@@ -32,6 +32,10 @@ python -m http.server 8080
 2. Others open it fresh; their data stays in their browser
 3. Use **Export data** to back up; **Import data** to restore
 
-## Deploy free (optional)
+## Live link (share this)
 
-Upload the folder to [Netlify Drop](https://app.netlify.com/drop) or [Vercel](https://vercel.com) for a public URL.
+**https://dhurimhalili.github.io/influenceflow-crm/**
+
+Anyone can open that link in a browser. Each person gets their own empty CRM — your data is not included.
+
+Source repo: https://github.com/DhurimHalili/influenceflow-crm
