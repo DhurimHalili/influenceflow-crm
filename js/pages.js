@@ -18,6 +18,7 @@ import {
   updateCreatorContacted,
   deleteCreatorContacted,
   bulkImportCreators,
+  importCreatorsMerge,
   addBrandContacted,
   updateBrandContacted,
   deleteBrandContacted,
@@ -201,6 +202,8 @@ export function renderCreatorsContacted() {
       </select>
       <button type="button" class="btn btn-primary" data-add-creator>+ Add Creator</button>
       <button type="button" class="btn btn-secondary" data-bulk-import>Bulk Import</button>
+      <button type="button" class="btn btn-secondary" data-import-master-list>Load AI/Tech List (127)</button>
+      <a class="btn btn-ghost btn-sm" href="imports/ai-tech-creators.json" download>Download list file</a>
     </div>
     <div class="card"><div class="table-wrap"><table>
       <thead><tr><th>Name</th><th>Email</th><th>Niche</th><th>Avg Views</th><th>Status</th><th>Contacted</th><th></th></tr></thead>
@@ -248,6 +251,18 @@ export function bindCreatorsContacted(root) {
 
   root.querySelector('[data-add-creator]').addEventListener('click', () => openCreatorForm());
   root.querySelector('[data-bulk-import]').addEventListener('click', () => openBulkImport('creators'));
+  root.querySelector('[data-import-master-list]')?.addEventListener('click', async () => {
+    try {
+      const res = await fetch('imports/ai-tech-creators.json');
+      if (!res.ok) throw new Error('fetch failed');
+      const data = await res.json();
+      const result = importCreatorsMerge(data.creators || []);
+      showToast(`Added ${result.added} creators (${result.skipped} skipped)`);
+      nav('/creators-contacted');
+    } catch {
+      showToast('Could not load list — use Import creator list in sidebar', 'error');
+    }
+  });
   bindCreatorRowActions(root);
 }
 
@@ -1244,6 +1259,7 @@ export function renderHelp() {
           <p>Paste one entry per line on the Creators or Brands page → <em>Bulk Import</em>.</p>
           <p><strong>Creators:</strong></p>
           <code class="guide-code">Name, email, channel link, niche, avg views (optional)</code>
+          <p>Or use <strong>Import creator list</strong> in the sidebar with a <code>.json</code> file — this merges into your CRM only and does not affect other users.</p>
           <p><strong>Brands:</strong></p>
           <code class="guide-code">Brand name, email</code>
         </div>

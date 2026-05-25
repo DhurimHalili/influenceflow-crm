@@ -1,0 +1,1150 @@
+{
+  "type": "influenceflow-creators-import",
+  "version": 1,
+  "description": "AI/Tech YouTube creators master list \u2014 import merges into YOUR browser only",
+  "creators": [
+    {
+      "name": "Bro Code",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@BroCodez",
+      "niche": "Coding & Software Engineering",
+      "avgViews": 150000,
+      "notes": "Subs: 2.96M | Engagement: 2.5%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Two Minute Papers",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@TwoMinutePapers",
+      "niche": "AI Research Summaries",
+      "avgViews": 120000,
+      "notes": "Subs: 1.81M | Engagement: 2.6%",
+      "status": "no_reply"
+    },
+    {
+      "name": "The Coding Train",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@TheCodingTrain",
+      "niche": "Creative Coding & JS",
+      "avgViews": 62000,
+      "notes": "Subs: 1.75M | Engagement: 1.8%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Corey Schafer",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@coreyms",
+      "niche": "Python & Software Dev",
+      "avgViews": 70000,
+      "notes": "Subs: 1.5M | Engagement: 1.5%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Sentdex",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@sentdex",
+      "niche": "Machine Learning & Python",
+      "avgViews": 60000,
+      "notes": "Subs: 1.41M | Engagement: 1.4%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Amigoscode",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@amigoscode",
+      "niche": "Backend Systems & AI Microservices",
+      "avgViews": 55000,
+      "notes": "Subs: 1.08M | Engagement: 1.2%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Siraj Raval",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@sirajraval",
+      "niche": "AI & Machine Learning",
+      "avgViews": 55000,
+      "notes": "Subs: 773K | Engagement: 1.5%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Coding with Lewis",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@CodingWithLewis",
+      "niche": "Software Engineering Lifestyle",
+      "avgViews": 65000,
+      "notes": "Subs: 714K | Engagement: 1.8%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Low Level Learning",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@LowLevelLearning",
+      "niche": "Systems Programming & C",
+      "avgViews": 80000,
+      "notes": "Subs: 500K | Engagement: 3.0%",
+      "status": "no_reply"
+    },
+    {
+      "name": "The Primeagen",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@ThePrimeagen",
+      "niche": "Dev Tools & Code Architecture",
+      "avgViews": 120000,
+      "notes": "Subs: 473K | Engagement: 3.5%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Caleb Curry",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@CalebCurry",
+      "niche": "Beginner Programming",
+      "avgViews": 55000,
+      "notes": "Subs: 450K | Engagement: 1.6%",
+      "status": "no_reply"
+    },
+    {
+      "name": "CodingEntrepreneurs",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@CodingEntrepreneurs",
+      "niche": "AI Product Dev & Django",
+      "avgViews": 54000,
+      "notes": "Subs: 387K | Engagement: 1.3%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Wes Roth",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@WesRoth",
+      "niche": "AI News & Agentic Workflows",
+      "avgViews": 75000,
+      "notes": "Subs: 319K | Engagement: 2.0%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Mike Dane",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@MikeDane",
+      "niche": "Fundamentals of Coding",
+      "avgViews": 60000,
+      "notes": "Subs: 300K | Engagement: 1.5%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Riley Brown",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@rileybrownai",
+      "niche": "Vibe Coding & AI Agents",
+      "avgViews": 52000,
+      "notes": "Subs: 241K | Engagement: 1.8%",
+      "status": "no_reply"
+    },
+    {
+      "name": "AI Explained",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@AIExplained",
+      "niche": "AI News & Capabilities",
+      "avgViews": 150000,
+      "notes": "Subs: 217K | Engagement: 3.0%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Yannic Kilcher",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@YannicKilcher",
+      "niche": "Deep Learning & ML Research",
+      "avgViews": 50000,
+      "notes": "Subs: 180K | Engagement: 2.0%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Skill Leap AI",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@SkillLeapAI",
+      "niche": "AI Tools & Workflows",
+      "avgViews": 53000,
+      "notes": "Subs: 150K | Engagement: 1.6%",
+      "status": "no_reply"
+    },
+    {
+      "name": "AI Foundations",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@AIFoundations",
+      "niche": "AI Agents & Vibe Coding",
+      "avgViews": 51000,
+      "notes": "Subs: 110K | Engagement: 1.5%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Greg Kamradt",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@GregKamradt",
+      "niche": "LLMs & AI Data Pipelines",
+      "avgViews": 55000,
+      "notes": "Subs: 100K | Engagement: 2.0%",
+      "status": "no_reply"
+    },
+    {
+      "name": "3Blue1Brown",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@3blue1brown",
+      "niche": "Math & AI Foundations",
+      "avgViews": 500000,
+      "notes": "Subs: 8.2M | Engagement: 4.0%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Lex Fridman",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@lexfridman",
+      "niche": "AI Interviews & Tech Podcasts",
+      "avgViews": 300000,
+      "notes": "Subs: 3.1M | Engagement: 3.0%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Andrej Karpathy",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@AndrejKarpathy",
+      "niche": "Deep Learning & Neural Networks",
+      "avgViews": 200000,
+      "notes": "Subs: 450K | Engagement: 5.0%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Theo - t3.gg",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@t3dotgg",
+      "niche": "Web Dev & Tech Architecture",
+      "avgViews": 70000,
+      "notes": "Subs: 280K | Engagement: 2.2%",
+      "status": "no_reply"
+    },
+    {
+      "name": "NetworkChuck",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@NetworkChuck",
+      "niche": "IT, Networks & Cloud",
+      "avgViews": 220000,
+      "notes": "Subs: 3.2M | Engagement: 4.0%",
+      "status": "no_reply"
+    },
+    {
+      "name": "StatQuest",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@statquest",
+      "niche": "Machine Learning & Statistics",
+      "avgViews": 80000,
+      "notes": "Subs: 1.1M | Engagement: 2.5%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Kevin Powell",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@Kepowob",
+      "niche": "Frontend CSS & HTML",
+      "avgViews": 75000,
+      "notes": "Subs: 850K | Engagement: 2.0%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Ben Eater",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@BenEater",
+      "niche": "Hardware & Computing Architecture",
+      "avgViews": 150000,
+      "notes": "Subs: 1.0M | Engagement: 3.5%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Dave Farley",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@ContinuousDelivery",
+      "niche": "DevOps & System Architecture",
+      "avgViews": 60000,
+      "notes": "Subs: 350K | Engagement: 1.6%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Steve Huynh",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@ALifeEngineered",
+      "niche": "Big Tech Careers & Software",
+      "avgViews": 70000,
+      "notes": "Subs: 160K | Engagement: 2.1%",
+      "status": "no_reply"
+    },
+    {
+      "name": "AI Advantage",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@aiadvantage",
+      "niche": "AI Productivity & Prompting",
+      "avgViews": 58000,
+      "notes": "Subs: 200K | Engagement: 1.7%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Jack Herrington",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@jherr",
+      "niche": "Advanced Frontend React",
+      "avgViews": 52000,
+      "notes": "Subs: 160K | Engagement: 1.8%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Dwarkesh Patel",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@DwarkeshPatel",
+      "niche": "AI Alignment & Policy Podcasts",
+      "avgViews": 110000,
+      "notes": "Subs: 150K | Engagement: 3.5%",
+      "status": "no_reply"
+    },
+    {
+      "name": "MKBHD",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@mkbhd",
+      "niche": "Consumer Tech & Hardware",
+      "avgViews": 2100000,
+      "notes": "Subs: 18.5M | Engagement: 5.2%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Dave2D",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@Dave2D",
+      "niche": "Laptops & Gadget Design",
+      "avgViews": 420000,
+      "notes": "Subs: 3.6M | Engagement: 4.1%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Linus Tech Tips",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@LinusTechTips",
+      "niche": "Computing Hardware & Systems",
+      "avgViews": 1200000,
+      "notes": "Subs: 15.5M | Engagement: 3.2%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Austin Evans",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@austinevans",
+      "niche": "Hardware & Gaming Tech",
+      "avgViews": 160000,
+      "notes": "Subs: 5.4M | Engagement: 2.1%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Mrwhosetheboss",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@mrwhosetheboss",
+      "niche": "Mobile Tech & Gadget Reviews",
+      "avgViews": 3100000,
+      "notes": "Subs: 18.2M | Engagement: 6.0%",
+      "status": "no_reply"
+    },
+    {
+      "name": "JerryRigEverything",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@JerryRigEverything",
+      "niche": "Tech Durability & Hardware",
+      "avgViews": 1100000,
+      "notes": "Subs: 8.5M | Engagement: 4.2%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Unbox Therapy",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@unboxtherapy",
+      "niche": "Consumer Tech & Gadget Unboxing",
+      "avgViews": 450000,
+      "notes": "Subs: 24.2M | Engagement: 2.5%",
+      "status": "no_reply"
+    },
+    {
+      "name": "The Tech Chap",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@TheTechChap",
+      "niche": "Laptops & High-End Gadgets",
+      "avgViews": 125000,
+      "notes": "Subs: 1.45M | Engagement: 2.0%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Daniel Bourke",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@mrdbourke",
+      "niche": "Machine Learning Tutorials",
+      "avgViews": 61000,
+      "notes": "Subs: 410K | Engagement: 2.2%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Web Dev Simplified",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@WebDevSimplified",
+      "niche": "Web Development Tutorials",
+      "avgViews": 92000,
+      "notes": "Subs: 1.55M | Engagement: 2.5%",
+      "status": "no_reply"
+    },
+    {
+      "name": "DeepLearning.AI",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@Deeplearningai",
+      "niche": "ML/DL Courses & News",
+      "avgViews": 100000,
+      "notes": "Subs: 652K | Engagement: 5.0%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Henry AI Labs",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@henryailabs",
+      "niche": "AI Research Updates",
+      "avgViews": 60000,
+      "notes": "Subs: 200K | Engagement: 4.0%",
+      "status": "no_reply"
+    },
+    {
+      "name": "ArXiv Insights",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@ArxivInsights",
+      "niche": "ML Research Summaries",
+      "avgViews": 150000,
+      "notes": "Subs: 103K | Engagement: 3.0%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Clever Programmer",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@CleverProgrammer",
+      "niche": "Coding & AI Tools",
+      "avgViews": 200000,
+      "notes": "Subs: 1.30M | Engagement: 6.0%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Net Ninja",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@NetNinja",
+      "niche": "Web Development Tutorials",
+      "avgViews": 120000,
+      "notes": "Subs: 2.04M | Engagement: 3.0%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Sebastian Lague",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@SebastianLague",
+      "niche": "Coding & Algorithms",
+      "avgViews": 150000,
+      "notes": "Subs: 1.40M | Engagement: 3.0%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Academind",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@academind",
+      "niche": "Web/JS Frameworks & Tutorials",
+      "avgViews": 150000,
+      "notes": "Subs: 3.29M | Engagement: 2.0%",
+      "status": "no_reply"
+    },
+    {
+      "name": "CodeWithChris",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@CodeWithChris",
+      "niche": "iOS App Development",
+      "avgViews": 80000,
+      "notes": "Subs: 627K | Engagement: 3.0%",
+      "status": "no_reply"
+    },
+    {
+      "name": "CS Dojo",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@CSDojo",
+      "niche": "Python & Coding Bootcamp",
+      "avgViews": 200000,
+      "notes": "Subs: 1.95M | Engagement: 3.0%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Abdul Bari",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@abdul_bari",
+      "niche": "Algorithms & Data Structures",
+      "avgViews": 50000,
+      "notes": "Subs: 300K | Engagement: 4.0%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Tech With Tim",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@TechWithTim",
+      "niche": "Python, ML & Game Dev",
+      "avgViews": 70000,
+      "notes": "Subs: 667K | Engagement: 3.0%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Hussein Nasser",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@hnasr",
+      "niche": "Computer Networks & Dev",
+      "avgViews": 60000,
+      "notes": "Subs: 494K | Engagement: 5.0%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Ben Awad",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@bawad",
+      "niche": "Full-Stack Dev",
+      "avgViews": 80000,
+      "notes": "Subs: 589K | Engagement: 5.0%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Brackeys",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@Brackeys",
+      "niche": "Game Development & Unity",
+      "avgViews": 150000,
+      "notes": "Subs: 1.93M | Engagement: 4.0%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Gary Explains",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@GaryExplains",
+      "niche": "Tech Explainers",
+      "avgViews": 60000,
+      "notes": "Subs: 349K | Engagement: 4.0%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Engineer Man",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@EngineerMan",
+      "niche": "Software Engineering",
+      "avgViews": 60000,
+      "notes": "Subs: 527K | Engagement: 4.0%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Krish Naik",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@krishnaik06",
+      "niche": "Data Science & ML",
+      "avgViews": 150000,
+      "notes": "Subs: 1.23M | Engagement: 3.0%",
+      "status": "no_reply"
+    },
+    {
+      "name": "ColdFusion",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@ColdFusion",
+      "niche": "Tech Documentary & AI",
+      "avgViews": 200000,
+      "notes": "Subs: 5.20M | Engagement: 4.0%",
+      "status": "no_reply"
+    },
+    {
+      "name": "CodeBullet",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@CodeBullet",
+      "niche": "AI Programming Experiments",
+      "avgViews": 200000,
+      "notes": "Subs: 3.46M | Engagement: 7.0%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Derek Banas",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@derekbanas",
+      "niche": "Programming Tutorials",
+      "avgViews": 100000,
+      "notes": "Subs: 1.04M | Engagement: 4.0%",
+      "status": "no_reply"
+    },
+    {
+      "name": "TheNewBoston",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@thenewboston",
+      "niche": "General Programming",
+      "avgViews": 120000,
+      "notes": "Subs: 2.66M | Engagement: 4.0%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Codebasics",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@codebasics",
+      "niche": "Data Science & Python",
+      "avgViews": 150000,
+      "notes": "Subs: 1.49M | Engagement: 3.0%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Data School",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@dataschool",
+      "niche": "Pandas & ML Tutorials",
+      "avgViews": 50000,
+      "notes": "Subs: 256K | Engagement: 4.0%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Keith Galli",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@KeithGalli",
+      "niche": "Data Science & Python",
+      "avgViews": 50000,
+      "notes": "Subs: 450K | Engagement: 5.0%",
+      "status": "no_reply"
+    },
+    {
+      "name": "The Cherno",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@TheCherno",
+      "niche": "C++ Game Engine Dev",
+      "avgViews": 50000,
+      "notes": "Subs: 700K | Engagement: 4.0%",
+      "status": "no_reply"
+    },
+    {
+      "name": "ProgrammingKnowledge",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@ProgrammingKnowledge",
+      "niche": "Programming Tutorials",
+      "avgViews": 150000,
+      "notes": "Subs: 1.87M | Engagement: 5.0%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Programming with Mosh",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@programmingwithmosh",
+      "niche": "Full-Stack & Career Dev",
+      "avgViews": 150000,
+      "notes": "Subs: 2.88M | Engagement: 3.0%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Neso Academy",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@nesoacademy",
+      "niche": "CS & Engineering Tutorials",
+      "avgViews": 100000,
+      "notes": "Subs: 3.18M | Engagement: 3.0%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Python Engineer",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@patloeber",
+      "niche": "Python ML/DS Tutorials",
+      "avgViews": 50000,
+      "notes": "Subs: 224K | Engagement: 3.0%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Coding Addict",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@CodingAddict",
+      "niche": "Web Dev Projects",
+      "avgViews": 50000,
+      "notes": "Subs: 200K | Engagement: 3.0%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Applied AI Course",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@AppliedAICourse",
+      "niche": "ML/AI Theory & Courses",
+      "avgViews": 50000,
+      "notes": "Subs: 89K | Engagement: 2.0%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Dad the Engineer",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@DadtheEngineer",
+      "niche": "Electronics & STEM",
+      "avgViews": 60000,
+      "notes": "Subs: 94K | Engagement: 5.0%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Chris Hawkes",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@noobtoprofessional",
+      "niche": "Dev Career & Advice",
+      "avgViews": 50000,
+      "notes": "Subs: 100K | Engagement: 5.0%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Coding Garden",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@CodingGarden",
+      "niche": "Live Coding & Web Dev",
+      "avgViews": 60000,
+      "notes": "Subs: 200K | Engagement: 5.0%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Kaggle",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@kaggle",
+      "niche": "Data Science & Competitions",
+      "avgViews": 50000,
+      "notes": "Subs: 200K | Engagement: 3.0%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Akshay Saini",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@akshaymarch7",
+      "niche": "Advanced JavaScript Core Concepts",
+      "avgViews": 120000,
+      "notes": "Subs: 2.08M | Engagement: 3.4%",
+      "status": "no_reply"
+    },
+    {
+      "name": "ArjanCodes",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@ArjanCodes",
+      "niche": "Software Design & Python",
+      "avgViews": 60000,
+      "notes": "Subs: 327K | Engagement: 2.1%",
+      "status": "no_reply"
+    },
+    {
+      "name": "ByCloud AI",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@bycloudAI",
+      "niche": "Cloud AI & ML Deployments",
+      "avgViews": 65000,
+      "notes": "Subs: 204K | Engagement: 2.8%",
+      "status": "no_reply"
+    },
+    {
+      "name": "ByteByteGo",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@ByteByteGo",
+      "niche": "System Design & Tech Architecture",
+      "avgViews": 110000,
+      "notes": "Subs: 1.39M | Engagement: 3.1%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Clement Mihailescu",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@ClementMihailescu",
+      "niche": "Software Engineering Careers & DSA",
+      "avgViews": 75000,
+      "notes": "Subs: 530K | Engagement: 2.6%",
+      "status": "no_reply"
+    },
+    {
+      "name": "CodeWithHarry",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@CodeWithHarry",
+      "niche": "Full-Stack Web Dev & Programming",
+      "avgViews": 180000,
+      "notes": "Subs: 9.67M | Engagement: 4.6%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Computerphile",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@Computerphile",
+      "niche": "Computer Science Theory & Algorithms",
+      "avgViews": 120000,
+      "notes": "Subs: 2.35M | Engagement: 3.5%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Corbin Brown",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@Corbin_Brown",
+      "niche": "Python & Machine Learning Engineering",
+      "avgViews": 50000,
+      "notes": "Subs: 130K | Engagement: 2.9%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Dani",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@Danidev",
+      "niche": "Game Development & Physics Engines",
+      "avgViews": 8500000,
+      "notes": "Subs: 3.57M | Engagement: 8.5%",
+      "status": "no_reply"
+    },
+    {
+      "name": "David Bombal",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@davidbombal",
+      "niche": "IT Networking & Ethical Hacking",
+      "avgViews": 320000,
+      "notes": "Subs: 3.06M | Engagement: 3.1%",
+      "status": "no_reply"
+    },
+    {
+      "name": "ExplainingComputers",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@ExplainingComputers",
+      "niche": "Computing Hardware & Linux OS",
+      "avgViews": 180000,
+      "notes": "Subs: 1.18M | Engagement: 8.0%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Gamefromscratch",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@gamefromscratch",
+      "niche": "Game Development Tools & Engines",
+      "avgViews": 55000,
+      "notes": "Subs: 280K | Engagement: 2.1%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Gamers Nexus",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@GamersNexus",
+      "niche": "PC Hardware Benchmarking",
+      "avgViews": 297000,
+      "notes": "Subs: 2.61M | Engagement: 5.7%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Gaurav Sen",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@gkcs",
+      "niche": "System Design & AI",
+      "avgViews": 150000,
+      "notes": "Subs: 736K | Engagement: 3.1%",
+      "status": "no_reply"
+    },
+    {
+      "name": "GDQuest",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@Gdquest",
+      "niche": "Godot Engine Game Development",
+      "avgViews": 85000,
+      "notes": "Subs: 317K | Engagement: 2.9%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Greg Isenberg",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@GregIsenberg",
+      "niche": "AI Agents & SaaS Startups",
+      "avgViews": 120000,
+      "notes": "Subs: 638K | Engagement: 2.2%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Harkirat Singh",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@harkirat1",
+      "niche": "Full-Stack Dev & Blockchain",
+      "avgViews": 140000,
+      "notes": "Subs: 607K | Engagement: 3.2%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Hitesh Choudhary",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@HiteshCodeLab",
+      "niche": "Web Frameworks & Software Dev",
+      "avgViews": 73000,
+      "notes": "Subs: 1.03M | Engagement: 2.5%",
+      "status": "no_reply"
+    },
+    {
+      "name": "IppSec",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@IppSec",
+      "niche": "Penetration Testing",
+      "avgViews": 60000,
+      "notes": "Subs: 308K | Engagement: 4.2%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Jeff Geerling",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@JeffGeerling",
+      "niche": "Single-Board Computers & Hardware",
+      "avgViews": 410000,
+      "notes": "Subs: 1.07M | Engagement: 4.5%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Joma Tech",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@JomaTech",
+      "niche": "Silicon Valley Careers & Tech",
+      "avgViews": 850000,
+      "notes": "Subs: 2.34M | Engagement: 5.1%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Jonas Tyroller",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@JonasTyroller",
+      "niche": "Indie Game Dev",
+      "avgViews": 60000,
+      "notes": "Subs: 230K | Engagement: 3.5%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Jon Gjengset",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@JonGjengset",
+      "niche": "Advanced Rust Systems Programming",
+      "avgViews": 85000,
+      "notes": "Subs: 140K | Engagement: 5.2%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Kalle Hallden",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@Hallden_",
+      "niche": "Python Automation & Dev Vlogs",
+      "avgViews": 95000,
+      "notes": "Subs: 686K | Engagement: 2.8%",
+      "status": "no_reply"
+    },
+    {
+      "name": "LGR",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@LGR",
+      "niche": "Retro Technology & Computing",
+      "avgViews": 190000,
+      "notes": "Subs: 1.81M | Engagement: 4.1%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Liam Ottley",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@LiamOttley",
+      "niche": "AI Automation Agencies & Agents",
+      "avgViews": 85000,
+      "notes": "Subs: 791K | Engagement: 3.2%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Loi Liang Yang",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@LoiLiangYang",
+      "niche": "Cloud Security & AWS",
+      "avgViews": 80000,
+      "notes": "Subs: 1.21M | Engagement: 4.0%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Mental Outlaw",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@MentalOutlaw",
+      "niche": "Cybersecurity, Linux & Privacy",
+      "avgViews": 152000,
+      "notes": "Subs: 791K | Engagement: 3.5%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Milan Jovanovi\u0107",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@MilanJovanovicTech",
+      "niche": "C# Software Architecture",
+      "avgViews": 54000,
+      "notes": "Subs: 159K | Engagement: 2.1%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Modern Vintage Gamer",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@ModernVintageGamer",
+      "niche": "Console Architecture & Retrogaming",
+      "avgViews": 160000,
+      "notes": "Subs: 929K | Engagement: 5.7%",
+      "status": "no_reply"
+    },
+    {
+      "name": "NeetCode",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@NeetCode",
+      "niche": "Coding Interviews & DSA",
+      "avgViews": 98000,
+      "notes": "Subs: 1.08M | Engagement: 3.6%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Nick Chapsas",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@nickchapsas",
+      "niche": ".NET & C# Software Engineering",
+      "avgViews": 57000,
+      "notes": "Subs: 414K | Engagement: 2.4%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Optimum Tech",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@optimumtech",
+      "niche": "Custom PC Hardware & ITX Builds",
+      "avgViews": 1100000,
+      "notes": "Subs: 1.47M | Engagement: 3.1%",
+      "status": "no_reply"
+    },
+    {
+      "name": "PwnFunction",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@PwnFunction",
+      "niche": "Web Application Security",
+      "avgViews": 180000,
+      "notes": "Subs: 238K | Engagement: 4.8%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Retro Game Corps",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@RetroGameCorps",
+      "niche": "Retro Hardware Emulation",
+      "avgViews": 140000,
+      "notes": "Subs: 824K | Engagement: 3.1%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Robert Miles AI Safety",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@RobertMilesAISafety",
+      "niche": "AI Safety & ML Alignment",
+      "avgViews": 150000,
+      "notes": "Subs: 146K | Engagement: 4.1%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Sam Witteveen AI",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@samwitteveenai",
+      "niche": "LangChain, LLMs & Agentic AI",
+      "avgViews": 52000,
+      "notes": "Subs: 109K | Engagement: 3.1%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Seytonic",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@Seytonic",
+      "niche": "Hardware Hacking & Raspberry Pi",
+      "avgViews": 75000,
+      "notes": "Subs: 426K | Engagement: 3.2%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Sonny Sangha",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@SonnySangha",
+      "niche": "Full-Stack Next.js & AI Agents",
+      "avgViews": 88000,
+      "notes": "Subs: 389K | Engagement: 2.2%",
+      "status": "no_reply"
+    },
+    {
+      "name": "take U forward",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@takeUforward",
+      "niche": "Algorithms & Data Structures",
+      "avgViews": 230000,
+      "notes": "Subs: 1.04M | Engagement: 3.5%",
+      "status": "no_reply"
+    },
+    {
+      "name": "TechLead",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@TechLead",
+      "niche": "Silicon Valley Tech Careers",
+      "avgViews": 130000,
+      "notes": "Subs: 1.48M | Engagement: 4.1%",
+      "status": "no_reply"
+    },
+    {
+      "name": "The 8-Bit Guy",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@The8BitGuy",
+      "niche": "Retrocomputing & Restoration",
+      "avgViews": 280000,
+      "notes": "Subs: 1.47M | Engagement: 4.5%",
+      "status": "no_reply"
+    },
+    {
+      "name": "The AI Grid",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@TheAiGrid",
+      "niche": "AI Software & Industry Analysis",
+      "avgViews": 95000,
+      "notes": "Subs: 374K | Engagement: 2.4%",
+      "status": "no_reply"
+    },
+    {
+      "name": "The Cyber Mentor",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@TCMSecurityAcademy",
+      "niche": "Ethical Hacking & Blue Team",
+      "avgViews": 95000,
+      "notes": "Subs: 998K | Engagement: 3.8%",
+      "status": "no_reply"
+    },
+    {
+      "name": "The PC Security Channel",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@thepcsecuritychannel",
+      "niche": "Antivirus & Malware Analysis",
+      "avgViews": 85000,
+      "notes": "Subs: 500K | Engagement: 3.4%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Traversy Media",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@TraversyMedia",
+      "niche": "Full-Stack Web Dev & DevOps",
+      "avgViews": 70000,
+      "notes": "Subs: 2.41M | Engagement: 1.5%",
+      "status": "no_reply"
+    },
+    {
+      "name": "zSecurity",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@zSecurity",
+      "niche": "Ethical Hacking & Wireless Security",
+      "avgViews": 167000,
+      "notes": "Subs: 625K | Engagement: 3.8%",
+      "status": "no_reply"
+    },
+    {
+      "name": "ML Street Talk",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@MachineLearningStreetTalk",
+      "niche": "Deep AI Discussions",
+      "avgViews": 40000,
+      "notes": "Subs: 216K | Engagement: 5.0%",
+      "status": "no_reply"
+    },
+    {
+      "name": "Real Python",
+      "contactEmail": "",
+      "channelLink": "https://www.youtube.com/@realpython",
+      "niche": "Python Tutorials & Tips",
+      "avgViews": 50000,
+      "notes": "Subs: 80K | Engagement: 4.0%",
+      "status": "no_reply"
+    }
+  ]
+}

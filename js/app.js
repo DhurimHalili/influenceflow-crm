@@ -1,5 +1,5 @@
 import { NAV_ITEMS } from './constants.js';
-import { subscribe, exportData, importData } from './store.js';
+import { subscribe, exportData, importData, importCreatorsMerge } from './store.js';
 import { showToast } from './ui.js';
 import {
   setNavigator,
@@ -103,6 +103,15 @@ function navigate(path) {
   location.hash = path;
 }
 
+function importCreatorsFile(jsonText) {
+  const parsed = JSON.parse(jsonText);
+  const list = Array.isArray(parsed) ? parsed : parsed.creators;
+  if (!Array.isArray(list) || !list.length) {
+    throw new Error('No creators array found in file');
+  }
+  return importCreatorsMerge(list);
+}
+
 function initExportImport() {
   document.getElementById('export-data').addEventListener('click', () => {
     const blob = new Blob([exportData()], { type: 'application/json' });
@@ -130,6 +139,25 @@ function initExportImport() {
     };
     reader.readAsText(file);
     fileInput.value = '';
+  });
+
+  const creatorsFileInput = document.getElementById('import-creators-file');
+  document.getElementById('import-creators').addEventListener('click', () => creatorsFileInput.click());
+  creatorsFileInput.addEventListener('change', () => {
+    const file = creatorsFileInput.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const result = importCreatorsFile(reader.result);
+        showToast(`Added ${result.added} creators (${result.skipped} skipped as duplicates)`);
+        render();
+      } catch {
+        showToast('Invalid creator list file', 'error');
+      }
+    };
+    reader.readAsText(file);
+    creatorsFileInput.value = '';
   });
 }
 

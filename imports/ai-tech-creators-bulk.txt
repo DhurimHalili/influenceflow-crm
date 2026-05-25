@@ -1,0 +1,127 @@
+Bro Code, https://www.youtube.com/@BroCodez, Coding & Software Engineering, 150000
+Two Minute Papers, https://www.youtube.com/@TwoMinutePapers, AI Research Summaries, 120000
+The Coding Train, https://www.youtube.com/@TheCodingTrain, Creative Coding & JS, 62000
+Corey Schafer, https://www.youtube.com/@coreyms, Python & Software Dev, 70000
+Sentdex, https://www.youtube.com/@sentdex, Machine Learning & Python, 60000
+Amigoscode, https://www.youtube.com/@amigoscode, Backend Systems & AI Microservices, 55000
+Siraj Raval, https://www.youtube.com/@sirajraval, AI & Machine Learning, 55000
+Coding with Lewis, https://www.youtube.com/@CodingWithLewis, Software Engineering Lifestyle, 65000
+Low Level Learning, https://www.youtube.com/@LowLevelLearning, Systems Programming & C, 80000
+The Primeagen, https://www.youtube.com/@ThePrimeagen, Dev Tools & Code Architecture, 120000
+Caleb Curry, https://www.youtube.com/@CalebCurry, Beginner Programming, 55000
+CodingEntrepreneurs, https://www.youtube.com/@CodingEntrepreneurs, AI Product Dev & Django, 54000
+Wes Roth, https://www.youtube.com/@WesRoth, AI News & Agentic Workflows, 75000
+Mike Dane, https://www.youtube.com/@MikeDane, Fundamentals of Coding, 60000
+Riley Brown, https://www.youtube.com/@rileybrownai, Vibe Coding & AI Agents, 52000
+AI Explained, https://www.youtube.com/@AIExplained, AI News & Capabilities, 150000
+Yannic Kilcher, https://www.youtube.com/@YannicKilcher, Deep Learning & ML Research, 50000
+Skill Leap AI, https://www.youtube.com/@SkillLeapAI, AI Tools & Workflows, 53000
+AI Foundations, https://www.youtube.com/@AIFoundations, AI Agents & Vibe Coding, 51000
+Greg Kamradt, https://www.youtube.com/@GregKamradt, LLMs & AI Data Pipelines, 55000
+3Blue1Brown, https://www.youtube.com/@3blue1brown, Math & AI Foundations, 500000
+Lex Fridman, https://www.youtube.com/@lexfridman, AI Interviews & Tech Podcasts, 300000
+Andrej Karpathy, https://www.youtube.com/@AndrejKarpathy, Deep Learning & Neural Networks, 200000
+Theo - t3.gg, https://www.youtube.com/@t3dotgg, Web Dev & Tech Architecture, 70000
+NetworkChuck, https://www.youtube.com/@NetworkChuck, IT, Networks & Cloud, 220000
+StatQuest, https://www.youtube.com/@statquest, Machine Learning & Statistics, 80000
+Kevin Powell, https://www.youtube.com/@Kepowob, Frontend CSS & HTML, 75000
+Ben Eater, https://www.youtube.com/@BenEater, Hardware & Computing Architecture, 150000
+Dave Farley, https://www.youtube.com/@ContinuousDelivery, DevOps & System Architecture, 60000
+Steve Huynh, https://www.youtube.com/@ALifeEngineered, Big Tech Careers & Software, 70000
+AI Advantage, https://www.youtube.com/@aiadvantage, AI Productivity & Prompting, 58000
+Jack Herrington, https://www.youtube.com/@jherr, Advanced Frontend React, 52000
+Dwarkesh Patel, https://www.youtube.com/@DwarkeshPatel, AI Alignment & Policy Podcasts, 110000
+MKBHD, https://www.youtube.com/@mkbhd, Consumer Tech & Hardware, 2100000
+Dave2D, https://www.youtube.com/@Dave2D, Laptops & Gadget Design, 420000
+Linus Tech Tips, https://www.youtube.com/@LinusTechTips, Computing Hardware & Systems, 1200000
+Austin Evans, https://www.youtube.com/@austinevans, Hardware & Gaming Tech, 160000
+Mrwhosetheboss, https://www.youtube.com/@mrwhosetheboss, Mobile Tech & Gadget Reviews, 3100000
+JerryRigEverything, https://www.youtube.com/@JerryRigEverything, Tech Durability & Hardware, 1100000
+Unbox Therapy, https://www.youtube.com/@unboxtherapy, Consumer Tech & Gadget Unboxing, 450000
+The Tech Chap, https://www.youtube.com/@TheTechChap, Laptops & High-End Gadgets, 125000
+Daniel Bourke, https://www.youtube.com/@mrdbourke, Machine Learning Tutorials, 61000
+Web Dev Simplified, https://www.youtube.com/@WebDevSimplified, Web Development Tutorials, 92000
+DeepLearning.AI, https://www.youtube.com/@Deeplearningai, ML/DL Courses & News, 100000
+Henry AI Labs, https://www.youtube.com/@henryailabs, AI Research Updates, 60000
+ArXiv Insights, https://www.youtube.com/@ArxivInsights, ML Research Summaries, 150000
+Clever Programmer, https://www.youtube.com/@CleverProgrammer, Coding & AI Tools, 200000
+Net Ninja, https://www.youtube.com/@NetNinja, Web Development Tutorials, 120000
+Sebastian Lague, https://www.youtube.com/@SebastianLague, Coding & Algorithms, 150000
+Academind, https://www.youtube.com/@academind, Web/JS Frameworks & Tutorials, 150000
+CodeWithChris, https://www.youtube.com/@CodeWithChris, iOS App Development, 80000
+CS Dojo, https://www.youtube.com/@CSDojo, Python & Coding Bootcamp, 200000
+Abdul Bari, https://www.youtube.com/@abdul_bari, Algorithms & Data Structures, 50000
+Tech With Tim, https://www.youtube.com/@TechWithTim, Python, ML & Game Dev, 70000
+Hussein Nasser, https://www.youtube.com/@hnasr, Computer Networks & Dev, 60000
+Ben Awad, https://www.youtube.com/@bawad, Full-Stack Dev, 80000
+Brackeys, https://www.youtube.com/@Brackeys, Game Development & Unity, 150000
+Gary Explains, https://www.youtube.com/@GaryExplains, Tech Explainers, 60000
+Engineer Man, https://www.youtube.com/@EngineerMan, Software Engineering, 60000
+Krish Naik, https://www.youtube.com/@krishnaik06, Data Science & ML, 150000
+ColdFusion, https://www.youtube.com/@ColdFusion, Tech Documentary & AI, 200000
+CodeBullet, https://www.youtube.com/@CodeBullet, AI Programming Experiments, 200000
+Derek Banas, https://www.youtube.com/@derekbanas, Programming Tutorials, 100000
+TheNewBoston, https://www.youtube.com/@thenewboston, General Programming, 120000
+Codebasics, https://www.youtube.com/@codebasics, Data Science & Python, 150000
+Data School, https://www.youtube.com/@dataschool, Pandas & ML Tutorials, 50000
+Keith Galli, https://www.youtube.com/@KeithGalli, Data Science & Python, 50000
+The Cherno, https://www.youtube.com/@TheCherno, C++ Game Engine Dev, 50000
+ProgrammingKnowledge, https://www.youtube.com/@ProgrammingKnowledge, Programming Tutorials, 150000
+Programming with Mosh, https://www.youtube.com/@programmingwithmosh, Full-Stack & Career Dev, 150000
+Neso Academy, https://www.youtube.com/@nesoacademy, CS & Engineering Tutorials, 100000
+Python Engineer, https://www.youtube.com/@patloeber, Python ML/DS Tutorials, 50000
+Coding Addict, https://www.youtube.com/@CodingAddict, Web Dev Projects, 50000
+Applied AI Course, https://www.youtube.com/@AppliedAICourse, ML/AI Theory & Courses, 50000
+Dad the Engineer, https://www.youtube.com/@DadtheEngineer, Electronics & STEM, 60000
+Chris Hawkes, https://www.youtube.com/@noobtoprofessional, Dev Career & Advice, 50000
+Coding Garden, https://www.youtube.com/@CodingGarden, Live Coding & Web Dev, 60000
+Kaggle, https://www.youtube.com/@kaggle, Data Science & Competitions, 50000
+Akshay Saini, https://www.youtube.com/@akshaymarch7, Advanced JavaScript Core Concepts, 120000
+ArjanCodes, https://www.youtube.com/@ArjanCodes, Software Design & Python, 60000
+ByCloud AI, https://www.youtube.com/@bycloudAI, Cloud AI & ML Deployments, 65000
+ByteByteGo, https://www.youtube.com/@ByteByteGo, System Design & Tech Architecture, 110000
+Clement Mihailescu, https://www.youtube.com/@ClementMihailescu, Software Engineering Careers & DSA, 75000
+CodeWithHarry, https://www.youtube.com/@CodeWithHarry, Full-Stack Web Dev & Programming, 180000
+Computerphile, https://www.youtube.com/@Computerphile, Computer Science Theory & Algorithms, 120000
+Corbin Brown, https://www.youtube.com/@Corbin_Brown, Python & Machine Learning Engineering, 50000
+Dani, https://www.youtube.com/@Danidev, Game Development & Physics Engines, 8500000
+David Bombal, https://www.youtube.com/@davidbombal, IT Networking & Ethical Hacking, 320000
+ExplainingComputers, https://www.youtube.com/@ExplainingComputers, Computing Hardware & Linux OS, 180000
+Gamefromscratch, https://www.youtube.com/@gamefromscratch, Game Development Tools & Engines, 55000
+Gamers Nexus, https://www.youtube.com/@GamersNexus, PC Hardware Benchmarking, 297000
+Gaurav Sen, https://www.youtube.com/@gkcs, System Design & AI, 150000
+GDQuest, https://www.youtube.com/@Gdquest, Godot Engine Game Development, 85000
+Greg Isenberg, https://www.youtube.com/@GregIsenberg, AI Agents & SaaS Startups, 120000
+Harkirat Singh, https://www.youtube.com/@harkirat1, Full-Stack Dev & Blockchain, 140000
+Hitesh Choudhary, https://www.youtube.com/@HiteshCodeLab, Web Frameworks & Software Dev, 73000
+IppSec, https://www.youtube.com/@IppSec, Penetration Testing, 60000
+Jeff Geerling, https://www.youtube.com/@JeffGeerling, Single-Board Computers & Hardware, 410000
+Joma Tech, https://www.youtube.com/@JomaTech, Silicon Valley Careers & Tech, 850000
+Jonas Tyroller, https://www.youtube.com/@JonasTyroller, Indie Game Dev, 60000
+Jon Gjengset, https://www.youtube.com/@JonGjengset, Advanced Rust Systems Programming, 85000
+Kalle Hallden, https://www.youtube.com/@Hallden_, Python Automation & Dev Vlogs, 95000
+LGR, https://www.youtube.com/@LGR, Retro Technology & Computing, 190000
+Liam Ottley, https://www.youtube.com/@LiamOttley, AI Automation Agencies & Agents, 85000
+Loi Liang Yang, https://www.youtube.com/@LoiLiangYang, Cloud Security & AWS, 80000
+Mental Outlaw, https://www.youtube.com/@MentalOutlaw, Cybersecurity, Linux & Privacy, 152000
+Milan Jovanović, https://www.youtube.com/@MilanJovanovicTech, C# Software Architecture, 54000
+Modern Vintage Gamer, https://www.youtube.com/@ModernVintageGamer, Console Architecture & Retrogaming, 160000
+NeetCode, https://www.youtube.com/@NeetCode, Coding Interviews & DSA, 98000
+Nick Chapsas, https://www.youtube.com/@nickchapsas, .NET & C# Software Engineering, 57000
+Optimum Tech, https://www.youtube.com/@optimumtech, Custom PC Hardware & ITX Builds, 1100000
+PwnFunction, https://www.youtube.com/@PwnFunction, Web Application Security, 180000
+Retro Game Corps, https://www.youtube.com/@RetroGameCorps, Retro Hardware Emulation, 140000
+Robert Miles AI Safety, https://www.youtube.com/@RobertMilesAISafety, AI Safety & ML Alignment, 150000
+Sam Witteveen AI, https://www.youtube.com/@samwitteveenai, LangChain, LLMs & Agentic AI, 52000
+Seytonic, https://www.youtube.com/@Seytonic, Hardware Hacking & Raspberry Pi, 75000
+Sonny Sangha, https://www.youtube.com/@SonnySangha, Full-Stack Next.js & AI Agents, 88000
+take U forward, https://www.youtube.com/@takeUforward, Algorithms & Data Structures, 230000
+TechLead, https://www.youtube.com/@TechLead, Silicon Valley Tech Careers, 130000
+The 8-Bit Guy, https://www.youtube.com/@The8BitGuy, Retrocomputing & Restoration, 280000
+The AI Grid, https://www.youtube.com/@TheAiGrid, AI Software & Industry Analysis, 95000
+The Cyber Mentor, https://www.youtube.com/@TCMSecurityAcademy, Ethical Hacking & Blue Team, 95000
+The PC Security Channel, https://www.youtube.com/@thepcsecuritychannel, Antivirus & Malware Analysis, 85000
+Traversy Media, https://www.youtube.com/@TraversyMedia, Full-Stack Web Dev & DevOps, 70000
+zSecurity, https://www.youtube.com/@zSecurity, Ethical Hacking & Wireless Security, 167000
+ML Street Talk, https://www.youtube.com/@MachineLearningStreetTalk, Deep AI Discussions, 40000
+Real Python, https://www.youtube.com/@realpython, Python Tutorials & Tips, 50000

@@ -131,18 +131,50 @@ export function bulkImportCreators(lines) {
     let contactEmail = '';
     let channelLink = '';
     let niche = '';
+    let avgViews = null;
     if (p2.includes('@')) {
       contactEmail = p2;
       channelLink = p3;
       niche = p4;
+      avgViews = p5 || null;
     } else {
       channelLink = p2;
       niche = p3;
+      avgViews = p4 || null;
     }
     if (findDuplicateCreator(name)) { skipped++; continue; }
-    addCreatorContacted({ name, contactEmail, channelLink, niche, avgViews: p5 || null });
+    addCreatorContacted({ name, contactEmail, channelLink, niche, avgViews });
     added++;
   }
+  return { added, skipped };
+}
+
+export function importCreatorsMerge(creators) {
+  let added = 0;
+  let skipped = 0;
+  for (const raw of creators) {
+    const name = raw.name?.trim();
+    if (!name) { skipped++; continue; }
+    const channelLink = raw.channelLink?.trim() || '';
+    const dupByName = findDuplicateCreator(name);
+    const dupByLink = channelLink && state.creatorsContacted.find(
+      (c) => c.channelLink && c.channelLink.toLowerCase() === channelLink.toLowerCase(),
+    );
+    if (dupByName || dupByLink) { skipped++; continue; }
+    const result = addCreatorContacted({
+      name,
+      contactEmail: raw.contactEmail || '',
+      channelLink,
+      niche: raw.niche || '',
+      avgViews: raw.avgViews,
+      status: raw.status || 'no_reply',
+      notes: raw.notes || '',
+    });
+    if (result.error) { skipped++; continue; }
+    added++;
+  }
+  if (added) logActivity(`Imported <strong>${added}</strong> creators from file`);
+  persist();
   return { added, skipped };
 }
 
