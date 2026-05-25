@@ -1157,5 +1157,133 @@ export function bindCreatorDetail(root, id) {
   });
 }
 
+// --- How to Use ---
+
+export function renderHelp() {
+  return `
+    <div class="guide-layout">
+      <div class="card guide-intro">
+        <div class="card-body">
+          <p class="guide-lead">InfluenceFlow is a free influencer agency CRM. No account needed — your data saves automatically in your browser.</p>
+          <div class="guide-toc">
+            <button type="button" class="guide-toc-item" data-go="/creators-contacted">👤 Creators Contacted</button>
+            <button type="button" class="guide-toc-item" data-go="/brands-contacted">🏢 Brands Contacted</button>
+            <button type="button" class="guide-toc-item" data-go="/signed-creators">⭐ Signed Creators</button>
+            <button type="button" class="guide-toc-item" data-go="/signed-brands">🤝 Signed Brands</button>
+            <button type="button" class="guide-toc-item" data-go="/quick-log">⚡ Quick Log</button>
+            <button type="button" class="guide-toc-item" data-go="/campaigns">🎯 Campaigns</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card guide-section">
+        <div class="card-header"><h2>🚀 Quick start (5 steps)</h2></div>
+        <div class="card-body guide-steps">
+          <div class="guide-step"><span class="guide-step-num">1</span><div><strong>Add contacts</strong><p>Go to <em>Creators Contacted</em> or <em>Brands Contacted</em>. Add name, email, and other details for everyone you've reached out to.</p></div></div>
+          <div class="guide-step"><span class="guide-step-num">2</span><div><strong>Log sponsorships you spot</strong><p>See a brand sponsoring a creator on YouTube/TikTok? Use <em>Quick Log Sponsorship</em>. This is research — not a campaign.</p></div></div>
+          <div class="guide-step"><span class="guide-step-num">3</span><div><strong>Sign talent & brands</strong><p>When someone signs, go to <em>Signed Creators</em> or <em>Signed Brands</em> → <em>Pick from Contacts</em> so you don't re-enter their info.</p></div></div>
+          <div class="guide-step"><span class="guide-step-num">4</span><div><strong>Create campaigns</strong><p>Real deals go in <em>Campaigns</em>. Add payment, agency %, creator payout, and assign creators.</p></div></div>
+          <div class="guide-step"><span class="guide-step-num">5</span><div><strong>Back up your data</strong><p>Use <em>Export data</em> in the sidebar footer. Use <em>Import data</em> to restore on a new device.</p></div></div>
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <div class="card guide-section">
+          <div class="card-header"><h2>👤 Creators</h2></div>
+          <div class="card-body guide-prose">
+            <p><strong>Creators Contacted</strong> — creators you've emailed or DM'd. Track status from No Reply → Signed.</p>
+            <p><strong>Signed Creators</strong> — creators you represent. Two ways to add:</p>
+            <ul>
+              <li><strong>Pick from Contacts</strong> — pre-fills name, email, niche, avg views</li>
+              <li><strong>Add New</strong> — for creators you signed without contacting first</li>
+            </ul>
+            <p>Every creator has <strong>email</strong> and optional <strong>avg views</strong> fields.</p>
+            <button type="button" class="btn btn-secondary btn-sm" data-go="/creators-contacted">Open Creators Contacted</button>
+          </div>
+        </div>
+
+        <div class="card guide-section">
+          <div class="card-header"><h2>🏢 Brands</h2></div>
+          <div class="card-body guide-prose">
+            <p><strong>Brands Contacted</strong> — brands you've pitched.</p>
+            <p><strong>Signed Brands</strong> — brands you actively work with. Click a brand to see:</p>
+            <ul>
+              <li>Creators they already work with (external)</li>
+              <li>Your agency creators on deals with them</li>
+              <li>Creators <strong>safe to pitch</strong></li>
+            </ul>
+            <p>Every brand has an <strong>email</strong> field.</p>
+            <button type="button" class="btn btn-secondary btn-sm" data-go="/signed-brands">Open Signed Brands</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card guide-section">
+        <div class="card-header"><h2>⚡ Quick Log vs 🎯 Campaigns</h2></div>
+        <div class="card-body">
+          <div class="alert alert-info" style="margin-bottom:16px;">These are different — don't mix them up!</div>
+          <div class="grid-2">
+            <div class="guide-compare">
+              <h3>Quick Log Sponsorship</h3>
+              <p>You <em>discovered</em> a brand already sponsors a creator. Saves research intel so you never pitch that creator to that brand later.</p>
+              <span class="badge badge-info">Research</span>
+            </div>
+            <div class="guide-compare">
+              <h3>Campaigns</h3>
+              <p>You have an <em>actual deal</em> between your signed creator and a brand. Tracks payment, agency cut, deliverables, and status.</p>
+              <span class="badge badge-success">Real deal</span>
+            </div>
+          </div>
+          <p class="guide-prose" style="margin-top:16px;">If you try to create a campaign with a creator who already has a logged relationship with that brand, the CRM <strong>warns you first</strong>.</p>
+        </div>
+      </div>
+
+      <div class="card guide-section">
+        <div class="card-header"><h2>📋 Bulk import</h2></div>
+        <div class="card-body guide-prose">
+          <p>Paste one entry per line on the Creators or Brands page → <em>Bulk Import</em>.</p>
+          <p><strong>Creators:</strong></p>
+          <code class="guide-code">Name, email, channel link, niche, avg views (optional)</code>
+          <p><strong>Brands:</strong></p>
+          <code class="guide-code">Brand name, email</code>
+        </div>
+      </div>
+
+      <div class="card guide-section">
+        <div class="card-header"><h2>🔒 Your data</h2></div>
+        <div class="card-body guide-prose">
+          <ul>
+            <li>Saves <strong>automatically</strong> in your browser — closing the tab does not delete it</li>
+            <li><strong>Private to you</strong> — other users can't see your contacts</li>
+            <li>Different browser or device = empty CRM (use Export/Import to move data)</li>
+            <li>Clearing browser site data will wipe your CRM — export backups regularly</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="card guide-section">
+        <div class="card-header"><h2>❓ Quick reference</h2></div>
+        <div class="card-body"><div class="table-wrap"><table>
+          <thead><tr><th>I want to…</th><th>Go to…</th></tr></thead>
+          <tbody>
+            <tr><td>Log a sponsorship I saw online</td><td><button type="button" class="link-btn" data-go="/quick-log">Quick Log Sponsorship</button></td></tr>
+            <tr><td>Track outreach</td><td><button type="button" class="link-btn" data-go="/creators-contacted">Creators / Brands Contacted</button></td></tr>
+            <tr><td>Sign someone I already contacted</td><td><button type="button" class="link-btn" data-go="/signed-creators">Signed Creators → Pick from Contacts</button></td></tr>
+            <tr><td>Create a paid deal</td><td><button type="button" class="link-btn" data-go="/campaigns">Campaigns</button></td></tr>
+            <tr><td>Check if I can pitch a creator to a brand</td><td><button type="button" class="link-btn" data-go="/signed-brands">Open the Brand page</button></td></tr>
+            <tr><td>Back up my CRM</td><td>Export data (sidebar footer)</td></tr>
+          </tbody>
+        </table></div></div>
+      </div>
+    </div>
+  `;
+}
+
+export function bindHelp(root) {
+  root.querySelectorAll('[data-go]').forEach((btn) => {
+    btn.addEventListener('click', () => nav(btn.dataset.go));
+  });
+}
+
 // Export for app.js topbar actions
 export { openSignedCreatorChoice, openSignedBrandChoice, openCampaignForm, openBulkImport };

@@ -44,6 +44,7 @@ export const NAV_ITEMS = [
   { section: 'Overview', items: [
     { route: '/', label: 'Dashboard', icon: '📊' },
     { route: '/quick-log', label: 'Quick Log Sponsorship', icon: '⚡' },
+    { route: '/help', label: 'How to Use', icon: '📖' },
   ]},
   { section: 'Pipeline', items: [
     { route: '/creators-contacted', label: 'Creators Contacted', icon: '👤' },

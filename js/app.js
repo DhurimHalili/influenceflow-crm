@@ -21,6 +21,8 @@ import {
   bindBrandDetail,
   renderCreatorDetail,
   bindCreatorDetail,
+  renderHelp,
+  bindHelp,
   openSignedCreatorChoice,
   openCampaignForm,
 } from './pages.js';
@@ -33,6 +35,7 @@ const ROUTES = {
   '/signed-creators': { title: 'Signed Creators', subtitle: 'Creators you currently represent', render: renderSignedCreators, bind: bindSignedCreators, action: { label: '+ Add Signed', fn: openSignedCreatorChoice } },
   '/signed-brands': { title: 'Signed Brands', subtitle: 'Brands you currently work with', render: renderSignedBrands, bind: bindSignedBrands },
   '/campaigns': { title: 'Campaigns', subtitle: 'Deals between your signed creators and brands', render: renderCampaigns, bind: bindCampaigns, action: { label: '+ Create Campaign', fn: openCampaignForm } },
+  '/help': { title: 'How to Use', subtitle: 'Everything you need to get started with InfluenceFlow', render: renderHelp, bind: bindHelp },
 };
 
 function parseRoute() {

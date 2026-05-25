@@ -503,3 +503,105 @@ label {
 
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 @keyframes slideUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+/* Help / How to Use */
+.guide-layout { display: flex; flex-direction: column; gap: 20px; max-width: 960px; }
+
+.guide-lead {
+  font-size: 16px;
+  color: var(--text-muted);
+  line-height: 1.6;
+  margin-bottom: 20px;
+}
+
+.guide-toc {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.guide-toc-item {
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+
+.guide-toc-item:hover {
+  border-color: var(--accent);
+  color: var(--accent-hover);
+  background: var(--accent-soft);
+}
+
+.guide-steps { display: flex; flex-direction: column; gap: 16px; }
+
+.guide-step {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.guide-step-num {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent-hover);
+  font-weight: 700;
+  font-size: 14px;
+  display: grid;
+  place-items: center;
+}
+
+.guide-step strong { display: block; margin-bottom: 4px; font-size: 15px; }
+.guide-step p { font-size: 14px; color: var(--text-muted); margin: 0; }
+
+.guide-prose { font-size: 14px; color: var(--text-muted); line-height: 1.65; }
+.guide-prose p { margin-bottom: 12px; }
+.guide-prose p:last-child { margin-bottom: 0; }
+.guide-prose ul { margin: 8px 0 12px 20px; }
+.guide-prose li { margin-bottom: 6px; }
+.guide-prose em { color: var(--text); font-style: normal; font-weight: 500; }
+
+.guide-compare {
+  padding: 16px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.guide-compare h3 { font-size: 15px; margin-bottom: 8px; }
+.guide-compare p { font-size: 14px; color: var(--text-muted); margin-bottom: 10px; line-height: 1.55; }
+
+.guide-code {
+  display: block;
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 12px 14px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  margin: 8px 0 16px;
+}
+
+.link-btn {
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: 500;
+  color: var(--accent-hover);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  text-align: left;
+}
+
+.link-btn:hover { text-decoration: underline; }
