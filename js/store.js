@@ -3,6 +3,7 @@ import {
   uid,
   normalizeName,
   todayISO,
+  parseAvgViews,
 } from './constants.js';
 
 const emptyState = () => ({
@@ -79,6 +80,7 @@ export function addCreatorContacted(data) {
     contactEmail: data.contactEmail?.trim() || '',
     channelLink: data.channelLink?.trim() || '',
     niche: data.niche?.trim() || '',
+    avgViews: parseAvgViews(data.avgViews),
     dateContacted: data.dateContacted || todayISO(),
     status: data.status || 'no_reply',
     notes: data.notes?.trim() || '',
@@ -95,13 +97,20 @@ export function updateCreatorContacted(id, data) {
   if (idx === -1) return { error: 'Not found' };
   const dup = findDuplicateCreator(data.name, id);
   if (dup) return { error: `Creator "${data.name}" already exists.` };
-  state.creatorsContacted[idx] = { ...state.creatorsContacted[idx], ...data, name: data.name.trim(), contactEmail: data.contactEmail?.trim() || '' };
+  state.creatorsContacted[idx] = {
+    ...state.creatorsContacted[idx],
+    ...data,
+    name: data.name.trim(),
+    contactEmail: data.contactEmail?.trim() || '',
+    avgViews: data.avgViews !== undefined ? parseAvgViews(data.avgViews) : state.creatorsContacted[idx].avgViews,
+  };
   const signed = state.signedCreators.find((s) => s.contactedCreatorId === id);
   if (signed) {
     signed.contactEmail = data.contactEmail?.trim() || signed.contactEmail || '';
     if (data.name) signed.name = data.name.trim();
     if (data.channelLink !== undefined) signed.channelLink = data.channelLink?.trim() || '';
     if (data.niche !== undefined) signed.niche = data.niche?.trim() || '';
+    if (data.avgViews !== undefined) signed.avgViews = parseAvgViews(data.avgViews);
   }
   persist();
   return { item: state.creatorsContacted[idx] };
@@ -118,7 +127,7 @@ export function bulkImportCreators(lines) {
   for (const line of lines) {
     const parts = line.split(/[,;\t|]/).map((p) => p.trim()).filter(Boolean);
     if (!parts.length) continue;
-    const [name, p2 = '', p3 = '', p4 = ''] = parts;
+    const [name, p2 = '', p3 = '', p4 = '', p5 = ''] = parts;
     let contactEmail = '';
     let channelLink = '';
     let niche = '';
@@ -131,7 +140,7 @@ export function bulkImportCreators(lines) {
       niche = p3;
     }
     if (findDuplicateCreator(name)) { skipped++; continue; }
-    addCreatorContacted({ name, contactEmail, channelLink, niche });
+    addCreatorContacted({ name, contactEmail, channelLink, niche, avgViews: p5 || null });
     added++;
   }
   return { added, skipped };
@@ -217,6 +226,7 @@ export function promoteToSignedCreator(contactedId, extra = {}) {
     contactEmail: contact.contactEmail || extra.contactEmail?.trim() || '',
     channelLink: contact.channelLink,
     niche: contact.niche,
+    avgViews: contact.avgViews ?? parseAvgViews(extra.avgViews),
     platform: extra.platform || 'YouTube',
     signedDate: extra.signedDate || todayISO(),
     notes: extra.notes || contact.notes || '',
@@ -240,6 +250,7 @@ export function addSignedCreator(data) {
     contactEmail: data.contactEmail?.trim() || '',
     channelLink: data.channelLink?.trim() || '',
     niche: data.niche?.trim() || '',
+    avgViews: parseAvgViews(data.avgViews),
     platform: data.platform || 'YouTube',
     signedDate: data.signedDate || todayISO(),
     notes: data.notes?.trim() || '',
@@ -261,7 +272,13 @@ export function updateSignedCreator(id, data) {
   if (idx === -1) return { error: 'Not found' };
   const dup = findDuplicateSignedCreator(data.name, id);
   if (dup) return { error: `Signed creator "${data.name}" already exists.` };
-  state.signedCreators[idx] = { ...state.signedCreators[idx], ...data, name: data.name.trim(), contactEmail: data.contactEmail?.trim() ?? state.signedCreators[idx].contactEmail ?? '' };
+  state.signedCreators[idx] = {
+    ...state.signedCreators[idx],
+    ...data,
+    name: data.name.trim(),
+    contactEmail: data.contactEmail?.trim() ?? state.signedCreators[idx].contactEmail ?? '',
+    avgViews: data.avgViews !== undefined ? parseAvgViews(data.avgViews) : state.signedCreators[idx].avgViews,
+  };
   autoLinkExternalRecords(state.signedCreators[idx]);
   persist();
   return { item: state.signedCreators[idx] };

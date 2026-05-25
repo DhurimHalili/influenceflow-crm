@@ -86,6 +86,21 @@ export function formatMoney(n) {
   return new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(Number(n));
 }
 
+export function formatViews(n) {
+  if (n == null || n === '') return '—';
+  const num = Number(n);
+  if (!Number.isFinite(num)) return '—';
+  if (num >= 1_000_000) return `${(num / 1_000_000).toFixed(1).replace(/\.0$/, '')}M views`;
+  if (num >= 1_000) return `${(num / 1_000).toFixed(1).replace(/\.0$/, '')}K views`;
+  return `${num.toLocaleString()} views`;
+}
+
+export function parseAvgViews(v) {
+  if (v == null || v === '') return null;
+  const n = Number(String(v).replace(/[,\s]/g, ''));
+  return Number.isFinite(n) && n >= 0 ? Math.round(n) : null;
+}
+
 export function todayISO() {
   return new Date().toISOString().slice(0, 10);
 }

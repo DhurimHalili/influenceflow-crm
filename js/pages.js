@@ -6,6 +6,7 @@ import {
   PLATFORMS,
   formatDate,
   formatMoney,
+  formatViews,
   todayISO,
   escapeHtml,
   labelFor,
@@ -202,19 +203,20 @@ export function renderCreatorsContacted() {
       <button type="button" class="btn btn-secondary" data-bulk-import>Bulk Import</button>
     </div>
     <div class="card"><div class="table-wrap"><table>
-      <thead><tr><th>Name</th><th>Email</th><th>Niche</th><th>Status</th><th>Contacted</th><th></th></tr></thead>
+      <thead><tr><th>Name</th><th>Email</th><th>Niche</th><th>Avg Views</th><th>Status</th><th>Contacted</th><th></th></tr></thead>
       <tbody id="creators-tbody">${renderCreatorsRows(creatorsContacted)}</tbody>
     </table></div></div>
   `;
 }
 
 function renderCreatorsRows(list) {
-  if (!list.length) return `<tr><td colspan="6">${renderEmpty('No creators yet')}</td></tr>`;
+  if (!list.length) return `<tr><td colspan="7">${renderEmpty('No creators yet')}</td></tr>`;
   return list.map((c) => `
     <tr>
       <td><strong>${escapeHtml(c.name)}</strong>${c.channelLink ? `<br><a class="link" href="${escapeHtml(c.channelLink)}" target="_blank" rel="noopener">Channel ↗</a>` : ''}</td>
       <td>${c.contactEmail ? `<a class="link" href="mailto:${escapeHtml(c.contactEmail)}">${escapeHtml(c.contactEmail)}</a>` : '—'}</td>
       <td>${escapeHtml(c.niche || '—')}</td>
+      <td>${formatViews(c.avgViews)}</td>
       <td>${statusBadge(c.status, CREATOR_STATUSES)}</td>
       <td>${formatDate(c.dateContacted)}</td>
       <td class="actions-cell">
@@ -276,6 +278,7 @@ function openCreatorForm(existing) {
           <div class="form-group"><label>Name *</label><input class="input" name="name" required value="${escapeHtml(existing?.name || '')}" /></div>
           <div class="form-group"><label>Email</label><input class="input" type="email" name="contactEmail" value="${escapeHtml(existing?.contactEmail || '')}" placeholder="creator@email.com" /></div>
           <div class="form-group"><label>Niche</label><input class="input" name="niche" value="${escapeHtml(existing?.niche || '')}" /></div>
+          <div class="form-group"><label>Avg views <span style="font-weight:400;color:var(--text-dim)">(optional)</span></label><input class="input" type="number" name="avgViews" min="0" step="1" value="${existing?.avgViews ?? ''}" placeholder="e.g. 500000" /></div>
           <div class="form-group full"><label>Channel link</label><input class="input" name="channelLink" value="${escapeHtml(existing?.channelLink || '')}" /></div>
           <div class="form-group"><label>Date contacted</label><input class="input" type="date" name="dateContacted" value="${existing?.dateContacted || todayISO()}" /></div>
           <div class="form-group"><label>Status</label><select class="select-input" name="status">${renderOptions(CREATOR_STATUSES, existing?.status || 'no_reply')}</select></div>
@@ -320,7 +323,7 @@ function renderBrandsRows(list) {
   return list.map((b) => `
     <tr>
       <td><strong>${escapeHtml(b.name)}</strong></td>
-      <td>${escapeHtml(b.contactEmail || '—')}</td>
+      <td>${b.contactEmail ? `<a class="link" href="mailto:${escapeHtml(b.contactEmail)}">${escapeHtml(b.contactEmail)}</a>` : '—'}</td>
       <td>${statusBadge(b.status, BRAND_STATUSES)}</td>
       <td>${formatDate(b.dateContacted)}</td>
       <td class="actions-cell">
@@ -374,7 +377,7 @@ function openBrandForm(existing) {
       <form id="brand-form">
         <div class="form-grid">
           <div class="form-group"><label>Brand name *</label><input class="input" name="name" required value="${escapeHtml(existing?.name || '')}" /></div>
-          <div class="form-group"><label>Contact email</label><input class="input" type="email" name="contactEmail" value="${escapeHtml(existing?.contactEmail || '')}" /></div>
+          <div class="form-group"><label>Email</label><input class="input" type="email" name="contactEmail" value="${escapeHtml(existing?.contactEmail || '')}" placeholder="brand@email.com" /></div>
           <div class="form-group"><label>Date contacted</label><input class="input" type="date" name="dateContacted" value="${existing?.dateContacted || todayISO()}" /></div>
           <div class="form-group"><label>Status</label><select class="select-input" name="status">${renderOptions(BRAND_STATUSES, existing?.status || 'no_reply')}</select></div>
           <div class="form-group full"><label>Notes</label><textarea class="textarea" name="notes">${escapeHtml(existing?.notes || '')}</textarea></div>
@@ -398,10 +401,10 @@ function openBulkImport(type) {
     size: 'modal-lg',
     body: `
       <p style="color:var(--text-muted);margin-bottom:12px;font-size:14px;">
-        Paste one entry per line. ${type === 'creators' ? 'Format: name, email, channel link, niche' : 'Format: name, email'}
+        Paste one entry per line. ${type === 'creators' ? 'Format: name, email, channel link, niche, avg views (optional)' : 'Format: name, email'}
       </p>
       <form id="bulk-form">
-        <textarea class="textarea" name="lines" style="min-height:200px;font-family:var(--mono);font-size:13px;" placeholder="${type === 'creators' ? 'MrBeast, business@mrbeast.com, https://youtube.com/@mrbeast, Entertainment\nMkbhd, contact@mkbhd.com, https://youtube.com/@mkbhd, Tech' : 'NordVPN, partnerships@nordvpn.com\nSkillshare, brand@skillshare.com'}"></textarea>
+        <textarea class="textarea" name="lines" style="min-height:200px;font-family:var(--mono);font-size:13px;" placeholder="${type === 'creators' ? 'MrBeast, business@mrbeast.com, https://youtube.com/@mrbeast, Entertainment, 150000000\nMkbhd, contact@mkbhd.com, https://youtube.com/@mkbhd, Tech, 3500000' : 'NordVPN, partnerships@nordvpn.com\nSkillshare, brand@skillshare.com'}"></textarea>
         <button type="submit" class="btn btn-primary" style="margin-top:16px;">Import</button>
       </form>
     `,
@@ -425,14 +428,14 @@ export function renderSignedCreators() {
       <button type="button" class="btn btn-primary" data-add-signed>+ Add Signed Creator</button>
     </div>
     <div class="card"><div class="table-wrap"><table>
-      <thead><tr><th>Name</th><th>Email</th><th>Platform</th><th>Niche</th><th>Signed</th><th>Linked</th><th></th></tr></thead>
+      <thead><tr><th>Name</th><th>Email</th><th>Platform</th><th>Niche</th><th>Avg Views</th><th>Signed</th><th>Linked</th><th></th></tr></thead>
       <tbody id="signed-creators-tbody">${renderSignedCreatorRows(signedCreators)}</tbody>
     </table></div></div>
   `;
 }
 
 function renderSignedCreatorRows(list) {
-  if (!list.length) return `<tr><td colspan="7">${renderEmpty('No signed creators yet')}</td></tr>`;
+  if (!list.length) return `<tr><td colspan="8">${renderEmpty('No signed creators yet')}</td></tr>`;
   return list.map((c) => {
     const hasConflict = getState().externalLinks.some(
       (l) => l.signedCreatorId === c.id || l.creatorName.toLowerCase() === c.name.toLowerCase(),
@@ -443,6 +446,7 @@ function renderSignedCreatorRows(list) {
         <td>${c.contactEmail ? `<a class="link" href="mailto:${escapeHtml(c.contactEmail)}">${escapeHtml(c.contactEmail)}</a>` : '—'}</td>
         <td>${escapeHtml(c.platform || '—')}</td>
         <td>${escapeHtml(c.niche || '—')}</td>
+        <td>${formatViews(c.avgViews)}</td>
         <td>${formatDate(c.signedDate)}</td>
         <td>${c.contactedCreatorId ? '<span class="badge badge-accent">From Contacts</span>' : '<span class="badge badge-default">New</span>'}</td>
         <td class="actions-cell" onclick="event.stopPropagation()">
@@ -560,6 +564,7 @@ function openSignedCreatorForm(existing) {
           <div class="form-group"><label>Email</label><input class="input" type="email" name="contactEmail" value="${escapeHtml(existing?.contactEmail || '')}" placeholder="creator@email.com" /></div>
           <div class="form-group"><label>Platform</label><select class="select-input" name="platform">${renderOptions(PLATFORMS, existing?.platform || 'YouTube')}</select></div>
           <div class="form-group"><label>Niche</label><input class="input" name="niche" value="${escapeHtml(existing?.niche || '')}" /></div>
+          <div class="form-group"><label>Avg views <span style="font-weight:400;color:var(--text-dim)">(optional)</span></label><input class="input" type="number" name="avgViews" min="0" step="1" value="${existing?.avgViews ?? ''}" placeholder="e.g. 500000" /></div>
           <div class="form-group"><label>Signed date</label><input class="input" type="date" name="signedDate" value="${existing?.signedDate || todayISO()}" /></div>
           <div class="form-group full"><label>Channel link</label><input class="input" name="channelLink" value="${escapeHtml(existing?.channelLink || '')}" /></div>
           <div class="form-group full"><label>Notes</label><textarea class="textarea" name="notes">${escapeHtml(existing?.notes || '')}</textarea></div>
@@ -601,7 +606,7 @@ function renderSignedBrandRows(list) {
     return `
       <tr class="row-clickable" data-go-brand="${b.id}">
         <td><strong>${escapeHtml(b.name)}</strong></td>
-        <td>${escapeHtml(b.contactEmail || '—')}</td>
+        <td>${b.contactEmail ? `<a class="link" href="mailto:${escapeHtml(b.contactEmail)}">${escapeHtml(b.contactEmail)}</a>` : '—'}</td>
         <td>${formatDate(b.signedDate)}</td>
         <td><span class="badge badge-warning">${extCount}</span></td>
         <td><span class="badge badge-accent">${campCount}</span></td>
@@ -711,7 +716,7 @@ function openSignedBrandForm(existing) {
       <form id="signed-brand-form">
         <div class="form-grid">
           <div class="form-group"><label>Brand name *</label><input class="input" name="name" required value="${escapeHtml(existing?.name || '')}" /></div>
-          <div class="form-group"><label>Contact email</label><input class="input" name="contactEmail" value="${escapeHtml(existing?.contactEmail || '')}" /></div>
+          <div class="form-group"><label>Email</label><input class="input" type="email" name="contactEmail" value="${escapeHtml(existing?.contactEmail || '')}" placeholder="brand@email.com" /></div>
           <div class="form-group"><label>Signed date</label><input class="input" type="date" name="signedDate" value="${existing?.signedDate || todayISO()}" /></div>
           <div class="form-group full"><label>Notes</label><textarea class="textarea" name="notes">${escapeHtml(existing?.notes || '')}</textarea></div>
         </div>
@@ -942,7 +947,7 @@ export function renderBrandDetail(id) {
     <div class="detail-header">
       <div>
         <h2>${escapeHtml(brand.name)}</h2>
-        <p class="subtitle">${escapeHtml(brand.contactEmail || '')} · Signed ${formatDate(brand.signedDate)}</p>
+        <p class="subtitle">${brand.contactEmail ? `<a class="link" href="mailto:${escapeHtml(brand.contactEmail)}">${escapeHtml(brand.contactEmail)}</a> · ` : ''}Signed ${formatDate(brand.signedDate)}</p>
       </div>
       <div style="display:flex;gap:8px;">
         <button type="button" class="btn btn-secondary" data-edit-brand>Edit</button>
@@ -1089,6 +1094,7 @@ export function renderCreatorDetail(id) {
         <h2>${escapeHtml(creator.name)} ${relationships.length ? '<span class="badge badge-warning" title="Has brand relationships">🔗 Linked to brands</span>' : ''}</h2>
         <p class="subtitle">${escapeHtml(creator.platform || '')} · ${escapeHtml(creator.niche || '')} · Signed ${formatDate(creator.signedDate)}</p>
         ${creator.contactEmail ? `<p class="subtitle"><a class="link" href="mailto:${escapeHtml(creator.contactEmail)}">${escapeHtml(creator.contactEmail)}</a></p>` : ''}
+        ${creator.avgViews != null ? `<p class="subtitle">${formatViews(creator.avgViews)}</p>` : ''}
         ${creator.channelLink ? `<a class="link" href="${escapeHtml(creator.channelLink)}" target="_blank" rel="noopener">Channel ↗</a>` : ''}
       </div>
       <button type="button" class="btn btn-secondary" data-edit-creator>Edit</button>
