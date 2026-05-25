@@ -189,7 +189,7 @@ export function renderCreatorsContacted() {
 
   return `
     <div class="toolbar" id="filters">
-      <input class="search-input" name="q" placeholder="Search name, niche, link..." />
+      <input class="search-input" name="q" placeholder="Search name, email, niche, link..." />
       <select class="select-input" name="status" style="width:auto;">
         <option value="">All statuses</option>
         ${renderOptions(CREATOR_STATUSES)}
@@ -202,17 +202,18 @@ export function renderCreatorsContacted() {
       <button type="button" class="btn btn-secondary" data-bulk-import>Bulk Import</button>
     </div>
     <div class="card"><div class="table-wrap"><table>
-      <thead><tr><th>Name</th><th>Niche</th><th>Status</th><th>Contacted</th><th></th></tr></thead>
+      <thead><tr><th>Name</th><th>Email</th><th>Niche</th><th>Status</th><th>Contacted</th><th></th></tr></thead>
       <tbody id="creators-tbody">${renderCreatorsRows(creatorsContacted)}</tbody>
     </table></div></div>
   `;
 }
 
 function renderCreatorsRows(list) {
-  if (!list.length) return `<tr><td colspan="5">${renderEmpty('No creators yet')}</td></tr>`;
+  if (!list.length) return `<tr><td colspan="6">${renderEmpty('No creators yet')}</td></tr>`;
   return list.map((c) => `
     <tr>
       <td><strong>${escapeHtml(c.name)}</strong>${c.channelLink ? `<br><a class="link" href="${escapeHtml(c.channelLink)}" target="_blank" rel="noopener">Channel ↗</a>` : ''}</td>
+      <td>${c.contactEmail ? `<a class="link" href="mailto:${escapeHtml(c.contactEmail)}">${escapeHtml(c.contactEmail)}</a>` : '—'}</td>
       <td>${escapeHtml(c.niche || '—')}</td>
       <td>${statusBadge(c.status, CREATOR_STATUSES)}</td>
       <td>${formatDate(c.dateContacted)}</td>
@@ -233,7 +234,7 @@ export function bindCreatorsContacted(root) {
     const status = filters.querySelector('[name="status"]').value;
     const niche = filters.querySelector('[name="niche"]').value.toLowerCase();
     const list = getState().creatorsContacted.filter((c) =>
-      matchesSearch(q, c.name, c.niche, c.channelLink, c.notes) &&
+      matchesSearch(q, c.name, c.contactEmail, c.niche, c.channelLink, c.notes) &&
       (!status || c.status === status) &&
       (!niche || (c.niche || '').toLowerCase().includes(niche)),
     );
@@ -273,6 +274,7 @@ function openCreatorForm(existing) {
       <form id="creator-form">
         <div class="form-grid">
           <div class="form-group"><label>Name *</label><input class="input" name="name" required value="${escapeHtml(existing?.name || '')}" /></div>
+          <div class="form-group"><label>Email</label><input class="input" type="email" name="contactEmail" value="${escapeHtml(existing?.contactEmail || '')}" placeholder="creator@email.com" /></div>
           <div class="form-group"><label>Niche</label><input class="input" name="niche" value="${escapeHtml(existing?.niche || '')}" /></div>
           <div class="form-group full"><label>Channel link</label><input class="input" name="channelLink" value="${escapeHtml(existing?.channelLink || '')}" /></div>
           <div class="form-group"><label>Date contacted</label><input class="input" type="date" name="dateContacted" value="${existing?.dateContacted || todayISO()}" /></div>
@@ -396,10 +398,10 @@ function openBulkImport(type) {
     size: 'modal-lg',
     body: `
       <p style="color:var(--text-muted);margin-bottom:12px;font-size:14px;">
-        Paste one entry per line. ${type === 'creators' ? 'Format: name, channel link, niche' : 'Format: name, email'}
+        Paste one entry per line. ${type === 'creators' ? 'Format: name, email, channel link, niche' : 'Format: name, email'}
       </p>
       <form id="bulk-form">
-        <textarea class="textarea" name="lines" style="min-height:200px;font-family:var(--mono);font-size:13px;" placeholder="${type === 'creators' ? 'MrBeast, https://youtube.com/@mrbeast, Entertainment\nMkbhd, https://youtube.com/@mkbhd, Tech' : 'NordVPN, partnerships@nordvpn.com\nSkillshare, brand@skillshare.com'}"></textarea>
+        <textarea class="textarea" name="lines" style="min-height:200px;font-family:var(--mono);font-size:13px;" placeholder="${type === 'creators' ? 'MrBeast, business@mrbeast.com, https://youtube.com/@mrbeast, Entertainment\nMkbhd, contact@mkbhd.com, https://youtube.com/@mkbhd, Tech' : 'NordVPN, partnerships@nordvpn.com\nSkillshare, brand@skillshare.com'}"></textarea>
         <button type="submit" class="btn btn-primary" style="margin-top:16px;">Import</button>
       </form>
     `,
@@ -419,18 +421,18 @@ export function renderSignedCreators() {
   const { signedCreators } = getState();
   return `
     <div class="toolbar" id="filters">
-      <input class="search-input" name="q" placeholder="Search signed creators..." />
+      <input class="search-input" name="q" placeholder="Search name, email..." />
       <button type="button" class="btn btn-primary" data-add-signed>+ Add Signed Creator</button>
     </div>
     <div class="card"><div class="table-wrap"><table>
-      <thead><tr><th>Name</th><th>Platform</th><th>Niche</th><th>Signed</th><th>Linked</th><th></th></tr></thead>
+      <thead><tr><th>Name</th><th>Email</th><th>Platform</th><th>Niche</th><th>Signed</th><th>Linked</th><th></th></tr></thead>
       <tbody id="signed-creators-tbody">${renderSignedCreatorRows(signedCreators)}</tbody>
     </table></div></div>
   `;
 }
 
 function renderSignedCreatorRows(list) {
-  if (!list.length) return `<tr><td colspan="6">${renderEmpty('No signed creators yet')}</td></tr>`;
+  if (!list.length) return `<tr><td colspan="7">${renderEmpty('No signed creators yet')}</td></tr>`;
   return list.map((c) => {
     const hasConflict = getState().externalLinks.some(
       (l) => l.signedCreatorId === c.id || l.creatorName.toLowerCase() === c.name.toLowerCase(),
@@ -438,6 +440,7 @@ function renderSignedCreatorRows(list) {
     return `
       <tr class="row-clickable" data-go-creator="${c.id}">
         <td><strong>${escapeHtml(c.name)}</strong> ${hasConflict ? '<span class="badge badge-warning" title="Has brand relationships">🔗</span>' : ''}</td>
+        <td>${c.contactEmail ? `<a class="link" href="mailto:${escapeHtml(c.contactEmail)}">${escapeHtml(c.contactEmail)}</a>` : '—'}</td>
         <td>${escapeHtml(c.platform || '—')}</td>
         <td>${escapeHtml(c.niche || '—')}</td>
         <td>${formatDate(c.signedDate)}</td>
@@ -457,7 +460,7 @@ export function bindSignedCreators(root) {
   const refresh = () => {
     const q = filters.querySelector('[name="q"]').value.toLowerCase();
     const list = getState().signedCreators.filter((c) =>
-      matchesSearch(q, c.name, c.niche, c.platform, c.channelLink),
+      matchesSearch(q, c.name, c.contactEmail, c.niche, c.platform, c.channelLink),
     );
     tbody.innerHTML = renderSignedCreatorRows(list);
     bindSignedCreatorActions(root);
@@ -528,7 +531,7 @@ function openPromoteCreatorForm() {
           <label>Select creator *</label>
           <select class="select-input" name="contactedId" required>
             <option value="">Choose...</option>
-            ${available.map((c) => `<option value="${c.id}">${escapeHtml(c.name)} — ${escapeHtml(c.niche || 'no niche')}</option>`).join('')}
+            ${available.map((c) => `<option value="${c.id}">${escapeHtml(c.name)}${c.contactEmail ? ` — ${escapeHtml(c.contactEmail)}` : ''}${c.niche ? ` (${escapeHtml(c.niche)})` : ''}</option>`).join('')}
           </select>
         </div>
         <div class="form-group"><label>Platform</label><select class="select-input" name="platform">${renderOptions(PLATFORMS, 'YouTube')}</select></div>
@@ -554,6 +557,7 @@ function openSignedCreatorForm(existing) {
       <form id="signed-creator-form">
         <div class="form-grid">
           <div class="form-group"><label>Name *</label><input class="input" name="name" required value="${escapeHtml(existing?.name || '')}" /></div>
+          <div class="form-group"><label>Email</label><input class="input" type="email" name="contactEmail" value="${escapeHtml(existing?.contactEmail || '')}" placeholder="creator@email.com" /></div>
           <div class="form-group"><label>Platform</label><select class="select-input" name="platform">${renderOptions(PLATFORMS, existing?.platform || 'YouTube')}</select></div>
           <div class="form-group"><label>Niche</label><input class="input" name="niche" value="${escapeHtml(existing?.niche || '')}" /></div>
           <div class="form-group"><label>Signed date</label><input class="input" type="date" name="signedDate" value="${existing?.signedDate || todayISO()}" /></div>
@@ -1084,6 +1088,7 @@ export function renderCreatorDetail(id) {
       <div>
         <h2>${escapeHtml(creator.name)} ${relationships.length ? '<span class="badge badge-warning" title="Has brand relationships">🔗 Linked to brands</span>' : ''}</h2>
         <p class="subtitle">${escapeHtml(creator.platform || '')} · ${escapeHtml(creator.niche || '')} · Signed ${formatDate(creator.signedDate)}</p>
+        ${creator.contactEmail ? `<p class="subtitle"><a class="link" href="mailto:${escapeHtml(creator.contactEmail)}">${escapeHtml(creator.contactEmail)}</a></p>` : ''}
         ${creator.channelLink ? `<a class="link" href="${escapeHtml(creator.channelLink)}" target="_blank" rel="noopener">Channel ↗</a>` : ''}
       </div>
       <button type="button" class="btn btn-secondary" data-edit-creator>Edit</button>

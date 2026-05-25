@@ -76,6 +76,7 @@ export function addCreatorContacted(data) {
   const item = {
     id: uid(),
     name: data.name.trim(),
+    contactEmail: data.contactEmail?.trim() || '',
     channelLink: data.channelLink?.trim() || '',
     niche: data.niche?.trim() || '',
     dateContacted: data.dateContacted || todayISO(),
@@ -94,7 +95,14 @@ export function updateCreatorContacted(id, data) {
   if (idx === -1) return { error: 'Not found' };
   const dup = findDuplicateCreator(data.name, id);
   if (dup) return { error: `Creator "${data.name}" already exists.` };
-  state.creatorsContacted[idx] = { ...state.creatorsContacted[idx], ...data, name: data.name.trim() };
+  state.creatorsContacted[idx] = { ...state.creatorsContacted[idx], ...data, name: data.name.trim(), contactEmail: data.contactEmail?.trim() || '' };
+  const signed = state.signedCreators.find((s) => s.contactedCreatorId === id);
+  if (signed) {
+    signed.contactEmail = data.contactEmail?.trim() || signed.contactEmail || '';
+    if (data.name) signed.name = data.name.trim();
+    if (data.channelLink !== undefined) signed.channelLink = data.channelLink?.trim() || '';
+    if (data.niche !== undefined) signed.niche = data.niche?.trim() || '';
+  }
   persist();
   return { item: state.creatorsContacted[idx] };
 }
@@ -110,9 +118,20 @@ export function bulkImportCreators(lines) {
   for (const line of lines) {
     const parts = line.split(/[,;\t|]/).map((p) => p.trim()).filter(Boolean);
     if (!parts.length) continue;
-    const [name, channelLink = '', niche = ''] = parts;
+    const [name, p2 = '', p3 = '', p4 = ''] = parts;
+    let contactEmail = '';
+    let channelLink = '';
+    let niche = '';
+    if (p2.includes('@')) {
+      contactEmail = p2;
+      channelLink = p3;
+      niche = p4;
+    } else {
+      channelLink = p2;
+      niche = p3;
+    }
     if (findDuplicateCreator(name)) { skipped++; continue; }
-    addCreatorContacted({ name, channelLink, niche });
+    addCreatorContacted({ name, contactEmail, channelLink, niche });
     added++;
   }
   return { added, skipped };
@@ -195,6 +214,7 @@ export function promoteToSignedCreator(contactedId, extra = {}) {
     id: uid(),
     contactedCreatorId: contactedId,
     name: contact.name,
+    contactEmail: contact.contactEmail || extra.contactEmail?.trim() || '',
     channelLink: contact.channelLink,
     niche: contact.niche,
     platform: extra.platform || 'YouTube',
@@ -217,6 +237,7 @@ export function addSignedCreator(data) {
     id: uid(),
     contactedCreatorId: data.contactedCreatorId || null,
     name: data.name.trim(),
+    contactEmail: data.contactEmail?.trim() || '',
     channelLink: data.channelLink?.trim() || '',
     niche: data.niche?.trim() || '',
     platform: data.platform || 'YouTube',
@@ -240,7 +261,7 @@ export function updateSignedCreator(id, data) {
   if (idx === -1) return { error: 'Not found' };
   const dup = findDuplicateSignedCreator(data.name, id);
   if (dup) return { error: `Signed creator "${data.name}" already exists.` };
-  state.signedCreators[idx] = { ...state.signedCreators[idx], ...data, name: data.name.trim() };
+  state.signedCreators[idx] = { ...state.signedCreators[idx], ...data, name: data.name.trim(), contactEmail: data.contactEmail?.trim() ?? state.signedCreators[idx].contactEmail ?? '' };
   autoLinkExternalRecords(state.signedCreators[idx]);
   persist();
   return { item: state.signedCreators[idx] };
