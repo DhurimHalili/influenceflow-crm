@@ -34,6 +34,8 @@ export function CampaignsPage() {
   })
   const [busy, setBusy] = useState(false)
   const [conflictWarn, setConflictWarn] = useState('')
+  const [creatorSearch, setCreatorSearch] = useState('')
+  const [brandSearch, setBrandSearch] = useState('')
 
   async function load() {
     if (!user) return
@@ -67,10 +69,26 @@ export function CampaignsPage() {
     })
   }, [rows, q, status])
 
+  const filteredCreators = useMemo(() => {
+    const s = creatorSearch.trim().toLowerCase()
+    if (!s) return creators
+    return creators.filter((c) =>
+      [c.name, c.contact_email, c.niche, c.channel_link].some((v) => (v || '').toLowerCase().includes(s)),
+    )
+  }, [creators, creatorSearch])
+
+  const filteredBrands = useMemo(() => {
+    const s = brandSearch.trim().toLowerCase()
+    if (!s) return brands
+    return brands.filter((b) => [b.name, b.domain, b.contact_email].some((v) => (v || '').toLowerCase().includes(s)))
+  }, [brands, brandSearch])
+
   function openCreate() {
     setEditing(null)
     setSelectedCreators([])
     setConflictWarn('')
+    setCreatorSearch('')
+    setBrandSearch('')
     setForm({
       name: '',
       brand_id: '',
@@ -84,6 +102,36 @@ export function CampaignsPage() {
       notes: '',
     })
     setModal(true)
+  }
+
+  async function promoteFromCampaign(brandId: string | null, creatorIds: string[]) {
+    if (!user) return
+    const now = new Date().toISOString()
+    if (creatorIds.length) {
+      await supabase
+        .from('creators')
+        .update({
+          pipeline_status: 'roster',
+          on_roster: true,
+          updated_at: now,
+        })
+        .in('id', creatorIds)
+        .eq('user_id', user.id)
+    }
+    if (brandId) {
+      const brand = brands.find((b) => b.id === brandId)
+      const early = ['new', 'contacted', 'no_reply', 'reach_back_1', 'reach_back_2', 'reach_back_3', 'replied']
+      if (!brand || early.includes(brand.pipeline_status)) {
+        await supabase
+          .from('brands')
+          .update({
+            pipeline_status: 'negotiating',
+            updated_at: now,
+          })
+          .eq('id', brandId)
+          .eq('user_id', user.id)
+      }
+    }
   }
 
   function checkConflicts(brandId: string, creatorIds: string[]) {
@@ -139,9 +187,10 @@ export function CampaignsPage() {
         })),
       )
     }
+    await promoteFromCampaign(form.brand_id || null, selectedCreators)
     setBusy(false)
     setModal(false)
-    show('Campaign saved')
+    show('Campaign saved · creators → roster · brand upgraded if needed')
     load()
   }
 
@@ -215,6 +264,8 @@ export function CampaignsPage() {
                       setEditing(c)
                       setSelectedCreators(assignments[c.id] || [])
                       setConflictWarn('')
+                      setCreatorSearch('')
+                      setBrandSearch('')
                       setForm({
                         name: c.name,
                         brand_id: c.brand_id || '',
@@ -247,26 +298,48 @@ export function CampaignsPage() {
               <input className="input" required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
             </Field>
             <Field label="Brand">
+              <input
+                className="input"
+                style={{ marginBottom: 6 }}
+                placeholder="Search brands…"
+                value={brandSearch}
+                onChange={(e) => setBrandSearch(e.target.value)}
+              />
               <select className="select" value={form.brand_id} onChange={(e) => setForm({ ...form, brand_id: e.target.value })}>
                 <option value="">Select…</option>
-                {brands.map((b) => (
+                {filteredBrands.map((b) => (
                   <option key={b.id} value={b.id}>
                     {b.name}
+                    {b.pipeline_status ? ` (${b.pipeline_status})` : ''}
                   </option>
                 ))}
               </select>
             </Field>
             <Field label="Payment">
-              <input className="input" value={form.agreed_payment} onChange={(e) => setForm({ ...form, agreed_payment: e.target.value })} />
+              <input className="input" inputMode="decimal" value={form.agreed_payment} onChange={(e) => setForm({ ...form, agreed_payment: e.target.value })} />
             </Field>
             <Field label="Agency %">
-              <input className="input" value={form.agency_percent} onChange={(e) => setForm({ ...form, agency_percent: e.target.value })} />
+              <input className="input" inputMode="decimal" value={form.agency_percent} onChange={(e) => setForm({ ...form, agency_percent: e.target.value })} />
             </Field>
             <Field label="Start">
-              <input className="input" type="date" value={form.start_date} onChange={(e) => setForm({ ...form, start_date: e.target.value })} />
+              <input
+                className="input"
+                type="date"
+                min="2000-01-01"
+                max="2099-12-31"
+                value={form.start_date}
+                onChange={(e) => setForm({ ...form, start_date: e.target.value })}
+              />
             </Field>
             <Field label="Due">
-              <input className="input" type="date" value={form.due_date} onChange={(e) => setForm({ ...form, due_date: e.target.value })} />
+              <input
+                className="input"
+                type="date"
+                min="2000-01-01"
+                max="2099-12-31"
+                value={form.due_date}
+                onChange={(e) => setForm({ ...form, due_date: e.target.value })}
+              />
             </Field>
             <Field label="Status">
               <select className="select" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
@@ -283,21 +356,41 @@ export function CampaignsPage() {
           <Field label="Deliverables">
             <textarea className="textarea" value={form.deliverables} onChange={(e) => setForm({ ...form, deliverables: e.target.value })} />
           </Field>
-          <Field label="Assign creators">
-            <div style={{ maxHeight: 160, overflow: 'auto', border: '1px solid var(--border)', borderRadius: 8, padding: 8 }}>
-              {creators.map((c) => (
-                <label key={c.id} style={{ display: 'block', marginBottom: 4 }}>
+          <Field label={`Assign creators (${selectedCreators.length} selected)`}>
+            <input
+              className="input"
+              style={{ marginBottom: 8 }}
+              placeholder="Search creators by name, email, niche…"
+              value={creatorSearch}
+              onChange={(e) => setCreatorSearch(e.target.value)}
+            />
+            <div style={{ maxHeight: 180, overflow: 'auto', border: '1px solid var(--border)', borderRadius: 8, padding: 8 }}>
+              {filteredCreators.length === 0 && (
+                <div style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>No creators match.</div>
+              )}
+              {filteredCreators.map((c) => (
+                <label key={c.id} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6 }}>
                   <input
                     type="checkbox"
                     checked={selectedCreators.includes(c.id)}
                     onChange={(e) => {
                       setSelectedCreators((prev) => (e.target.checked ? [...prev, c.id] : prev.filter((x) => x !== c.id)))
                     }}
-                  />{' '}
-                  {c.name}
+                  />
+                  <span>
+                    <strong>{c.name}</strong>
+                    <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>
+                      {' '}
+                      · {c.pipeline_status}
+                      {c.contact_email ? ` · ${c.contact_email}` : ''}
+                    </span>
+                  </span>
                 </label>
               ))}
             </div>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', margin: '8px 0 0' }}>
+              Saving puts assigned creators on your <strong>roster</strong> and upgrades the brand to <strong>negotiating</strong> if it was only contacted/new.
+            </p>
           </Field>
           {conflictWarn && <p className="error">{conflictWarn}</p>}
           <FormActions onCancel={() => setModal(false)} busy={busy} />

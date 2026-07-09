@@ -693,3 +693,256 @@ table.data tr:hover td {
     padding: 0;
   }
 }
+
+/* Interactive calendar */
+.cal-shell {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(280px, 0.9fr);
+  gap: 0.9rem;
+  align-items: start;
+}
+
+.cal-board {
+  padding: 0.85rem;
+  background:
+    radial-gradient(700px 240px at 0% 0%, rgba(61, 156, 240, 0.12), transparent 60%),
+    var(--bg-elevated);
+}
+
+.cal-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+}
+
+.cal-toolbar h2 {
+  margin: 0;
+  font-size: 1.2rem;
+  letter-spacing: -0.03em;
+}
+
+.cal-weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 0.35rem;
+  margin-bottom: 0.35rem;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+  text-align: center;
+}
+
+.cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 0.35rem;
+}
+
+.cal-day {
+  appearance: none;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-soft) 80%, transparent);
+  color: var(--text);
+  border-radius: 12px;
+  min-height: 92px;
+  padding: 0.4rem;
+  text-align: left;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  transition: transform 0.12s ease, border-color 0.12s ease, background 0.12s ease;
+}
+
+.cal-day:hover {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  transform: translateY(-1px);
+}
+
+.cal-day.muted {
+  opacity: 0.45;
+}
+
+.cal-day.today .cal-day-num {
+  background: var(--accent);
+  color: #fff;
+}
+
+.cal-day.selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+  background: color-mix(in srgb, var(--accent-soft) 70%, var(--bg-elevated));
+}
+
+.cal-day-num {
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  display: inline-grid;
+  place-items: center;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.cal-dots {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.cal-pill {
+  display: block;
+  font-size: 0.65rem;
+  line-height: 1.2;
+  padding: 0.15rem 0.3rem;
+  border-radius: 5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border: 1px solid transparent;
+}
+
+.cal-pill.meeting {
+  background: rgba(61, 156, 240, 0.18);
+  color: #9fd0ff;
+}
+
+.cal-pill.campaign_start {
+  background: rgba(62, 207, 142, 0.16);
+  color: #7de0b0;
+}
+
+.cal-pill.campaign_due {
+  background: rgba(230, 184, 77, 0.16);
+  color: #f0d48a;
+}
+
+.cal-more {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+}
+
+.cal-hint {
+  margin: 0.7rem 0 0;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+.cal-side {
+  padding: 0.9rem;
+  position: sticky;
+  top: 72px;
+}
+
+.cal-side-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: flex-start;
+  margin-bottom: 0.85rem;
+}
+
+.cal-side-label {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.cal-side h3 {
+  margin: 0.15rem 0 0;
+  font-size: 1.05rem;
+}
+
+.cal-empty {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.cal-event-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.cal-event {
+  display: grid;
+  grid-template-columns: 52px 1fr;
+  gap: 0.55rem;
+  padding: 0.65rem;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-soft);
+}
+
+.cal-event-time {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.cal-event.campaign_start .cal-event-time {
+  color: var(--success);
+}
+
+.cal-event.campaign_due .cal-event-time {
+  color: var(--warning);
+}
+
+.cal-event-body strong {
+  display: block;
+  margin-bottom: 0.15rem;
+}
+
+.cal-event-body p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  white-space: pre-wrap;
+}
+
+.cal-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 0.78rem;
+}
+
+.cal-legend i {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 99px;
+  margin-right: 5px;
+}
+
+.cal-legend i.meeting {
+  background: var(--accent);
+}
+.cal-legend i.campaign_start {
+  background: var(--success);
+}
+.cal-legend i.campaign_due {
+  background: var(--warning);
+}
+
+@media (max-width: 960px) {
+  .cal-shell {
+    grid-template-columns: 1fr;
+  }
+  .cal-side {
+    position: static;
+  }
+  .cal-day {
+    min-height: 72px;
+  }
+}
