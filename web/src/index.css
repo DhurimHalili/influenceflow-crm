@@ -935,6 +935,21 @@ table.data tr:hover td {
   background: var(--warning);
 }
 
+.legal-page .legal-card {
+  max-width: 760px;
+}
+
+.legal-card h3 {
+  margin: 1.25rem 0 0.4rem;
+  font-size: 1rem;
+}
+
+.legal-card p,
+.legal-card li {
+  color: var(--text-muted);
+  font-size: 0.95rem;
+}
+
 @media (max-width: 960px) {
   .cal-shell {
     grid-template-columns: 1fr;

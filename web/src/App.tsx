@@ -10,6 +10,7 @@ import { OutreachPage } from './pages/OutreachPage'
 import { CalendarPage } from './pages/CalendarPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { HelpPage, HirePage } from './pages/HelpHirePages'
+import { PrivacyPage, TermsPage } from './pages/LegalPages'
 
 export default function App() {
   return (
@@ -37,7 +38,11 @@ export default function App() {
             <Route path="settings" element={<SettingsPage />} />
             <Route path="help" element={<HelpPage />} />
             <Route path="hire" element={<HirePage />} />
+            <Route path="privacy" element={<PrivacyPage />} />
+            <Route path="terms" element={<TermsPage />} />
           </Route>
+          <Route path="/privacy" element={<PrivacyPage />} />
+          <Route path="/terms" element={<TermsPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </HashRouter>
