@@ -201,7 +201,7 @@ export function BrandsPage() {
             {filtered.map((b) => (
               <tr key={b.id}>
                 <td>
-                  <Link to={`/brands/${b.id}`}>{b.name}</Link>
+                  <Link to={`/app/brands/${b.id}`}>{b.name}</Link>
                 </td>
                 <td>{b.domain || '—'}</td>
                 <td>{b.contact_email || '—'}</td>
@@ -234,7 +234,7 @@ export function BrandsPage() {
         {filtered.map((b) => (
           <div className="mobile-card" key={b.id}>
             <h3>
-              <Link to={`/brands/${b.id}`}>{b.name}</Link>
+              <Link to={`/app/brands/${b.id}`}>{b.name}</Link>
             </h3>
             <StatusBadge status={b.pipeline_status} />
             <div style={{ color: 'var(--text-muted)', marginTop: 6 }}>{b.contact_email || b.domain || '—'}</div>
@@ -345,7 +345,7 @@ export function BrandDetailPage() {
     <div>
       {Toast}
       <PageHeader title={brand.name} subtitle={brand.domain || brand.contact_email || undefined}>
-        <Link className="btn" to="/brands">
+        <Link className="btn" to="/app/brands">
           Back
         </Link>
         <button className="btn btn-primary" type="button" onClick={() => setModal(true)}>

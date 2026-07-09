@@ -1,7 +1,8 @@
 import { HashRouter, Navigate, Route, Routes } from 'react-router-dom'
-import { AuthProvider } from './context/AuthContext'
+import { AuthProvider, useAuth } from './context/AuthContext'
 import { AppLayout, RequireAuth } from './components/Layout'
 import { LoginPage, SignupPage } from './pages/AuthPages'
+import { LandingPage } from './pages/LandingPage'
 import { DashboardPage } from './pages/DashboardPage'
 import { CreatorsPage, CreatorDetailPage } from './pages/CreatorsPage'
 import { BrandsPage, BrandDetailPage } from './pages/BrandsPage'
@@ -12,15 +13,27 @@ import { SettingsPage } from './pages/SettingsPage'
 import { HelpPage, HirePage } from './pages/HelpHirePages'
 import { PrivacyPage, TermsPage } from './pages/LegalPages'
 
+function RootRedirect() {
+  const { user, loading } = useAuth()
+  if (loading) return <div className="auth-page">Loading…</div>
+  if (user) return <Navigate to="/app" replace />
+  return <LandingPage />
+}
+
 export default function App() {
   return (
     <AuthProvider>
       <HashRouter>
         <Routes>
+          <Route path="/" element={<RootRedirect />} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/signup" element={<SignupPage />} />
+          <Route path="/privacy" element={<PrivacyPage />} />
+          <Route path="/terms" element={<TermsPage />} />
+          <Route path="/help" element={<HelpPage />} />
+          <Route path="/hire" element={<HirePage />} />
           <Route
-            path="/"
+            path="/app"
             element={
               <RequireAuth>
                 <AppLayout />
@@ -41,8 +54,6 @@ export default function App() {
             <Route path="privacy" element={<PrivacyPage />} />
             <Route path="terms" element={<TermsPage />} />
           </Route>
-          <Route path="/privacy" element={<PrivacyPage />} />
-          <Route path="/terms" element={<TermsPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </HashRouter>

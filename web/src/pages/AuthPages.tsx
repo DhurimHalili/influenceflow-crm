@@ -13,7 +13,7 @@ export function LoginPage() {
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
 
-  if (!loading && user) return <Navigate to="/" replace />
+  if (!loading && user) return <Navigate to="/app" replace />
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault()
@@ -22,7 +22,7 @@ export function LoginPage() {
     const { error: err } = await supabase.auth.signInWithPassword({ email, password })
     setBusy(false)
     if (err) setError(err.message)
-    else nav('/')
+    else nav('/app')
   }
 
   return (
@@ -65,7 +65,7 @@ export function SignupPage() {
   const [info, setInfo] = useState('')
   const [busy, setBusy] = useState(false)
 
-  if (!loading && user) return <Navigate to="/" replace />
+  if (!loading && user) return <Navigate to="/app" replace />
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault()
@@ -87,7 +87,7 @@ export function SignupPage() {
       setError(err.message)
       return
     }
-    if (data.session) nav('/')
+    if (data.session) nav('/app')
     else setInfo('Check your email to confirm your account, then log in.')
   }
 

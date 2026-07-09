@@ -62,7 +62,7 @@ export function SettingsPage() {
     if (hash.includes('gmail=connected')) {
       refreshProfile()
       show('Gmail connected')
-      window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}#/settings`)
+      window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}#/app/settings`)
     }
   }, [refreshProfile, show])
 

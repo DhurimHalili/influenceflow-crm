@@ -64,7 +64,7 @@ export function DashboardPage() {
   return (
     <div>
       <PageHeader title="Dashboard" subtitle="Your private CRM workspace">
-        <Link className="btn btn-primary" to="/outreach">
+        <Link className="btn btn-primary" to="/app/outreach">
           Open Outreach
         </Link>
       </PageHeader>
@@ -108,7 +108,7 @@ export function DashboardPage() {
               <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>{formatDateTime(m.starts_at)}</div>
             </div>
           ))}
-          <Link to="/calendar">Open calendar →</Link>
+          <Link to="/app/calendar">Open calendar →</Link>
         </div>
         <div className="card">
           <h3 style={{ marginTop: 0 }}>Recent activity</h3>

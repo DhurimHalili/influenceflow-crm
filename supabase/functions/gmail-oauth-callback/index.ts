@@ -111,7 +111,7 @@ Deno.serve(async (req) => {
 
     return new Response(null, {
       status: 302,
-      headers: { Location: `${appUrl}/#/settings?gmail=connected` },
+      headers: { Location: `${appUrl}/#/app/settings?gmail=connected` },
     });
   } catch (e) {
     return new Response(

@@ -950,6 +950,129 @@ table.data tr:hover td {
   font-size: 0.95rem;
 }
 
+/* Public landing (Google OAuth branding homepage) */
+.landing {
+  min-height: 100vh;
+  background:
+    radial-gradient(900px 420px at 8% -8%, rgba(61, 156, 240, 0.2), transparent 55%),
+    radial-gradient(700px 360px at 100% 0%, rgba(124, 92, 255, 0.12), transparent 50%),
+    var(--bg);
+}
+
+.landing-nav {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.landing-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-weight: 700;
+}
+
+.landing-nav-actions {
+  display: flex;
+  gap: 0.45rem;
+}
+
+.landing-main {
+  max-width: 920px;
+  margin: 0 auto;
+  padding: 2.5rem 1.25rem 3rem;
+}
+
+.landing-kicker {
+  color: var(--accent);
+  font-weight: 650;
+  margin: 0 0 0.6rem;
+}
+
+.landing-hero h1 {
+  margin: 0;
+  font-size: clamp(1.7rem, 4vw, 2.55rem);
+  letter-spacing: -0.035em;
+  line-height: 1.12;
+}
+
+.landing-lead {
+  color: var(--text-muted);
+  font-size: 1.05rem;
+  max-width: 640px;
+  margin: 0.9rem 0 1.25rem;
+}
+
+.landing-cta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 2rem;
+}
+
+.landing-purpose,
+.landing-privacy-note,
+.landing-builder {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 1.15rem 1.2rem;
+  margin-bottom: 0.85rem;
+}
+
+.landing-purpose h2,
+.landing-privacy-note h2,
+.landing-builder h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1.1rem;
+}
+
+.landing-purpose p,
+.landing-privacy-note p,
+.landing-builder p {
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.landing-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 0.7rem;
+  margin-top: 1rem;
+}
+
+.landing-grid article {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.85rem;
+  background: var(--bg-soft);
+}
+
+.landing-grid h3 {
+  margin: 0 0 0.35rem;
+  font-size: 0.95rem;
+}
+
+.landing-grid p {
+  margin: 0;
+  font-size: 0.88rem;
+}
+
+.landing-footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  padding: 1rem 1.25rem 2rem;
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  max-width: 920px;
+  margin: 0 auto;
+}
+
 @media (max-width: 960px) {
   .cal-shell {
     grid-template-columns: 1fr;

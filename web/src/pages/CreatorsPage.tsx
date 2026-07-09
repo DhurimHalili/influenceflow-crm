@@ -294,7 +294,7 @@ export function CreatorsPage() {
                 {filtered.map((c) => (
                   <tr key={c.id}>
                     <td>
-                      <Link to={`/creators/${c.id}`}>{c.name}</Link>
+                      <Link to={`/app/creators/${c.id}`}>{c.name}</Link>
                     </td>
                     <td>{c.contact_email || '—'}</td>
                     <td>{c.niche || '—'}</td>
@@ -326,7 +326,7 @@ export function CreatorsPage() {
             {filtered.map((c) => (
               <div className="mobile-card" key={c.id}>
                 <h3>
-                  <Link to={`/creators/${c.id}`}>{c.name}</Link>
+                  <Link to={`/app/creators/${c.id}`}>{c.name}</Link>
                 </h3>
                 <StatusBadge status={c.pipeline_status} />
                 <div style={{ color: 'var(--text-muted)', marginTop: 6 }}>{c.contact_email || 'No email'}</div>
@@ -420,7 +420,7 @@ export function CreatorDetailPage() {
   return (
     <div>
       <PageHeader title={c.name} subtitle={c.contact_email || undefined}>
-        <Link className="btn" to="/creators">
+        <Link className="btn" to="/app/creators">
           Back
         </Link>
       </PageHeader>

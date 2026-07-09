@@ -5,15 +5,15 @@ import { supabase } from '../lib/supabase'
 import { HIRE } from '../lib/types'
 
 const NAV = [
-  { to: '/', label: 'Dashboard', end: true },
-  { to: '/outreach', label: 'Outreach' },
-  { to: '/creators', label: 'Creators' },
-  { to: '/brands', label: 'Brands' },
-  { to: '/campaigns', label: 'Campaigns' },
-  { to: '/calendar', label: 'Calendar' },
-  { to: '/help', label: 'Help' },
-  { to: '/hire', label: 'Hire' },
-  { to: '/settings', label: 'Settings' },
+  { to: '/app', label: 'Dashboard', end: true },
+  { to: '/app/outreach', label: 'Outreach' },
+  { to: '/app/creators', label: 'Creators' },
+  { to: '/app/brands', label: 'Brands' },
+  { to: '/app/campaigns', label: 'Campaigns' },
+  { to: '/app/calendar', label: 'Calendar' },
+  { to: '/app/help', label: 'Help' },
+  { to: '/app/hire', label: 'Hire' },
+  { to: '/app/settings', label: 'Settings' },
 ]
 
 type SearchHit = { type: string; id: string; label: string; sub?: string; path: string }
@@ -40,10 +40,10 @@ export function AppLayout() {
       ])
       const next: SearchHit[] = []
       for (const c of creators.data || []) {
-        next.push({ type: 'Creator', id: c.id, label: c.name, sub: c.contact_email || undefined, path: `/creators/${c.id}` })
+        next.push({ type: 'Creator', id: c.id, label: c.name, sub: c.contact_email || undefined, path: `/app/creators/${c.id}` })
       }
       for (const b of brands.data || []) {
-        next.push({ type: 'Brand', id: b.id, label: b.name, sub: b.domain || undefined, path: `/brands/${b.id}` })
+        next.push({ type: 'Brand', id: b.id, label: b.name, sub: b.domain || undefined, path: `/app/brands/${b.id}` })
       }
       for (const p of contacts.data || []) {
         next.push({
@@ -51,11 +51,11 @@ export function AppLayout() {
           id: p.id,
           label: [p.first_name, p.last_name].filter(Boolean).join(' ') || p.email,
           sub: p.email,
-          path: `/brands/${p.brand_id}`,
+          path: `/app/brands/${p.brand_id}`,
         })
       }
       for (const c of campaigns.data || []) {
-        next.push({ type: 'Campaign', id: c.id, label: c.name, path: `/campaigns` })
+        next.push({ type: 'Campaign', id: c.id, label: c.name, path: `/app/campaigns` })
       }
       setHits(next)
     }, 220)
@@ -196,13 +196,13 @@ export function OnboardingBanner() {
       <strong>Welcome — quick setup</strong>
       <ol style={{ color: 'var(--text-muted)', margin: '0.5rem 0' }}>
         <li>
-          <Link to="/settings">Connect Gmail</Link> so you can send from any device
+          <Link to="/app/settings">Connect Gmail</Link> so you can send from any device
         </li>
         <li>
-          Add <Link to="/creators">creators</Link> or <Link to="/brands">brands</Link> (manual or CSV)
+          Add <Link to="/app/creators">creators</Link> or <Link to="/app/brands">brands</Link> (manual or CSV)
         </li>
         <li>
-          Open <Link to="/outreach">Outreach</Link> to send personalized emails
+          Open <Link to="/app/outreach">Outreach</Link> to send personalized emails
         </li>
       </ol>
       <button className="btn" type="button" onClick={() => updateProfile({ onboarding_done: true })}>
