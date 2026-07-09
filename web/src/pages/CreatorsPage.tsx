@@ -36,6 +36,8 @@ export function CreatorsPage() {
   const [form, setForm] = useState(emptyForm)
   const [bulk, setBulk] = useState('')
   const [busy, setBusy] = useState(false)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [bulkStatus, setBulkStatus] = useState<PipelineStatus>('contacted')
 
   async function load() {
     if (!user) return
@@ -57,6 +59,13 @@ export function CreatorsPage() {
       return [r.name, r.contact_email, r.niche, r.channel_link].some((v) => (v || '').toLowerCase().includes(s))
     })
   }, [rows, q, status])
+
+  useEffect(() => {
+    setSelected(new Set())
+  }, [q, status, showArchived, view])
+
+  const allFilteredSelected = filtered.length > 0 && filtered.every((r) => selected.has(r.id))
+  const someFilteredSelected = filtered.some((r) => selected.has(r.id))
 
   const duplicates = useMemo(() => {
     const map = new Map<string, Creator[]>()
@@ -190,6 +199,54 @@ export function CreatorsPage() {
     load()
   }
 
+  function toggleOne(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  function toggleAllFiltered() {
+    if (allFilteredSelected) {
+      setSelected((prev) => {
+        const next = new Set(prev)
+        for (const r of filtered) next.delete(r.id)
+        return next
+      })
+      return
+    }
+    setSelected((prev) => {
+      const next = new Set(prev)
+      for (const r of filtered) next.add(r.id)
+      return next
+    })
+  }
+
+  async function applyBulkStatus() {
+    if (!user || selected.size === 0) return
+    setBusy(true)
+    const ids = [...selected]
+    const { error } = await supabase
+      .from('creators')
+      .update({
+        pipeline_status: bulkStatus,
+        on_roster: bulkStatus === 'roster',
+        updated_at: new Date().toISOString(),
+      })
+      .in('id', ids)
+    setBusy(false)
+    if (error) {
+      show(error.message)
+      return
+    }
+    await log(`Bulk updated ${ids.length} creators → ${STATUS_LABELS[bulkStatus]}`)
+    setSelected(new Set())
+    show(`Updated ${ids.length} creator${ids.length === 1 ? '' : 's'} → ${STATUS_LABELS[bulkStatus]}`)
+    load()
+  }
+
   function exportCsv() {
     downloadCsv(
       'creators.csv',
@@ -244,6 +301,28 @@ export function CreatorsPage() {
         </label>
       </div>
 
+      {selected.size > 0 && (
+        <div className="bulk-bar">
+          <span className="bulk-bar-count">
+            {selected.size} selected
+            {someFilteredSelected && !allFilteredSelected ? ` · ${filtered.filter((r) => selected.has(r.id)).length} on this page` : ''}
+          </span>
+          <select className="select" style={{ maxWidth: 200 }} value={bulkStatus} onChange={(e) => setBulkStatus(e.target.value as PipelineStatus)}>
+            {CREATOR_STATUSES.map((s) => (
+              <option key={s} value={s}>
+                {STATUS_LABELS[s]}
+              </option>
+            ))}
+          </select>
+          <button className="btn btn-primary" type="button" disabled={busy} onClick={applyBulkStatus}>
+            Update status
+          </button>
+          <button className="btn" type="button" onClick={() => setSelected(new Set())}>
+            Clear
+          </button>
+        </div>
+      )}
+
       {view === 'board' ? (
         <div className="kanban">
           {CREATOR_STATUSES.map((col) => (
@@ -282,6 +361,17 @@ export function CreatorsPage() {
             <table className="data">
               <thead>
                 <tr>
+                  <th className="col-check">
+                    <input
+                      type="checkbox"
+                      aria-label="Select all visible"
+                      checked={allFilteredSelected}
+                      ref={(el) => {
+                        if (el) el.indeterminate = someFilteredSelected && !allFilteredSelected
+                      }}
+                      onChange={toggleAllFiltered}
+                    />
+                  </th>
                   <th>Name</th>
                   <th>Email</th>
                   <th>Niche</th>
@@ -292,7 +382,10 @@ export function CreatorsPage() {
               </thead>
               <tbody>
                 {filtered.map((c) => (
-                  <tr key={c.id}>
+                  <tr key={c.id} className={selected.has(c.id) ? 'row-selected' : undefined}>
+                    <td className="col-check">
+                      <input type="checkbox" aria-label={`Select ${c.name}`} checked={selected.has(c.id)} onChange={() => toggleOne(c.id)} />
+                    </td>
                     <td>
                       <Link to={`/app/creators/${c.id}`}>{c.name}</Link>
                     </td>
@@ -324,10 +417,13 @@ export function CreatorsPage() {
           </div>
           <div className="mobile-cards">
             {filtered.map((c) => (
-              <div className="mobile-card" key={c.id}>
-                <h3>
-                  <Link to={`/app/creators/${c.id}`}>{c.name}</Link>
-                </h3>
+              <div className={`mobile-card${selected.has(c.id) ? ' row-selected' : ''}`} key={c.id}>
+                <label className="mobile-select">
+                  <input type="checkbox" checked={selected.has(c.id)} onChange={() => toggleOne(c.id)} />
+                  <h3>
+                    <Link to={`/app/creators/${c.id}`}>{c.name}</Link>
+                  </h3>
+                </label>
                 <StatusBadge status={c.pipeline_status} />
                 <div style={{ color: 'var(--text-muted)', marginTop: 6 }}>{c.contact_email || 'No email'}</div>
                 <div className="actions" style={{ marginTop: 8 }}>

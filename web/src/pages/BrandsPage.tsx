@@ -41,6 +41,8 @@ export function BrandsPage() {
   })
   const [bulk, setBulk] = useState('')
   const [busy, setBusy] = useState(false)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [bulkStatus, setBulkStatus] = useState<PipelineStatus>('contacted')
 
   async function load() {
     if (!user) return
@@ -62,6 +64,13 @@ export function BrandsPage() {
       return [r.name, r.domain, r.contact_email].some((v) => (v || '').toLowerCase().includes(s))
     })
   }, [rows, q, status])
+
+  useEffect(() => {
+    setSelected(new Set())
+  }, [q, status, showArchived])
+
+  const allFilteredSelected = filtered.length > 0 && filtered.every((r) => selected.has(r.id))
+  const someFilteredSelected = filtered.some((r) => selected.has(r.id))
 
   function openCreate() {
     setEditing(null)
@@ -155,6 +164,53 @@ export function BrandsPage() {
     load()
   }
 
+  function toggleOne(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  function toggleAllFiltered() {
+    if (allFilteredSelected) {
+      setSelected((prev) => {
+        const next = new Set(prev)
+        for (const r of filtered) next.delete(r.id)
+        return next
+      })
+      return
+    }
+    setSelected((prev) => {
+      const next = new Set(prev)
+      for (const r of filtered) next.add(r.id)
+      return next
+    })
+  }
+
+  async function applyBulkStatus() {
+    if (!user || selected.size === 0) return
+    setBusy(true)
+    const ids = [...selected]
+    const { error } = await supabase
+      .from('brands')
+      .update({
+        pipeline_status: bulkStatus,
+        updated_at: new Date().toISOString(),
+      })
+      .in('id', ids)
+    setBusy(false)
+    if (error) {
+      show(error.message)
+      return
+    }
+    await log(`Bulk updated ${ids.length} brands → ${STATUS_LABELS[bulkStatus]}`)
+    setSelected(new Set())
+    show(`Updated ${ids.length} brand${ids.length === 1 ? '' : 's'} → ${STATUS_LABELS[bulkStatus]}`)
+    load()
+  }
+
   return (
     <div>
       {Toast}
@@ -186,10 +242,40 @@ export function BrandsPage() {
         </label>
       </div>
 
+      {selected.size > 0 && (
+        <div className="bulk-bar">
+          <span className="bulk-bar-count">{selected.size} selected</span>
+          <select className="select" style={{ maxWidth: 200 }} value={bulkStatus} onChange={(e) => setBulkStatus(e.target.value as PipelineStatus)}>
+            {brandStatuses.map((s) => (
+              <option key={s} value={s}>
+                {STATUS_LABELS[s]}
+              </option>
+            ))}
+          </select>
+          <button className="btn btn-primary" type="button" disabled={busy} onClick={applyBulkStatus}>
+            Update status
+          </button>
+          <button className="btn" type="button" onClick={() => setSelected(new Set())}>
+            Clear
+          </button>
+        </div>
+      )}
+
       <div className="table-wrap desktop-only">
         <table className="data">
           <thead>
             <tr>
+              <th className="col-check">
+                <input
+                  type="checkbox"
+                  aria-label="Select all visible"
+                  checked={allFilteredSelected}
+                  ref={(el) => {
+                    if (el) el.indeterminate = someFilteredSelected && !allFilteredSelected
+                  }}
+                  onChange={toggleAllFiltered}
+                />
+              </th>
               <th>Brand</th>
               <th>Domain</th>
               <th>Email</th>
@@ -199,7 +285,10 @@ export function BrandsPage() {
           </thead>
           <tbody>
             {filtered.map((b) => (
-              <tr key={b.id}>
+              <tr key={b.id} className={selected.has(b.id) ? 'row-selected' : undefined}>
+                <td className="col-check">
+                  <input type="checkbox" aria-label={`Select ${b.name}`} checked={selected.has(b.id)} onChange={() => toggleOne(b.id)} />
+                </td>
                 <td>
                   <Link to={`/app/brands/${b.id}`}>{b.name}</Link>
                 </td>
@@ -232,10 +321,13 @@ export function BrandsPage() {
 
       <div className="mobile-cards">
         {filtered.map((b) => (
-          <div className="mobile-card" key={b.id}>
-            <h3>
-              <Link to={`/app/brands/${b.id}`}>{b.name}</Link>
-            </h3>
+          <div className={`mobile-card${selected.has(b.id) ? ' row-selected' : ''}`} key={b.id}>
+            <label className="mobile-select">
+              <input type="checkbox" checked={selected.has(b.id)} onChange={() => toggleOne(b.id)} />
+              <h3>
+                <Link to={`/app/brands/${b.id}`}>{b.name}</Link>
+              </h3>
+            </label>
             <StatusBadge status={b.pipeline_status} />
             <div style={{ color: 'var(--text-muted)', marginTop: 6 }}>{b.contact_email || b.domain || '—'}</div>
           </div>
