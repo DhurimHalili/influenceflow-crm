@@ -6,29 +6,44 @@ import { estimateSendMinutes, renderTemplate } from '../lib/utils'
 import { Empty, Field, Modal, useToast } from '../components/ui'
 import { PageHeader, useActivityLogger } from '../components/Layout'
 
+type Audience = 'influencers' | 'brands'
+
 type Target = {
   target_type: 'creator' | 'brand_contact'
   target_id: string
   email: string
   first_name: string
+  last_name: string
+  full_name: string
+  title: string
   brand_name: string
   send_mode: 'new' | 'reach_back'
   personalization: string
   reach_back_count: number
   last_sent_at: string | null
+  pipeline_status: string
 }
 
-type DraftItem = SendJobItem & { preview?: boolean }
+type DraftItem = SendJobItem & {
+  last_name?: string
+  title?: string
+  full_name?: string
+}
+
+function neverContacted(t: Target) {
+  return !t.last_sent_at && (t.pipeline_status === 'new' || !t.pipeline_status)
+}
 
 export function OutreachPage() {
   const { user, profile } = useAuth()
   const log = useActivityLogger()
   const { show, Toast } = useToast()
   const [tab, setTab] = useState<'new' | 'reach_back' | 'queued' | 'sent'>('new')
+  const [audience, setAudience] = useState<Audience>('influencers')
   const [targets, setTargets] = useState<Target[]>([])
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [templates, setTemplates] = useState<EmailTemplate[]>([])
-  const [mode, setMode] = useState<'new' | 'reach_back' | 'mixed'>('mixed')
+  const [mode, setMode] = useState<'new' | 'reach_back' | 'mixed'>('new')
   const [composeMode, setComposeMode] = useState<'template' | 'review' | 'custom'>('review')
   const [limit, setLimit] = useState(20)
   const [reviewOpen, setReviewOpen] = useState(false)
@@ -60,32 +75,49 @@ export function OutreachPage() {
     setSentToday(sent.count || 0)
     const brandMap = new Map((brands.data || []).map((b) => [b.id, b.name]))
     const list: Target[] = []
+
     for (const c of (creators.data || []) as Creator[]) {
       if (!c.contact_email) continue
+      const parts = (c.name || '').trim().split(/\s+/)
+      const first = parts[0] || c.name
+      const last = parts.slice(1).join(' ')
       list.push({
         target_type: 'creator',
         target_id: c.id,
         email: c.contact_email,
-        first_name: c.name.split(' ')[0] || c.name,
+        first_name: first,
+        last_name: last,
+        full_name: c.name,
+        title: '',
         brand_name: c.name,
         send_mode: c.last_sent_at ? 'reach_back' : 'new',
         personalization: c.personalization || '',
         reach_back_count: c.reach_back_count || 0,
         last_sent_at: c.last_sent_at,
+        pipeline_status: c.pipeline_status || 'new',
       })
     }
+
     for (const p of (contacts.data || []) as BrandContact[]) {
-      const brandName = (p as BrandContact & { brands?: { name?: string } }).brands?.name || brandMap.get(p.brand_id) || 'Brand'
+      const brandName =
+        (p as BrandContact & { brands?: { name?: string } }).brands?.name || brandMap.get(p.brand_id) || 'Brand'
+      const first = p.first_name || ''
+      const last = p.last_name || ''
+      const full = [first, last].filter(Boolean).join(' ') || p.email
       list.push({
         target_type: 'brand_contact',
         target_id: p.id,
         email: p.email,
-        first_name: p.first_name || 'there',
+        first_name: first || 'there',
+        last_name: last,
+        full_name: full,
+        title: p.title || '',
         brand_name: brandName,
         send_mode: p.last_sent_at ? 'reach_back' : 'new',
         personalization: p.personalization || '',
         reach_back_count: p.reach_back_count || 0,
         last_sent_at: p.last_sent_at,
+        pipeline_status: p.pipeline_status || 'new',
       })
     }
     setTargets(list)
@@ -95,17 +127,28 @@ export function OutreachPage() {
     load()
   }, [user])
 
+  useEffect(() => {
+    setSelected(new Set())
+  }, [audience, tab])
+
+  const byAudience = useMemo(() => {
+    return targets.filter((t) =>
+      audience === 'influencers' ? t.target_type === 'creator' : t.target_type === 'brand_contact',
+    )
+  }, [targets, audience])
+
   const dueReach = useMemo(() => {
-    return targets.filter((t) => {
+    return byAudience.filter((t) => {
       if (!t.last_sent_at) return false
       if (t.reach_back_count >= maxRb) return false
+      if (['denied', 'roster', 'signed'].includes(t.pipeline_status)) return false
       return Date.now() - new Date(t.last_sent_at).getTime() >= reachDays * 86400000
     })
-  }, [targets, reachDays, maxRb])
+  }, [byAudience, reachDays, maxRb])
 
-  const newOnes = useMemo(() => targets.filter((t) => !t.last_sent_at), [targets])
+  const newOnes = useMemo(() => byAudience.filter(neverContacted), [byAudience])
 
-  const visible = tab === 'new' ? newOnes : tab === 'reach_back' ? dueReach : targets
+  const visible = tab === 'new' ? newOnes : tab === 'reach_back' ? dueReach : byAudience
 
   function keyOf(t: Target) {
     return `${t.target_type}:${t.target_id}`
@@ -121,6 +164,14 @@ export function OutreachPage() {
     })
   }
 
+  function selectAllVisible() {
+    setSelected(new Set(visible.map(keyOf)))
+  }
+
+  function clearSelection() {
+    setSelected(new Set())
+  }
+
   function pickTemplate(sendMode: 'new' | 'reach_back', rbCount: number) {
     if (sendMode === 'new') return templates.find((t) => t.template_key === 'new')
     const key = rbCount === 0 ? 'reach_back_0' : rbCount === 1 ? 'reach_back_1' : 'reach_back_2'
@@ -129,12 +180,13 @@ export function OutreachPage() {
 
   function buildDraftsFromSelection(): DraftItem[] {
     const chosen = visible.filter((t) => selected.has(keyOf(t)))
-    let pool = chosen
-    if (!pool.length) {
-      if (mode === 'new') pool = newOnes
-      else if (mode === 'reach_back') pool = dueReach
-      else pool = [...newOnes, ...dueReach]
+    if (!chosen.length) {
+      show('Select at least one person to send')
+      return []
     }
+    let pool = chosen
+    if (mode === 'new') pool = chosen.filter(neverContacted)
+    else if (mode === 'reach_back') pool = chosen.filter((t) => !!t.last_sent_at)
     const remaining = Math.max(0, dailyLimit - sentToday)
     pool = pool.slice(0, Math.min(limit, remaining))
     return pool.map((t, i) => {
@@ -142,10 +194,12 @@ export function OutreachPage() {
       const tpl = pickTemplate(sendMode, t.reach_back_count)
       const vars = {
         first_name: t.first_name,
+        last_name: t.last_name,
+        full_name: t.full_name,
         brand_name: t.brand_name,
+        title: t.title,
         sender_name: profile?.sender_name || 'there',
         personal_note: t.personalization,
-        title: '',
         niche: '',
         channel_link: '',
       }
@@ -163,6 +217,9 @@ export function OutreachPage() {
         target_id: t.target_id,
         email: t.email,
         first_name: t.first_name,
+        last_name: t.last_name,
+        full_name: t.full_name,
+        title: t.title,
         brand_name: t.brand_name,
         send_mode: sendMode,
         subject,
@@ -185,12 +242,64 @@ export function OutreachPage() {
     }
     const items = buildDraftsFromSelection()
     if (!items.length) {
-      show('No recipients available for this mode / quota')
+      show('No recipients selected / available for this mode')
       return
     }
     setDrafts(items)
     if (composeMode === 'template') setConfirmOpen(true)
     else setReviewOpen(true)
+  }
+
+  async function markAlreadyContacted() {
+    if (!user) return
+    const chosen = visible.filter((t) => selected.has(keyOf(t)))
+    if (!chosen.length) {
+      show('Select people you already emailed')
+      return
+    }
+    if (!confirm(`Mark ${chosen.length} as already contacted? They stay in the CRM but leave the New list.`)) return
+    setBusy(true)
+    const now = new Date().toISOString()
+    const day = now.slice(0, 10)
+    for (const t of chosen) {
+      if (t.target_type === 'creator') {
+        await supabase
+          .from('creators')
+          .update({
+            last_sent_at: now,
+            date_contacted: day,
+            pipeline_status: 'contacted',
+            updated_at: now,
+          })
+          .eq('id', t.target_id)
+          .eq('user_id', user.id)
+      } else {
+        await supabase
+          .from('brand_contacts')
+          .update({
+            last_sent_at: now,
+            date_contacted: day,
+            pipeline_status: 'contacted',
+            updated_at: now,
+          })
+          .eq('id', t.target_id)
+          .eq('user_id', user.id)
+      }
+      await supabase.from('outreach_events').insert({
+        user_id: user.id,
+        target_type: t.target_type,
+        target_id: t.target_id,
+        email: t.email,
+        mode: 'new',
+        subject: '[Marked already contacted — no email sent]',
+        sent_at: now,
+      })
+    }
+    await log(`Marked ${chosen.length} as already contacted`)
+    setBusy(false)
+    setSelected(new Set())
+    show(`Marked ${chosen.length} contacted (not deleted)`)
+    load()
   }
 
   async function queueAndSend() {
@@ -229,14 +338,12 @@ export function OutreachPage() {
     }))
     await supabase.from('send_job_items').insert(items)
 
-    // Invoke edge function if deployed; otherwise mark as queued for bridge
     const { error: fnErr } = await supabase.functions.invoke('send-emails', {
       body: { job_id: job.id },
     })
 
     if (fnErr) {
-      // Fallback: simulate local status update guidance
-      show('Job queued. Deploy send-emails Edge Function + Gmail OAuth to send from cloud. Job saved.')
+      show('Job queued, but send function failed: ' + fnErr.message)
       await log(`Queued send job (${drafts.length} emails)`)
     } else {
       show('Sending started')
@@ -259,10 +366,26 @@ export function OutreachPage() {
         title="Outreach"
         subtitle={`Sent today ${sentToday}/${dailyLimit} · Gmail ${profile?.gmail_connected ? 'ready' : 'not connected'}`}
       >
+        <button className="btn" type="button" disabled={busy || selected.size === 0} onClick={markAlreadyContacted}>
+          Mark already contacted
+        </button>
         <button className="btn btn-primary" type="button" onClick={startCompose}>
           Prepare send
         </button>
       </PageHeader>
+
+      <div className="tabs">
+        <button
+          className={`tab ${audience === 'influencers' ? 'active' : ''}`}
+          type="button"
+          onClick={() => setAudience('influencers')}
+        >
+          Influencers
+        </button>
+        <button className={`tab ${audience === 'brands' ? 'active' : ''}`} type="button" onClick={() => setAudience('brands')}>
+          Brands (people)
+        </button>
+      </div>
 
       <div className="tabs">
         {(
@@ -287,33 +410,60 @@ export function OutreachPage() {
                 <select className="select" value={mode} onChange={(e) => setMode(e.target.value as typeof mode)}>
                   <option value="new">New only</option>
                   <option value="reach_back">Reach-back only</option>
-                  <option value="mixed">Mixed</option>
+                  <option value="mixed">Mixed (selected only)</option>
                 </select>
               </Field>
               <Field label="Personalization">
-                <select className="select" value={composeMode} onChange={(e) => setComposeMode(e.target.value as typeof composeMode)}>
+                <select
+                  className="select"
+                  value={composeMode}
+                  onChange={(e) => setComposeMode(e.target.value as typeof composeMode)}
+                >
                   <option value="template">Template (bulk)</option>
                   <option value="review">Review & customize</option>
                   <option value="custom">Write custom base</option>
                 </select>
               </Field>
               <Field label="Max emails this run">
-                <input className="input" type="number" min={1} max={dailyLimit} value={limit} onChange={(e) => setLimit(Number(e.target.value) || 1)} />
+                <input
+                  className="input"
+                  type="number"
+                  min={1}
+                  max={dailyLimit}
+                  value={limit}
+                  onChange={(e) => setLimit(Number(e.target.value) || 1)}
+                />
               </Field>
             </div>
             {composeMode === 'custom' && (
               <div className="grid-2">
-                <Field label="Custom subject (supports {{first_name}} {{brand_name}})">
-                  <input className="input" value={customBody.subject} onChange={(e) => setCustomBody({ ...customBody, subject: e.target.value })} />
+                <Field label="Custom subject ({{first_name}} {{brand_name}} {{title}})">
+                  <input
+                    className="input"
+                    value={customBody.subject}
+                    onChange={(e) => setCustomBody({ ...customBody, subject: e.target.value })}
+                  />
                 </Field>
                 <Field label="Custom body">
-                  <textarea className="textarea" value={customBody.body} onChange={(e) => setCustomBody({ ...customBody, body: e.target.value })} />
+                  <textarea
+                    className="textarea"
+                    value={customBody.body}
+                    onChange={(e) => setCustomBody({ ...customBody, body: e.target.value })}
+                  />
                 </Field>
               </div>
             )}
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', margin: 0 }}>
-              Selected {selected.size || 'all matching'} · leave unchecked to auto-pick by mode
-            </p>
+            <div className="actions" style={{ marginTop: 8 }}>
+              <button className="btn btn-ghost" type="button" onClick={selectAllVisible}>
+                Select all shown
+              </button>
+              <button className="btn btn-ghost" type="button" onClick={clearSelection}>
+                Clear selection
+              </button>
+              <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+                {audience === 'influencers' ? 'Influencers only' : 'Brand people only'} · selected {selected.size}
+              </span>
+            </div>
           </div>
 
           <div className="table-wrap">
@@ -321,10 +471,21 @@ export function OutreachPage() {
               <thead>
                 <tr>
                   <th></th>
-                  <th>Name</th>
-                  <th>Email</th>
-                  <th>Brand / Creator</th>
-                  <th>Type</th>
+                  {audience === 'brands' ? (
+                    <>
+                      <th>Brand</th>
+                      <th>First name</th>
+                      <th>Last name</th>
+                      <th>Job title</th>
+                      <th>Email</th>
+                    </>
+                  ) : (
+                    <>
+                      <th>Influencer</th>
+                      <th>Email</th>
+                    </>
+                  )}
+                  <th>Status</th>
                 </tr>
               </thead>
               <tbody>
@@ -333,15 +494,36 @@ export function OutreachPage() {
                     <td>
                       <input type="checkbox" checked={selected.has(keyOf(t))} onChange={() => toggle(t)} />
                     </td>
-                    <td>{t.first_name}</td>
-                    <td>{t.email}</td>
-                    <td>{t.brand_name}</td>
-                    <td>{t.send_mode}</td>
+                    {audience === 'brands' ? (
+                      <>
+                        <td>
+                          <strong>{t.brand_name}</strong>
+                        </td>
+                        <td>{t.first_name || '—'}</td>
+                        <td>{t.last_name || '—'}</td>
+                        <td>{t.title || '—'}</td>
+                        <td>{t.email}</td>
+                      </>
+                    ) : (
+                      <>
+                        <td>
+                          <strong>{t.full_name}</strong>
+                        </td>
+                        <td>{t.email}</td>
+                      </>
+                    )}
+                    <td>{t.send_mode === 'new' ? 'new' : `reach-back ${t.reach_back_count}`}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
-            {visible.length === 0 && <Empty>Nothing in this tab.</Empty>}
+            {visible.length === 0 && (
+              <Empty>
+                {tab === 'new'
+                  ? 'No new people here. If you already emailed them, use “Mark already contacted” after selecting — or they are already marked.'
+                  : 'No reach-backs due yet.'}
+              </Empty>
+            )}
           </div>
         </>
       )}
@@ -350,14 +532,14 @@ export function OutreachPage() {
       {tab === 'sent' && <SentRecent />}
 
       <Modal open={reviewOpen} title="Review & personalize" onClose={() => setReviewOpen(false)} wide>
-        <p style={{ color: 'var(--text-muted)' }}>Click a row to edit that email only. Others keep the template.</p>
+        <p style={{ color: 'var(--text-muted)' }}>Click a row to edit that email only.</p>
         <div className="table-wrap" style={{ maxHeight: 360 }}>
           <table className="data">
             <thead>
               <tr>
                 <th>To</th>
+                <th>Brand / role</th>
                 <th>Subject</th>
-                <th>Custom?</th>
                 <th></th>
               </tr>
             </thead>
@@ -365,10 +547,13 @@ export function OutreachPage() {
               {drafts.map((d, i) => (
                 <tr key={d.id}>
                   <td>
-                    {d.first_name} &lt;{d.email}&gt;
+                    {d.full_name || d.first_name} &lt;{d.email}&gt;
+                  </td>
+                  <td>
+                    {d.brand_name}
+                    {d.title ? ` · ${d.title}` : ''}
                   </td>
                   <td>{d.subject}</td>
-                  <td>{d.customized ? 'Yes' : 'No'}</td>
                   <td>
                     <button className="btn btn-ghost" type="button" onClick={() => setEditIdx(i)}>
                       Edit
@@ -438,17 +623,24 @@ export function OutreachPage() {
 
       <Modal open={confirmOpen} title="Confirm send" onClose={() => setConfirmOpen(false)}>
         <p>
-          <strong>{drafts.length}</strong> emails · <strong>{mode}</strong> · {customizedCount} customized
+          <strong>{drafts.length}</strong> emails · <strong>{audience}</strong> · <strong>{mode}</strong> ·{' '}
+          {customizedCount} customized
         </p>
         <p style={{ color: 'var(--text-muted)' }}>
-          Estimated time ~{eta} min (delays {delayMin}–{delayMax}s). Remaining daily quota after: {Math.max(0, dailyLimit - sentToday - drafts.length)}.
+          Estimated time ~{eta} min (delays {delayMin}–{delayMax}s). Remaining daily quota after:{' '}
+          {Math.max(0, dailyLimit - sentToday - drafts.length)}.
         </p>
         {!profile?.gmail_connected && <p className="error">Connect Gmail in Settings before sending.</p>}
         <div className="modal-actions">
           <button className="btn btn-ghost" type="button" onClick={() => setConfirmOpen(false)}>
             Cancel
           </button>
-          <button className="btn btn-primary" type="button" disabled={busy || !profile?.gmail_connected} onClick={queueAndSend}>
+          <button
+            className="btn btn-primary"
+            type="button"
+            disabled={busy || !profile?.gmail_connected}
+            onClick={queueAndSend}
+          >
             {busy ? 'Queuing…' : 'Send'}
           </button>
         </div>

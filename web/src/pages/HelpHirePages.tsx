@@ -14,9 +14,26 @@ export function HelpPage() {
       <div className="card help-section">
         <h3>2. Connect Gmail (required to send)</h3>
         <p>
-          Go to <strong>Settings → Connect Gmail</strong>. You’ll authorize InfluenceFlow to send mail as you. Google may show an “unverified app” warning until the project is verified — that’s normal for early access. Only connect <em>your</em> Gmail. Never share passwords.
+          Go to <strong>Settings → Connect Gmail</strong>. You’ll authorize InfluenceFlow to send mail as you. Only connect{' '}
+          <em>your</em> Gmail. Never share passwords.
         </p>
-        <p>Admin setup (one-time for the site owner): create a Google Cloud OAuth client with Gmail send scope, add redirect URL to the Supabase Edge Function callback, set secrets <code>GOOGLE_CLIENT_ID</code>, <code>GOOGLE_CLIENT_SECRET</code>.</p>
+        <p>
+          <strong>If Google says “app is in testing” / only test users can connect:</strong> that is Google Cloud OAuth, not the CRM
+          signup. CRM accounts (email/password) are open to everyone. Gmail connect is limited until you publish the OAuth app:
+        </p>
+        <ol>
+          <li>
+            Open <a href="https://console.cloud.google.com/apis/credentials/consent" target="_blank" rel="noreferrer">Google Cloud → OAuth consent screen</a>
+          </li>
+          <li>
+            Click <strong>Publish app</strong> (move from Testing → In production)
+          </li>
+          <li>
+            Google may show “unverified app” until you complete verification for sensitive scopes (Gmail send). Users can still click{' '}
+            <strong>Advanced → Go to InfluenceFlow (unsafe)</strong> while unverified, or you submit for verification later.
+          </li>
+        </ol>
+        <p>You do <strong>not</strong> need to add every CRM user as a test user after publishing.</p>
       </div>
 
       <div className="card help-section">
@@ -28,16 +45,18 @@ export function HelpPage() {
         <h3>4. Personalize & send</h3>
         <ul>
           <li>
-            <strong>Template (bulk)</strong> — merge fields fill automatically
+            Choose <strong>Influencers</strong> or <strong>Brands (people)</strong> — they are not mixed unless you switch tabs
           </li>
           <li>
-            <strong>Review & customize</strong> — edit any recipient before send
+            Brand rows show <strong>brand · first · last · job title · email</strong>
           </li>
           <li>
-            <strong>Write custom</strong> — your own subject/body base
+            Already emailed someone outside the CRM? Select them → <strong>Mark already contacted</strong> (keeps the record, removes from New)
+          </li>
+          <li>
+            <strong>Template / Review / Custom</strong> for personalization before send
           </li>
         </ul>
-        <p>Confirm shows count, ETA, and daily quota. Statuses update to contacted / reach-back automatically when sends complete.</p>
       </div>
 
       <div className="card help-section">
