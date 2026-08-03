@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
+import { STATUS_LABELS } from '../lib/types'
 
 export function Modal({
   open,
@@ -88,23 +89,7 @@ export function useToast() {
   return {
     toast: msg,
     show: setMsg,
-    Toast: msg ? (
-      <div
-        style={{
-          position: 'fixed',
-          bottom: 16,
-          right: 16,
-          background: 'var(--bg-elevated)',
-          border: '1px solid var(--border)',
-          padding: '0.65rem 0.9rem',
-          borderRadius: 10,
-          boxShadow: 'var(--shadow)',
-          zIndex: 80,
-        }}
-      >
-        {msg}
-      </div>
-    ) : null,
+    Toast: msg ? <div className="toast">{msg}</div> : null,
   }
 }
 
@@ -113,7 +98,7 @@ export function Empty({ children }: { children: ReactNode }) {
 }
 
 export function StatusBadge({ status }: { status: string }) {
-  return <span className={`badge ${status}`}>{status.replaceAll('_', ' ')}</span>
+  return <span className={`badge ${status}`}>{STATUS_LABELS[status] || status.replaceAll('_', ' ')}</span>
 }
 
 export function FormActions({

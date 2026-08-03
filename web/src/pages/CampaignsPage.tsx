@@ -356,6 +356,9 @@ export function CampaignsPage() {
           <Field label="Deliverables">
             <textarea className="textarea" value={form.deliverables} onChange={(e) => setForm({ ...form, deliverables: e.target.value })} />
           </Field>
+          <Field label="Notes">
+            <textarea className="textarea" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
+          </Field>
           <Field label={`Assign creators (${selectedCreators.length} selected)`}>
             <input
               className="input"

@@ -120,10 +120,10 @@ export function CreatorsPage() {
     }
     if (editing) {
       await supabase.from('creators').update(payload).eq('id', editing.id)
-      await log(`Updated creator <strong>${payload.name}</strong>`)
+      await log(`Updated creator ${payload.name}`)
     } else {
       await supabase.from('creators').insert(payload)
-      await log(`Added creator <strong>${payload.name}</strong>`)
+      await log(`Added creator ${payload.name}`)
     }
     setBusy(false)
     setModal(false)
@@ -133,7 +133,7 @@ export function CreatorsPage() {
 
   async function archive(c: Creator) {
     await supabase.from('creators').update({ archived_at: new Date().toISOString() }).eq('id', c.id)
-    await log(`Archived creator <strong>${c.name}</strong>`)
+    await log(`Archived creator ${c.name}`)
     load()
   }
 
@@ -455,6 +455,15 @@ export function CreatorsPage() {
             <Field label="Avg views">
               <input className="input" value={form.avg_views} onChange={(e) => setForm({ ...form, avg_views: e.target.value })} />
             </Field>
+            <Field label="Platform">
+              <select className="select" value={form.platform} onChange={(e) => setForm({ ...form, platform: e.target.value })}>
+                <option value="youtube">YouTube</option>
+                <option value="tiktok">TikTok</option>
+                <option value="instagram">Instagram</option>
+                <option value="twitch">Twitch</option>
+                <option value="other">Other</option>
+              </select>
+            </Field>
             <Field label="Status">
               <select className="select" value={form.pipeline_status} onChange={(e) => setForm({ ...form, pipeline_status: e.target.value as PipelineStatus })}>
                 {CREATOR_STATUSES.map((s) => (
@@ -465,6 +474,10 @@ export function CreatorsPage() {
               </select>
             </Field>
           </div>
+          <label className="field" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <input type="checkbox" checked={form.on_roster} onChange={(e) => setForm({ ...form, on_roster: e.target.checked, pipeline_status: e.target.checked ? 'roster' : form.pipeline_status })} />
+            <span>On roster</span>
+          </label>
           <Field label="Personalization snippet (fills {{personal_note}})">
             <textarea className="textarea" value={form.personalization} onChange={(e) => setForm({ ...form, personalization: e.target.value })} />
           </Field>
@@ -502,20 +515,54 @@ export function CreatorsPage() {
 
 export function CreatorDetailPage() {
   const { id } = useParams()
+  const log = useActivityLogger()
+  const { show, Toast } = useToast()
   const [c, setC] = useState<Creator | null>(null)
-  useEffect(() => {
+  const [loading, setLoading] = useState(true)
+  const [busy, setBusy] = useState(false)
+
+  async function load() {
     if (!id) return
-    supabase
-      .from('creators')
-      .select('*')
-      .eq('id', id)
-      .maybeSingle()
-      .then(({ data }) => setC(data as Creator | null))
+    setLoading(true)
+    const { data } = await supabase.from('creators').select('*').eq('id', id).maybeSingle()
+    setC(data as Creator | null)
+    setLoading(false)
+  }
+
+  useEffect(() => {
+    load()
   }, [id])
+
+  async function setStatus(pipeline_status: PipelineStatus) {
+    if (!c) return
+    setBusy(true)
+    const { error } = await supabase
+      .from('creators')
+      .update({
+        pipeline_status,
+        on_roster: pipeline_status === 'roster',
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', c.id)
+    setBusy(false)
+    if (error) {
+      show(error.message)
+      return
+    }
+    await log(`Updated ${c.name} → ${STATUS_LABELS[pipeline_status]}`)
+    show(`Status → ${STATUS_LABELS[pipeline_status]}`)
+    load()
+  }
+
+  if (loading) return <Empty>Loading…</Empty>
   if (!c) return <Empty>Creator not found</Empty>
   return (
     <div>
+      {Toast}
       <PageHeader title={c.name} subtitle={c.contact_email || undefined}>
+        <Link className="btn" to="/app/outreach">
+          Outreach
+        </Link>
         <Link className="btn" to="/app/creators">
           Back
         </Link>
@@ -525,10 +572,18 @@ export function CreatorDetailPage() {
           <p>
             <StatusBadge status={c.pipeline_status} />
           </p>
+          <p>Platform: {c.platform || '—'}</p>
           <p>Channel: {c.channel_link ? <a href={c.channel_link} target="_blank" rel="noreferrer">{c.channel_link}</a> : '—'}</p>
           <p>Niche: {c.niche || '—'}</p>
           <p>Reach-backs: {c.reach_back_count}</p>
           <p>Last sent: {formatDate(c.last_sent_at)}</p>
+          <div className="quick-row">
+            {(['contacted', 'replied', 'negotiating', 'roster', 'denied', 'no_reply'] as PipelineStatus[]).map((s) => (
+              <button key={s} className="btn btn-ghost" type="button" disabled={busy || c.pipeline_status === s} onClick={() => setStatus(s)}>
+                {STATUS_LABELS[s]}
+              </button>
+            ))}
+          </div>
         </div>
         <div className="card">
           <h3 style={{ marginTop: 0 }}>Personalization</h3>

@@ -1,19 +1,20 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, NavLink, Navigate, Outlet, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabase'
 import { HIRE } from '../lib/types'
+import { stripHtml } from '../lib/utils'
 
 const NAV = [
-  { to: '/app', label: 'Dashboard', end: true },
-  { to: '/app/outreach', label: 'Outreach' },
-  { to: '/app/creators', label: 'Creators' },
-  { to: '/app/brands', label: 'Brands' },
-  { to: '/app/campaigns', label: 'Campaigns' },
-  { to: '/app/calendar', label: 'Calendar' },
-  { to: '/app/help', label: 'Help' },
-  { to: '/app/hire', label: 'Hire' },
-  { to: '/app/settings', label: 'Settings' },
+  { to: '/app', label: 'Dashboard', end: true, ico: '01' },
+  { to: '/app/outreach', label: 'Outreach', ico: '02' },
+  { to: '/app/creators', label: 'Creators', ico: '03' },
+  { to: '/app/brands', label: 'Brands', ico: '04' },
+  { to: '/app/campaigns', label: 'Campaigns', ico: '05' },
+  { to: '/app/calendar', label: 'Calendar', ico: '06' },
+  { to: '/app/help', label: 'Help', ico: '07' },
+  { to: '/app/hire', label: 'Hire', ico: '08' },
+  { to: '/app/settings', label: 'Settings', ico: '09' },
 ]
 
 type SearchHit = { type: string; id: string; label: string; sub?: string; path: string }
@@ -24,6 +25,25 @@ export function AppLayout() {
   const [q, setQ] = useState('')
   const [hits, setHits] = useState<SearchHit[]>([])
   const nav = useNavigate()
+  const searchRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName
+      const typing = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (e.target as HTMLElement)?.isContentEditable
+      if (e.key === '/' && !typing) {
+        e.preventDefault()
+        searchRef.current?.focus()
+      }
+      if (e.key === 'Escape') {
+        setQ('')
+        setHits([])
+        ;(e.target as HTMLElement)?.blur?.()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
 
   useEffect(() => {
     if (!q.trim()) {
@@ -74,16 +94,13 @@ export function AppLayout() {
         <nav className="nav" onClick={() => setOpen(false)}>
           {NAV.map((item) => (
             <NavLink key={item.to} to={item.to} end={item.end} className={({ isActive }) => (isActive ? 'active' : '')}>
+              <span className="nav-ico">{item.ico}</span>
               {item.label}
             </NavLink>
           ))}
         </nav>
         <div className="sidebar-footer">
-          <button
-            className="btn btn-ghost"
-            type="button"
-            onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-          >
+          <button className="btn btn-ghost" type="button" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>
             Theme: {theme === 'dark' ? 'Dark' : 'Light'}
           </button>
           <Link to="/hire">Free · by Dhurim — Hire / See work</Link>
@@ -103,14 +120,21 @@ export function AppLayout() {
           </button>
           <div className="topbar-search search-wrap">
             <input
+              ref={searchRef}
               className="input"
-              placeholder="Search creators, brands, people… (/)"
+              placeholder="Search creators, brands, people…  /"
               value={q}
               onChange={(e) => setQ(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === 'Escape') {
                   setQ('')
                   setHits([])
+                }
+                if (e.key === 'Enter' && hits[0]) {
+                  e.preventDefault()
+                  setQ('')
+                  setHits([])
+                  nav(hits[0].path)
                 }
               }}
             />
@@ -133,7 +157,9 @@ export function AppLayout() {
               </div>
             )}
           </div>
-          <span className="badge">{profile?.gmail_connected ? 'Gmail connected' : 'Gmail not connected'}</span>
+          <span className={`badge ${profile?.gmail_connected ? 'replied' : ''}`}>
+            {profile?.gmail_connected ? 'Gmail on' : 'Gmail off'}
+          </span>
         </header>
         <div className="content">
           <Outlet />
@@ -162,7 +188,7 @@ export function useActivityLogger() {
   return useMemo(
     () => async (text: string) => {
       if (!user) return
-      await supabase.from('activity').insert({ user_id: user.id, text })
+      await supabase.from('activity').insert({ user_id: user.id, text: stripHtml(text) })
     },
     [user],
   )

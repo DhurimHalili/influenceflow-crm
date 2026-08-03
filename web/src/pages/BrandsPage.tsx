@@ -107,7 +107,7 @@ export function BrandsPage() {
     }
     if (editing) {
       await supabase.from('brands').update(payload).eq('id', editing.id)
-      await log(`Updated brand <strong>${payload.name}</strong>`)
+      await log(`Updated brand ${payload.name}`)
     } else {
       const { data } = await supabase.from('brands').insert(payload).select('*').single()
       if (data && payload.contact_email && isValidEmail(payload.contact_email)) {
@@ -119,7 +119,7 @@ export function BrandsPage() {
           pipeline_status: 'new',
         })
       }
-      await log(`Added brand <strong>${payload.name}</strong>`)
+      await log(`Added brand ${payload.name}`)
     }
     setBusy(false)
     setModal(false)
@@ -301,16 +301,30 @@ export function BrandsPage() {
                   <button className="btn btn-ghost" type="button" onClick={() => openEdit(b)}>
                     Edit
                   </button>
-                  <button
-                    className="btn btn-ghost"
-                    type="button"
-                    onClick={async () => {
-                      await supabase.from('brands').update({ archived_at: new Date().toISOString() }).eq('id', b.id)
-                      load()
-                    }}
-                  >
-                    Archive
-                  </button>
+                  {b.archived_at ? (
+                    <button
+                      className="btn btn-ghost"
+                      type="button"
+                      onClick={async () => {
+                        await supabase.from('brands').update({ archived_at: null, updated_at: new Date().toISOString() }).eq('id', b.id)
+                        show('Restored')
+                        load()
+                      }}
+                    >
+                      Restore
+                    </button>
+                  ) : (
+                    <button
+                      className="btn btn-ghost"
+                      type="button"
+                      onClick={async () => {
+                        await supabase.from('brands').update({ archived_at: new Date().toISOString() }).eq('id', b.id)
+                        load()
+                      }}
+                    >
+                      Archive
+                    </button>
+                  )}
                 </td>
               </tr>
             ))}
@@ -424,7 +438,7 @@ export function BrandDetailPage() {
       notes: form.notes,
       pipeline_status: 'new',
     })
-    await log(`Added contact <strong>${form.email}</strong> at ${brand?.name || 'brand'}`)
+    await log(`Added contact ${form.email} at ${brand?.name || 'brand'}`)
     setModal(false)
     setForm({ first_name: '', last_name: '', title: '', email: '', linkedin_url: '', personalization: '', notes: '' })
     show('Contact added')

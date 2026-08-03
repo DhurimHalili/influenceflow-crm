@@ -197,6 +197,23 @@ export function SettingsPage() {
       show('Legacy backup imported')
       return
     }
+    if (raw.version === 2 || raw.creators || raw.brands) {
+      const tables = ['creators', 'brands', 'brand_contacts', 'campaigns', 'campaign_creators', 'external_links', 'meetings', 'email_templates'] as const
+      let imported = 0
+      for (const t of tables) {
+        const rows = raw[t]
+        if (!Array.isArray(rows) || rows.length === 0) continue
+        const cleaned = rows.map((row: Record<string, unknown>) => {
+          const next: Record<string, unknown> = { ...row, user_id: user.id }
+          delete next.id
+          return next
+        })
+        const { error } = await supabase.from(t).insert(cleaned)
+        if (!error) imported += cleaned.length
+      }
+      show(imported ? `Imported ${imported} rows from v2 backup` : 'Backup had no insertable rows')
+      return
+    }
     show('Unsupported backup format')
   }
 
@@ -226,6 +243,9 @@ export function SettingsPage() {
             </Field>
             <Field label="Delay max (sec)">
               <input className="input" type="number" value={form.send_delay_max} onChange={(e) => setForm({ ...form, send_delay_max: Number(e.target.value) })} />
+            </Field>
+            <Field label="Max reach-backs">
+              <input className="input" type="number" min={0} max={10} value={form.max_reach_backs} onChange={(e) => setForm({ ...form, max_reach_backs: Number(e.target.value) })} />
             </Field>
           </div>
           <Field label="Reminders">
