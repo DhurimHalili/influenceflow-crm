@@ -1,4 +1,7 @@
--- Applied via Supabase MCP as init_crm_schema + secure_handle_new_user
--- Kept here for version control / redeploy
+# Supabase migrations
 
--- See project oyyuugucxqtenuqbbbur
+SQL and notes for InfluenceFlow CRM (Auth, RLS, tables, Edge Function helpers).
+
+Apply these to your own Supabase project before running the web app locally or in production.
+
+See the [root README](../../README.md) for env vars and Gmail Edge Function secrets.
