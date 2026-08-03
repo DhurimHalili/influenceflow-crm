@@ -1,8 +1,41 @@
 # InfluenceFlow CRM
 
-Free influencer marketing CRM by [Dhurim Halili](https://concepts-ew8.pages.dev/).
+Free influencer marketing CRM for agencies and freelancers — track creators, brands, outreach, campaigns, and calendar in one private workspace.
 
-Private per-user workspaces (Supabase Auth + RLS), Gmail cloud send, campaigns, calendar, outreach personalization, dark/light themes.
+Built by [Dhurim Halili](https://concepts-ew8.pages.dev/).
+
+**Live:** deploy `web/` (Vite) + Supabase Auth/RLS. Each user gets an isolated workspace.
+
+---
+
+## Who it's for
+
+Marketing agencies and solo operators who need to:
+
+- Track **influencers / creators** (table + kanban)
+- Manage **brands** and brand contacts
+- Run **outreach** (new / reach-back / mixed) with templates
+- Plan **campaigns** with conflict warnings
+- Keep a **calendar** + browser reminders
+- Export data and search everything quickly
+
+---
+
+## Features
+
+| Area | What you get |
+|------|----------------|
+| Auth | Signup / login — private data per account (Supabase Auth + RLS) |
+| Creators | Table + kanban boards, soft archive, duplicate merge |
+| Brands | Brand + people lists |
+| Outreach | New / reach-back / mixed · template · review/customize · custom write |
+| Campaigns | Campaign tracking with conflict warnings |
+| Calendar | Schedule + browser reminders |
+| Data | CSV/JSON export, global search |
+| UI | Dark (default) / light themes · mobile/tablet · PWA manifest |
+| Email | Gmail cloud send via Edge Functions |
+
+---
 
 ## Quick start (local)
 
@@ -16,26 +49,26 @@ npm run dev
 
 Open the URL Vite prints (usually http://localhost:5173).
 
-## Features
-
-- Signup / login (private data per account)
-- Creators (table + kanban), brands + people lists
-- Outreach: new / reach-back / mixed, template + review/customize + custom write
-- Campaigns with conflict warnings
-- Calendar + browser reminders
-- Soft archive, duplicate merge, CSV/JSON export, global search
-- Help + Hire/Concepts (portfolio, WhatsApp, LinkedIn)
-- Dark (default) / light themes
-- Mobile / tablet responsive + PWA manifest
+---
 
 ## Supabase
 
-Project schema is applied via migrations. Edge Functions:
+Apply migrations under `supabase/`. Edge Functions:
 
 - `gmail-oauth-start` — begin Google OAuth
 - `send-emails` — send a queued job via Gmail API
 
 Set secrets: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GMAIL_OAUTH_REDIRECT_URI`.
+
+Public pages (`privacy.html`, `terms.html`) support Google OAuth branding verification.
+
+---
+
+## License
+
+MIT — see [LICENSE](LICENSE).
+
+---
 
 ## Contact
 
