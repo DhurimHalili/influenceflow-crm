@@ -17,7 +17,16 @@
       .seo-landing a{color:#3d9cf0}
       .seo-landing h1{font-size:1.8rem;letter-spacing:-.03em}
       .seo-landing p,.seo-landing li{color:#8b97a8}
+      html[data-app-boot="1"] #seo-landing{display:none!important}
     </style>
+    <script>
+      (function () {
+        var h = location.hash || ''
+        if (h.indexOf('/login') !== -1 || h.indexOf('/signup') !== -1 || h.indexOf('/app') !== -1) {
+          document.documentElement.setAttribute('data-app-boot', '1')
+        }
+      })()
+    </script>
   </head>
   <body>
     <div id="seo-landing" class="seo-landing">

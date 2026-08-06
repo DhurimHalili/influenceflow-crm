@@ -10,6 +10,7 @@ import { CampaignsPage } from './pages/CampaignsPage'
 import { OutreachPage } from './pages/OutreachPage'
 import { CalendarPage } from './pages/CalendarPage'
 import { SettingsPage } from './pages/SettingsPage'
+import { SearchPage } from './pages/SearchPage'
 import { HelpPage, HirePage } from './pages/HelpHirePages'
 import { PrivacyPage, TermsPage } from './pages/LegalPages'
 
@@ -42,6 +43,7 @@ export default function App() {
           >
             <Route index element={<DashboardPage />} />
             <Route path="outreach" element={<OutreachPage />} />
+            <Route path="search" element={<SearchPage />} />
             <Route path="creators" element={<CreatorsPage />} />
             <Route path="creators/:id" element={<CreatorDetailPage />} />
             <Route path="brands" element={<BrandsPage />} />

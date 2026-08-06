@@ -17,9 +17,18 @@
       .seo-landing a{color:#3d9cf0}
       .seo-landing h1{font-size:1.8rem;letter-spacing:-.03em}
       .seo-landing p,.seo-landing li{color:#8b97a8}
+      html[data-app-boot="1"] #seo-landing{display:none!important}
     </style>
-    <script type="module" crossorigin src="/influenceflow-crm/assets/index-Lk-tvZ4G.js"></script>
-    <link rel="stylesheet" crossorigin href="/influenceflow-crm/assets/index-1EjZ7Tqk.css">
+    <script>
+      (function () {
+        var h = location.hash || ''
+        if (h.indexOf('/login') !== -1 || h.indexOf('/signup') !== -1 || h.indexOf('/app') !== -1) {
+          document.documentElement.setAttribute('data-app-boot', '1')
+        }
+      })()
+    </script>
+    <script type="module" crossorigin src="/influenceflow-crm/assets/index-Cr1zdUTw.js"></script>
+    <link rel="stylesheet" crossorigin href="/influenceflow-crm/assets/index-BH6V0Ret.css">
   </head>
   <body>
     <div id="seo-landing" class="seo-landing">
