@@ -16,23 +16,156 @@ const MIN_ENGAGEMENT = 0.01;
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 const BATCH_MS = 45_000;
 
-const KEYWORDS = [
-  "best AI tools 2025",
-  "SaaS review",
-  "productivity apps review",
-  "developer tools review",
-  "tech stack review",
-  "ChatGPT tools review",
-  "automation tools review",
-  "no code tools review",
-  "marketing tools review",
-  "CRM software review",
-  "project management tools",
-  "AI agent tools",
-  "startup tools review",
-  "notion alternatives",
-  "figma plugins review",
-];
+type NichePack = { keywords: string[]; match: string[]; label: string }
+
+const NICHE_MAP: Record<string, NichePack & { subniches?: Record<string, NichePack> }> = {
+  automotive: {
+    label: 'Automotive',
+    keywords: ['car review', 'automotive review', 'car detailing', 'EV car review', 'modded car'],
+    match: ['car', 'auto', 'vehicle', 'automotive', 'ev', 'truck'],
+  },
+  productivity: {
+    label: 'Productivity',
+    keywords: ['productivity apps review', 'notion setup', 'second brain apps', 'time management tools'],
+    match: ['productivity', 'notion', 'habits', 'workflow', 'gtd'],
+  },
+  podcasts: {
+    label: 'Podcasts',
+    keywords: ['podcast gear review', 'podcast microphone setup', 'best podcast equipment'],
+    match: ['podcast', 'microphone', 'recording studio'],
+  },
+  education: {
+    label: 'Education',
+    keywords: ['online learning tools', 'study apps review', 'education technology review'],
+    match: ['education', 'learn', 'study', 'course', 'tutor'],
+  },
+  pets: {
+    label: 'Pets',
+    keywords: ['dog products review', 'pet products review', 'cat products review'],
+    match: ['pet', 'dog', 'cat', 'puppy', 'kitten'],
+  },
+  'baby-kids': {
+    label: 'Baby & Kids Products',
+    keywords: ['baby products review', 'kids toys review', 'stroller review'],
+    match: ['baby', 'kids', 'toddler', 'stroller', 'nursery'],
+  },
+  ai: {
+    label: 'AI',
+    keywords: ['best AI tools 2025', 'ChatGPT tools review', 'AI agent tools', 'AI software review', 'artificial intelligence tools'],
+    match: ['ai', 'chatgpt', 'openai', 'llm', 'machine learning', 'artificial intelligence'],
+  },
+  tech: {
+    label: 'Tech',
+    keywords: ['tech gadgets review', 'consumer tech review', 'new tech unboxing', 'tech product review'],
+    match: ['tech', 'gadget', 'electronics', 'hardware', 'device'],
+    subniches: {
+      'desk-setups': {
+        label: 'Desk Setups',
+        keywords: ['desk setup tour', 'battlestation setup', 'ultrawide desk setup', 'office desk setup review', 'monitor desk setup', 'desk accessories review'],
+        match: ['desk setup', 'battlestation', 'desk tour', 'workspace setup', 'monitor setup', 'desk mat'],
+      },
+      'sim-racing-rigs': {
+        label: 'Sim Racing Rigs',
+        keywords: [
+          'sim racing rig review',
+          'sim racing cockpit',
+          'racing simulator setup',
+          'fanatec review',
+          'simagic wheel review',
+          'sim racing rig build',
+          'direct drive sim racing',
+          'sim racing pedal review',
+        ],
+        match: ['sim racing', 'racing sim', 'simrig', 'sim rig', 'fanatec', 'simagic', 'moza racing', 'cockpit', 'direct drive wheel', 'racing simulator'],
+      },
+    },
+  },
+  diy: {
+    label: 'DIY Products',
+    keywords: ['DIY tools review', 'home DIY products', 'maker tools review'],
+    match: ['diy', 'maker', 'craft', 'build', 'handmade'],
+  },
+  content: {
+    label: 'Content',
+    keywords: ['content creator gear', 'camera for youtube', 'creator tools review'],
+    match: ['content creator', 'youtube gear', 'filmmaking', 'vlogging'],
+  },
+  'physical-products': {
+    label: 'Physical Products',
+    keywords: ['product review unboxing', 'amazon finds review', 'physical product review'],
+    match: ['unboxing', 'product review', 'amazon finds'],
+  },
+  books: {
+    label: 'Books',
+    keywords: ['book recommendations', 'best books review', 'nonfiction book review'],
+    match: ['book', 'reading', 'author', 'literature'],
+  },
+  'self-development': {
+    label: 'Self-Development',
+    keywords: ['self improvement tips', 'personal development books', 'motivation habits'],
+    match: ['self improvement', 'mindset', 'habits', 'motivation', 'personal development'],
+  },
+  travel: {
+    label: 'Travel',
+    keywords: ['travel gear review', 'best travel accessories', 'travel packing products'],
+    match: ['travel', 'trip', 'luggage', 'backpack', 'vacation'],
+  },
+  lifestyle: {
+    label: 'Lifestyle',
+    keywords: ['lifestyle products review', 'daily lifestyle haul'],
+    match: ['lifestyle', 'day in my life', 'vlog'],
+  },
+  teaching: {
+    label: 'Teaching',
+    keywords: ['teacher classroom products', 'teaching tools review'],
+    match: ['teacher', 'teaching', 'classroom', 'lesson'],
+  },
+  'home-decor': {
+    label: 'Home Decor',
+    keywords: ['home decor haul', 'interior design products', 'home styling review'],
+    match: ['home decor', 'interior', 'furniture', 'styling'],
+  },
+  'home-garden': {
+    label: 'Home & Garden',
+    keywords: ['garden tools review', 'home improvement products', 'lawn garden review'],
+    match: ['garden', 'lawn', 'home improvement', 'outdoor'],
+  },
+  'wedding-events': {
+    label: 'Wedding & Events',
+    keywords: ['wedding products review', 'event planning products', 'wedding favors review'],
+    match: ['wedding', 'event planning', 'bridal', 'party'],
+  },
+};
+
+function resolveNichePack(nicheId: string, subnicheId?: string | null): NichePack {
+  const niche = NICHE_MAP[nicheId];
+  if (!niche) {
+    return { label: nicheId || 'Tech', keywords: NICHE_MAP.tech.keywords, match: NICHE_MAP.tech.match };
+  }
+  if (subnicheId && niche.subniches?.[subnicheId]) {
+    const sub = niche.subniches[subnicheId];
+    // Subniche searches must match subniche terms only — parent niche terms are too broad
+    return {
+      label: `${niche.label} · ${sub.label}`,
+      keywords: sub.keywords,
+      match: sub.match,
+    };
+  }
+  return { label: niche.label, keywords: niche.keywords, match: niche.match };
+}
+
+function matchesNiche(text: string, terms: string[]): boolean {
+  const blob = (text || '').toLowerCase();
+  if (!blob.trim() || !terms.length) return false;
+  return terms.some((t) => {
+    const term = t.toLowerCase();
+    if (term.length <= 3) {
+      const re = new RegExp(`(?:^|[^a-z0-9])${term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:[^a-z0-9]|$)`, 'i');
+      return re.test(blob);
+    }
+    return blob.includes(term);
+  });
+}
 
 const BLOCKED_DOMAINS = new Set([
   "youtube.com", "youtu.be", "google.com", "twitter.com", "x.com",
@@ -106,6 +239,11 @@ type Cursor = {
   keywordIndex: number;
   searchPageToken: string | null;
   youtubeChannelQueue: string[];
+  niche?: string;
+  subniche?: string | null;
+  keywords?: string[];
+  match?: string[];
+  nicheLabel?: string;
 };
 
 function json(data: unknown, status = 200) {
@@ -354,6 +492,11 @@ Deno.serve(async (req) => {
     let run: Record<string, unknown> | null = null;
 
     if (action === "start" || !runId) {
+      const nicheId = String(body.niche || "tech");
+      const subnicheId = body.subniche ? String(body.subniche) : null;
+      const pack = resolveNichePack(nicheId, subnicheId);
+      if (!pack.keywords.length) return json({ error: "Unknown niche" }, 400);
+
       const { data, error } = await admin
         .from("brand_search_runs")
         .insert({
@@ -361,7 +504,17 @@ Deno.serve(async (req) => {
           status: "running",
           target,
           phase: "crm",
-          cursor_json: { crmOffset: 0, keywordIndex: 0, searchPageToken: null, youtubeChannelQueue: [] },
+          cursor_json: {
+            crmOffset: 0,
+            keywordIndex: 0,
+            searchPageToken: null,
+            youtubeChannelQueue: [],
+            niche: nicheId,
+            subniche: subnicheId,
+            keywords: pack.keywords,
+            match: pack.match,
+            nicheLabel: pack.label,
+          },
           results: [],
         })
         .select("*")
@@ -394,6 +547,16 @@ Deno.serve(async (req) => {
 
     const started = Date.now();
     const cursor = (run!.cursor_json || {}) as Cursor;
+    // Backfill niche pack for older runs / missing cursor fields
+    if (!cursor.keywords?.length || !cursor.match?.length) {
+      const pack = resolveNichePack(cursor.niche || "tech", cursor.subniche || null);
+      cursor.niche = cursor.niche || "tech";
+      cursor.keywords = pack.keywords;
+      cursor.match = pack.match;
+      cursor.nicheLabel = pack.label;
+    }
+    const keywords = cursor.keywords!;
+    const matchTerms = cursor.match!;
     const found: FoundBrand[] = Array.isArray(run!.results) ? [...(run!.results as FoundBrand[])] : [];
     const knownDomains = new Set(found.map((f) => f.domain));
 
@@ -455,6 +618,7 @@ Deno.serve(async (req) => {
       creatorId: string | null;
       creatorName: string;
       markCrmUsed?: boolean;
+      requireNicheMatch?: boolean;
     }) {
       const ch = await getChannel(keys, opts.channelId);
       if (!ch) return;
@@ -465,6 +629,7 @@ Deno.serve(async (req) => {
       const title = String(sn.title || opts.creatorName);
       if (subs < MIN_SUBS) return;
       if (!looksEnglish(desc) && !looksEnglish(title)) return;
+      if (opts.requireNicheMatch !== false && !matchesNiche(`${title}\n${desc}`, matchTerms)) return;
       if (!guessMale(title, desc)) {
         if (opts.creatorId) {
           await admin.from("creators").update({ gender_guess: "female" }).eq("id", opts.creatorId);
@@ -476,6 +641,12 @@ Deno.serve(async (req) => {
       const videos = await getRecentVideos(keys, uploads, VIDEOS_PER_CHANNEL);
       const metrics = computeMetrics(videos);
       if (metrics.avgViews < MIN_AVG_VIEWS || metrics.engagement < MIN_ENGAGEMENT) return;
+
+      // Extra niche gate: recent video titles should relate when searching a subniche
+      const videoBlob = videos.map((v: { snippet?: { title?: string; description?: string } }) =>
+        `${v.snippet?.title || ""}\n${v.snippet?.description || ""}`
+      ).join("\n");
+      if (!matchesNiche(`${title}\n${desc}\n${videoBlob}`, matchTerms)) return;
 
       const hints = creatorHints(title, sn.customUrl);
       for (const video of videos) {
@@ -514,7 +685,7 @@ Deno.serve(async (req) => {
       if (phase === "crm" && found.length < target) {
         const { data: creators } = await admin
           .from("creators")
-          .select("id,name,channel_link,last_brand_search_at,archived_at")
+          .select("id,name,channel_link,niche,notes,personalization,last_brand_search_at,archived_at")
           .eq("user_id", userId)
           .is("archived_at", null)
           .order("created_at", { ascending: true });
@@ -522,6 +693,8 @@ Deno.serve(async (req) => {
         const now = Date.now();
         const eligible = (creators || []).filter((c) => {
           if (!c.channel_link) return false;
+          const nicheBlob = [c.name, c.niche, c.notes, c.personalization].filter(Boolean).join("\n");
+          if (!matchesNiche(nicheBlob, matchTerms)) return false;
           if (!c.last_brand_search_at) return true;
           return now - new Date(c.last_brand_search_at).getTime() >= WEEK_MS;
         });
@@ -550,8 +723,8 @@ Deno.serve(async (req) => {
       if (phase === "youtube" && found.length < target) {
         while (found.length < target && Date.now() - started < BATCH_MS) {
           if (!cursor.youtubeChannelQueue.length) {
-            if (cursor.keywordIndex >= KEYWORDS.length) break;
-            const keyword = KEYWORDS[cursor.keywordIndex];
+            if (cursor.keywordIndex >= keywords.length) break;
+            const keyword = keywords[cursor.keywordIndex];
             const params: Record<string, string> = {
               part: "snippet",
               type: "channel",
@@ -602,7 +775,7 @@ Deno.serve(async (req) => {
       errorMsg = e instanceof Error ? e.message : String(e);
     }
 
-    const done = found.length >= target || (phase === "youtube" && cursor.keywordIndex >= KEYWORDS.length && !cursor.youtubeChannelQueue.length) || Boolean(errorMsg);
+    const done = found.length >= target || (phase === "youtube" && cursor.keywordIndex >= keywords.length && !cursor.youtubeChannelQueue.length) || Boolean(errorMsg);
     const status = errorMsg && found.length === 0 ? "failed" : done ? "completed" : "running";
 
     await admin
@@ -630,6 +803,9 @@ Deno.serve(async (req) => {
       creators_scanned: creatorsScanned,
       youtube_scanned: youtubeScanned,
       phase,
+      niche: cursor.niche,
+      subniche: cursor.subniche || null,
+      niche_label: cursor.nicheLabel || null,
       results: found,
       error: errorMsg,
       quota_used_approx: keys.reduce((s, k) => s + k.used, 0),

@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabase'
+import { SEARCH_NICHES, getNiche, resolveSearchQueries } from '../lib/niches'
 import { Empty, useToast } from '../components/ui'
 import { PageHeader, useActivityLogger } from '../components/Layout'
 
@@ -27,6 +28,9 @@ type RunProgress = {
   phase?: string
   results?: FoundBrand[]
   error?: string | null
+  niche?: string
+  subniche?: string | null
+  niche_label?: string
   quota_used_approx?: number
 }
 
@@ -37,9 +41,25 @@ export function SearchPage() {
   const log = useActivityLogger()
   const { show, Toast } = useToast()
   const [tab, setTab] = useState<Tab>('brands')
+  const [nicheId, setNicheId] = useState('tech')
+  const [subnicheId, setSubnicheId] = useState<string | null>('sim-racing-rigs')
   const [running, setRunning] = useState(false)
   const [progress, setProgress] = useState<RunProgress | null>(null)
   const [results, setResults] = useState<FoundBrand[]>([])
+
+  const niche = useMemo(() => getNiche(nicheId), [nicheId])
+  const searchLabel = useMemo(() => resolveSearchQueries(nicheId, subnicheId).label, [nicheId, subnicheId])
+
+  useEffect(() => {
+    const n = getNiche(nicheId)
+    if (!n?.subniches?.length) {
+      setSubnicheId(null)
+      return
+    }
+    if (!subnicheId || !n.subniches.some((s) => s.id === subnicheId)) {
+      setSubnicheId(n.subniches[0].id)
+    }
+  }, [nicheId, subnicheId])
 
   useEffect(() => {
     if (!user) return
@@ -52,6 +72,9 @@ export function SearchPage() {
         .limit(1)
         .maybeSingle()
       if (data) {
+        const cursor = (data.cursor_json || {}) as { niche?: string; subniche?: string | null }
+        if (cursor.niche) setNicheId(cursor.niche)
+        if (cursor.subniche !== undefined) setSubnicheId(cursor.subniche)
         setProgress({
           run_id: data.id,
           status: data.status,
@@ -63,6 +86,8 @@ export function SearchPage() {
           results: data.results || [],
           error: data.error,
           done: data.status === 'completed' || data.status === 'failed',
+          niche: cursor.niche,
+          subniche: cursor.subniche,
         })
         setResults((data.results || []) as FoundBrand[])
       }
@@ -71,7 +96,14 @@ export function SearchPage() {
 
   async function invokeBatch(runId?: string) {
     const { data, error } = await supabase.functions.invoke('find-brands', {
-      body: runId ? { action: 'continue', run_id: runId, target: TARGET } : { action: 'start', target: TARGET },
+      body: runId
+        ? { action: 'continue', run_id: runId, target: TARGET }
+        : {
+            action: 'start',
+            target: TARGET,
+            niche: nicheId,
+            subniche: subnicheId,
+          },
     })
     if (error) throw new Error(error.message)
     if (data?.error && !data?.run_id) throw new Error(data.error)
@@ -80,6 +112,10 @@ export function SearchPage() {
 
   async function runSearch() {
     if (!user || running) return
+    if (!nicheId) {
+      show('Pick a niche first')
+      return
+    }
     setRunning(true)
     setResults([])
     setProgress({
@@ -89,6 +125,9 @@ export function SearchPage() {
       creators_scanned: 0,
       youtube_scanned: 0,
       phase: 'crm',
+      niche: nicheId,
+      subniche: subnicheId,
+      niche_label: searchLabel,
     })
     try {
       let batch = await invokeBatch()
@@ -104,8 +143,8 @@ export function SearchPage() {
       if (batch.error && (batch.brands_found || 0) === 0) {
         show(batch.error)
       } else {
-        await log(`Brand search found <strong>${batch.brands_found}</strong> brands`)
-        show(`Found ${batch.brands_found} brands`)
+        await log(`Brand search (${searchLabel}) found <strong>${batch.brands_found}</strong> brands`)
+        show(`Found ${batch.brands_found} brands in ${searchLabel}`)
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
@@ -123,7 +162,7 @@ export function SearchPage() {
       {Toast}
       <PageHeader title="Search" subtitle="Discover creators and the brands sponsoring them">
         {tab === 'brands' && (
-          <button className="btn btn-primary" type="button" disabled={running} onClick={runSearch}>
+          <button className="btn btn-primary" type="button" disabled={running || !nicheId} onClick={runSearch}>
             {running ? 'Searching…' : 'Run brand search'}
           </button>
         )}
@@ -144,15 +183,9 @@ export function SearchPage() {
             <div className="search-badge">Soon</div>
             <h2 style={{ marginTop: 0 }}>Find Creators</h2>
             <p style={{ color: 'var(--text-muted)', maxWidth: 520 }}>
-              Creator discovery by niche, language, gender, views, and engagement is next. For now, use Find Brands to
-              mine sponsors from CRM + YouTube creators.
+              Creator discovery by niche, language, gender, views, and engagement is next. Niche picker below will power
+              that flow too.
             </p>
-            <div className="chip-row">
-              <span className="chip">50k+ avg views</span>
-              <span className="chip">1%+ engagement</span>
-              <span className="chip">English</span>
-              <span className="chip">Male</span>
-            </div>
             <button className="btn" type="button" disabled>
               Coming soon
             </button>
@@ -161,35 +194,86 @@ export function SearchPage() {
       ) : (
         <>
           <div className="card search-hero-card" style={{ marginBottom: '1rem' }}>
+            <div className="search-kicker">Halal niches</div>
+            <h2 style={{ margin: '0.2rem 0 0.35rem' }}>Search conditions</h2>
+            <p style={{ color: 'var(--text-muted)', marginTop: 0 }}>
+              Pick a niche (and subniche when available). Influencers must match that niche <em>and</em> the usual
+              gates: 50k+ subs, 50k+ avg views, 1%+ engagement, English, male heuristic.
+            </p>
+
+            <div className="niche-grid" role="listbox" aria-label="Niches">
+              {SEARCH_NICHES.map((n) => (
+                <button
+                  key={n.id}
+                  type="button"
+                  role="option"
+                  aria-selected={nicheId === n.id}
+                  className={`niche-pill ${nicheId === n.id ? 'active' : ''}`}
+                  disabled={running}
+                  onClick={() => setNicheId(n.id)}
+                >
+                  {n.label}
+                </button>
+              ))}
+            </div>
+
+            {niche?.subniches?.length ? (
+              <div style={{ marginTop: '1rem' }}>
+                <div className="search-kicker">Subniches in {niche.label}</div>
+                <div className="chip-row" style={{ marginTop: '0.55rem' }}>
+                  <button
+                    type="button"
+                    className={`chip chip-btn ${subnicheId === null ? 'active' : ''}`}
+                    disabled={running}
+                    onClick={() => setSubnicheId(null)}
+                  >
+                    All {niche.label}
+                  </button>
+                  {niche.subniches.map((s) => (
+                    <button
+                      key={s.id}
+                      type="button"
+                      className={`chip chip-btn ${subnicheId === s.id ? 'active' : ''}`}
+                      disabled={running}
+                      onClick={() => setSubnicheId(s.id)}
+                    >
+                      {s.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            <div className="chip-row" style={{ marginBottom: 0 }}>
+              <span className="chip">Selected: {searchLabel}</span>
+              <span className="chip">CRM first</span>
+              <span className="chip">Target 50 brands</span>
+            </div>
+          </div>
+
+          <div className="card" style={{ marginBottom: '1rem' }}>
             <div className="search-hero-grid">
               <div>
                 <div className="search-kicker">Pipeline</div>
-                <h2 style={{ margin: '0.2rem 0 0.55rem' }}>Find sponsoring brands</h2>
+                <h3 style={{ margin: '0.2rem 0 0.55rem' }}>Find sponsoring brands</h3>
                 <p style={{ color: 'var(--text-muted)', marginTop: 0 }}>
-                  Uses your CRM creators first (once per week each), then YouTube. Scans 15–20 recent videos for real
-                  sponsors and adds up to <strong>50 unique brands</strong> per run.
+                  CRM creators in this niche first (once per week each), then YouTube search for matching creators. Scans
+                  15–20 recent videos for sponsors.
                 </p>
-                <div className="chip-row">
-                  <span className="chip">CRM first</span>
-                  <span className="chip">50k+ subs</span>
-                  <span className="chip">50k+ avg views</span>
-                  <span className="chip">1%+ ER</span>
-                  <span className="chip">English</span>
-                  <span className="chip">Male heuristic</span>
-                  <span className="chip">Target 50</span>
-                </div>
               </div>
               <div className="search-meter">
                 <div className="search-meter-label">
-                  <span>{progress?.brands_found ?? 0} / {TARGET}</span>
+                  <span>
+                    {progress?.brands_found ?? 0} / {TARGET}
+                  </span>
                   <span style={{ color: 'var(--text-dim)' }}>{progress?.status || 'idle'}</span>
                 </div>
                 <div className="search-meter-track">
                   <div className="search-meter-fill" style={{ width: `${pct}%` }} />
                 </div>
                 <div className="search-meter-meta">
-                  <span>CRM scanned: {progress?.creators_scanned ?? 0}</span>
-                  <span>YouTube scanned: {progress?.youtube_scanned ?? 0}</span>
+                  <span>CRM: {progress?.creators_scanned ?? 0}</span>
+                  <span>YouTube: {progress?.youtube_scanned ?? 0}</span>
                   <span>Phase: {progress?.phase || '—'}</span>
                 </div>
                 {progress?.error && (
@@ -208,7 +292,7 @@ export function SearchPage() {
               <Empty>
                 <strong>No brands yet</strong>
                 <p style={{ margin: '0.35rem 0 0', color: 'var(--text-muted)' }}>
-                  Run a search to pull sponsoring brands into your CRM.
+                  Select a niche (e.g. Tech → Sim Racing Rigs) and run a search.
                 </p>
               </Empty>
             ) : (
