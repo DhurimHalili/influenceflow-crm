@@ -211,6 +211,68 @@ export function BrandsPage() {
     load()
   }
 
+  async function hardDeleteBrands(ids: string[]) {
+    if (!ids.length) return null
+    const { data: campaigns } = await supabase.from('campaigns').select('id').in('brand_id', ids)
+    const campaignIds = (campaigns || []).map((c) => c.id)
+    if (campaignIds.length) {
+      const { error: joinErr } = await supabase.from('campaign_creators').delete().in('campaign_id', campaignIds)
+      if (joinErr) return joinErr
+      const { error: campErr } = await supabase.from('campaigns').delete().in('id', campaignIds)
+      if (campErr) return campErr
+    }
+    const { error: contactErr } = await supabase.from('brand_contacts').delete().in('brand_id', ids)
+    if (contactErr) return contactErr
+    const { error: linkErr } = await supabase.from('external_links').delete().in('brand_id', ids)
+    if (linkErr) return linkErr
+    const { error } = await supabase.from('brands').delete().in('id', ids)
+    return error
+  }
+
+  async function applyBulkDelete() {
+    if (!user || selected.size === 0) return
+    const ids = [...selected]
+    if (!confirm(`Permanently delete ${ids.length} brand${ids.length === 1 ? '' : 's'} (and their contacts/campaigns)? This cannot be undone.`)) return
+    setBusy(true)
+    const error = await hardDeleteBrands(ids)
+    setBusy(false)
+    if (error) {
+      show(error.message)
+      return
+    }
+    await log(`Permanently deleted ${ids.length} brands`)
+    setSelected(new Set())
+    show(`Deleted ${ids.length} brand${ids.length === 1 ? '' : 's'}`)
+    load()
+  }
+
+  async function deleteAllBrands() {
+    if (!user) return
+    const { data, error: loadErr } = await supabase.from('brands').select('id')
+    if (loadErr) {
+      show(loadErr.message)
+      return
+    }
+    const ids = (data || []).map((r) => r.id)
+    if (!ids.length) {
+      show('No brands to delete')
+      return
+    }
+    if (!confirm(`Permanently delete ALL ${ids.length} brands? This cannot be undone.`)) return
+    if (!confirm('Final confirm: delete every brand, contact, and related campaign?')) return
+    setBusy(true)
+    const error = await hardDeleteBrands(ids)
+    setBusy(false)
+    if (error) {
+      show(error.message)
+      return
+    }
+    await log(`Deleted all ${ids.length} brands`)
+    setSelected(new Set())
+    show(`Deleted all ${ids.length} brands — clean slate`)
+    load()
+  }
+
   return (
     <div>
       {Toast}
@@ -220,6 +282,9 @@ export function BrandsPage() {
         </button>
         <button className="btn" type="button" onClick={() => setBulkOpen(true)}>
           Bulk import
+        </button>
+        <button className="btn btn-danger" type="button" disabled={busy || rows.length === 0} onClick={deleteAllBrands}>
+          Delete all
         </button>
         <button className="btn btn-primary" type="button" onClick={openCreate}>
           Add brand
@@ -254,6 +319,9 @@ export function BrandsPage() {
           </select>
           <button className="btn btn-primary" type="button" disabled={busy} onClick={applyBulkStatus}>
             Update status
+          </button>
+          <button className="btn btn-danger" type="button" disabled={busy} onClick={applyBulkDelete}>
+            Delete selected
           </button>
           <button className="btn" type="button" onClick={() => setSelected(new Set())}>
             Clear

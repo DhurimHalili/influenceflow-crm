@@ -151,6 +151,33 @@ export function SettingsPage() {
     downloadJson(`influenceflow-backup-${new Date().toISOString().slice(0, 10)}.json`, out)
   }
 
+  async function clearAllCrmData() {
+    if (!user) return
+    if (!confirm('Delete ALL CRM data for this account (creators, brands, campaigns, meetings, activity, outreach logs)?')) return
+    if (!confirm('Final confirm: this cannot be undone. Export a backup first if you need it.')) return
+
+    const tables = [
+      'campaign_creators',
+      'outreach_events',
+      'external_links',
+      'meetings',
+      'activity',
+      'campaigns',
+      'brand_contacts',
+      'creators',
+      'brands',
+    ] as const
+
+    for (const t of tables) {
+      const { error } = await supabase.from(t).delete().eq('user_id', user.id)
+      if (error) {
+        show(`Failed clearing ${t}: ${error.message}`)
+        return
+      }
+    }
+    show('All CRM data cleared — clean slate')
+  }
+
   async function importBackup(file: File) {
     if (!user) return
     const text = await file.text()
@@ -314,6 +341,14 @@ export function SettingsPage() {
               />
             </label>
           </div>
+
+          <h3 style={{ color: 'var(--danger)' }}>Danger zone</h3>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>
+            Permanently wipe creators, brands, campaigns, meetings, activity, and outreach logs. Keeps your profile, Gmail connection, and email templates.
+          </p>
+          <button className="btn btn-danger" type="button" onClick={clearAllCrmData}>
+            Clear all CRM data
+          </button>
         </div>
       </div>
 

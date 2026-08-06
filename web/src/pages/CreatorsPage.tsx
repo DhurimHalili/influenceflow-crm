@@ -247,6 +247,58 @@ export function CreatorsPage() {
     load()
   }
 
+  async function hardDeleteCreators(ids: string[]) {
+    if (!ids.length) return null
+    const { error: joinErr } = await supabase.from('campaign_creators').delete().in('creator_id', ids)
+    if (joinErr) return joinErr
+    const { error } = await supabase.from('creators').delete().in('id', ids)
+    return error
+  }
+
+  async function applyBulkDelete() {
+    if (!user || selected.size === 0) return
+    const ids = [...selected]
+    if (!confirm(`Permanently delete ${ids.length} creator${ids.length === 1 ? '' : 's'}? This cannot be undone.`)) return
+    setBusy(true)
+    const error = await hardDeleteCreators(ids)
+    setBusy(false)
+    if (error) {
+      show(error.message)
+      return
+    }
+    await log(`Permanently deleted ${ids.length} creators`)
+    setSelected(new Set())
+    show(`Deleted ${ids.length} creator${ids.length === 1 ? '' : 's'}`)
+    load()
+  }
+
+  async function deleteAllCreators() {
+    if (!user) return
+    const { data, error: loadErr } = await supabase.from('creators').select('id')
+    if (loadErr) {
+      show(loadErr.message)
+      return
+    }
+    const ids = (data || []).map((r) => r.id)
+    if (!ids.length) {
+      show('No creators to delete')
+      return
+    }
+    if (!confirm(`Permanently delete ALL ${ids.length} creators? This cannot be undone.`)) return
+    if (!confirm('Final confirm: delete every creator in your CRM?')) return
+    setBusy(true)
+    const error = await hardDeleteCreators(ids)
+    setBusy(false)
+    if (error) {
+      show(error.message)
+      return
+    }
+    await log(`Deleted all ${ids.length} creators`)
+    setSelected(new Set())
+    show(`Deleted all ${ids.length} creators — clean slate`)
+    load()
+  }
+
   function exportCsv() {
     downloadCsv(
       'creators.csv',
@@ -280,6 +332,9 @@ export function CreatorsPage() {
             Merge duplicates ({duplicates.length})
           </button>
         )}
+        <button className="btn btn-danger" type="button" disabled={busy || rows.length === 0} onClick={deleteAllCreators}>
+          Delete all
+        </button>
         <button className="btn btn-primary" type="button" onClick={openCreate}>
           Add creator
         </button>
@@ -316,6 +371,9 @@ export function CreatorsPage() {
           </select>
           <button className="btn btn-primary" type="button" disabled={busy} onClick={applyBulkStatus}>
             Update status
+          </button>
+          <button className="btn btn-danger" type="button" disabled={busy} onClick={applyBulkDelete}>
+            Delete selected
           </button>
           <button className="btn" type="button" onClick={() => setSelected(new Set())}>
             Clear
