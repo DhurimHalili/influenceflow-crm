@@ -265,17 +265,27 @@ function loadKeys(): YtKey[] {
 }
 
 async function ytGet(keys: YtKey[], endpoint: string, params: Record<string, string>, cost: number) {
-  const key = keys.find((k) => k.used + cost <= k.limit);
-  if (!key) throw new Error("YouTube API quota exhausted for today. Add another key or retry tomorrow.");
-  const url = new URL(`${YT}/${endpoint}`);
-  Object.entries({ ...params, key: key.key }).forEach(([k, v]) => url.searchParams.set(k, v));
-  const res = await fetch(url);
-  key.used += cost;
-  const body = await res.json();
-  if (!res.ok) {
-    throw new Error(body?.error?.message || `YouTube API error ${res.status}`);
+  const tried = new Set<string>();
+  let lastErr = "YouTube API quota exhausted for today. Add another key or retry tomorrow.";
+  while (true) {
+    const key = keys.find((k) => !tried.has(k.key) && k.used + cost <= k.limit);
+    if (!key) throw new Error(lastErr);
+    tried.add(key.key);
+    const url = new URL(`${YT}/${endpoint}`);
+    Object.entries({ ...params, key: key.key }).forEach(([k, v]) => url.searchParams.set(k, v));
+    const res = await fetch(url);
+    const body = await res.json().catch(() => ({}));
+    const msg = body?.error?.message || `YouTube API error ${res.status}`;
+    const quotaHit = /quota|dailyLimitExceeded|rateLimitExceeded/i.test(msg) || res.status === 403;
+    if (!res.ok && quotaHit) {
+      key.used = key.limit;
+      lastErr = msg;
+      continue;
+    }
+    key.used += cost;
+    if (!res.ok) throw new Error(msg);
+    return body;
   }
-  return body;
 }
 
 function normalizeDomain(raw: string): string {
