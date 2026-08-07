@@ -14,56 +14,153 @@ const MIN_SUBS = 50_000;
 const MIN_AVG_VIEWS = 50_000;
 const MIN_ENGAGEMENT = 0.01;
 const MONTH_MS = 30 * 24 * 60 * 60 * 1000;
-const BATCH_MS = 45_000;
+const BATCH_MS = 48_000;
+const MAX_PAGES_PER_QUERY = 5;
 
 type NichePack = { keywords: string[]; match: string[]; label: string };
+
+/** Large curated discovery banks (server-only). Accuracy comes from match terms + metric gates. */
+const EXTRA_QUERIES: Record<string, string[]> = {
+  "sim-racing-rigs": [
+    "sim racing",
+    "sim racing rig",
+    "sim racing cockpit",
+    "sim racing setup",
+    "sim racing build",
+    "sim racing wheel",
+    "sim racing pedals",
+    "sim racing wheelbase",
+    "racing simulator",
+    "racing sim rig",
+    "iRacing rig",
+    "iRacing setup",
+    "Assetto Corsa rig",
+    "ACC sim racing",
+    "Fanatec CSL DD",
+    "Fanatec GT DD Pro",
+    "Fanatec Clubsport",
+    "Simagic Alpha Mini",
+    "Simagic Alpha U",
+    "Simagic P1000",
+    "Moza R9",
+    "Moza R12",
+    "Moza R16",
+    "Moza R21",
+    "Simucube 2 Pro",
+    "Simucube 2 Sport",
+    "Asetek Invicta",
+    "Asetek Forte",
+    "Heusinkveld Sprint",
+    "Heusinkveld Ultimate",
+    "Logitech G Pro Racing Wheel",
+    "Thrustmaster T818",
+    "Thrustmaster T248",
+    "Next Level Racing F-GT",
+    "Trak Racer TR160",
+    "Sim-Lab P1X",
+    "GT Omega Prime",
+    "Aspire sim racing",
+    "direct drive wheel review",
+    "load cell pedals review",
+    "sim racing cockpit review",
+    "formula sim racing",
+    "gt sim racing setup",
+    "sim racing desk mount",
+    "sim racing triple screen",
+    "sim racing vr setup",
+    "best sim racing wheel 2025",
+    "best sim racing wheel 2026",
+    "sim racing beginners rig",
+    "budget sim racing rig",
+    "endurance sim racing",
+    "sim racing league",
+  ],
+  "desk-setups": [
+    "desk setup",
+    "battlestation",
+    "desk tour",
+    "ultrawide setup",
+    "gaming desk setup",
+    "office desk setup",
+    "minimal desk setup",
+    "dual monitor setup",
+    "programmer desk setup",
+    "streaming desk setup",
+    "desk accessories review",
+    "monitor arm setup",
+    "cable management desk",
+    "standing desk setup",
+    "home office setup tour",
+  ],
+  tech: [
+    "tech review",
+    "gadget review",
+    "tech unboxing",
+    "consumer electronics review",
+    "new tech 2026",
+    "hardware review",
+    "tech creator",
+    "tech tips youtube",
+  ],
+  ai: [
+    "AI tools review",
+    "ChatGPT review",
+    "AI software demo",
+    "best AI apps",
+    "LLM tools",
+    "AI agent demo",
+    "OpenAI tools",
+    "AI productivity tools",
+  ],
+};
 
 const NICHE_MAP: Record<string, NichePack & { subniches?: Record<string, NichePack> }> = {
   automotive: {
     label: "Automotive",
-    keywords: ["car review", "automotive review", "car detailing", "EV car review", "modded car"],
-    match: ["car", "auto", "vehicle", "automotive", "ev", "truck"],
+    keywords: ["car review", "automotive review", "car detailing", "EV car review", "modded car", "car mods", "supercar review"],
+    match: ["car review", "automotive", "car detailing", "vehicle review", "ev review", "car mods"],
   },
   productivity: {
     label: "Productivity",
-    keywords: ["productivity apps review", "notion setup", "second brain apps", "time management tools"],
-    match: ["productivity", "notion", "habits", "workflow", "gtd"],
+    keywords: ["productivity apps review", "notion setup", "second brain apps", "time management tools", "productivity system"],
+    match: ["productivity", "notion", "second brain", "time management", "gtd"],
   },
   podcasts: {
     label: "Podcasts",
-    keywords: ["podcast gear review", "podcast microphone setup", "best podcast equipment"],
-    match: ["podcast", "microphone", "recording studio"],
+    keywords: ["podcast gear review", "podcast microphone setup", "best podcast equipment", "podcast studio setup"],
+    match: ["podcast", "podcast mic", "podcast studio", "podcast gear"],
   },
   education: {
     label: "Education",
-    keywords: ["online learning tools", "study apps review", "education technology review"],
-    match: ["education", "learn", "study", "course", "tutor"],
+    keywords: ["online learning tools", "study apps review", "education technology review", "study with me"],
+    match: ["education", "study tips", "online learning", "edtech", "tutor"],
   },
   pets: {
     label: "Pets",
-    keywords: ["dog products review", "pet products review", "cat products review"],
-    match: ["pet", "dog", "cat", "puppy", "kitten"],
+    keywords: ["dog products review", "pet products review", "cat products review", "dog gear review"],
+    match: ["pet products", "dog review", "cat products", "puppy", "pet gear"],
   },
   "baby-kids": {
     label: "Baby & Kids Products",
-    keywords: ["baby products review", "kids toys review", "stroller review"],
-    match: ["baby", "kids", "toddler", "stroller", "nursery"],
+    keywords: ["baby products review", "kids toys review", "stroller review", "baby gear review"],
+    match: ["baby products", "kids toys", "stroller", "baby gear", "nursery"],
   },
   ai: {
     label: "AI",
     keywords: [
       "best AI tools 2025",
+      "best AI tools 2026",
       "ChatGPT tools review",
       "AI agent tools",
       "AI software review",
       "artificial intelligence tools",
     ],
-    match: ["ai", "chatgpt", "openai", "llm", "machine learning", "artificial intelligence"],
+    match: ["chatgpt", "openai", "llm", "machine learning", "artificial intelligence", "ai tools", "ai agent"],
   },
   tech: {
     label: "Tech",
-    keywords: ["tech gadgets review", "consumer tech review", "new tech unboxing", "tech product review"],
-    match: ["tech", "gadget", "electronics", "hardware", "device"],
+    keywords: ["tech gadgets review", "consumer tech review", "new tech unboxing", "tech product review", "gadget unboxing"],
+    match: ["tech review", "gadget", "electronics review", "hardware review", "tech unboxing"],
     subniches: {
       "desk-setups": {
         label: "Desk Setups",
@@ -75,7 +172,7 @@ const NICHE_MAP: Record<string, NichePack & { subniches?: Record<string, NichePa
           "monitor desk setup",
           "desk accessories review",
         ],
-        match: ["desk setup", "battlestation", "desk tour", "workspace setup", "monitor setup", "desk mat"],
+        match: ["desk setup", "battlestation", "desk tour", "workspace setup", "monitor setup", "desk mat", "standing desk"],
       },
       "sim-racing-rigs": {
         label: "Sim Racing Rigs",
@@ -91,6 +188,7 @@ const NICHE_MAP: Record<string, NichePack & { subniches?: Record<string, NichePa
           "direct drive sim racing",
           "sim racing cockpit review",
         ],
+        // Strict terms only — no lone "cockpit" (false positives)
         match: [
           "sim racing",
           "racing sim",
@@ -99,22 +197,35 @@ const NICHE_MAP: Record<string, NichePack & { subniches?: Record<string, NichePa
           "fanatec",
           "simagic",
           "moza racing",
-          "cockpit",
-          "direct drive wheel",
+          "moza r9",
+          "moza r12",
           "racing simulator",
+          "direct drive wheel",
+          "sim racing rig",
+          "sim racing cockpit",
+          "heusinkveld",
+          "simucube",
+          "asetek",
+          "iracing",
+          "assetto corsa",
+          "load cell pedal",
+          "next level racing",
+          "trak racer",
+          "sim-lab",
+          "gt omega",
         ],
       },
     },
   },
   diy: {
     label: "DIY Products",
-    keywords: ["DIY tools review", "home DIY products", "maker tools review"],
-    match: ["diy", "maker", "craft", "build", "handmade"],
+    keywords: ["DIY tools review", "home DIY products", "maker tools review", "diy project"],
+    match: ["diy", "maker project", "diy tools", "handmade"],
   },
   content: {
     label: "Content",
-    keywords: ["content creator gear", "camera for youtube", "creator tools review"],
-    match: ["content creator", "youtube gear", "filmmaking", "vlogging"],
+    keywords: ["content creator gear", "camera for youtube", "creator tools review", "youtube gear review"],
+    match: ["content creator", "youtube gear", "filmmaking", "vlogging gear", "creator camera"],
   },
   "physical-products": {
     label: "Physical Products",
@@ -123,45 +234,67 @@ const NICHE_MAP: Record<string, NichePack & { subniches?: Record<string, NichePa
   },
   books: {
     label: "Books",
-    keywords: ["book recommendations", "best books review", "nonfiction book review"],
-    match: ["book", "reading", "author", "literature"],
+    keywords: ["book recommendations", "best books review", "nonfiction book review", "book haul"],
+    match: ["book review", "book haul", "reading list", "nonfiction"],
   },
   "self-development": {
     label: "Self-Development",
-    keywords: ["self improvement tips", "personal development books", "motivation habits"],
-    match: ["self improvement", "mindset", "habits", "motivation", "personal development"],
+    keywords: ["self improvement tips", "personal development books", "motivation habits", "self help"],
+    match: ["self improvement", "personal development", "mindset", "self help"],
   },
   travel: {
     label: "Travel",
-    keywords: ["travel gear review", "best travel accessories", "travel packing products"],
-    match: ["travel", "trip", "luggage", "backpack", "vacation"],
+    keywords: ["travel gear review", "best travel accessories", "travel packing products", "travel vlog"],
+    match: ["travel gear", "travel vlog", "packing list", "travel accessories"],
   },
   lifestyle: {
     label: "Lifestyle",
-    keywords: ["lifestyle products review", "daily lifestyle haul"],
-    match: ["lifestyle", "day in my life", "vlog"],
+    keywords: ["lifestyle products review", "daily lifestyle haul", "lifestyle vlog"],
+    match: ["lifestyle vlog", "day in my life", "lifestyle haul"],
   },
   teaching: {
     label: "Teaching",
-    keywords: ["teacher classroom products", "teaching tools review"],
-    match: ["teacher", "teaching", "classroom", "lesson"],
+    keywords: ["teacher classroom products", "teaching tools review", "classroom setup"],
+    match: ["teacher", "classroom", "teaching tools", "lesson"],
   },
   "home-decor": {
     label: "Home Decor",
     keywords: ["home decor haul", "interior design products", "home styling review"],
-    match: ["home decor", "interior", "furniture", "styling"],
+    match: ["home decor", "interior design", "home styling"],
   },
   "home-garden": {
     label: "Home & Garden",
     keywords: ["garden tools review", "home improvement products", "lawn garden review"],
-    match: ["garden", "lawn", "home improvement", "outdoor"],
+    match: ["garden", "lawn care", "home improvement"],
   },
   "wedding-events": {
     label: "Wedding & Events",
     keywords: ["wedding products review", "event planning products", "wedding favors review"],
-    match: ["wedding", "event planning", "bridal", "party"],
+    match: ["wedding", "event planning", "bridal"],
   },
 };
+
+type Strategy = {
+  id: string;
+  type: "video" | "channel";
+  order: string;
+  regionCode?: string;
+  usePublishedAfter: boolean;
+};
+
+const STRATEGIES: Strategy[] = [
+  { id: "video-rel-us", type: "video", order: "relevance", regionCode: "US", usePublishedAfter: true },
+  { id: "video-views-us", type: "video", order: "viewCount", regionCode: "US", usePublishedAfter: true },
+  { id: "video-date-us", type: "video", order: "date", regionCode: "US", usePublishedAfter: true },
+  { id: "video-rel-gb", type: "video", order: "relevance", regionCode: "GB", usePublishedAfter: true },
+  { id: "video-rel-ca", type: "video", order: "relevance", regionCode: "CA", usePublishedAfter: true },
+  { id: "video-rel-au", type: "video", order: "relevance", regionCode: "AU", usePublishedAfter: true },
+  { id: "video-views-global", type: "video", order: "viewCount", usePublishedAfter: true },
+  { id: "video-rel-global", type: "video", order: "relevance", usePublishedAfter: true },
+  { id: "channel-rel-us", type: "channel", order: "relevance", regionCode: "US", usePublishedAfter: false },
+  { id: "channel-views-us", type: "channel", order: "viewCount", regionCode: "US", usePublishedAfter: false },
+  { id: "channel-rel-global", type: "channel", order: "relevance", usePublishedAfter: false },
+];
 
 function resolveNichePack(nicheId: string, subnicheId?: string | null): NichePack {
   const niche = NICHE_MAP[nicheId];
@@ -177,6 +310,23 @@ function resolveNichePack(nicheId: string, subnicheId?: string | null): NichePac
     };
   }
   return { label: niche.label, keywords: niche.keywords, match: niche.match };
+}
+
+function buildQueryBank(nicheId: string, subnicheId: string | null, pack: NichePack): string[] {
+  const extras = [
+    ...(EXTRA_QUERIES[subnicheId || ""] || []),
+    ...(EXTRA_QUERIES[nicheId] || []),
+  ];
+  const merged = [...pack.keywords, ...extras];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const q of merged) {
+    const key = q.trim().toLowerCase();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(q.trim());
+  }
+  return out;
 }
 
 function matchesNiche(text: string, terms: string[]): boolean {
@@ -238,13 +388,17 @@ type FoundCreator = {
 };
 
 type Cursor = {
-  keywordIndex: number;
-  searchPageToken: string | null;
+  phase: "crm" | "youtube";
+  crmOffset: number;
+  strategyIndex: number;
+  queryIndex: number;
+  pageToken: string | null;
+  pagesForQuery: number;
   channelQueue: string[];
   seenChannelIds: string[];
   niche?: string;
   subniche?: string | null;
-  keywords?: string[];
+  queries?: string[];
   match?: string[];
   nicheLabel?: string;
 };
@@ -298,6 +452,41 @@ function looksEnglish(text: string): boolean {
   const sample = text.slice(0, 500);
   const latin = (sample.match(/[a-zA-Z]/g) || []).length;
   return latin / Math.max(sample.length, 1) > 0.55;
+}
+
+function parseChannelId(link: string | null | undefined): string | null {
+  if (!link) return null;
+  try {
+    const u = new URL(link.startsWith("http") ? link : `https://${link}`);
+    const parts = u.pathname.split("/").filter(Boolean);
+    if (parts[0] === "channel" && parts[1]?.startsWith("UC")) return parts[1];
+    if (parts[0]?.startsWith("UC") && parts[0].length > 20) return parts[0];
+  } catch {
+    /* ignore */
+  }
+  const m = link.match(/UC[\w-]{20,}/);
+  return m?.[0] || null;
+}
+
+async function resolveHandleToChannelId(keys: YtKey[], handleOrUrl: string): Promise<string | null> {
+  const direct = parseChannelId(handleOrUrl);
+  if (direct) return direct;
+  let q = handleOrUrl;
+  try {
+    const u = new URL(handleOrUrl.startsWith("http") ? handleOrUrl : `https://youtube.com/${handleOrUrl}`);
+    const parts = u.pathname.split("/").filter(Boolean);
+    q = parts[0]?.startsWith("@") ? parts[0] : parts[parts.length - 1] || handleOrUrl;
+  } catch {
+    /* keep q */
+  }
+  const data = await ytGet(keys, "search", {
+    part: "snippet",
+    type: "channel",
+    maxResults: "1",
+    q: q.replace(/^@/, ""),
+    relevanceLanguage: "en",
+  }, 100);
+  return data.items?.[0]?.snippet?.channelId || data.items?.[0]?.id?.channelId || null;
 }
 
 async function getChannel(keys: YtKey[], channelId: string) {
@@ -359,6 +548,15 @@ function formatEngagement(rate: number): string {
   return `${(rate * 100).toFixed(2)}%`;
 }
 
+function discoveryFullyDrained(cursor: Cursor, queryCount: number): boolean {
+  return (
+    cursor.phase === "youtube" &&
+    cursor.strategyIndex >= STRATEGIES.length &&
+    !cursor.channelQueue.length &&
+    !cursor.pageToken
+  );
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
 
@@ -390,7 +588,8 @@ Deno.serve(async (req) => {
       const nicheId = String(body.niche || "tech");
       const subnicheId = body.subniche ? String(body.subniche) : null;
       const pack = resolveNichePack(nicheId, subnicheId);
-      if (!pack.keywords.length) return json({ error: "Unknown niche" }, 400);
+      const queries = buildQueryBank(nicheId, subnicheId, pack);
+      if (!queries.length) return json({ error: "Unknown niche" }, 400);
 
       const { data, error } = await admin
         .from("creator_search_runs")
@@ -398,18 +597,22 @@ Deno.serve(async (req) => {
           user_id: userId,
           status: "running",
           target,
-          phase: "youtube",
+          phase: "crm",
           cursor_json: {
-            keywordIndex: 0,
-            searchPageToken: null,
+            phase: "crm",
+            crmOffset: 0,
+            strategyIndex: 0,
+            queryIndex: 0,
+            pageToken: null,
+            pagesForQuery: 0,
             channelQueue: [],
             seenChannelIds: [],
             niche: nicheId,
             subniche: subnicheId,
-            keywords: pack.keywords,
+            queries,
             match: pack.match,
             nicheLabel: pack.label,
-          },
+          } satisfies Cursor,
           results: [],
         })
         .select("*")
@@ -446,17 +649,22 @@ Deno.serve(async (req) => {
 
     const started = Date.now();
     const cursor = (run!.cursor_json || {}) as Cursor;
-    if (!cursor.keywords?.length || !cursor.match?.length) {
-      const pack = resolveNichePack(cursor.niche || "tech", cursor.subniche || null);
-      cursor.niche = cursor.niche || "tech";
-      cursor.keywords = pack.keywords;
-      cursor.match = pack.match;
-      cursor.nicheLabel = pack.label;
-    }
+    const nicheId = cursor.niche || "tech";
+    const subnicheId = cursor.subniche || null;
+    const pack = resolveNichePack(nicheId, subnicheId);
+
+    if (!cursor.queries?.length) cursor.queries = buildQueryBank(nicheId, subnicheId, pack);
+    if (!cursor.match?.length) cursor.match = pack.match;
+    if (!cursor.nicheLabel) cursor.nicheLabel = pack.label;
     if (!cursor.seenChannelIds) cursor.seenChannelIds = [];
     if (!cursor.channelQueue) cursor.channelQueue = [];
+    if (cursor.phase !== "crm" && cursor.phase !== "youtube") cursor.phase = "crm";
+    if (typeof cursor.crmOffset !== "number") cursor.crmOffset = 0;
+    if (typeof cursor.strategyIndex !== "number") cursor.strategyIndex = 0;
+    if (typeof cursor.queryIndex !== "number") cursor.queryIndex = 0;
+    if (typeof cursor.pagesForQuery !== "number") cursor.pagesForQuery = 0;
 
-    const keywords = cursor.keywords!;
+    const queries = cursor.queries!;
     const matchTerms = cursor.match!;
     const nicheLabel = cursor.nicheLabel || "Tech";
     const found: FoundCreator[] = Array.isArray(run!.results) ? [...(run!.results as FoundCreator[])] : [];
@@ -465,7 +673,7 @@ Deno.serve(async (req) => {
 
     const { data: existingCreators } = await admin
       .from("creators")
-      .select("id,name,channel_link")
+      .select("id,name,channel_link,niche,notes,personalization")
       .eq("user_id", userId)
       .is("archived_at", null);
 
@@ -481,7 +689,8 @@ Deno.serve(async (req) => {
     const publishedAfter = new Date(Date.now() - MONTH_MS).toISOString();
 
     async function evaluateChannel(channelId: string): Promise<FoundCreator | null> {
-      if (foundIds.has(channelId) || seen.has(channelId)) return null;
+      if (foundIds.has(channelId)) return null;
+      if (seen.has(channelId)) return null;
       seen.add(channelId);
       cursor.seenChannelIds = [...seen];
 
@@ -539,7 +748,14 @@ Deno.serve(async (req) => {
           .single();
         if (!error && inserted) {
           creatorId = inserted.id;
-          existingCreators?.push({ id: inserted.id, name: title, channel_link: link });
+          existingCreators?.push({
+            id: inserted.id,
+            name: title,
+            channel_link: link,
+            niche: nicheLabel,
+            notes: null,
+            personalization: null,
+          });
         }
       } else {
         await admin
@@ -566,56 +782,140 @@ Deno.serve(async (req) => {
       };
     }
 
-    try {
-      while (found.length < target && Date.now() - started < BATCH_MS) {
-        if (!cursor.channelQueue.length) {
-          if (cursor.keywordIndex >= keywords.length) break;
-          const keyword = keywords[cursor.keywordIndex];
-          const params: Record<string, string> = {
-            part: "snippet",
-            type: "video",
-            maxResults: "25",
-            q: keyword,
-            relevanceLanguage: "en",
-            regionCode: "US",
-            order: "relevance",
-            publishedAfter,
-          };
-          if (cursor.searchPageToken) params.pageToken = cursor.searchPageToken;
-          const search = await ytGet(keys, "search", params, 100);
-          cursor.searchPageToken = search.nextPageToken || null;
-          if (!cursor.searchPageToken) cursor.keywordIndex++;
+    function enqueueChannels(ids: string[]) {
+      const fresh = [...new Set(ids)].filter((id) => id && !seen.has(id) && !foundIds.has(id));
+      cursor.channelQueue.push(...fresh);
+    }
 
-          const ids = (search.items || [])
-            .map((it: { snippet?: { channelId?: string } }) => it.snippet?.channelId)
-            .filter((id: string | undefined): id is string => Boolean(id) && !seen.has(id) && !foundIds.has(id));
-          cursor.channelQueue.push(...[...new Set(ids)]);
-          if (!ids.length && !cursor.searchPageToken) cursor.keywordIndex++;
-          continue;
+    function advanceQuery() {
+      cursor.pageToken = null;
+      cursor.pagesForQuery = 0;
+      cursor.queryIndex++;
+      if (cursor.queryIndex >= queries.length) {
+        cursor.queryIndex = 0;
+        cursor.strategyIndex++;
+      }
+    }
+
+    try {
+      // Phase 1: re-qualify matching CRM creators toward the 50
+      if (cursor.phase === "crm" && found.length < target) {
+        const eligible = (existingCreators || []).filter((c) => {
+          if (!c.channel_link) return false;
+          const blob = [c.name, c.niche, c.notes, c.personalization].filter(Boolean).join("\n");
+          return matchesNiche(blob, matchTerms) || matchesNiche(blob, [nicheLabel.toLowerCase()]);
+        });
+
+        while (cursor.crmOffset < eligible.length && found.length < target && Date.now() - started < BATCH_MS) {
+          const c = eligible[cursor.crmOffset++];
+          try {
+            const channelId = await resolveHandleToChannelId(keys, c.channel_link!);
+            if (!channelId) continue;
+            youtubeScanned++;
+            const hit = await evaluateChannel(channelId);
+            if (hit) {
+              found.push(hit);
+              foundIds.add(hit.channel_id);
+            }
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            if (/quota/i.test(msg)) throw e;
+          }
         }
 
-        const channelId = cursor.channelQueue.shift()!;
-        youtubeScanned++;
-        try {
-          const hit = await evaluateChannel(channelId);
-          if (hit) {
-            found.push(hit);
-            foundIds.add(hit.channel_id);
+        if (cursor.crmOffset >= eligible.length || found.length >= target) {
+          cursor.phase = "youtube";
+        }
+      }
+
+      // Phase 2: multi-strategy YouTube discovery until 50 or fully exhausted
+      while (cursor.phase === "youtube" && found.length < target && Date.now() - started < BATCH_MS) {
+        if (!cursor.channelQueue.length) {
+          if (cursor.strategyIndex >= STRATEGIES.length) break;
+          if (cursor.queryIndex >= queries.length) {
+            cursor.queryIndex = 0;
+            cursor.strategyIndex++;
+            cursor.pageToken = null;
+            cursor.pagesForQuery = 0;
+            continue;
           }
-        } catch (e) {
-          const msg = e instanceof Error ? e.message : String(e);
-          if (/quota/i.test(msg)) throw e;
+
+          const strategy = STRATEGIES[cursor.strategyIndex];
+          const keyword = queries[cursor.queryIndex];
+          const params: Record<string, string> = {
+            part: "snippet",
+            type: strategy.type,
+            maxResults: "50",
+            q: keyword,
+            relevanceLanguage: "en",
+            order: strategy.order,
+          };
+          if (strategy.regionCode) params.regionCode = strategy.regionCode;
+          if (strategy.usePublishedAfter && strategy.type === "video") {
+            params.publishedAfter = publishedAfter;
+          }
+          if (cursor.pageToken) params.pageToken = cursor.pageToken;
+
+          const search = await ytGet(keys, "search", params, 100);
+          cursor.pagesForQuery++;
+          cursor.pageToken = search.nextPageToken || null;
+
+          const ids = (search.items || [])
+            .map((it: {
+              snippet?: { channelId?: string };
+              id?: { channelId?: string };
+            }) => it.snippet?.channelId || it.id?.channelId)
+            .filter((id: string | undefined): id is string => Boolean(id));
+
+          enqueueChannels(ids);
+
+          if (cursor.pageToken && cursor.pagesForQuery < MAX_PAGES_PER_QUERY) {
+            // keep same query, next page
+          } else {
+            advanceQuery();
+          }
+
+          if (!ids.length && !cursor.channelQueue.length) continue;
+        }
+
+        while (cursor.channelQueue.length && found.length < target && Date.now() - started < BATCH_MS) {
+          const channelId = cursor.channelQueue.shift()!;
+          youtubeScanned++;
+          try {
+            const hit = await evaluateChannel(channelId);
+            if (hit) {
+              found.push(hit);
+              foundIds.add(hit.channel_id);
+            }
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            if (/quota/i.test(msg)) throw e;
+          }
         }
       }
     } catch (e) {
       errorMsg = e instanceof Error ? e.message : String(e);
     }
 
+    const drained = discoveryFullyDrained(cursor, queries.length);
+
+    // Keep status=running under target until every strategy/query page is drained (or quota error)
     const done =
       found.length >= target ||
-      (cursor.keywordIndex >= keywords.length && !cursor.channelQueue.length) ||
-      Boolean(errorMsg);
-    const status = errorMsg && found.length === 0 ? "failed" : done ? "completed" : "running";
+      Boolean(errorMsg) ||
+      drained;
+
+    let status: string;
+    if (errorMsg && found.length === 0) status = "failed";
+    else if (found.length >= target) status = "completed";
+    else if (drained && found.length < target) {
+      status = "completed";
+      if (!errorMsg) {
+        errorMsg = `Scan finished with ${found.length}/${target} after full multi-strategy discovery. Add more YouTube API keys or retry tomorrow to keep filling.`;
+      }
+    } else status = "running";
+
+    const phaseOut = cursor.phase === "crm" ? "crm" : `yt:${STRATEGIES[Math.min(cursor.strategyIndex, STRATEGIES.length - 1)]?.id || "done"}`;
 
     await admin
       .from("creator_search_runs")
@@ -623,7 +923,7 @@ Deno.serve(async (req) => {
         status,
         creators_found: found.length,
         youtube_scanned: youtubeScanned,
-        phase: "youtube",
+        phase: phaseOut,
         cursor_json: cursor,
         results: found,
         error: errorMsg,
@@ -639,12 +939,14 @@ Deno.serve(async (req) => {
       creators_found: found.length,
       target,
       youtube_scanned: youtubeScanned,
-      phase: "youtube",
+      phase: phaseOut,
       niche: cursor.niche,
       subniche: cursor.subniche || null,
       niche_label: cursor.nicheLabel || null,
       results: found,
       error: errorMsg,
+      queries_total: queries.length,
+      strategies_total: STRATEGIES.length,
       quota_used_approx: keys.reduce((s, k) => s + k.used, 0),
     });
   } catch (e) {

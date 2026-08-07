@@ -261,13 +261,17 @@ export function SearchPage() {
       setCreatorProgress(batch)
       setCreatorResults(batch.results || [])
       let guard = 0
-      while (!batch.done && batch.status === 'running' && guard < 80) {
+      while (!batch.done && batch.status === 'running' && guard < 250) {
         guard++
         batch = await invokeCreatorBatch(batch.run_id)
         setCreatorProgress(batch)
         setCreatorResults(batch.results || [])
       }
-      if (batch.error && (batch.creators_found || 0) === 0) {
+      if (!batch.done && batch.status === 'running') {
+        show(`Still running after many batches — ${batch.creators_found || 0}/50 so far. Run again to continue.`)
+      } else if (batch.error && (batch.creators_found || 0) === 0) {
+        show(batch.error)
+      } else if ((batch.creators_found || 0) < TARGET && batch.error) {
         show(batch.error)
       } else {
         await log(`Creator search (${searchLabel}) found <strong>${batch.creators_found}</strong> influencers`)
@@ -366,19 +370,6 @@ export function SearchPage() {
           <span className="chip">Male · 1%+ ER · 50k+ subs/views</span>
           <span className="chip">Posted last 30 days</span>
         </div>
-
-        {searchPack.keywords.length ? (
-          <details style={{ marginTop: '0.85rem' }}>
-            <summary style={{ cursor: 'pointer', color: 'var(--text-muted)', fontSize: '0.9rem' }}>
-              Keywords used for this search ({searchPack.keywords.length})
-            </summary>
-            <ul style={{ margin: '0.5rem 0 0', paddingLeft: '1.1rem', color: 'var(--text-muted)', fontSize: '0.88rem' }}>
-              {searchPack.keywords.map((k) => (
-                <li key={k}>{k}</li>
-              ))}
-            </ul>
-          </details>
-        ) : null}
       </div>
 
       {tab === 'creators' ? (
@@ -389,8 +380,8 @@ export function SearchPage() {
                 <div className="search-kicker">Pipeline</div>
                 <h3 style={{ margin: '0.2rem 0 0.55rem' }}>Find influencers</h3>
                 <p style={{ color: 'var(--text-muted)', marginTop: 0 }}>
-                  Searches YouTube videos from the last 30 days for your niche keywords, then keeps channels that pass
-                  the influencer gates. Matching creators are saved into your CRM.
+                  Multi-strategy YouTube discovery for your niche, then keeps only channels that pass every influencer
+                  gate. Keeps running until it hits 50 (or fully exhausts discovery / quota). Matches are saved to CRM.
                 </p>
               </div>
               <div className="search-meter">
