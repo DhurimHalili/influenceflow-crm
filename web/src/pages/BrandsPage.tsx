@@ -27,7 +27,6 @@ export function BrandsPage() {
   const [rows, setRows] = useState<Brand[]>([])
   const [q, setQ] = useState('')
   const [status, setStatus] = useState('all')
-  const [showArchived, setShowArchived] = useState(false)
   const [modal, setModal] = useState(false)
   const [bulkOpen, setBulkOpen] = useState(false)
   const [editing, setEditing] = useState<Brand | null>(null)
@@ -46,15 +45,17 @@ export function BrandsPage() {
 
   async function load() {
     if (!user) return
-    let query = supabase.from('brands').select('*').order('updated_at', { ascending: false })
-    if (!showArchived) query = query.is('archived_at', null)
-    const { data } = await query
+    const { data } = await supabase
+      .from('brands')
+      .select('*')
+      .is('archived_at', null)
+      .order('updated_at', { ascending: false })
     setRows((data || []) as Brand[])
   }
 
   useEffect(() => {
     load()
-  }, [user, showArchived])
+  }, [user])
 
   const filtered = useMemo(() => {
     return rows.filter((r) => {
@@ -67,7 +68,7 @@ export function BrandsPage() {
 
   useEffect(() => {
     setSelected(new Set())
-  }, [q, status, showArchived])
+  }, [q, status])
 
   const allFilteredSelected = filtered.length > 0 && filtered.every((r) => selected.has(r.id))
   const someFilteredSelected = filtered.some((r) => selected.has(r.id))
@@ -211,44 +212,42 @@ export function BrandsPage() {
     load()
   }
 
-  async function hardDeleteBrands(ids: string[]) {
+  async function moveToDeleted(b: Brand) {
+    await supabase.from('brands').update({ archived_at: new Date().toISOString() }).eq('id', b.id)
+    await log(`Moved brand ${b.name} to Deleted`)
+    show('Moved to Deleted')
+    load()
+  }
+
+  async function softDeleteBrands(ids: string[]) {
     if (!ids.length) return null
-    const { data: campaigns } = await supabase.from('campaigns').select('id').in('brand_id', ids)
-    const campaignIds = (campaigns || []).map((c) => c.id)
-    if (campaignIds.length) {
-      const { error: joinErr } = await supabase.from('campaign_creators').delete().in('campaign_id', campaignIds)
-      if (joinErr) return joinErr
-      const { error: campErr } = await supabase.from('campaigns').delete().in('id', campaignIds)
-      if (campErr) return campErr
-    }
-    const { error: contactErr } = await supabase.from('brand_contacts').delete().in('brand_id', ids)
-    if (contactErr) return contactErr
-    const { error: linkErr } = await supabase.from('external_links').delete().in('brand_id', ids)
-    if (linkErr) return linkErr
-    const { error } = await supabase.from('brands').delete().in('id', ids)
+    const { error } = await supabase
+      .from('brands')
+      .update({ archived_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+      .in('id', ids)
     return error
   }
 
   async function applyBulkDelete() {
     if (!user || selected.size === 0) return
     const ids = [...selected]
-    if (!confirm(`Permanently delete ${ids.length} brand${ids.length === 1 ? '' : 's'} (and their contacts/campaigns)? This cannot be undone.`)) return
+    if (!confirm(`Move ${ids.length} brand${ids.length === 1 ? '' : 's'} to Deleted? Search will skip them.`)) return
     setBusy(true)
-    const error = await hardDeleteBrands(ids)
+    const error = await softDeleteBrands(ids)
     setBusy(false)
     if (error) {
       show(error.message)
       return
     }
-    await log(`Permanently deleted ${ids.length} brands`)
+    await log(`Moved ${ids.length} brands to Deleted`)
     setSelected(new Set())
-    show(`Deleted ${ids.length} brand${ids.length === 1 ? '' : 's'}`)
+    show(`Moved ${ids.length} to Deleted`)
     load()
   }
 
   async function deleteAllBrands() {
     if (!user) return
-    const { data, error: loadErr } = await supabase.from('brands').select('id')
+    const { data, error: loadErr } = await supabase.from('brands').select('id').is('archived_at', null)
     if (loadErr) {
       show(loadErr.message)
       return
@@ -258,18 +257,17 @@ export function BrandsPage() {
       show('No brands to delete')
       return
     }
-    if (!confirm(`Permanently delete ALL ${ids.length} brands? This cannot be undone.`)) return
-    if (!confirm('Final confirm: delete every brand, contact, and related campaign?')) return
+    if (!confirm(`Move ALL ${ids.length} active brands to Deleted? Search will skip them.`)) return
     setBusy(true)
-    const error = await hardDeleteBrands(ids)
+    const error = await softDeleteBrands(ids)
     setBusy(false)
     if (error) {
       show(error.message)
       return
     }
-    await log(`Deleted all ${ids.length} brands`)
+    await log(`Moved all ${ids.length} brands to Deleted`)
     setSelected(new Set())
-    show(`Deleted all ${ids.length} brands — clean slate`)
+    show(`Moved all ${ids.length} to Deleted`)
     load()
   }
 
@@ -286,6 +284,9 @@ export function BrandsPage() {
         <button className="btn btn-danger" type="button" disabled={busy || rows.length === 0} onClick={deleteAllBrands}>
           Delete all
         </button>
+        <Link className="btn" to="/app/deleted">
+          Deleted list
+        </Link>
         <button className="btn btn-primary" type="button" onClick={openCreate}>
           Add brand
         </button>
@@ -301,10 +302,6 @@ export function BrandsPage() {
             </option>
           ))}
         </select>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text-muted)', fontSize: '0.9rem' }}>
-          <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />
-          Show archived
-        </label>
       </div>
 
       {selected.size > 0 && (
@@ -369,30 +366,9 @@ export function BrandsPage() {
                   <button className="btn btn-ghost" type="button" onClick={() => openEdit(b)}>
                     Edit
                   </button>
-                  {b.archived_at ? (
-                    <button
-                      className="btn btn-ghost"
-                      type="button"
-                      onClick={async () => {
-                        await supabase.from('brands').update({ archived_at: null, updated_at: new Date().toISOString() }).eq('id', b.id)
-                        show('Restored')
-                        load()
-                      }}
-                    >
-                      Restore
-                    </button>
-                  ) : (
-                    <button
-                      className="btn btn-ghost"
-                      type="button"
-                      onClick={async () => {
-                        await supabase.from('brands').update({ archived_at: new Date().toISOString() }).eq('id', b.id)
-                        load()
-                      }}
-                    >
-                      Archive
-                    </button>
-                  )}
+                  <button className="btn btn-ghost" type="button" onClick={() => moveToDeleted(b)}>
+                    Delete
+                  </button>
                 </td>
               </tr>
             ))}

@@ -11,6 +11,7 @@ import { OutreachPage } from './pages/OutreachPage'
 import { CalendarPage } from './pages/CalendarPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { SearchPage } from './pages/SearchPage'
+import { DeletedPage } from './pages/DeletedPage'
 import { HelpPage, HirePage } from './pages/HelpHirePages'
 import { PrivacyPage, TermsPage } from './pages/LegalPages'
 
@@ -48,6 +49,7 @@ export default function App() {
             <Route path="creators/:id" element={<CreatorDetailPage />} />
             <Route path="brands" element={<BrandsPage />} />
             <Route path="brands/:id" element={<BrandDetailPage />} />
+            <Route path="deleted" element={<DeletedPage />} />
             <Route path="campaigns" element={<CampaignsPage />} />
             <Route path="calendar" element={<CalendarPage />} />
             <Route path="settings" element={<SettingsPage />} />

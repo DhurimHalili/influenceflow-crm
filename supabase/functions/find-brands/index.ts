@@ -572,16 +572,20 @@ Deno.serve(async (req) => {
     const found: FoundBrand[] = Array.isArray(run!.results) ? [...(run!.results as FoundBrand[])] : [];
     const knownDomains = new Set(found.map((f) => f.domain));
 
-    const { data: existingBrands } = await admin
-      .from("brands")
-      .select("id,name,domain")
-      .eq("user_id", userId)
-      .is("archived_at", null);
+    const [{ data: existingBrands }, { data: brandExclusions }] = await Promise.all([
+      admin.from("brands").select("id,name,domain,archived_at").eq("user_id", userId),
+      admin.from("search_exclusions").select("exclusion_key,domain,label").eq("user_id", userId).eq("kind", "brand"),
+    ]);
     for (const b of existingBrands || []) {
       if (b.domain) knownDomains.add(String(b.domain).toLowerCase());
       const guess = domainToBrandName(String(b.domain || "")).toLowerCase();
       if (guess) knownDomains.add(guess);
       knownDomains.add(String(b.name || "").toLowerCase());
+    }
+    for (const ex of brandExclusions || []) {
+      if (ex.exclusion_key) knownDomains.add(String(ex.exclusion_key).toLowerCase());
+      if (ex.domain) knownDomains.add(String(ex.domain).toLowerCase());
+      if (ex.label) knownDomains.add(String(ex.label).toLowerCase());
     }
 
     let creatorsScanned = Number(run!.creators_scanned || 0);

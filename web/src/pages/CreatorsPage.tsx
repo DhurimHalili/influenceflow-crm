@@ -27,7 +27,6 @@ export function CreatorsPage() {
   const [rows, setRows] = useState<Creator[]>([])
   const [q, setQ] = useState('')
   const [status, setStatus] = useState('all')
-  const [showArchived, setShowArchived] = useState(false)
   const [view, setView] = useState<'table' | 'board'>('table')
   const [modal, setModal] = useState(false)
   const [bulkOpen, setBulkOpen] = useState(false)
@@ -41,15 +40,17 @@ export function CreatorsPage() {
 
   async function load() {
     if (!user) return
-    let query = supabase.from('creators').select('*').order('updated_at', { ascending: false })
-    if (!showArchived) query = query.is('archived_at', null)
-    const { data } = await query
+    const { data } = await supabase
+      .from('creators')
+      .select('*')
+      .is('archived_at', null)
+      .order('updated_at', { ascending: false })
     setRows((data || []) as Creator[])
   }
 
   useEffect(() => {
     load()
-  }, [user, showArchived])
+  }, [user])
 
   const filtered = useMemo(() => {
     return rows.filter((r) => {
@@ -62,7 +63,7 @@ export function CreatorsPage() {
 
   useEffect(() => {
     setSelected(new Set())
-  }, [q, status, showArchived, view])
+  }, [q, status, view])
 
   const allFilteredSelected = filtered.length > 0 && filtered.every((r) => selected.has(r.id))
   const someFilteredSelected = filtered.some((r) => selected.has(r.id))
@@ -131,14 +132,62 @@ export function CreatorsPage() {
     load()
   }
 
-  async function archive(c: Creator) {
+  async function moveToDeleted(c: Creator) {
     await supabase.from('creators').update({ archived_at: new Date().toISOString() }).eq('id', c.id)
-    await log(`Archived creator ${c.name}`)
+    await log(`Moved creator ${c.name} to Deleted`)
+    show('Moved to Deleted')
     load()
   }
 
-  async function restore(c: Creator) {
-    await supabase.from('creators').update({ archived_at: null }).eq('id', c.id)
+  async function softDeleteCreators(ids: string[]) {
+    if (!ids.length) return null
+    const { error } = await supabase
+      .from('creators')
+      .update({ archived_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+      .in('id', ids)
+    return error
+  }
+
+  async function applyBulkDelete() {
+    if (!user || selected.size === 0) return
+    const ids = [...selected]
+    if (!confirm(`Move ${ids.length} creator${ids.length === 1 ? '' : 's'} to Deleted? Search will skip them.`)) return
+    setBusy(true)
+    const error = await softDeleteCreators(ids)
+    setBusy(false)
+    if (error) {
+      show(error.message)
+      return
+    }
+    await log(`Moved ${ids.length} creators to Deleted`)
+    setSelected(new Set())
+    show(`Moved ${ids.length} to Deleted`)
+    load()
+  }
+
+  async function deleteAllCreators() {
+    if (!user) return
+    const { data, error: loadErr } = await supabase.from('creators').select('id').is('archived_at', null)
+    if (loadErr) {
+      show(loadErr.message)
+      return
+    }
+    const ids = (data || []).map((r) => r.id)
+    if (!ids.length) {
+      show('No creators to delete')
+      return
+    }
+    if (!confirm(`Move ALL ${ids.length} active creators to Deleted?`)) return
+    setBusy(true)
+    const error = await softDeleteCreators(ids)
+    setBusy(false)
+    if (error) {
+      show(error.message)
+      return
+    }
+    await log(`Moved all ${ids.length} creators to Deleted`)
+    setSelected(new Set())
+    show(`Moved all ${ids.length} to Deleted`)
     load()
   }
 
@@ -247,58 +296,6 @@ export function CreatorsPage() {
     load()
   }
 
-  async function hardDeleteCreators(ids: string[]) {
-    if (!ids.length) return null
-    const { error: joinErr } = await supabase.from('campaign_creators').delete().in('creator_id', ids)
-    if (joinErr) return joinErr
-    const { error } = await supabase.from('creators').delete().in('id', ids)
-    return error
-  }
-
-  async function applyBulkDelete() {
-    if (!user || selected.size === 0) return
-    const ids = [...selected]
-    if (!confirm(`Permanently delete ${ids.length} creator${ids.length === 1 ? '' : 's'}? This cannot be undone.`)) return
-    setBusy(true)
-    const error = await hardDeleteCreators(ids)
-    setBusy(false)
-    if (error) {
-      show(error.message)
-      return
-    }
-    await log(`Permanently deleted ${ids.length} creators`)
-    setSelected(new Set())
-    show(`Deleted ${ids.length} creator${ids.length === 1 ? '' : 's'}`)
-    load()
-  }
-
-  async function deleteAllCreators() {
-    if (!user) return
-    const { data, error: loadErr } = await supabase.from('creators').select('id')
-    if (loadErr) {
-      show(loadErr.message)
-      return
-    }
-    const ids = (data || []).map((r) => r.id)
-    if (!ids.length) {
-      show('No creators to delete')
-      return
-    }
-    if (!confirm(`Permanently delete ALL ${ids.length} creators? This cannot be undone.`)) return
-    if (!confirm('Final confirm: delete every creator in your CRM?')) return
-    setBusy(true)
-    const error = await hardDeleteCreators(ids)
-    setBusy(false)
-    if (error) {
-      show(error.message)
-      return
-    }
-    await log(`Deleted all ${ids.length} creators`)
-    setSelected(new Set())
-    show(`Deleted all ${ids.length} creators — clean slate`)
-    load()
-  }
-
   function exportCsv() {
     downloadCsv(
       'creators.csv',
@@ -335,6 +332,9 @@ export function CreatorsPage() {
         <button className="btn btn-danger" type="button" disabled={busy || rows.length === 0} onClick={deleteAllCreators}>
           Delete all
         </button>
+        <Link className="btn" to="/app/deleted">
+          Deleted list
+        </Link>
         <button className="btn btn-primary" type="button" onClick={openCreate}>
           Add creator
         </button>
@@ -350,10 +350,6 @@ export function CreatorsPage() {
             </option>
           ))}
         </select>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text-muted)', fontSize: '0.9rem' }}>
-          <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />
-          Show archived
-        </label>
       </div>
 
       {selected.size > 0 && (
@@ -457,15 +453,9 @@ export function CreatorsPage() {
                       <button className="btn btn-ghost" type="button" onClick={() => openEdit(c)}>
                         Edit
                       </button>
-                      {c.archived_at ? (
-                        <button className="btn btn-ghost" type="button" onClick={() => restore(c)}>
-                          Restore
-                        </button>
-                      ) : (
-                        <button className="btn btn-ghost" type="button" onClick={() => archive(c)}>
-                          Archive
-                        </button>
-                      )}
+                      <button className="btn btn-ghost" type="button" onClick={() => moveToDeleted(c)}>
+                        Delete
+                      </button>
                     </td>
                   </tr>
                 ))}

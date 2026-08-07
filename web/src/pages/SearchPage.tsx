@@ -381,7 +381,8 @@ export function SearchPage() {
                 <h3 style={{ margin: '0.2rem 0 0.55rem' }}>Find influencers</h3>
                 <p style={{ color: 'var(--text-muted)', marginTop: 0 }}>
                   Multi-strategy YouTube discovery for your niche, then keeps only channels that pass every influencer
-                  gate. Keeps running until it hits 50 (or fully exhausts discovery / quota). Matches are saved to CRM.
+                  gate. Skips anyone already in Creators or Deleted. Keeps running until it hits 50 (or fully exhausts
+                  discovery / quota). New matches are saved to CRM.
                 </p>
               </div>
               <div className="search-meter">

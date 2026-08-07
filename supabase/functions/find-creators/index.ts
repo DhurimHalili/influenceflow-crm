@@ -607,9 +607,9 @@ Deno.serve(async (req) => {
           user_id: userId,
           status: "running",
           target,
-          phase: "crm",
+          phase: "youtube",
           cursor_json: {
-            phase: "crm",
+            phase: "youtube",
             crmOffset: 0,
             strategyIndex: 0,
             queryIndex: 0,
@@ -681,17 +681,40 @@ Deno.serve(async (req) => {
     const foundIds = new Set(found.map((f) => f.channel_id));
     const seen = new Set(cursor.seenChannelIds);
 
-    const { data: existingCreators } = await admin
-      .from("creators")
-      .select("id,name,channel_link,niche,notes,personalization")
-      .eq("user_id", userId)
-      .is("archived_at", null);
+    // Block active + deleted (archived) CRM creators and permanent exclusions
+    const [{ data: allCreators }, { data: creatorExclusions }] = await Promise.all([
+      admin.from("creators").select("id,name,channel_link,niche,notes,personalization,archived_at").eq("user_id", userId),
+      admin.from("search_exclusions").select("exclusion_key,channel_link").eq("user_id", userId).eq("kind", "creator"),
+    ]);
 
-    function findExisting(channelId: string, link: string) {
-      return (existingCreators || []).find((c) => {
-        const cl = (c.channel_link || "").toLowerCase();
-        return cl.includes(channelId.toLowerCase()) || (link && cl === link.toLowerCase());
-      });
+    const blockedChannelIds = new Set<string>();
+    const blockedKeys = new Set<string>();
+
+    function blockKey(raw: string | null | undefined) {
+      const v = (raw || "").trim().toLowerCase();
+      if (v) blockedKeys.add(v);
+    }
+
+    for (const c of allCreators || []) {
+      const id = (c.channel_link || "").match(/UC[\w-]{20,}/)?.[0];
+      if (id) blockedChannelIds.add(id);
+      blockKey(c.channel_link);
+      blockKey(c.name);
+    }
+    for (const ex of creatorExclusions || []) {
+      blockKey(ex.exclusion_key);
+      blockKey(ex.channel_link);
+      const id = (ex.exclusion_key || "").match(/UC[\w-]{20,}/)?.[0] ||
+        (ex.channel_link || "").match(/UC[\w-]{20,}/)?.[0];
+      if (id) blockedChannelIds.add(id);
+    }
+
+    function isBlockedChannel(channelId: string, link: string, title: string): boolean {
+      if (blockedChannelIds.has(channelId)) return true;
+      if (blockedKeys.has(channelId.toLowerCase())) return true;
+      if (link && blockedKeys.has(link.toLowerCase())) return true;
+      if (title && blockedKeys.has(title.toLowerCase())) return true;
+      return false;
     }
 
     let youtubeScanned = Number(run!.youtube_scanned || 0);
@@ -704,6 +727,9 @@ Deno.serve(async (req) => {
       seen.add(channelId);
       cursor.seenChannelIds = [...seen];
 
+      // Skip anyone already in Creators (active) or Deleted, or permanently excluded
+      if (blockedChannelIds.has(channelId) || blockedKeys.has(channelId.toLowerCase())) return null;
+
       const ch = await getChannel(keys, channelId);
       if (!ch) return null;
       const sn = ch.snippet || {};
@@ -711,6 +737,8 @@ Deno.serve(async (req) => {
       const subs = Number(stats.subscriberCount || 0);
       const desc = String(sn.description || "");
       const title = String(sn.title || "");
+      const linkEarly = channelUrl(channelId, sn.customUrl);
+      if (isBlockedChannel(channelId, linkEarly, title)) return null;
       if (subs < MIN_SUBS) return null;
       if (!looksEnglish(desc) && !looksEnglish(title)) return null;
       if (!guessMale(title, desc)) return null;
@@ -735,51 +763,42 @@ Deno.serve(async (req) => {
       if (!matchesNiche(`${title}\n${desc}\n${videoBlob}`, matchTerms)) return null;
 
       const link = channelUrl(channelId, sn.customUrl);
-      const existing = findExisting(channelId, link);
-      let creatorId = existing?.id || null;
-      const wasInCrm = Boolean(existing);
+      // Never return creators already in CRM / Deleted — only brand-new discoveries
+      if (isBlockedChannel(channelId, link, title)) return null;
 
-      if (!existing) {
-        const { data: inserted, error } = await admin
-          .from("creators")
-          .insert({
-            user_id: userId,
-            name: title,
-            channel_link: link,
-            niche: nicheLabel,
-            avg_views: Math.round(metrics.avgViews),
-            platform: "YouTube",
-            pipeline_status: "new",
-            gender_guess: "male",
-            notes: `Discovered via Search · ${nicheLabel} · ${subs.toLocaleString()} subs · ${formatEngagement(metrics.engagement)} ER · last upload ${lastPublished.slice(0, 10)}`,
-            personalization: `YouTube channel ${channelId}. Avg views ~${Math.round(metrics.avgViews).toLocaleString()}.`,
-          })
-          .select("id")
-          .single();
-        if (!error && inserted) {
-          creatorId = inserted.id;
-          existingCreators?.push({
-            id: inserted.id,
-            name: title,
-            channel_link: link,
-            niche: nicheLabel,
-            notes: null,
-            personalization: null,
-          });
-        }
-      } else {
-        await admin
-          .from("creators")
-          .update({
-            avg_views: Math.round(metrics.avgViews),
-            gender_guess: "male",
-            niche: nicheLabel,
-          })
-          .eq("id", existing.id);
-      }
+      const { data: inserted, error } = await admin
+        .from("creators")
+        .insert({
+          user_id: userId,
+          name: title,
+          channel_link: link,
+          niche: nicheLabel,
+          avg_views: Math.round(metrics.avgViews),
+          platform: "YouTube",
+          pipeline_status: "new",
+          gender_guess: "male",
+          notes: `Discovered via Search · ${nicheLabel} · ${subs.toLocaleString()} subs · ${formatEngagement(metrics.engagement)} ER · last upload ${lastPublished.slice(0, 10)}`,
+          personalization: `YouTube channel ${channelId}. Avg views ~${Math.round(metrics.avgViews).toLocaleString()}.`,
+        })
+        .select("id")
+        .single();
+      if (error || !inserted) return null;
+
+      blockedChannelIds.add(channelId);
+      blockKey(link);
+      blockKey(title);
+      allCreators?.push({
+        id: inserted.id,
+        name: title,
+        channel_link: link,
+        niche: nicheLabel,
+        notes: null,
+        personalization: null,
+        archived_at: null,
+      });
 
       return {
-        creator_id: creatorId,
+        creator_id: inserted.id,
         name: title,
         channel_id: channelId,
         channel_link: link,
@@ -788,12 +807,14 @@ Deno.serve(async (req) => {
         avg_views: Math.round(metrics.avgViews),
         engagement: Number(metrics.engagement.toFixed(4)),
         last_upload_at: lastPublished,
-        already_in_crm: wasInCrm,
+        already_in_crm: false,
       };
     }
 
     function enqueueChannels(ids: string[]) {
-      const fresh = [...new Set(ids)].filter((id) => id && !seen.has(id) && !foundIds.has(id));
+      const fresh = [...new Set(ids)].filter(
+        (id) => id && !seen.has(id) && !foundIds.has(id) && !blockedChannelIds.has(id),
+      );
       cursor.channelQueue.push(...fresh);
     }
 
@@ -808,37 +829,9 @@ Deno.serve(async (req) => {
     }
 
     try {
-      // Phase 1: re-qualify matching CRM creators toward the 50
-      if (cursor.phase === "crm" && found.length < target) {
-        const eligible = (existingCreators || []).filter((c) => {
-          if (!c.channel_link) return false;
-          const blob = [c.name, c.niche, c.notes, c.personalization].filter(Boolean).join("\n");
-          return matchesNiche(blob, matchTerms) || matchesNiche(blob, [nicheLabel.toLowerCase()]);
-        });
+      // Skip CRM phase — active/deleted creators must not appear in Search results
+      cursor.phase = "youtube";
 
-        while (cursor.crmOffset < eligible.length && found.length < target && Date.now() - started < BATCH_MS) {
-          const c = eligible[cursor.crmOffset++];
-          try {
-            const channelId = await resolveHandleToChannelId(keys, c.channel_link!);
-            if (!channelId) continue;
-            youtubeScanned++;
-            const hit = await evaluateChannel(channelId);
-            if (hit) {
-              found.push(hit);
-              foundIds.add(hit.channel_id);
-            }
-          } catch (e) {
-            const msg = e instanceof Error ? e.message : String(e);
-            if (/quota/i.test(msg)) throw e;
-          }
-        }
-
-        if (cursor.crmOffset >= eligible.length || found.length >= target) {
-          cursor.phase = "youtube";
-        }
-      }
-
-      // Phase 2: multi-strategy YouTube discovery until 50 or fully exhausted
       while (cursor.phase === "youtube" && found.length < target && Date.now() - started < BATCH_MS) {
         if (!cursor.channelQueue.length) {
           if (cursor.strategyIndex >= STRATEGIES.length) break;
