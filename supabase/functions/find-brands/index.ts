@@ -276,7 +276,12 @@ async function ytGet(keys: YtKey[], endpoint: string, params: Record<string, str
     const res = await fetch(url);
     const body = await res.json().catch(() => ({}));
     const msg = body?.error?.message || `YouTube API error ${res.status}`;
-    const quotaHit = /quota|dailyLimitExceeded|rateLimitExceeded/i.test(msg) || res.status === 403;
+    const reasons = (body?.error?.errors || []).map((e: { reason?: string }) => e.reason || "").join(" ");
+    const quotaHit =
+      res.status === 429 ||
+      /quota|dailyLimitExceeded|rateLimitExceeded|userRateLimitExceeded|servingLimitExceeded/i.test(
+        `${msg} ${reasons}`,
+      );
     if (!res.ok && quotaHit) {
       key.used = key.limit;
       lastErr = msg;
