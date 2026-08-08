@@ -59,6 +59,9 @@ type CreatorProgress = {
   niche?: string
   subniche?: string | null
   niche_label?: string
+  keys_alive?: number
+  keys_total?: number
+  keys_dead?: number
 }
 
 const TARGET = 50
@@ -398,6 +401,11 @@ export function SearchPage() {
                 <div className="search-meter-meta">
                   <span>YouTube scanned: {creatorProgress?.youtube_scanned ?? 0}</span>
                   <span>Phase: {creatorProgress?.phase || '—'}</span>
+                  {creatorProgress?.keys_total != null ? (
+                    <span>
+                      Keys: {creatorProgress.keys_alive ?? '—'} / {creatorProgress.keys_total} alive
+                    </span>
+                  ) : null}
                 </div>
                 {creatorProgress?.error && (
                   <p style={{ color: 'var(--danger)', marginBottom: 0, fontSize: '0.9rem' }}>{creatorProgress.error}</p>

@@ -225,7 +225,7 @@ const MALE_NAMES = new Set([
   "chris", "mike", "dave", "tom", "nick", "ben", "matt", "josh", "jake", "luke",
 ]);
 
-type YtKey = { key: string; used: number; limit: number };
+type YtKey = { key: string; used: number; limit: number; dead: boolean };
 
 type FoundBrand = {
   brand_name: string;
@@ -241,6 +241,7 @@ type Cursor = {
   keywordIndex: number;
   searchPageToken: string | null;
   youtubeChannelQueue: string[];
+  deadKeys?: string[];
   niche?: string;
   subniche?: string | null;
   keywords?: string[];
@@ -255,42 +256,90 @@ function json(data: unknown, status = 200) {
   });
 }
 
-function loadKeys(): YtKey[] {
+function loadKeys(deadKeys: string[] = []): YtKey[] {
+  const dead = new Set(deadKeys.filter(Boolean));
   const raw = Deno.env.get("YOUTUBE_API_KEYS") || "";
-  return raw
-    .split(/[,\n]/)
-    .map((s) => s.trim())
-    .filter(Boolean)
-    .map((key) => ({ key, used: 0, limit: 9500 }));
+  const seen = new Set<string>();
+  const keys: YtKey[] = [];
+  for (const part of raw.split(/[,\n\r\t ]+/)) {
+    const key = part.trim();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    keys.push({ key, used: 0, limit: 9500, dead: dead.has(key) });
+  }
+  keys.sort((a, b) => Number(a.dead) - Number(b.dead));
+  return keys;
+}
+
+function isQuotaError(status: number, body: Record<string, unknown>): boolean {
+  if (status === 429) return true;
+  const err = (body?.error || {}) as { message?: string; errors?: Array<{ reason?: string; domain?: string }> };
+  const msg = String(err.message || "");
+  const reasons = (err.errors || []).map((e) => `${e.reason || ""} ${e.domain || ""}`).join(" ");
+  const blob = `${msg} ${reasons}`;
+  if (/quotaExceeded|dailyLimitExceeded|rateLimitExceeded|userRateLimitExceeded|servingLimitExceeded|quota/i.test(blob)) {
+    return true;
+  }
+  if (status === 403 && /quota|limit|exceeded|rate/i.test(blob)) return true;
+  return false;
+}
+
+function aliveKeyCount(keys: YtKey[]): number {
+  return keys.filter((k) => !k.dead && k.used < k.limit).length;
+}
+
+function snapshotDeadKeys(keys: YtKey[]): string[] {
+  return keys.filter((k) => k.dead).map((k) => k.key);
 }
 
 async function ytGet(keys: YtKey[], endpoint: string, params: Record<string, string>, cost: number) {
-  const tried = new Set<string>();
-  let lastErr = "YouTube API quota exhausted for today. Add another key or retry tomorrow.";
-  while (true) {
-    const key = keys.find((k) => !tried.has(k.key) && k.used + cost <= k.limit);
-    if (!key) throw new Error(lastErr);
-    tried.add(key.key);
+  let lastErr = "All YouTube API keys hit quota for today. Add keys from other Google Cloud projects or retry tomorrow.";
+  const attempted = new Set<string>();
+
+  while (aliveKeyCount(keys) > 0) {
+    const key = keys
+      .filter((k) => !k.dead && !attempted.has(k.key) && k.used + cost <= k.limit)
+      .sort((a, b) => a.used - b.used)[0];
+    if (!key) break;
+    attempted.add(key.key);
+
     const url = new URL(`${YT}/${endpoint}`);
     Object.entries({ ...params, key: key.key }).forEach(([k, v]) => url.searchParams.set(k, v));
-    const res = await fetch(url);
-    const body = await res.json().catch(() => ({}));
-    const msg = body?.error?.message || `YouTube API error ${res.status}`;
-    const reasons = (body?.error?.errors || []).map((e: { reason?: string }) => e.reason || "").join(" ");
-    const quotaHit =
-      res.status === 429 ||
-      /quota|dailyLimitExceeded|rateLimitExceeded|userRateLimitExceeded|servingLimitExceeded/i.test(
-        `${msg} ${reasons}`,
-      );
-    if (!res.ok && quotaHit) {
-      key.used = key.limit;
-      lastErr = msg;
+
+    let res: Response;
+    try {
+      res = await fetch(url);
+    } catch (e) {
+      lastErr = e instanceof Error ? e.message : String(e);
       continue;
     }
+
+    const body = await res.json().catch(() => ({} as Record<string, unknown>));
+    const msg = (body as { error?: { message?: string } })?.error?.message || `YouTube API error ${res.status}`;
+
+    if (!res.ok && isQuotaError(res.status, body as Record<string, unknown>)) {
+      key.dead = true;
+      key.used = key.limit;
+      lastErr = msg;
+      attempted.clear();
+      continue;
+    }
+
     key.used += cost;
-    if (!res.ok) throw new Error(msg);
+    if (!res.ok) {
+      if (aliveKeyCount(keys) > 1) {
+        lastErr = msg;
+        continue;
+      }
+      throw new Error(msg);
+    }
     return body;
   }
+
+  for (const k of keys) {
+    if (k.used >= k.limit) k.dead = true;
+  }
+  throw new Error(lastErr);
 }
 
 function normalizeDomain(raw: string): string {
@@ -502,13 +551,15 @@ Deno.serve(async (req) => {
     const body = await req.json().catch(() => ({}));
     const action = body.action || "start";
     const target = Number(body.target || TARGET_DEFAULT);
-    const keys = loadKeys();
-    if (!keys.length) return json({ error: "YOUTUBE_API_KEYS secret is not set" }, 500);
 
     let runId = body.run_id as string | undefined;
     let run: Record<string, unknown> | null = null;
+    let keys: YtKey[] = [];
 
     if (action === "start" || !runId) {
+      keys = loadKeys([]);
+      if (!keys.length) return json({ error: "YOUTUBE_API_KEYS secret is not set" }, 500);
+
       const nicheId = String(body.niche || "tech");
       const subnicheId = body.subniche ? String(body.subniche) : null;
       const pack = resolveNichePack(nicheId, subnicheId);
@@ -526,6 +577,7 @@ Deno.serve(async (req) => {
             keywordIndex: 0,
             searchPageToken: null,
             youtubeChannelQueue: [],
+            deadKeys: [],
             niche: nicheId,
             subniche: subnicheId,
             keywords: pack.keywords,
@@ -548,6 +600,9 @@ Deno.serve(async (req) => {
         .maybeSingle();
       if (error || !data) return json({ error: "Run not found" }, 404);
       run = data;
+      const priorDead = ((data.cursor_json as Cursor)?.deadKeys || []) as string[];
+      keys = loadKeys(priorDead);
+      if (!keys.length) return json({ error: "YOUTUBE_API_KEYS secret is not set" }, 500);
       if (data.status === "completed" || data.status === "failed") {
         return json({
           run_id: runId,
@@ -558,6 +613,8 @@ Deno.serve(async (req) => {
           results: data.results,
           done: true,
           error: data.error,
+          keys_alive: aliveKeyCount(keys),
+          keys_total: keys.length,
         });
       }
     }
@@ -734,7 +791,7 @@ Deno.serve(async (req) => {
             });
           } catch (e) {
             const msg = e instanceof Error ? e.message : String(e);
-            if (/quota/i.test(msg)) throw e;
+            if (/quota|All YouTube API keys/i.test(msg) && aliveKeyCount(keys) === 0) throw e;
           }
         }
 
@@ -788,7 +845,7 @@ Deno.serve(async (req) => {
             });
           } catch (e) {
             const msg = e instanceof Error ? e.message : String(e);
-            if (/quota/i.test(msg)) throw e;
+            if (/quota|All YouTube API keys/i.test(msg) && aliveKeyCount(keys) === 0) throw e;
           }
         }
       }
@@ -796,8 +853,23 @@ Deno.serve(async (req) => {
       errorMsg = e instanceof Error ? e.message : String(e);
     }
 
-    const done = found.length >= target || (phase === "youtube" && cursor.keywordIndex >= keywords.length && !cursor.youtubeChannelQueue.length) || Boolean(errorMsg);
-    const status = errorMsg && found.length === 0 ? "failed" : done ? "completed" : "running";
+    cursor.deadKeys = snapshotDeadKeys(keys);
+    const allKeysDead = aliveKeyCount(keys) === 0;
+    const quotaBlocked = allKeysDead && Boolean(errorMsg) && /quota|All YouTube API keys/i.test(errorMsg || "");
+    const done =
+      found.length >= target ||
+      (phase === "youtube" && cursor.keywordIndex >= keywords.length && !cursor.youtubeChannelQueue.length) ||
+      quotaBlocked ||
+      (Boolean(errorMsg) && !/quota|All YouTube API keys/i.test(errorMsg || ""));
+
+    let status: string;
+    if (quotaBlocked && found.length === 0) status = "failed";
+    else if (errorMsg && found.length === 0 && !/quota|All YouTube API keys/i.test(errorMsg)) status = "failed";
+    else if (found.length >= target) status = "completed";
+    else if (quotaBlocked) {
+      status = "completed";
+      errorMsg = `All YouTube keys hit quota after finding ${found.length}/${target}. Add keys from other Google Cloud projects or retry tomorrow.`;
+    } else status = done ? "completed" : "running";
 
     await admin
       .from("brand_search_runs")
@@ -829,6 +901,9 @@ Deno.serve(async (req) => {
       niche_label: cursor.nicheLabel || null,
       results: found,
       error: errorMsg,
+      keys_alive: aliveKeyCount(keys),
+      keys_total: keys.length,
+      keys_dead: snapshotDeadKeys(keys).length,
       quota_used_approx: keys.reduce((s, k) => s + k.used, 0),
     });
   } catch (e) {
