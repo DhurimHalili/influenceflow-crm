@@ -383,9 +383,9 @@ export function SearchPage() {
                 <div className="search-kicker">Pipeline</div>
                 <h3 style={{ margin: '0.2rem 0 0.55rem' }}>Find influencers</h3>
                 <p style={{ color: 'var(--text-muted)', marginTop: 0 }}>
-                  Multi-strategy YouTube discovery for your niche, then keeps only channels that pass every influencer
-                  gate. Skips anyone already in Creators or Deleted. Keeps running until it hits 50 (or fully exhausts
-                  discovery / quota). New matches are saved to CRM.
+                  Multi-strategy YouTube discovery for your niche. Skips Creators + Deleted, and skips any channel
+                  already checked in the last 3 weeks so each run digs into new people. After 3 weeks, checked
+                  channels can be searched again. Keeps going until 50 (or quota / full drain).
                 </p>
               </div>
               <div className="search-meter">

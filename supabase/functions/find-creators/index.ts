@@ -14,6 +14,7 @@ const MIN_SUBS = 50_000;
 const MIN_AVG_VIEWS = 50_000;
 const MIN_ENGAGEMENT = 0.01;
 const MONTH_MS = 30 * 24 * 60 * 60 * 1000;
+const SCAN_COOLDOWN_MS = 21 * 24 * 60 * 60 * 1000; // 3 weeks — don't re-check same channel
 const BATCH_MS = 48_000;
 const MAX_PAGES_PER_QUERY = 5;
 
@@ -754,13 +755,20 @@ Deno.serve(async (req) => {
     const foundIds = new Set(found.map((f) => f.channel_id));
     const seen = new Set(cursor.seenChannelIds);
 
-    // Block active + deleted (archived) CRM creators and permanent exclusions
-    const [{ data: allCreators }, { data: creatorExclusions }] = await Promise.all([
+    // Block active + deleted CRM creators, permanent exclusions, and channels scanned in last 3 weeks
+    const cooldownSince = new Date(Date.now() - SCAN_COOLDOWN_MS).toISOString();
+    const [{ data: allCreators }, { data: creatorExclusions }, { data: recentScans }] = await Promise.all([
       admin.from("creators").select("id,name,channel_link,niche,notes,personalization,archived_at").eq("user_id", userId),
       admin.from("search_exclusions").select("exclusion_key,channel_link").eq("user_id", userId).eq("kind", "creator"),
+      admin
+        .from("creator_channel_scans")
+        .select("channel_id")
+        .eq("user_id", userId)
+        .gte("last_scanned_at", cooldownSince),
     ]);
 
     const blockedChannelIds = new Set<string>();
+    const cooldownChannelIds = new Set<string>();
     const blockedKeys = new Set<string>();
 
     function blockKey(raw: string | null | undefined) {
@@ -781,6 +789,9 @@ Deno.serve(async (req) => {
         (ex.channel_link || "").match(/UC[\w-]{20,}/)?.[0];
       if (id) blockedChannelIds.add(id);
     }
+    for (const s of recentScans || []) {
+      if (s.channel_id) cooldownChannelIds.add(String(s.channel_id));
+    }
 
     function isBlockedChannel(channelId: string, link: string, title: string): boolean {
       if (blockedChannelIds.has(channelId)) return true;
@@ -788,6 +799,18 @@ Deno.serve(async (req) => {
       if (link && blockedKeys.has(link.toLowerCase())) return true;
       if (title && blockedKeys.has(title.toLowerCase())) return true;
       return false;
+    }
+
+    async function markScanned(channelId: string) {
+      cooldownChannelIds.add(channelId);
+      await admin.from("creator_channel_scans").upsert(
+        {
+          user_id: userId,
+          channel_id: channelId,
+          last_scanned_at: new Date().toISOString(),
+        },
+        { onConflict: "user_id,channel_id" },
+      );
     }
 
     let youtubeScanned = Number(run!.youtube_scanned || 0);
@@ -800,8 +823,12 @@ Deno.serve(async (req) => {
       seen.add(channelId);
       cursor.seenChannelIds = [...seen];
 
-      // Skip anyone already in Creators (active) or Deleted, or permanently excluded
+      // Skip CRM active/deleted, permanent blocklist, and 3-week cooldown
       if (blockedChannelIds.has(channelId) || blockedKeys.has(channelId.toLowerCase())) return null;
+      if (cooldownChannelIds.has(channelId)) return null;
+
+      // Count as searched even if they fail filters — won't revisit for 3 weeks
+      await markScanned(channelId);
 
       const ch = await getChannel(keys, channelId);
       if (!ch) return null;
@@ -886,7 +913,12 @@ Deno.serve(async (req) => {
 
     function enqueueChannels(ids: string[]) {
       const fresh = [...new Set(ids)].filter(
-        (id) => id && !seen.has(id) && !foundIds.has(id) && !blockedChannelIds.has(id),
+        (id) =>
+          id &&
+          !seen.has(id) &&
+          !foundIds.has(id) &&
+          !blockedChannelIds.has(id) &&
+          !cooldownChannelIds.has(id),
       );
       cursor.channelQueue.push(...fresh);
     }
