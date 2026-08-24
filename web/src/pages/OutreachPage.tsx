@@ -359,6 +359,96 @@ export function OutreachPage() {
   const eta = estimateSendMinutes(drafts.length, delayMin, delayMax)
   const customizedCount = drafts.filter((d) => d.customized).length
 
+  const SOON_MODE = true // temporary — keep outreach code intact, just gate UI
+  if (SOON_MODE) {
+    return (
+      <div style={{ position: 'relative', minHeight: '68vh', display: 'grid', placeItems: 'center', padding: '2rem 1rem' }}>
+        {Toast}
+        <div
+          style={{
+            width: 'min(840px, 100%)',
+            borderRadius: 24,
+            padding: '2px',
+            background: 'linear-gradient(135deg, rgba(124,58,237,.9), rgba(236,72,153,.85), rgba(14,165,233,.85))',
+            boxShadow: '0 20px 60px rgba(124,58,237,.22), 0 8px 24px rgba(0,0,0,.18)',
+          }}
+        >
+          <div
+            style={{
+              borderRadius: 22,
+              background:
+                'radial-gradient(800px 400px at 20% 0%, rgba(124,58,237,.18), transparent 60%), radial-gradient(700px 500px at 90% 30%, rgba(236,72,153,.14), transparent 60%), linear-gradient(180deg, rgba(18,18,22,.96), rgba(10,10,14,.98))',
+              border: '1px solid rgba(255,255,255,.08)',
+              padding: '3rem 2rem',
+              textAlign: 'center',
+              position: 'relative',
+              overflow: 'hidden',
+            }}
+          >
+            <div
+              style={{
+                position: 'absolute',
+                inset: -40,
+                background:
+                  'repeating-linear-gradient( -12deg, transparent 0 22px, rgba(255,255,255,.015) 22px 24px)',
+                pointerEvents: 'none',
+              }}
+            />
+            <div
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 10,
+                padding: '6px 12px',
+                borderRadius: 999,
+                background: 'rgba(124,58,237,.14)',
+                border: '1px solid rgba(124,58,237,.28)',
+                color: '#c4b5fd',
+                fontSize: '.78rem',
+                letterSpacing: '.08em',
+                fontWeight: 700,
+              }}
+            >
+              <span style={{ width: 8, height: 8, borderRadius: 999, background: '#a78bfa', boxShadow: '0 0 12px #a78bfa', display: 'inline-block' }} />
+              OUTREACH · SOON
+            </div>
+            <h1
+              style={{
+                margin: '1.1rem 0 .6rem',
+                fontSize: 'clamp(2rem, 5vw, 3.2rem)',
+                lineHeight: 1,
+                letterSpacing: '-.04em',
+                fontFamily: 'var(--display, Inter)',
+                background: 'linear-gradient(180deg, #fff 0%, #e9e5ff 100%)',
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: 'transparent',
+              }}
+            >
+              Supercharged outreach
+              <br />
+              <span style={{ background: 'linear-gradient(90deg,#a78bfa,#f0abfc,#38bdf8)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+                is on its way
+              </span>
+            </h1>
+            <p style={{ margin: '0 auto', maxWidth: 560, color: 'rgba(255,255,255,.72)', fontSize: '1.02rem', lineHeight: 1.6 }}>
+              Automated sequences, Gmail sync & reach-back scheduling are being polished. Your creators, brands and campaigns keep working — outreach will unlock here shortly.
+            </p>
+            <div style={{ marginTop: '1.6rem', display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
+              <span style={{ padding: '10px 16px', borderRadius: 12, background: '#fff', color: '#111', fontWeight: 700, fontSize: '.9rem' }}>Coming soon</span>
+              <span style={{ padding: '10px 16px', borderRadius: 12, background: 'rgba(255,255,255,.08)', border: '1px solid rgba(255,255,255,.14)', color: '#fff', fontWeight: 600, fontSize: '.9rem' }}>
+                Code preserved — flip SOON_MODE to re-enable
+              </span>
+            </div>
+            <div style={{ marginTop: '1.4rem', color: 'rgba(255,255,255,.45)', fontSize: '.82rem' }}>Need it now? Ask Dhurim to toggle it — nothing was deleted.</div>
+          </div>
+        </div>
+        {/* Keep original outreach tree mounted hidden for quick re-enable (not rendered visually) */}
+        <div style={{ display: 'none' }} aria-hidden>
+          <PageHeader title="Outreach-hidden" subtitle="" />
+        </div>
+      </div>
+    )
+  }
   return (
     <div>
       {Toast}
