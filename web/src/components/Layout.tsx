@@ -48,39 +48,33 @@ export function AppLayout() {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
+  const [noHit, setNoHit] = useState(false)
   useEffect(() => {
     if (!q.trim()) {
       setHits([])
+      setNoHit(false)
       return
     }
     const t = setTimeout(async () => {
       const term = `%${q.trim()}%`
-      const [creators, brands, contacts, campaigns] = await Promise.all([
-        supabase.from('creators').select('id,name,contact_email').is('archived_at', null).or(`name.ilike.${term},contact_email.ilike.${term}`).limit(5),
-        supabase.from('brands').select('id,name,domain').is('archived_at', null).or(`name.ilike.${term},domain.ilike.${term}`).limit(5),
-        supabase.from('brand_contacts').select('id,first_name,last_name,email,brand_id').is('archived_at', null).or(`email.ilike.${term},first_name.ilike.${term},last_name.ilike.${term}`).limit(5),
-        supabase.from('campaigns').select('id,name').is('archived_at', null).ilike('name', term).limit(5),
-      ])
+      // Influencer-only search
+      const { data, error } = await supabase
+        .from('creators')
+        .select('id,name,contact_email')
+        .is('archived_at', null)
+        .or(`name.ilike.${term},contact_email.ilike.${term}`)
+        .limit(8)
+      if (error) {
+        setHits([])
+        setNoHit(true)
+        return
+      }
       const next: SearchHit[] = []
-      for (const c of creators.data || []) {
+      for (const c of data || []) {
         next.push({ type: 'Creator', id: c.id, label: c.name, sub: c.contact_email || undefined, path: `/app/creators/${c.id}` })
       }
-      for (const b of brands.data || []) {
-        next.push({ type: 'Brand', id: b.id, label: b.name, sub: b.domain || undefined, path: `/app/brands/${b.id}` })
-      }
-      for (const p of contacts.data || []) {
-        next.push({
-          type: 'Person',
-          id: p.id,
-          label: [p.first_name, p.last_name].filter(Boolean).join(' ') || p.email,
-          sub: p.email,
-          path: `/app/brands/${p.brand_id}`,
-        })
-      }
-      for (const c of campaigns.data || []) {
-        next.push({ type: 'Campaign', id: c.id, label: c.name, path: `/app/campaigns` })
-      }
       setHits(next)
+      setNoHit(next.length === 0)
     }, 220)
     return () => clearTimeout(t)
   }, [q])
@@ -125,18 +119,20 @@ export function AppLayout() {
             <input
               ref={searchRef}
               className="input"
-              placeholder="Search creators, brands, people…  /"
+              placeholder="Search influencers…  /"
               value={q}
               onChange={(e) => setQ(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === 'Escape') {
                   setQ('')
                   setHits([])
+                  setNoHit(false)
                 }
                 if (e.key === 'Enter' && hits[0]) {
                   e.preventDefault()
                   setQ('')
                   setHits([])
+                  setNoHit(false)
                   nav(hits[0].path)
                 }
               }}
@@ -150,6 +146,7 @@ export function AppLayout() {
                     onClick={() => {
                       setQ('')
                       setHits([])
+                      setNoHit(false)
                       nav(h.path)
                     }}
                   >
@@ -157,6 +154,13 @@ export function AppLayout() {
                     {h.sub ? <span style={{ color: 'var(--text-muted)' }}> — {h.sub}</span> : null}
                   </button>
                 ))}
+              </div>
+            )}
+            {q.trim() && noHit && hits.length === 0 && (
+              <div className="search-results">
+                <div style={{ padding: '10px 12px', color: 'var(--text-muted)', fontSize: '0.9rem' }}>
+                  No influencers found for “{q.trim()}” — try another name or run <strong>Search → Find Creators</strong>.
+                </div>
               </div>
             )}
           </div>
