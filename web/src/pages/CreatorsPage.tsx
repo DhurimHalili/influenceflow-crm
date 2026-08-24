@@ -195,18 +195,77 @@ export function CreatorsPage() {
     e.preventDefault()
     if (!user) return
     setBusy(true)
-    const lines = parseBulkLines(bulk)
-    const existing = new Set(rows.map((r) => normalizeName(r.name)))
-    const inserts = lines
-      .filter((l) => !existing.has(normalizeName(l.name)))
-      .map((l) => ({
-        user_id: user.id,
-        name: l.name,
-        contact_email: l.email || null,
-        niche: l.extra || null,
-        pipeline_status: 'new' as const,
-      }))
-    if (inserts.length) await supabase.from('creators').insert(inserts)
+    // Smart bulk: handles 3 formats:
+    // 1) Simple: Name, email, niche
+    // 2) Sheet: Name, channelUrl (detects youtube.com/http -> channel_link)
+    // 3) Full CSV: name,channel_link,niche,avg_views,platform,pipeline_status,notes (with header)
+    const raw = bulk.trim()
+    const isCsvHeader = /name\s*,\s*channel/i.test(raw.split('\n')[0] || '')
+    let inserts: any[] = []
+    const existingNames = new Set(rows.map((r) => normalizeName(r.name)))
+    const existingLinks = new Set(rows.map((r) => (r.channel_link || '').toLowerCase()))
+
+    if (isCsvHeader) {
+      const lines = raw.split(/\r?\n/).slice(1).filter(Boolean)
+      for (const line of lines) {
+        // naive CSV split handling quoted commas
+        const parts: string[] = []
+        let cur = '', inQ = false
+        for (let i = 0; i < line.length; i++) {
+          const ch = line[i]
+          if (ch === '"') { inQ = !inQ; continue }
+          if (ch === ',' && !inQ) { parts.push(cur.trim()); cur = '' } else cur += ch
+        }
+        parts.push(cur.trim())
+        const [name, channel_link, niche, avg_views, , , notes] = parts
+        if (!name || existingNames.has(normalizeName(name))) continue
+        if (channel_link && existingLinks.has(channel_link.toLowerCase())) continue
+        inserts.push({
+          user_id: user.id,
+          name: name.replace(/^"|"$/g, ''),
+          channel_link: channel_link?.replace(/^"|"$/g, '') || null,
+          niche: niche?.replace(/^"|"$/g, '') || 'Desk Setups & Battlestations',
+          avg_views: avg_views ? Number(avg_views.replace(/[^0-9]/g, '')) || null : null,
+          platform: 'youtube' as const,
+          pipeline_status: 'new' as const,
+          notes: notes?.replace(/^"|"$/g, '') || null,
+        })
+      }
+    } else {
+      const lines = parseBulkLines(raw)
+      for (const l of lines) {
+        if (existingNames.has(normalizeName(l.name))) continue
+        const second = (l.email || '').trim()
+        const isUrl = /https?:|youtube\.com|youtu\.be/i.test(second)
+        const third = (l.extra || '').trim()
+        const isThirdNumeric = /^\d+$/.test(third.replace(/[, ]/g, ''))
+        if (isUrl) {
+          if (second && existingLinks.has(second.toLowerCase())) continue
+          inserts.push({
+            user_id: user.id,
+            name: l.name,
+            channel_link: second || null,
+            contact_email: null,
+            niche: isThirdNumeric ? null : (third || 'Desk Setups & Battlestations'),
+            avg_views: isThirdNumeric ? Number(third.replace(/[^0-9]/g, '')) : null,
+            pipeline_status: 'new' as const,
+          })
+        } else {
+          inserts.push({
+            user_id: user.id,
+            name: l.name,
+            contact_email: isUrl ? null : (second || null),
+            channel_link: null,
+            niche: third || null,
+            pipeline_status: 'new' as const,
+          })
+        }
+      }
+    }
+    if (inserts.length) {
+      const { error } = await supabase.from('creators').insert(inserts)
+      if (error) { show(error.message); setBusy(false); return }
+    }
     setBusy(false)
     setBulkOpen(false)
     setBulk('')
@@ -538,8 +597,18 @@ export function CreatorsPage() {
 
       <Modal open={bulkOpen} title="Bulk import creators" onClose={() => setBulkOpen(false)}>
         <form onSubmit={bulkImport}>
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>One per line: Name, email, niche</p>
-          <textarea className="textarea" style={{ minHeight: 180 }} value={bulk} onChange={(e) => setBulk(e.target.value)} required />
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', lineHeight: 1.5 }}>
+            Paste one per line: <strong style={{ color: 'var(--text)' }}>Name, channelUrl</strong> or <strong style={{ color: 'var(--text)' }}>Name, email, niche</strong> — channel URLs auto-detected.
+            <br />Or paste the full <code style={{ background: 'var(--bg-soft)', padding: '1px 5px', borderRadius: 4 }}>name,channel_link,niche,avg_views</code> CSV (with header) from <code>influencer_creators_ready.csv</code>.
+          </p>
+          <label className="btn btn-ghost" style={{ marginBottom: 10, display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+            Attach CSV file
+            <input type="file" accept=".csv,.txt" style={{ display: 'none' }} onChange={async (e) => {
+              const file = e.target.files?.[0]; if (!file) return
+              const text = await file.text(); setBulk(text)
+            }} />
+          </label>
+          <textarea className="textarea" style={{ minHeight: 180, fontFamily: 'var(--mono)', fontSize: '.85rem' }} value={bulk} onChange={(e) => setBulk(e.target.value)} required placeholder={`Rory Alexander, https://www.youtube.com/channel/UCqPNuJUqqn9QBZiq1QEW_UA\nJames Baldwin, https://www.youtube.com/channel/UC0Ene38yf-Y6movLKSvc0Iw\n— or paste influencer_creators_ready.csv with header —`} />
           <FormActions onCancel={() => setBulkOpen(false)} submitLabel="Import" busy={busy} />
         </form>
       </Modal>
