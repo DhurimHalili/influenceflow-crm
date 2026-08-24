@@ -178,13 +178,25 @@ async function runDiscovery(
   ranAt: string
 ) {
   const cfg = normalizeCfg(raw);
-  // Per-user keys take precedence so each agency uses its own quota; fallback to global secret
+  // Top-level: each agency must use own quota. Owner's 5 global keys (YOUTUBE_API_KEYS secret) are private to the owner only — not shared.
+  const OWNER_IDS = new Set(["16674a1c-c22d-487b-80d7-b9c11f083f8d"]);
   const perUserKeys = Array.isArray(raw.youtube_api_keys)
     ? (raw.youtube_api_keys as string[]).map((k) => String(k || "").trim()).filter(Boolean)
     : [];
   const globalKeys = apiKeysFromEnv();
-  const keys = perUserKeys.length ? perUserKeys : globalKeys;
-  const usingPerUser = perUserKeys.length > 0;
+  let keys: string[] = [];
+  let usingPerUser = false;
+  let usingOwnerGlobal = false;
+  if (perUserKeys.length) {
+    keys = perUserKeys;
+    usingPerUser = true;
+  } else if (OWNER_IDS.has(userId) && globalKeys.length) {
+    // Owner fallback — your 5 private keys stay yours, not shared with other agencies
+    keys = globalKeys;
+    usingOwnerGlobal = true;
+  } else {
+    keys = [];
+  }
 
   // Resolve keyword pools from DB or fall back to defaults (desk setups niche)
   const dbKeywords = Array.isArray(raw.keywords) && raw.keywords.length
@@ -206,7 +218,7 @@ async function runDiscovery(
   };
 
   if (!keys.length) {
-    log.error = "No YOUTUBE_API_KEY(s) configured";
+    log.error = "No YouTube API keys configured — add 1-5 keys in Discovery → Your YouTube API keys. The 5 global keys are owner's private and not shared.";
     await persistRun(admin, userId, log, ranAt);
     return log;
   }

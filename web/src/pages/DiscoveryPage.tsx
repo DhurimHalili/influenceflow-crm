@@ -339,10 +339,15 @@ if (!loaded) return <div className="empty">Loading…</div>
           </div>
 
           <div className="card" style={{ marginTop: '1rem' }}>
-            <h3 style={{ marginTop: 0 }}>Your YouTube API keys</h3>
+            <h3 style={{ marginTop: 0 }}>Your YouTube API keys — private quota</h3>
             <p style={{ color: 'var(--text-muted)', marginTop: 0, fontSize: '0.9rem' }}>
-              Each agency uses its <strong>own quota</strong>. Paste 1–5 YouTube Data API v3 keys (one per line, from <a href="https://console.cloud.google.com/apis/library/youtube.googleapis.com" target="_blank" rel="noreferrer" className="link">Google Cloud Console</a>). If empty, the workflow uses the shared global keys. Keys are stored per-user and never shown to others. Next run uses the new keys immediately (rotates on 403/quota).
+              Each agency uses its <strong>own quota</strong>. Paste 1–5 YouTube Data API v3 keys (one per line, from <a href="https://console.cloud.google.com/apis/library/youtube.googleapis.com" target="_blank" rel="noreferrer" className="link">Google Cloud Console</a>). The 5 global keys are <strong>owner's private</strong> and <strong>not shared</strong> — other agencies must add their own keys or Discovery will not run. Keys are stored per-user and never shown to others. Next run uses the new keys immediately (rotates on 403/quota).
             </p>
+            {user?.id === '16674a1c-c22d-487b-80d7-b9c11f083f8d' && youtubeKeys.split('\n').filter((k) => k.trim()).length === 0 && (
+              <div style={{ marginBottom: 10, padding: '8px 10px', borderRadius: 8, background: 'rgba(34,197,94,.08)', border: '1px solid rgba(34,197,94,.18)', color: 'var(--text-muted)', fontSize: '.85rem' }}>
+                <strong style={{ color: '#16a34a' }}>Owner mode:</strong> your 5 global private keys are still active via Supabase Secrets, so your runs work even with 0 private keys above. Others see an error until they add theirs — your quota stays yours.
+              </div>
+            )}
             <Field label={`YouTube API keys (${youtubeKeys.split('\n').filter((k) => k.trim()).length} private keys) — one per line`}>
               <div style={{ position: 'relative' }}>
                 <textarea
@@ -350,7 +355,7 @@ if (!loaded) return <div className="empty">Loading…</div>
                   style={{ minHeight: 90, fontFamily: 'monospace', fontSize: '0.85rem', filter: showKeys ? 'none' : 'blur(6px)' }}
                   value={youtubeKeys}
                   onChange={(e) => setYoutubeKeys(e.target.value)}
-                  placeholder="AIzaSy...&#10;AIzaSy...&#10;Leave empty to use global keys"
+                  placeholder={user?.id === '16674a1c-c22d-487b-80d7-b9c11f083f8d' ? "AIzaSy...\nAIzaSy...\nLeave empty to use your 5 owner global keys" : "AIzaSy...\nAIzaSy...\nAdd your own keys — required, global is owner's private"}
                   spellCheck={false}
                 />
                 <button
@@ -369,23 +374,29 @@ if (!loaded) return <div className="empty">Loading…</div>
                   borderRadius: 8,
                   fontSize: '.85rem',
                   lineHeight: 1.5,
-                  background: youtubeKeys.split('\n').filter((k) => k.trim()).length === 0 ? 'rgba(34,197,94,.10)' : 'rgba(124,58,237,.08)',
-                  border: `1px solid ${youtubeKeys.split('\n').filter((k) => k.trim()).length === 0 ? 'rgba(34,197,94,.22)' : 'rgba(124,58,237,.18)'}`,
+                  background: youtubeKeys.split('\n').filter((k) => k.trim()).length === 0 ? (user?.id === '16674a1c-c22d-487b-80d7-b9c11f083f8d' ? 'rgba(34,197,94,.10)' : 'rgba(239,68,68,.08)') : 'rgba(124,58,237,.08)',
+                  border: `1px solid ${youtubeKeys.split('\n').filter((k) => k.trim()).length === 0 ? (user?.id === '16674a1c-c22d-487b-80d7-b9c11f083f8d' ? 'rgba(34,197,94,.22)' : 'rgba(239,68,68,.22)') : 'rgba(124,58,237,.18)'}`,
                   color: 'var(--text-muted)',
                 }}
               >
                 {youtubeKeys.split('\n').filter((k) => k.trim()).length === 0 ? (
-                  <>
-                    <strong style={{ color: '#22c55e' }}>No private keys saved — using shared global pool (5 keys active).</strong> Your auto runs and <em>Run now</em> are live via the global <code>YOUTUBE_API_KEYS</code> secret you added in Supabase. Add your own keys above and Save to switch to private quota (your keys replace only your row, global stays untouched for other users).
-                  </>
+                  user?.id === '16674a1c-c22d-487b-80d7-b9c11f083f8d' ? (
+                    <>
+                      <strong style={{ color: '#16a34a' }}>Owner private pool active (5 global keys).</strong> Your runs work via Supabase Secrets fallback. Others must add their own keys — your quota is not shared. Add private keys above to override your own global pool.
+                    </>
+                  ) : (
+                    <>
+                      <strong style={{ color: '#dc2626' }}>No private keys saved — Discovery will not run.</strong> Add 1–5 YouTube keys above and Save. Your runs require your own quota — the 5 global keys are owner's private and not shared.
+                    </>
+                  )
                 ) : (
                   <>
-                    <strong style={{ color: '#7c3aed' }}>{youtubeKeys.split('\n').filter((k) => k.trim()).length} private key(s) will be used.</strong> Next run ignores the global pool and uses these. Saving here <em>replaces</em> your private list only — global keys stay for others. Leave and Save empty to switch back to global.
+                    <strong style={{ color: '#7c3aed' }}>{youtubeKeys.split('\n').filter((k) => k.trim()).length} private key(s) will be used.</strong> Next run uses these only. Saving replaces your private list only — global stays owner's. Clear and Save empty {user?.id === '16674a1c-c22d-487b-80d7-b9c11f083f8d' ? 'to revert to your owner global pool' : 'will block Discovery until you add keys again'}.
                   </>
                 )}
               </div>
               <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: 6 }}>
-                Tip: Google Cloud → Enable YouTube Data API v3 → Create API key → paste here. 10k quota per key/day (~100 searches). 5 keys ≈ 500 searches/day. Manually added global keys in Supabase → Edge Functions → Secrets stay as fallback.
+                Tip: Google Cloud → Enable YouTube Data API v3 → Create API key → paste here. 10k quota per key/day (~100 searches). 5 keys ≈ 500 searches/day. Your 5 global keys remain private in Supabase Secrets — not shared with other agencies.
               </div>
             </Field>
           </div>
