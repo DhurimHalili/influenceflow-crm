@@ -345,15 +345,15 @@ if (!loaded) return <div className="empty">Loading…</div>
             </Field>
           </div>
 
-          <div className="card" style={{ marginTop: '1rem', border: '1px dashed rgba(124,58,237,.22)', background: 'rgba(124,58,237,.04)' }}>
-            <h3 style={{ marginTop: 0, display: 'flex', alignItems: 'center', gap: 8 }}>How to get keywords with AI <span style={{ fontSize: '.7rem', padding: '4px 8px', borderRadius: 999, background: '#7c3aed', color: '#fff' }}>COPY & PASTE</span></h3>
+          <div className="card" style={{ marginTop: '1rem', border: '1px dashed var(--border-strong)', background: 'color-mix(in srgb, var(--accent-soft) 55%, transparent)' }}>
+            <h3 style={{ marginTop: 0, display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text)' }}>How to get keywords with AI <span style={{ fontSize: '.7rem', padding: '4px 8px', borderRadius: 999, background: 'var(--accent)', color: '#fff' }}>COPY & PASTE</span></h3>
             <p style={{ color: 'var(--text-muted)', marginTop: 0, fontSize: '.9rem', lineHeight: 1.6 }}>
-              New users start with desk-setup defaults. Changing niche? Copy a prompt below, replace <code>[YOUR NICHE]</code>, paste into ChatGPT/Claude, get a clean list, then paste here and Save. Niche bio is <strong>not auto-generated</strong> — it boosts channels whose About contains these terms.
+              New users start with desk-setup defaults. Changing niche? Copy a prompt below, replace <code style={{ background: 'var(--bg-soft)', padding: '2px 6px', borderRadius: 4, color: 'var(--text)' }}>[YOUR NICHE]</code>, paste into ChatGPT/Claude, get a clean list, then paste here and Save. Niche bio is <strong style={{ color: 'var(--text)' }}>not auto-generated</strong> — it boosts channels whose About contains these terms.
             </p>
             <div style={{ display: 'grid', gap: 12 }}>
-              <details style={{ background: '#fff', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 12px' }}>
-                <summary style={{ cursor: 'pointer', fontWeight: 700 }}>Prompt: 500 search keywords</summary>
-                <pre style={{ whiteSpace: 'pre-wrap', fontSize: '.82rem', lineHeight: 1.6, margin: '10px 0 0', background: 'rgba(0,0,0,.04)', padding: 10, borderRadius: 8, fontFamily: 'monospace' }}>
+              <details style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 12px' }}>
+                <summary style={{ cursor: 'pointer', fontWeight: 700, color: 'var(--text)' }}>Prompt: 500 search keywords</summary>
+                <pre style={{ whiteSpace: 'pre-wrap', fontSize: '.82rem', lineHeight: 1.6, margin: '10px 0 0', background: 'var(--bg-soft)', padding: 10, borderRadius: 8, fontFamily: 'var(--mono)', color: 'var(--text)', border: '1px solid var(--border)', overflowX: 'auto' }}>
 {`You are a YouTube keyword expert for influencer discovery.
 
 Give me 500 YouTube search keywords for creators in niche [YOUR NICHE, e.g. "Desk Setups & Battlestations"].
@@ -367,18 +367,18 @@ Rules:
                 </pre>
                 <button type="button" className="btn btn-ghost" style={{ marginTop: 8, fontSize: '.8rem' }} onClick={() => navigator.clipboard.writeText(`You are a YouTube keyword expert for influencer discovery.\n\nGive me 500 YouTube search keywords for creators in niche [YOUR NICHE, e.g. \"Desk Setups & Battlestations\"].\n\nRules:\n- One keyword per line, no numbering, no quotes\n- 2-4 words each, focused on YouTube video titles people actually search (e.g. \"desk setup tour\", \"battlestation build\")\n- Avoid generic single words\n- Mix: tours, builds, setups, essentials, transformations, minimal, rgb, white theme, etc.\n- No duplicates`)}>Copy prompt</button>
               </details>
-              <details style={{ background: '#fff', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 12px' }}>
-                <summary style={{ cursor: 'pointer', fontWeight: 700 }}>Prompt: 40 negative keywords</summary>
-                <pre style={{ whiteSpace: 'pre-wrap', fontSize: '.82rem', lineHeight: 1.6, margin: '10px 0 0', background: 'rgba(0,0,0,.04)', padding: 10, borderRadius: 8, fontFamily: 'monospace' }}>
+              <details style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 12px' }}>
+                <summary style={{ cursor: 'pointer', fontWeight: 700, color: 'var(--text)' }}>Prompt: 40 negative keywords</summary>
+                <pre style={{ whiteSpace: 'pre-wrap', fontSize: '.82rem', lineHeight: 1.6, margin: '10px 0 0', background: 'var(--bg-soft)', padding: 10, borderRadius: 8, fontFamily: 'var(--mono)', color: 'var(--text)', border: '1px solid var(--border)', overflowX: 'auto' }}>
 {`Give me 40 negative keywords to exclude off-topic YouTube results for niche [YOUR NICHE].
 
 One per line, 1-3 words each. These are terms that appear in titles but are NOT my niche (e.g. for desk setups: "kitchen setup", "school desk", "trading desk", etc.). No numbering.`}
                 </pre>
                 <button type="button" className="btn btn-ghost" style={{ marginTop: 8, fontSize: '.8rem' }} onClick={() => navigator.clipboard.writeText(`Give me 40 negative keywords to exclude off-topic YouTube results for niche [YOUR NICHE].\n\nOne per line, 1-3 words each. These are terms that appear in titles but are NOT my niche (e.g. for desk setups: \"kitchen setup\", \"school desk\", \"trading desk\", etc.). No numbering.`)}>Copy prompt</button>
               </details>
-              <details style={{ background: '#fff', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 12px' }} open>
-                <summary style={{ cursor: 'pointer', fontWeight: 700 }}>Prompt: 15-20 niche bio keywords (the one you asked about)</summary>
-                <pre style={{ whiteSpace: 'pre-wrap', fontSize: '.82rem', lineHeight: 1.6, margin: '10px 0 0', background: 'rgba(0,0,0,.04)', padding: 10, borderRadius: 8, fontFamily: 'monospace' }}>
+              <details style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 12px' }} open>
+                <summary style={{ cursor: 'pointer', fontWeight: 700, color: 'var(--text)' }}>Prompt: 15-20 niche bio keywords (the one you asked about)</summary>
+                <pre style={{ whiteSpace: 'pre-wrap', fontSize: '.82rem', lineHeight: 1.6, margin: '10px 0 0', background: 'var(--bg-soft)', padding: 10, borderRadius: 8, fontFamily: 'var(--mono)', color: 'var(--text)', border: '1px solid var(--border)', overflowX: 'auto' }}>
 {`Give me 15-20 niche bio keywords for niche [YOUR NICHE].
 
 These are short words/phrases that appear in a YouTuber's channel About/description if they are truly on-topic (e.g. for desk setups: "desk setup", "battlestation", "workspace", "cable management", "peripherals").
