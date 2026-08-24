@@ -19,7 +19,7 @@ type DiscoverySettings = {
   niche_bio_kw: string[]
   youtube_api_keys: string[]
   subscriber_min: number
-  subscriber_max: number
+  subscriber_max: number | null
   min_avg_views: number
   min_engagement_pct: number
   max_days_since_upload: number
@@ -147,11 +147,11 @@ export function DiscoveryPage() {
       platform: 'youtube',
       enabled: true,
       schedule_time: '08:00',
-      schedule_timezone: 'Etc/UTC',
+      schedule_timezone: 'Europe/Berlin',
       max_keywords_per_run: 10,
       cooldown_days: 7,
       subscriber_min: 50000,
-      subscriber_max: 1000000,
+      subscriber_max: null,
       min_avg_views: 50000,
       min_engagement_pct: 1,
       max_days_since_upload: 21,
@@ -460,8 +460,8 @@ One per line, lower case, 1-2 words each. No sentences, no numbering. These will
               <Field label="Min subscribers">
                 <input className="input" type="number" min={0} value={settings.subscriber_min} onChange={(e) => patch({ subscriber_min: Number(e.target.value) })} />
               </Field>
-              <Field label="Max subscribers">
-                <input className="input" type="number" min={0} value={settings.subscriber_max} onChange={(e) => patch({ subscriber_max: Number(e.target.value) })} />
+              <Field label="Max subscribers (leave empty for no limit)">
+                <input className="input" type="number" min={0} placeholder="No limit" value={settings.subscriber_max ?? ''} onChange={(e) => patch({ subscriber_max: e.target.value === '' ? null : Number(e.target.value) })} />
               </Field>
               <Field label="Min avg views">
                 <input className="input" type="number" min={0} value={settings.min_avg_views} onChange={(e) => patch({ min_avg_views: Number(e.target.value) })} />

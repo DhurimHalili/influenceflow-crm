@@ -12,7 +12,7 @@ const DEFAULTS = {
   maxKeywordsPerRun: 10,
   cooldownDays: 7,
   subscriberMin: 5e4,
-  subscriberMax: 1e6,
+  subscriberMax: null as number | null,
   minAvgViews: 5e4,
   minEngagementPct: 1,
   maxDaysSinceUpload: 21,
@@ -89,7 +89,13 @@ function normalizeCfg(s: any): any {
   cfg.maxKeywordsPerRun = s.max_keywords_per_run ?? cfg.maxKeywordsPerRun;
   cfg.cooldownDays = s.cooldown_days ?? cfg.cooldownDays;
   cfg.subscriberMin = s.subscriber_min ?? cfg.subscriberMin;
-  cfg.subscriberMax = s.subscriber_max ?? cfg.subscriberMax;
+  // null = no upper limit (user left Max empty) — keep null, don't fallback to 1M
+  if (s.subscriber_max === null || s.subscriber_max === undefined || s.subscriber_max === "") {
+    cfg.subscriberMax = null;
+  } else {
+    const v = Number(s.subscriber_max);
+    cfg.subscriberMax = isNaN(v) || v <= 0 ? null : v;
+  }
   cfg.minAvgViews = s.min_avg_views ?? cfg.minAvgViews;
   cfg.minEngagementPct = Number(s.min_engagement_pct ?? cfg.minEngagementPct);
   cfg.maxDaysSinceUpload = s.max_days_since_upload ?? cfg.maxDaysSinceUpload;
@@ -327,7 +333,7 @@ async function runDiscovery(
     try { body = await res.json(); } catch { continue; }
     for (const ch of body.items || []) {
       const subs = parseInt(ch?.statistics?.subscriberCount || "0", 10);
-      if (subs < cfg.subscriberMin || subs > cfg.subscriberMax) continue;
+      if (subs < cfg.subscriberMin || (cfg.subscriberMax != null && subs > cfg.subscriberMax)) continue;
       bandPassed.push({
         id: ch.id,
         url: normalizeUrl(`https://www.youtube.com/channel/${ch.id}`),
@@ -448,7 +454,7 @@ async function runDiscovery(
       c.daysSinceLastUpload <= cfg.maxDaysSinceUpload &&
       c.onTopicCount >= 1 &&
       c.subscribers >= cfg.subscriberMin &&
-      c.subscribers <= cfg.subscriberMax
+      (cfg.subscriberMax == null || c.subscribers <= cfg.subscriberMax)
   );
   shortlisted.sort((a: any, b: any) => {
     if ((b.bioIsNiche ? 1 : 0) !== (a.bioIsNiche ? 1 : 0))
