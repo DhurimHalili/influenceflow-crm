@@ -10,7 +10,6 @@ import { CampaignsPage } from './pages/CampaignsPage'
 import { OutreachPage } from './pages/OutreachPage'
 import { CalendarPage } from './pages/CalendarPage'
 import { SettingsPage } from './pages/SettingsPage'
-import { SearchPage } from './pages/SearchPage'
 import { DeletedPage } from './pages/DeletedPage'
 import { DiscoveryPage } from './pages/DiscoveryPage'
 import { HelpPage, HirePage } from './pages/HelpHirePages'
@@ -45,7 +44,7 @@ export default function App() {
           >
             <Route index element={<DashboardPage />} />
             <Route path="outreach" element={<OutreachPage />} />
-            <Route path="search" element={<SearchPage />} />
+            <Route path="search" element={<Navigate to="/app/discovery" replace />} />
             <Route path="creators" element={<CreatorsPage />} />
             <Route path="creators/:id" element={<CreatorDetailPage />} />
             <Route path="brands" element={<BrandsPage />} />

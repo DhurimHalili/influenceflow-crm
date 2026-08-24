@@ -8,16 +8,15 @@ import { stripHtml } from '../lib/utils'
 const NAV = [
   { to: '/app', label: 'Dashboard', end: true, ico: '01' },
   { to: '/app/outreach', label: 'Outreach', ico: '02' },
-  { to: '/app/search', label: 'Search', ico: '03' },
-  { to: '/app/creators', label: 'Creators', ico: '04' },
+  { to: '/app/creators', label: 'Creators', ico: '03' },
   { to: '/app/discovery', label: 'Discovery', ico: '10' },
-  { to: '/app/brands', label: 'Brands', ico: '05' },
-  { to: '/app/deleted', label: 'Deleted', ico: '06' },
-  { to: '/app/campaigns', label: 'Campaigns', ico: '07' },
-  { to: '/app/calendar', label: 'Calendar', ico: '08' },
-  { to: '/app/help', label: 'Help', ico: '09' },
-  { to: '/app/hire', label: 'Hire', ico: '10' },
-  { to: '/app/settings', label: 'Settings', ico: '11' },
+  { to: '/app/brands', label: 'Brands', ico: '04' },
+  { to: '/app/deleted', label: 'Deleted', ico: '05' },
+  { to: '/app/campaigns', label: 'Campaigns', ico: '06' },
+  { to: '/app/calendar', label: 'Calendar', ico: '07' },
+  { to: '/app/help', label: 'Help', ico: '08' },
+  { to: '/app/hire', label: 'Hire', ico: '09' },
+  { to: '/app/settings', label: 'Settings', ico: '10' },
 ]
 
 type SearchHit = { type: string; id: string; label: string; sub?: string; path: string }

@@ -312,13 +312,22 @@ if (!loaded) return <div className="empty">Loading…</div>
           <div className="card" style={{ marginTop: '1rem' }}>
             <h3 style={{ marginTop: 0 }}>Search content</h3>
             <Field label={`Search keywords (${keywords.split('\n').filter((k) => k.trim()).length} in pool) — one per line`}>
-              <textarea className="textarea" style={{ minHeight: 200 }} value={keywords} onChange={(e) => setKeywords(e.target.value)} />
+              <textarea className="textarea" style={{ minHeight: 200 }} value={keywords} onChange={(e) => setKeywords(e.target.value)} placeholder="One keyword per line — e.g. desk setup tour, battlestation, etc. Next auto-run will use the new list immediately." />
+              <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: 6 }}>
+                Add as many as you want (you have 520). Each run searches <strong>{settings.max_keywords_per_run}</strong> of them, rotating daily — 520 ÷ 10 = 52-day cycle. More keywords = more variety without extra quota per run.
+              </div>
             </Field>
-            <Field label="Negative keywords — one per line (excluded from search + video checks)">
-              <textarea className="textarea" style={{ minHeight: 140 }} value={negativeKw} onChange={(e) => setNegativeKw(e.target.value)} />
+            <Field label={`Negative keywords (${negativeKw.split('\n').filter((k) => k.trim()).length} in pool) — one per line`}>
+              <textarea className="textarea" style={{ minHeight: 140 }} value={negativeKw} onChange={(e) => setNegativeKw(e.target.value)} placeholder="One term per line — excluded from YouTube search (as -&quot;term&quot;) and from video title/description checks." />
+              <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: 6 }}>
+                Filters out off-topic results (e.g. `kitchen setup`, `baby nursery`). Next run uses the new list immediately.
+              </div>
             </Field>
-            <Field label="Niche bio keywords — one per line (identifies true on-topic channels)">
-              <textarea className="textarea" style={{ minHeight: 100 }} value={nicheBioKw} onChange={(e) => setNicheBioKw(e.target.value)} />
+            <Field label={`Niche bio keywords (${nicheBioKw.split('\n').filter((k) => k.trim()).length} in pool) — one per line`}>
+              <textarea className="textarea" style={{ minHeight: 100 }} value={nicheBioKw} onChange={(e) => setNicheBioKw(e.target.value)} placeholder="e.g. desk setup, battlestation, workspace — if any appear in channel About tab, channel gets ranking boost." />
+              <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: 6 }}>
+                <strong>What is this?</strong> After the subscriber/view/engagement gates pass, channels are ranked. If the channel's <em>About</em> description contains any of these terms, it's considered <strong>true on-topic</strong> and ranked higher (more of its videos are likely desk-setup content). Not a filter — a boost. Edit and save — next run uses it immediately.
+              </div>
             </Field>
           </div>
 
