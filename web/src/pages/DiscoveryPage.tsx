@@ -343,7 +343,7 @@ if (!loaded) return <div className="empty">Loading…</div>
             <p style={{ color: 'var(--text-muted)', marginTop: 0, fontSize: '0.9rem' }}>
               Each agency uses its <strong>own quota</strong>. Paste 1–5 YouTube Data API v3 keys (one per line, from <a href="https://console.cloud.google.com/apis/library/youtube.googleapis.com" target="_blank" rel="noreferrer" className="link">Google Cloud Console</a>). If empty, the workflow uses the shared global keys. Keys are stored per-user and never shown to others. Next run uses the new keys immediately (rotates on 403/quota).
             </p>
-            <Field label={`YouTube API keys (${youtubeKeys.split('\n').filter((k) => k.trim()).length} keys) — one per line`}>
+            <Field label={`YouTube API keys (${youtubeKeys.split('\n').filter((k) => k.trim()).length} private keys) — one per line`}>
               <div style={{ position: 'relative' }}>
                 <textarea
                   className="textarea"
@@ -362,8 +362,30 @@ if (!loaded) return <div className="empty">Loading…</div>
                   {showKeys ? 'Hide' : 'Show'}
                 </button>
               </div>
+              <div
+                style={{
+                  marginTop: 8,
+                  padding: '8px 10px',
+                  borderRadius: 8,
+                  fontSize: '.85rem',
+                  lineHeight: 1.5,
+                  background: youtubeKeys.split('\n').filter((k) => k.trim()).length === 0 ? 'rgba(34,197,94,.10)' : 'rgba(124,58,237,.08)',
+                  border: `1px solid ${youtubeKeys.split('\n').filter((k) => k.trim()).length === 0 ? 'rgba(34,197,94,.22)' : 'rgba(124,58,237,.18)'}`,
+                  color: 'var(--text-muted)',
+                }}
+              >
+                {youtubeKeys.split('\n').filter((k) => k.trim()).length === 0 ? (
+                  <>
+                    <strong style={{ color: '#22c55e' }}>No private keys saved — using shared global pool (5 keys active).</strong> Your auto runs and <em>Run now</em> are live via the global <code>YOUTUBE_API_KEYS</code> secret you added in Supabase. Add your own keys above and Save to switch to private quota (your keys replace only your row, global stays untouched for other users).
+                  </>
+                ) : (
+                  <>
+                    <strong style={{ color: '#7c3aed' }}>{youtubeKeys.split('\n').filter((k) => k.trim()).length} private key(s) will be used.</strong> Next run ignores the global pool and uses these. Saving here <em>replaces</em> your private list only — global keys stay for others. Leave and Save empty to switch back to global.
+                  </>
+                )}
+              </div>
               <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: 6 }}>
-                Tip: Create a Google Cloud project → Enable YouTube Data API v3 → Create API key → paste here. 10k quota per key/day (~100 searches + enrichment). 5 keys = ~500 searches/day. Next auto-run (08:00) or <strong>Run now</strong> will use these keys.
+                Tip: Google Cloud → Enable YouTube Data API v3 → Create API key → paste here. 10k quota per key/day (~100 searches). 5 keys ≈ 500 searches/day. Manually added global keys in Supabase → Edge Functions → Secrets stay as fallback.
               </div>
             </Field>
           </div>
