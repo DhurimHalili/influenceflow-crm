@@ -17,6 +17,7 @@ type DiscoverySettings = {
   keywords: string[]
   negative_kw: string[]
   niche_bio_kw: string[]
+  youtube_api_keys: string[]
   subscriber_min: number
   subscriber_max: number
   min_avg_views: number
@@ -64,6 +65,8 @@ export function DiscoveryPage() {
   const [keywords, setKeywords] = useState('')
   const [negativeKw, setNegativeKw] = useState('')
   const [nicheBioKw, setNicheBioKw] = useState('')
+  const [youtubeKeys, setYoutubeKeys] = useState('')
+  const [showKeys, setShowKeys] = useState(false)
 
   useEffect(() => {
     if (!user) return
@@ -74,6 +77,7 @@ export function DiscoveryPage() {
         setKeywords((s.keywords || []).join('\n'))
         setNegativeKw((s.negative_kw || []).join('\n'))
         setNicheBioKw((s.niche_bio_kw || []).join('\n'))
+        setYoutubeKeys(((s as any).youtube_api_keys || []).join('\n'))
       }
       setLoaded(true)
     })()
@@ -110,28 +114,29 @@ export function DiscoveryPage() {
   function patch(p: Partial<DiscoverySettings>) {
     setSettings((prev) => (prev ? { ...prev, ...p } : prev))
   }
-async function save(e: FormEvent) {
+  async function save(e: FormEvent) {
     e.preventDefault()
     if (!user || !settings) return
     setBusy(true)
-    const payload = {
+    const payload: any = {
       ...settings,
       keywords: keywords.split('\n').map((k) => k.trim()).filter(Boolean),
       negative_kw: negativeKw.split('\n').map((k) => k.trim()).filter(Boolean),
       niche_bio_kw: nicheBioKw.split('\n').map((k) => k.trim()).filter(Boolean),
+      youtube_api_keys: youtubeKeys.split('\n').map((k) => k.trim()).filter(Boolean),
       niche: settings.niche,
       updated_at: new Date().toISOString(),
     }
     const { error } = await supabase.from('creator_discovery_settings').upsert(payload)
     setBusy(false)
     if (error) show(error.message)
-    else show('Discovery settings saved')
+    else show('Discovery settings saved — next auto-run will use the new keys/keywords immediately')
   }
 
   async function createDefault() {
     if (!user) return
     setBusy(true)
-    const base = {
+    const base: any = {
       user_id: user.id,
       niche: 'Desk Setups & Battlestations',
       platform: 'youtube',
@@ -143,6 +148,7 @@ async function save(e: FormEvent) {
       keywords: keywords.split('\n').map((k) => k.trim()).filter(Boolean),
       negative_kw: negativeKw.split('\n').map((k) => k.trim()).filter(Boolean),
       niche_bio_kw: nicheBioKw.split('\n').map((k) => k.trim()).filter(Boolean),
+      youtube_api_keys: youtubeKeys.split('\n').map((k) => k.trim()).filter(Boolean),
       subscriber_min: 50000,
       subscriber_max: 1000000,
       min_avg_views: 50000,
@@ -160,6 +166,7 @@ async function save(e: FormEvent) {
     setKeywords((data.keywords || []).join('\n'))
     setNegativeKw((data.negative_kw || []).join('\n'))
     setNicheBioKw((data.niche_bio_kw || []).join('\n'))
+    setYoutubeKeys(((data as any).youtube_api_keys || []).join('\n'))
     show('Discovery enabled — save settings to tune the search')
   }
 
@@ -327,6 +334,36 @@ if (!loaded) return <div className="empty">Loading…</div>
               <textarea className="textarea" style={{ minHeight: 100 }} value={nicheBioKw} onChange={(e) => setNicheBioKw(e.target.value)} placeholder="e.g. desk setup, battlestation, workspace — if any appear in channel About tab, channel gets ranking boost." />
               <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: 6 }}>
                 <strong>What is this?</strong> After the subscriber/view/engagement gates pass, channels are ranked. If the channel's <em>About</em> description contains any of these terms, it's considered <strong>true on-topic</strong> and ranked higher (more of its videos are likely desk-setup content). Not a filter — a boost. Edit and save — next run uses it immediately.
+              </div>
+            </Field>
+          </div>
+
+          <div className="card" style={{ marginTop: '1rem' }}>
+            <h3 style={{ marginTop: 0 }}>Your YouTube API keys</h3>
+            <p style={{ color: 'var(--text-muted)', marginTop: 0, fontSize: '0.9rem' }}>
+              Each agency uses its <strong>own quota</strong>. Paste 1–5 YouTube Data API v3 keys (one per line, from <a href="https://console.cloud.google.com/apis/library/youtube.googleapis.com" target="_blank" rel="noreferrer" className="link">Google Cloud Console</a>). If empty, the workflow uses the shared global keys. Keys are stored per-user and never shown to others. Next run uses the new keys immediately (rotates on 403/quota).
+            </p>
+            <Field label={`YouTube API keys (${youtubeKeys.split('\n').filter((k) => k.trim()).length} keys) — one per line`}>
+              <div style={{ position: 'relative' }}>
+                <textarea
+                  className="textarea"
+                  style={{ minHeight: 90, fontFamily: 'monospace', fontSize: '0.85rem', filter: showKeys ? 'none' : 'blur(6px)' }}
+                  value={youtubeKeys}
+                  onChange={(e) => setYoutubeKeys(e.target.value)}
+                  placeholder="AIzaSy...&#10;AIzaSy...&#10;Leave empty to use global keys"
+                  spellCheck={false}
+                />
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  style={{ position: 'absolute', right: 8, top: 8, padding: '4px 8px', fontSize: '0.8rem' }}
+                  onClick={() => setShowKeys((v) => !v)}
+                >
+                  {showKeys ? 'Hide' : 'Show'}
+                </button>
+              </div>
+              <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: 6 }}>
+                Tip: Create a Google Cloud project → Enable YouTube Data API v3 → Create API key → paste here. 10k quota per key/day (~100 searches + enrichment). 5 keys = ~500 searches/day. Next auto-run (08:00) or <strong>Run now</strong> will use these keys.
               </div>
             </Field>
           </div>

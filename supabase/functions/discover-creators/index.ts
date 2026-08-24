@@ -178,7 +178,13 @@ async function runDiscovery(
   ranAt: string
 ) {
   const cfg = normalizeCfg(raw);
-  const keys = apiKeysFromEnv();
+  // Per-user keys take precedence so each agency uses its own quota; fallback to global secret
+  const perUserKeys = Array.isArray(raw.youtube_api_keys)
+    ? (raw.youtube_api_keys as string[]).map((k) => String(k || "").trim()).filter(Boolean)
+    : [];
+  const globalKeys = apiKeysFromEnv();
+  const keys = perUserKeys.length ? perUserKeys : globalKeys;
+  const usingPerUser = perUserKeys.length > 0;
 
   // Resolve keyword pools from DB or fall back to defaults (desk setups niche)
   const dbKeywords = Array.isArray(raw.keywords) && raw.keywords.length
