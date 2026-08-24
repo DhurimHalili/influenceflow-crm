@@ -79,7 +79,7 @@ export function DashboardPage() {
 
   return (
     <div>
-      <PageHeader title="Dashboard" subtitle="Your private CRM workspace">
+      <PageHeader title="Dashboard" subtitle="Pipeline, discovery and revenue at a glance">
         <Link className="btn" to="/app/creators">
           Creators
         </Link>

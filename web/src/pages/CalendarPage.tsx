@@ -215,7 +215,7 @@ export function CalendarPage() {
   return (
     <div>
       {Toast}
-      <PageHeader title="Calendar" subtitle="Click a day to add a meeting · campaign dates included">
+      <PageHeader title="Calendar" subtitle="Meetings and campaign dates · click any day to add">
         <button className="btn" type="button" onClick={() => setCursor(startOfMonth(new Date()))}>
           Today
         </button>

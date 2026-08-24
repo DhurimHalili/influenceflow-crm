@@ -247,7 +247,7 @@ export function SettingsPage() {
   return (
     <div>
       {Toast}
-      <PageHeader title="Settings" subtitle="Profile, Gmail, templates, backup" />
+      <PageHeader title="Settings" subtitle="Workspace, Gmail, templates and backup · tuned for speed" />
 
       <div className="grid-2">
         <form className="card" onSubmit={saveProfile}>
