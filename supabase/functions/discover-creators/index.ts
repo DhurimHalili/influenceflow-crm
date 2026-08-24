@@ -60,6 +60,21 @@ function containsAny(text: string | null | undefined, terms: string[]): boolean 
   return terms.some((t) => lower.includes(t.toLowerCase()));
 }
 
+// Strict niche match: short terms (<=3 chars) use word boundaries, longer use substring — same as find-creators
+function matchesNicheStrict(text: string | null | undefined, terms: string[]): boolean {
+  const blob = (text || "").toLowerCase();
+  if (!blob.trim() || !terms.length) return false;
+  return terms.some((t) => {
+    const term = t.toLowerCase().trim();
+    if (!term) return false;
+    if (term.length <= 3) {
+      const re = new RegExp(`(?:^|[^a-z0-9])${term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:[^a-z0-9]|$)`, "i");
+      return re.test(blob);
+    }
+    return blob.includes(term);
+  });
+}
+
 function apiKeysFromEnv(): string[] {
   const multi = Deno.env.get("YOUTUBE_API_KEYS");
   if (multi) {
@@ -382,7 +397,11 @@ async function runDiscovery(
       const durationSec = parseDuration(v?.contentDetails?.duration);
       if (durationSec > 0 && durationSec <= cfg.shortsMaxSeconds) continue;
       if (ch.latestVideos.length >= cfg.maxLongformPerChannel) continue;
-      ch.latestVideos.push({ viewCount: parseInt(v?.statistics?.viewCount || "0", 10), likeCount: parseInt(v?.statistics?.likeCount || "0", 10), commentCount: parseInt(v?.statistics?.commentCount || "0", 10), uploadedAt: v?.snippet?.publishedAt || "", daysAgo: daysAgo(v?.snippet?.publishedAt), isOffTopic: containsAny(v?.snippet?.title, dbNeg) || containsAny(v?.snippet?.description, dbNeg) });
+      const title = String(v?.snippet?.title || "");
+      const desc = String(v?.snippet?.description || "");
+      // niche signal: does this video look like the user's niche?
+      const isNicheVideo = matchesNicheStrict(`${title}\n${desc}`, dbBio);
+      ch.latestVideos.push({ viewCount: parseInt(v?.statistics?.viewCount || "0", 10), likeCount: parseInt(v?.statistics?.likeCount || "0", 10), commentCount: parseInt(v?.statistics?.commentCount || "0", 10), uploadedAt: v?.snippet?.publishedAt || "", daysAgo: daysAgo(v?.snippet?.publishedAt), isOffTopic: containsAny(title, dbNeg) || containsAny(desc, dbNeg), isNiche: isNicheVideo, title, desc });
     }
 
     const scored: any[] = [];
@@ -397,7 +416,19 @@ async function runDiscovery(
       const totalViews = viewCounts.reduce((a: number, b: number) => a + b, 0);
       const engagementRate = totalViews > 0 ? parseFloat((totalEngagements / totalViews * 100).toFixed(2)) : 0;
       const onTopicCount = videos.filter((v: any) => !v.isOffTopic).length;
-      scored.push({ channelName: ch.channelName, channelUrl: ch.channelUrl, subscribers: ch.subscribers, avgViews, engagementRate, daysSinceLastUpload: videos[0].daysAgo, onTopicCount, onTopicRatio: videos.length > 0 ? parseFloat((onTopicCount / videos.length).toFixed(2)) : 0, bioIsNiche: containsAny(ch.channelDescription, dbBio), totalVideos: videos.length });
+      // niche enforcement: at least one *on-topic* video OR the channel About must contain a niche term — otherwise it's off-niche
+      // exclude pure generic singletons from bio matching to avoid "setup/rgb/desk" false positives
+      const genericSingletons = new Set(["setup","desk","rig","rgb","pc","workspace","streamer"]);
+      const strictBio = dbBio.filter((t: string) => {
+        const tt = t.trim().toLowerCase();
+        if (genericSingletons.has(tt)) return false;
+        if (tt.length <= 2) return false;
+        return true;
+      });
+      const nicheTerms = strictBio.length >= 3 ? strictBio : dbBio;
+      const strictNicheVideoCount = videos.filter((v: any) => !v.isOffTopic && matchesNicheStrict(`${v.title}\n${v.desc}`, nicheTerms)).length;
+      const bioIsNiche = matchesNicheStrict(ch.channelDescription, nicheTerms);
+      scored.push({ channelName: ch.channelName, channelUrl: ch.channelUrl, subscribers: ch.subscribers, avgViews, engagementRate, daysSinceLastUpload: videos[0].daysAgo, onTopicCount, onTopicRatio: videos.length > 0 ? parseFloat((onTopicCount / videos.length).toFixed(2)) : 0, nicheVideoCount: strictNicheVideoCount, nicheRatio: videos.length > 0 ? parseFloat((strictNicheVideoCount / videos.length).toFixed(2)) : 0, bioIsNiche, totalVideos: videos.length });
     }
 
     // Adaptive thresholds: if hunting for 50 and first batches low, relax to ensure 50 (5 keys = quota to keep hunting)
@@ -408,8 +439,8 @@ async function runDiscovery(
     if (batch >= 2 && totalInserted < 35) { effMinViews = Math.min(effMinViews, 20000); effEngagement = Math.min(effEngagement, 0.5); effMaxDays = Math.max(effMaxDays, 30); }
     if (batch >= 3 && totalInserted < 45) { effMinViews = Math.min(effMinViews, 15000); effEngagement = Math.min(effEngagement, 0.3); }
 
-    let shortlisted = scored.filter((c) => c.avgViews >= effMinViews && c.engagementRate >= effEngagement && c.daysSinceLastUpload <= effMaxDays && c.onTopicCount >= 1 && c.subscribers >= cfg.subscriberMin && (cfg.subscriberMax == null || c.subscribers <= cfg.subscriberMax));
-    shortlisted.sort((a: any, b: any) => { if ((b.bioIsNiche ? 1 : 0) !== (a.bioIsNiche ? 1 : 0)) return (b.bioIsNiche ? 1 : 0) - (a.bioIsNiche ? 1 : 0); if (b.onTopicRatio !== a.onTopicRatio) return b.onTopicRatio - a.onTopicRatio; return b.engagementRate - a.engagementRate; });
+    let shortlisted = scored.filter((c) => c.avgViews >= effMinViews && c.engagementRate >= effEngagement && c.daysSinceLastUpload <= effMaxDays && c.onTopicCount >= 1 && (c.bioIsNiche || c.nicheVideoCount >= 1) && c.subscribers >= cfg.subscriberMin && (cfg.subscriberMax == null || c.subscribers <= cfg.subscriberMax));
+    shortlisted.sort((a: any, b: any) => { if ((b.bioIsNiche ? 1 : 0) !== (a.bioIsNiche ? 1 : 0)) return (b.bioIsNiche ? 1 : 0) - (a.bioIsNiche ? 1 : 0); if (b.nicheRatio !== a.nicheRatio) return b.nicheRatio - a.nicheRatio; if (b.onTopicRatio !== a.onTopicRatio) return b.onTopicRatio - a.onTopicRatio; return b.engagementRate - a.engagementRate; });
     totalShortlisted += shortlisted.length;
     const fresh = shortlisted.filter((c) => !exSet.has(normalizeUrl(c.channelUrl)));
     const remaining = cfg.targetCount - totalInserted;
