@@ -219,6 +219,17 @@ if (!loaded) return <div className="empty">Loading…</div>
 
       {result && <div className="card" style={{ marginBottom: '1rem' }}>{result}</div>}
 
+      {settings && runs.length > 0 && runs[0] && (runs[0].inserted ?? 0) < (settings.target_count || 50) && (runs[0].inserted ?? 0) >= 0 && (
+        <div className="card" style={{ marginBottom: '1rem', border: '1px solid color-mix(in srgb, var(--warning) 35%, var(--border))', background: 'linear-gradient(135deg, color-mix(in srgb, var(--warning) 10%, transparent), transparent)', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', padding: '10px 12px' }}>
+          <span style={{ width: 28, height: 28, borderRadius: 999, background: 'var(--warning)', color: '#fff', display: 'grid', placeItems: 'center', fontWeight: 800, fontSize: '.85rem' }}>!</span>
+          <div style={{ flex: 1, minWidth: 220 }}>
+            <strong style={{ color: 'var(--text)', fontSize: '.88rem' }}>Last run found only {runs[0].inserted} / {settings.target_count || 50} — shortlist was tight</strong>
+            <div style={{ color: 'var(--text-muted)', fontSize: '.8rem', lineHeight: 1.5 }}>We kept it strict (50k / 1%). Want more volume? You can loosen filters below — you control it, we don't auto-loosen your saved settings.</div>
+          </div>
+          <a href="#looser-help" className="btn" style={{ fontSize: '.8rem', padding: '6px 10px', whiteSpace: 'nowrap' }} onClick={(e) => { e.preventDefault(); document.getElementById('looser-help')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }}>How to loosen ↓</a>
+        </div>
+      )}
+
       {!settings && (
         <div className="card" style={{ border: '1px solid rgba(124,58,237,.18)', background: 'linear-gradient(135deg, rgba(124,58,237,.06), rgba(14,165,233,.04))' }}>
           <h3 style={{ marginTop: 0 }}>Set up automated discovery — 1 click with defaults</h3>
@@ -477,6 +488,38 @@ One per line, lower case, 1-2 words each. No sentences, no numbering. These will
               <button className="btn btn-primary" type="submit" disabled={busy}>
                 {busy ? 'Saving…' : 'Save all settings'}
               </button>
+            </div>
+          </div>
+
+          <div className="card" id="looser-help" style={{ marginTop: '1rem', border: '1px solid color-mix(in srgb, var(--warning) 35%, var(--border))', background: 'color-mix(in srgb, var(--warning) 7%, var(--bg-elevated))' }}>
+            <h3 style={{ marginTop: 0, display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text)', flexWrap: 'wrap' }}>
+              Only getting a few? How to make the shortlist looser <span style={{ fontSize: '.7rem', padding: '3px 7px', borderRadius: 999, background: 'var(--warning)', color: '#fff' }}>MORE RESULTS</span>
+              <span style={{ fontSize: '.68rem', padding: '3px 7px', borderRadius: 999, border: '1px solid var(--border)', color: 'var(--text-muted)', fontWeight: 600 }}>We keep it strict — you decide</span>
+            </h3>
+            <p style={{ color: 'var(--text-muted)', fontSize: '.85rem', lineHeight: 1.6, marginTop: 0 }}>
+              Discovery stays <strong style={{ color: 'var(--text)' }}>strict by default</strong> (50k subs / 50k views / 1% engagement / 21 days) for quality. <em>We don't silently make it looser</em> — if you're under 50, <strong style={{ color: 'var(--text)' }}>you</strong> loosen one lever at a time below, Save, then Run now. Lower = more hits, but you control it. <span style={{ fontSize: '.78rem' }}>(Safety net: within a single run, if we’re still under 25 after 2 batches we try 30K/0.7% just for that run — your saved settings stay strict unless you Save a preset.)</span>
+            </p>
+            {runs.length > 0 && runs[0] && settings && (runs[0].inserted ?? 0) < (settings.target_count || 50) && (
+              <div style={{ background: 'var(--bg-elevated)', border: '1px solid color-mix(in srgb, var(--warning) 45%, var(--border))', borderRadius: 8, padding: '9px 10px', fontSize: '.82rem', color: 'var(--text)', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <span>Last run: <strong>{runs[0].inserted ?? 0}/{settings.target_count || 50}</strong> — shortlist was tight.</span>
+                <span style={{ color: 'var(--text-muted)' }}>Try a looser preset below → Save → <strong>Run now</strong>. If <code style={{ background: 'var(--bg-soft)', padding: '1px 4px', borderRadius: 4 }}>{runs[0].shortlisted ?? 0} shortlisted</code> jumps, you’ve found your sweet spot.</span>
+              </div>
+            )}
+            <div style={{ display: 'grid', gap: 8, fontSize: '.82rem', lineHeight: 1.5 }}>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <button type="button" className="btn btn-ghost" style={{ fontSize: '.78rem', padding: '6px 10px' }} onClick={() => { patch({ min_avg_views: 30000, min_engagement_pct: 0.7, max_days_since_upload: 21 }); setTimeout(() => (document.querySelector('form') as any)?.requestSubmit(), 0) }}>Preset: Balanced (30K / 0.7%)</button>
+                <button type="button" className="btn btn-ghost" style={{ fontSize: '.78rem', padding: '6px 10px' }} onClick={() => { patch({ min_avg_views: 20000, min_engagement_pct: 0.5, max_days_since_upload: 30 }); setTimeout(() => (document.querySelector('form') as any)?.requestSubmit(), 0) }}>Preset: Loose (20K / 0.5% / 30d)</button>
+                <button type="button" className="btn btn-ghost" style={{ fontSize: '.78rem', padding: '6px 10px' }} onClick={() => { patch({ min_avg_views: 15000, min_engagement_pct: 0.3, max_days_since_upload: 30, subscriber_min: 20000 }); setTimeout(() => (document.querySelector('form') as any)?.requestSubmit(), 0) }}>Preset: Very loose (15K / 0.3%)</button>
+                <button type="button" className="btn btn-ghost" style={{ fontSize: '.78rem', padding: '6px 10px' }} onClick={() => { patch({ min_avg_views: 50000, min_engagement_pct: 1, max_days_since_upload: 21, subscriber_min: 50000 }); setTimeout(() => (document.querySelector('form') as any)?.requestSubmit(), 0) }}>Reset: Strict (50K / 1%)</button>
+              </div>
+              <ul style={{ margin: 0, paddingLeft: 18, color: 'var(--text-muted)' }}>
+                <li><strong style={{ color: 'var(--text)' }}>Min avg views</strong> 50K → 30K → 20K → 15K — biggest lever. Try 30K first.</li>
+                <li><strong style={{ color: 'var(--text)' }}>Min engagement %</strong> 1% → 0.7% → 0.5% → 0.3% — second lever for new channels.</li>
+                <li><strong style={{ color: 'var(--text)' }}>Max days since upload</strong> 21 → 30 — catches monthly posters.</li>
+                <li><strong style={{ color: 'var(--text)' }}>Min subscribers</strong> 50K → 20K — if niche is micro-creators.</li>
+                <li><strong style={{ color: 'var(--text)' }}>Max subscribers</strong> leave empty = no cap — only set if you truly need upper bound.</li>
+              </ul>
+              <div style={{ color: 'var(--text-muted)', fontSize: '.78rem' }}>Tip: Change one lever at a time, Save, Run now. Check <strong style={{ color: 'var(--text)' }}>Recent runs</strong> below — if `shortlisted` jumps, you’ve found your sweet spot. Need help? See <strong style={{ color: 'var(--text)' }}>Help → Discovery</strong>.</div>
             </div>
           </div>
         </form>

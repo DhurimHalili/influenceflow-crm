@@ -171,6 +171,8 @@ export function SearchPage() {
   }
 
   const creatorPct = Math.min(100, Math.round(((creatorProgress?.creators_found || 0) / TARGET) * 100))
+  const struggling = Boolean(creatorProgress?.done && (creatorProgress?.creators_found ?? 0) < TARGET)
+  const found = creatorProgress?.creators_found ?? 0
 
   return (
     <div>
@@ -276,6 +278,43 @@ export function SearchPage() {
           </div>
         </div>
       </div>
+
+      {struggling && (
+        <div className="card" style={{ marginBottom: '1rem', border: '1px solid color-mix(in srgb, var(--warning) 45%, var(--border))', background: 'color-mix(in srgb, var(--warning) 7%, var(--bg-elevated))' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
+            <h3 style={{ margin: 0, color: 'var(--text)' }}>Only {found} / 50? How to make the shortlist looser</h3>
+            <span style={{ fontSize: '.68rem', padding: '3px 8px', borderRadius: 999, background: 'var(--warning)', color: '#fff', fontWeight: 700, letterSpacing: '.04em' }}>MORE RESULTS</span>
+            <span style={{ fontSize: '.72rem', padding: '3px 8px', borderRadius: 999, border: '1px solid var(--border)', color: 'var(--text-muted)' }}>We keep it strict — you decide to loosen</span>
+          </div>
+          <p style={{ color: 'var(--text-muted)', fontSize: '.88rem', lineHeight: 1.6, margin: '0 0 10px' }}>
+            Search keeps gates <strong style={{ color: 'var(--text)' }}>strict by default</strong> (male, 50k+ subs, 50k+ avg views, 1%+ engagement, English, posted ≤30 days) for quality. We don't auto-loosen the shortlist — <em>you</em> loosen it only if you need more volume. Zero hidden changes.
+          </p>
+          <div style={{ display: 'grid', gap: 10, fontSize: '.85rem', lineHeight: 1.55 }}>
+            <div style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 12px' }}>
+              <strong style={{ color: 'var(--text)' }}>✓ What you can change right here in Search (gets looser immediately):</strong>
+              <ul style={{ margin: '6px 0 0', paddingLeft: 18, color: 'var(--text-muted)' }}>
+                <li><strong style={{ color: 'var(--text)' }}>Go broader:</strong> {subnicheId ? (<>you're on a narrow subniche — click <strong>All {niche?.label}</strong> or try the parent <strong>{niche?.label}</strong> niche to 2–3× the pool</>) : (<>try a related niche (e.g. Tech → Content / AI / DIY) or click a broader chip above</>)}.</li>
+                <li><strong style={{ color: 'var(--text)' }}>Run again:</strong> each run skips Creators + Deleted + 3-week cooldown, so a 2nd/3rd run digs new channels. No need to wait.</li>
+                <li><strong style={{ color: 'var(--text)' }}>Check the meter:</strong> if <code style={{ background: 'var(--bg-soft)', padding: '1px 4px', borderRadius: 4 }}>YouTube scanned</code> is high but <code>found</code> stays low, the niche is small — broadening is the lever.</li>
+              </ul>
+            </div>
+            <div style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 12px' }}>
+              <strong style={{ color: 'var(--text)' }}>Want lower gates? Use Discovery (tunable) — if you need true looser:</strong>
+              <ul style={{ margin: '6px 0 0', paddingLeft: 18, color: 'var(--text-muted)' }}>
+                <li><strong style={{ color: 'var(--text)' }}>Min avg views</strong> 50k → 30k → 20k, <strong style={{ color: 'var(--text)' }}>Engagement</strong> 1% → 0.5%, <strong style={{ color: 'var(--text)' }}>Max days</strong> 30 → 45. The lowest gates give ~2–3× more hits.</li>
+                <li>Change one lever at a time, Save, <strong>Run now</strong>. Your saved setting stays until you revert — nothing auto-reverts.</li>
+              </ul>
+              <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+                <Link className="btn btn-primary" to="/app/discovery" style={{ fontSize: '.8rem', padding: '6px 10px' }}>Open Discovery → loosen filters</Link>
+                <button type="button" className="btn" style={{ fontSize: '.8rem', padding: '6px 10px' }} onClick={runCreatorSearch} disabled={running}>Run Search again (broader)</button>
+              </div>
+            </div>
+            <div style={{ color: 'var(--text-muted)', fontSize: '.78rem', padding: '0 2px' }}>
+              Tip: Changing <em>Target</em> doesn't loosen — it just stops earlier. To get more <em>eligible</em> influencers, broaden niche or lower gates in Discovery. Need help? <Link className="link" to="/app/help">Help → Discovery</Link>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="card">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12, marginBottom: 12 }}>

@@ -399,6 +399,20 @@ export function CreatorsPage() {
         </button>
       </PageHeader>
 
+      {rows.length > 0 && rows.length < 50 && (
+        <div className="card" style={{ marginBottom: '.85rem', border: '1px solid color-mix(in srgb, var(--warning) 35%, var(--border))', background: 'color-mix(in srgb, var(--warning) 7%, var(--bg-elevated))', display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', padding: '10px 12px' }}>
+          <span style={{ width: 26, height: 26, borderRadius: 999, background: 'var(--warning)', color: '#fff', display: 'grid', placeItems: 'center', fontWeight: 800, fontSize: '.8rem' }}>!</span>
+          <div style={{ flex: 1, minWidth: 220 }}>
+            <strong style={{ color: 'var(--text)', fontSize: '.88rem' }}>Only {rows.length} creators so far — haven't hit 50 yet?</strong>
+            <div style={{ color: 'var(--text-muted)', fontSize: '.82rem', lineHeight: 1.5 }}>We keep the shortlist <strong style={{ color: 'var(--text)' }}>strict by default</strong> (50k / 1%) for quality — we don't make it looser silently. If you need more volume, <em>you</em> can loosen: broaden the niche in <strong>Search</strong> (e.g. Desk Setups → All Tech) or lower gates in <strong>Discovery → Filters</strong> (try 30k / 0.7%). One lever at a time, then Run again.</div>
+          </div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <Link className="btn" to="/app/search" style={{ fontSize: '.8rem', padding: '6px 10px' }}>Go Search → broaden</Link>
+            <Link className="btn btn-primary" to="/app/discovery" style={{ fontSize: '.8rem', padding: '6px 10px' }}>Discovery → looser</Link>
+          </div>
+        </div>
+      )}
+
       <div className="filters">
         <input className="input" style={{ maxWidth: 240 }} placeholder="Filter…" value={q} onChange={(e) => setQ(e.target.value)} />
         <select className="select" style={{ maxWidth: 180 }} value={status} onChange={(e) => setStatus(e.target.value)}>
