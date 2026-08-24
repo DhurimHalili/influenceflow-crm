@@ -60,21 +60,6 @@ function containsAny(text: string | null | undefined, terms: string[]): boolean 
   return terms.some((t) => lower.includes(t.toLowerCase()));
 }
 
-// Strict niche match: short terms (<=3 chars) use word boundaries, longer use substring — same as find-creators
-function matchesNicheStrict(text: string | null | undefined, terms: string[]): boolean {
-  const blob = (text || "").toLowerCase();
-  if (!blob.trim() || !terms.length) return false;
-  return terms.some((t) => {
-    const term = t.toLowerCase().trim();
-    if (!term) return false;
-    if (term.length <= 3) {
-      const re = new RegExp(`(?:^|[^a-z0-9])${term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:[^a-z0-9]|$)`, "i");
-      return re.test(blob);
-    }
-    return blob.includes(term);
-  });
-}
-
 function apiKeysFromEnv(): string[] {
   const multi = Deno.env.get("YOUTUBE_API_KEYS");
   if (multi) {
@@ -199,7 +184,6 @@ async function runDiscovery(
   ranAt: string
 ) {
   const cfg = normalizeCfg(raw);
-  const startTime = Date.now();
   // Top-level: each agency must use own quota. Owner's 5 global keys (YOUTUBE_API_KEYS secret) are private to the owner only — not shared.
   const OWNER_IDS = new Set(["16674a1c-c22d-487b-80d7-b9c11f083f8d"]);
   const perUserKeys = Array.isArray(raw.youtube_api_keys)
@@ -261,7 +245,13 @@ async function runDiscovery(
     .select("channel_link").eq("user_id", userId).not("channel_link", "is", null);
   const exUrls = new Set((exRows || []).map((r: any) => normalizeUrl(r.channel_link)));
 
-  // --- Batched search: keep going until we hit 50 or quota/pool exhausted (5 keys = keep searching, don't stop at 25)
+  // Rotate keywords — different subset each run (capped to pool size so no duplicates per run)
+  const { selected, nextCursor } = rotate(dbKeywords, raw.keyword_cursor || 0, cfg.maxKeywordsPerRun);
+  await admin.from("creator_discovery_settings")
+    .update({ keyword_cursor: nextCursor, updated_at: new Date().toISOString() })
+    .eq("user_id", userId);
+
+  // --- Phase 1: Search via keyword rotation across up to 5 API keys ---
   let keyIdx = 0;
   const exhausted = new Set<number>();
   const usedKeys = new Set<number>();
@@ -273,209 +263,53 @@ async function runDiscovery(
     return null;
   };
 
-  let nextCursor = raw.keyword_cursor || 0;
-  const maxBatches = 4; // 4*15=60 keywords max per run — enough for 50 with relaxed filters, still within timeout with parallel fetches
-  let totalInserted = 0;
-  let totalFound = 0;
-  let totalShortlisted = 0;
-  let totalConsidered = 0;
-  let totalSkippedCooldown = 0;
-  let totalDupeExisting = 0;
+  const found = new Map();
   let lastErr: string | null = null;
-  // cooldown/existing sets mutable for per-batch dedupe
-  const cdSet = new Set(cdUrls);
-  const exSet = new Set(exUrls);
-
-  for (let batch = 0; batch < maxBatches; batch++) {
-    if (totalInserted >= cfg.targetCount) break;
-    if (Date.now() - startTime > 110000) { log.error = (log.error || "") + " | timeout guard — returning " + totalInserted + " so far"; break; }
-    if (exhausted.size >= keys.length) { log.quota_exhausted = true; break; }
-    // Use 15 keywords per batch when hunting for 50 (5 keys = enough quota, fewer batches = less timeout risk)
-    const batchSize = Math.min(15, cfg.maxKeywordsPerRun * 1.5 | 0) || 15;
-    const { selected, nextCursor: newCursor } = rotate(dbKeywords, nextCursor, batchSize);
-    nextCursor = newCursor;
-    await admin.from("creator_discovery_settings")
-      .update({ keyword_cursor: nextCursor, updated_at: new Date().toISOString() })
-      .eq("user_id", userId);
-
-    const batchFound = new Map();
-    for (const keyword of selected) {
-      const searchKey = keyFor();
-      if (!searchKey) { log.quota_exhausted = true; break; }
-      log.keywords_searched++;
-      const q = `${keyword} ${NEG_QUERY}`;
-      const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(q)}&type=video&maxResults=50&relevanceLanguage=en`;
-      let res: Response;
-      try { res = await yt(url, searchKey); } catch (e: any) { lastErr = `fetch failed "${keyword}": ${String(e?.message || e)}`; continue; }
-      if (res.status === 403 || res.status === 429) {
-        let bodyText = ""; try { bodyText = await res.text(); } catch {}
-        exhausted.add(keys.indexOf(searchKey)); log.quota_exhausted = true;
-        lastErr = `quota ${res.status} key ${keys.indexOf(searchKey)} "${keyword}": ${bodyText.slice(0, 300)}`;
-        if (exhausted.size >= keys.length) break;
-        continue;
-      }
-      if (!res.ok) { try { lastErr = `HTTP ${res.status} "${keyword}": ${(await res.text()).slice(0, 300)}`; } catch { lastErr = `HTTP ${res.status} "${keyword}"`; } continue; }
-      log.searches_performed++; usedKeys.add(keys.indexOf(searchKey));
-      let body: any; try { body = await res.json(); } catch { lastErr = `json parse fail "${keyword}"`; continue; }
-      for (const item of body.items || []) {
-        const cid = item?.snippet?.channelId; if (!cid) continue;
-        if (containsAny(item.snippet?.title, dbNeg) || containsAny(item.snippet?.description, dbNeg)) continue;
-        const u = normalizeUrl(`https://www.youtube.com/channel/${cid}`);
-        if (!batchFound.has(u) && !cdSet.has(u) && !exSet.has(u)) batchFound.set(u, { id: cid, url: u, name: item.snippet?.channelTitle || "" });
-      }
+  for (const keyword of selected) {
+    const searchKey = keyFor();
+    if (!searchKey) { log.quota_exhausted = true; break; }
+    log.keywords_searched++;
+    const q = `${keyword} ${NEG_QUERY}`;
+    const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(q)}&type=video&maxResults=50&relevanceLanguage=en`;
+    let res: Response;
+    try {
+      res = await yt(url, searchKey);
+    } catch (e: any) {
+      lastErr = `fetch failed keyword="${keyword}": ${String(e?.message || e)}`;
+      continue;
     }
-    totalFound += batchFound.size;
-    log.channels_found = totalFound; log.api_keys_used = usedKeys.size;
-    if (batchFound.size === 0) {
-      if (lastErr && !log.error && totalFound === 0) log.error = lastErr.slice(0, 500);
-      continue; // no channels this batch, try next keyword batch
+    if (res.status === 403 || res.status === 429) {
+      // Try to read body for quota vs other 403/429
+      let bodyText = "";
+      try { bodyText = await res.text(); } catch {}
+      // Mark key exhausted, try next key on next keyword. Don't count as performed.
+      exhausted.add(keys.indexOf(searchKey));
+      log.quota_exhausted = true;
+      lastErr = `quota ${res.status} on key ${keys.indexOf(searchKey)} for "${keyword}": ${bodyText.slice(0, 300)}`;
+      // If all keys exhausted, stop keyword loop
+      if (exhausted.size >= keys.length) break;
+      continue;
     }
-
-    // --- Batch Phase 2-5: evaluate only this batch's fresh channels (cap 50 to stay fast, 5 keys loop will keep hunting for 50) ---
-    const toEvaluate: any[] = [];
-    for (const ch of batchFound.values()) {
-      if (toEvaluate.length >= 50) break;
-      if (cdSet.has(ch.url)) { totalSkippedCooldown++; continue; }
-      if (exSet.has(ch.url)) { totalDupeExisting++; continue; }
-      toEvaluate.push(ch);
+    if (!res.ok) {
+      try { lastErr = `HTTP ${res.status} keyword="${keyword}": ${(await res.text()).slice(0, 300)}`; } catch { lastErr = `HTTP ${res.status} keyword="${keyword}"`; }
+      continue;
     }
-    // De-dupe within batch already done, now fetch details
-    const bandPassed: any[] = [];
-    for (const ids of chunk(toEvaluate.map((c) => c.id), 50)) {
-      const lookKey = keyFor(); if (!lookKey) break;
-      let res: Response; try { res = await yt(`https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics,contentDetails&id=${ids.join(",")}`, lookKey); } catch { continue; }
-      if (res.status === 403 || res.status === 429) { exhausted.add(keys.indexOf(lookKey)); log.quota_exhausted = true; continue; }
-      if (!res.ok) continue;
-      usedKeys.add(keys.indexOf(lookKey));
-      let body: any; try { body = await res.json(); } catch { continue; }
-      for (const ch of body.items || []) {
-        const subs = parseInt(ch?.statistics?.subscriberCount || "0", 10);
-        if (subs < cfg.subscriberMin || (cfg.subscriberMax != null && subs > cfg.subscriberMax)) continue;
-        bandPassed.push({ id: ch.id, url: normalizeUrl(`https://www.youtube.com/channel/${ch.id}`), name: ch?.snippet?.title || "Unknown", subs, desc: ch?.snippet?.description || "", uploads: ch?.contentDetails?.relatedPlaylists?.uploads || null });
-      }
+    log.searches_performed++;
+    usedKeys.add(keys.indexOf(searchKey));
+    let body: any;
+    try { body = await res.json(); } catch { lastErr = `json parse fail keyword="${keyword}"`; continue; }
+    for (const item of body.items || []) {
+      const cid = item?.snippet?.channelId;
+      if (!cid) continue;
+      if (containsAny(item.snippet?.title, dbNeg) || containsAny(item.snippet?.description, dbNeg)) continue;
+      const u = normalizeUrl(`https://www.youtube.com/channel/${cid}`);
+      if (!found.has(u)) found.set(u, { id: cid, url: u, name: item.snippet?.channelTitle || "" });
     }
-    totalConsidered += bandPassed.length;
-
-    const channelVideos: Record<string, string[]> = {};
-    // Parallel playlistItems (limit concurrency 10 to stay fast)
-    const playlistChunks = chunk(bandPassed.filter(c => c.uploads), 10);
-    for (const pChunk of playlistChunks) {
-      await Promise.all(pChunk.map(async (c) => {
-        const listKey = keyFor(); if (!listKey) return;
-        let res: Response; try { res = await yt(`https://www.googleapis.com/youtube/v3/playlistItems?part=contentDetails&playlistId=${c.uploads}&maxResults=12`, listKey); } catch { return; }
-        if (!res.ok) return;
-        usedKeys.add(keys.indexOf(listKey));
-        let body: any; try { body = await res.json(); } catch { return; }
-        channelVideos[c.id] = (body.items || []).map((it: any) => it?.contentDetails?.videoId).filter(Boolean);
-      }));
-      if (Date.now() - startTime > 110000) break;
-    }
-
-    const videoIdToChannel: Record<string, string> = {};
-    const allVideoIds: string[] = [];
-    for (const c of bandPassed) for (const vid of channelVideos[c.id] || []) if (!(vid in videoIdToChannel)) { videoIdToChannel[vid] = c.id; allVideoIds.push(vid); }
-
-    const videoStats: Record<string, any> = {};
-    const videoChunks = chunk(allVideoIds, 50);
-    // Parallel video stats (5 at a time)
-    for (const vChunk of chunk(videoChunks, 5)) {
-      await Promise.all(vChunk.map(async (ids) => {
-        const statsKey = keyFor(); if (!statsKey) return;
-        let res: Response; try { res = await yt(`https://www.googleapis.com/youtube/v3/videos?part=snippet,statistics,contentDetails&id=${ids.join(",")}`, statsKey); } catch { return; }
-        if (!res.ok) return;
-        usedKeys.add(keys.indexOf(statsKey));
-        let body: any; try { body = await res.json(); } catch { return; }
-        for (const v of body.items || []) videoStats[v.id] = v;
-      }));
-      if (Date.now() - startTime > 110000) break;
-    }
-
-    const channelsMap: Record<string, any> = {};
-    for (const c of bandPassed) channelsMap[c.id] = { channelName: c.name, channelUrl: c.url, subscribers: c.subs, channelDescription: c.desc, latestVideos: [] };
-    for (const vid of allVideoIds) {
-      const chId = videoIdToChannel[vid]; const ch = channelsMap[chId]; const v = videoStats[vid]; if (!ch || !v) continue;
-      const durationSec = parseDuration(v?.contentDetails?.duration);
-      if (durationSec > 0 && durationSec <= cfg.shortsMaxSeconds) continue;
-      if (ch.latestVideos.length >= cfg.maxLongformPerChannel) continue;
-      const title = String(v?.snippet?.title || "");
-      const desc = String(v?.snippet?.description || "");
-      // niche signal: does this video look like the user's niche?
-      const isNicheVideo = matchesNicheStrict(`${title}\n${desc}`, dbBio);
-      ch.latestVideos.push({ viewCount: parseInt(v?.statistics?.viewCount || "0", 10), likeCount: parseInt(v?.statistics?.likeCount || "0", 10), commentCount: parseInt(v?.statistics?.commentCount || "0", 10), uploadedAt: v?.snippet?.publishedAt || "", daysAgo: daysAgo(v?.snippet?.publishedAt), isOffTopic: containsAny(title, dbNeg) || containsAny(desc, dbNeg), isNiche: isNicheVideo, title, desc });
-    }
-
-    const scored: any[] = [];
-    for (const id in channelsMap) {
-      const ch = channelsMap[id]; const videos = ch.latestVideos;
-      if (videos.length < cfg.minLongformVideos) continue;
-      videos.sort((a: any, b: any) => a.daysAgo - b.daysAgo);
-      const totalEngagements = videos.reduce((s: number, v: any) => s + v.likeCount + v.commentCount, 0);
-      const viewCounts = videos.map((v: any) => v.viewCount).sort((a: number, b: number) => a - b);
-      const trimmed = viewCounts.length >= 3 ? viewCounts.slice(1, -1) : viewCounts;
-      const avgViews = trimmed.length ? Math.round(trimmed.reduce((a: number, b: number) => a + b, 0) / trimmed.length) : 0;
-      const totalViews = viewCounts.reduce((a: number, b: number) => a + b, 0);
-      const engagementRate = totalViews > 0 ? parseFloat((totalEngagements / totalViews * 100).toFixed(2)) : 0;
-      const onTopicCount = videos.filter((v: any) => !v.isOffTopic).length;
-      // niche enforcement: at least one *on-topic* video OR the channel About must contain a niche term — otherwise it's off-niche
-      // exclude pure generic singletons from bio matching to avoid "setup/rgb/desk" false positives
-      const genericSingletons = new Set(["setup","desk","rig","rgb","pc","workspace","streamer"]);
-      const strictBio = dbBio.filter((t: string) => {
-        const tt = t.trim().toLowerCase();
-        if (genericSingletons.has(tt)) return false;
-        if (tt.length <= 2) return false;
-        return true;
-      });
-      const nicheTerms = strictBio.length >= 3 ? strictBio : dbBio;
-      const strictNicheVideoCount = videos.filter((v: any) => !v.isOffTopic && matchesNicheStrict(`${v.title}\n${v.desc}`, nicheTerms)).length;
-      const bioIsNiche = matchesNicheStrict(ch.channelDescription, nicheTerms);
-      scored.push({ channelName: ch.channelName, channelUrl: ch.channelUrl, subscribers: ch.subscribers, avgViews, engagementRate, daysSinceLastUpload: videos[0].daysAgo, onTopicCount, onTopicRatio: videos.length > 0 ? parseFloat((onTopicCount / videos.length).toFixed(2)) : 0, nicheVideoCount: strictNicheVideoCount, nicheRatio: videos.length > 0 ? parseFloat((strictNicheVideoCount / videos.length).toFixed(2)) : 0, bioIsNiche, totalVideos: videos.length });
-    }
-
-    // Adaptive thresholds: if hunting for 50 and first batches low, relax to ensure 50 (5 keys = quota to keep hunting)
-    let effMinViews = cfg.minAvgViews;
-    let effEngagement = cfg.minEngagementPct;
-    let effMaxDays = cfg.maxDaysSinceUpload;
-    if (batch >= 1 && totalInserted < 25) { effMinViews = Math.min(effMinViews, 30000); effEngagement = Math.min(effEngagement, 0.7); }
-    if (batch >= 2 && totalInserted < 35) { effMinViews = Math.min(effMinViews, 20000); effEngagement = Math.min(effEngagement, 0.5); effMaxDays = Math.max(effMaxDays, 30); }
-    if (batch >= 3 && totalInserted < 45) { effMinViews = Math.min(effMinViews, 15000); effEngagement = Math.min(effEngagement, 0.3); }
-
-    let shortlisted = scored.filter((c) => c.avgViews >= effMinViews && c.engagementRate >= effEngagement && c.daysSinceLastUpload <= effMaxDays && c.onTopicCount >= 1 && (c.bioIsNiche || c.nicheVideoCount >= 1) && c.subscribers >= cfg.subscriberMin && (cfg.subscriberMax == null || c.subscribers <= cfg.subscriberMax));
-    shortlisted.sort((a: any, b: any) => { if ((b.bioIsNiche ? 1 : 0) !== (a.bioIsNiche ? 1 : 0)) return (b.bioIsNiche ? 1 : 0) - (a.bioIsNiche ? 1 : 0); if (b.nicheRatio !== a.nicheRatio) return b.nicheRatio - a.nicheRatio; if (b.onTopicRatio !== a.onTopicRatio) return b.onTopicRatio - a.onTopicRatio; return b.engagementRate - a.engagementRate; });
-    totalShortlisted += shortlisted.length;
-    const fresh = shortlisted.filter((c) => !exSet.has(normalizeUrl(c.channelUrl)));
-    const remaining = cfg.targetCount - totalInserted;
-    const inserts = fresh.slice(0, remaining);
-    if (inserts.length) {
-      const now = new Date().toISOString();
-      const rows = inserts.map((c) => ({ user_id: userId, name: c.channelName, channel_link: c.channelUrl, niche: raw.niche || "Desk Setups", avg_views: c.avgViews, platform: raw.platform || "youtube", pipeline_status: "new", on_roster: false, notes: `Subs: ${c.subscribers} | Engagement: ${c.engagementRate}% | Avg views: ${c.avgViews} | Days: ${c.daysSinceLastUpload}`, updated_at: now, created_at: now }));
-      const { error } = await admin.from("creators").insert(rows);
-      if (!error) {
-        totalInserted += rows.length;
-        for (const r of rows) exSet.add(normalizeUrl(r.channel_link));
-      } else if (!log.error) log.error = String(error.message);
-    }
-    // mark batch's channels as searched for cooldown
-    if (batchFound.size) {
-      const arr = [...batchFound.values()].filter((c: any) => !cdSet.has(normalizeUrl(c.url)));
-      if (arr.length) {
-        await admin.from("searched_channels").upsert(arr.map((c: any) => ({ user_id: userId, channel_url: normalizeUrl(c.url), channel_id: c.id, last_searched_at: new Date().toISOString() })), { onConflict: "user_id,channel_url" });
-        for (const c of arr) cdSet.add(normalizeUrl(c.url));
-      }
-    }
-    log.channels_found = totalFound; log.channels_skipped_cooldown = totalSkippedCooldown; log.channels_dupe_existing = totalDupeExisting;
-    log.channels_considered = totalConsidered; log.shortlisted = totalShortlisted; log.fresh = totalShortlisted; log.inserted = totalInserted; log.api_keys_used = usedKeys.size;
-    log.error = log.error || lastErr?.slice(0, 500) || null;
-    if (totalInserted >= cfg.targetCount) break;
-    if (exhausted.size >= keys.length) { log.quota_exhausted = true; break; }
   }
-
-  // if loop never inserted (e.g. all filtered), ensure logs reflect final state
-  log.channels_found = totalFound; log.channels_skipped_cooldown = totalSkippedCooldown; log.channels_dupe_existing = totalDupeExisting;
-  log.channels_considered = totalConsidered; log.shortlisted = totalShortlisted; log.fresh = totalShortlisted; log.inserted = totalInserted; log.api_keys_used = usedKeys.size;
-  if (totalInserted === 0 && lastErr && !log.error) log.error = lastErr.slice(0, 500);
-
-  await persistRun(admin, userId, log, new Date().toISOString());
-  return log;
+  log.channels_found = found.size;
+  log.api_keys_used = usedKeys.size;
+  // Only set error if no channels found and we have a diagnostic
+  if (found.size === 0 && lastErr && !log.error) log.error = lastErr.slice(0, 500);
 
   // --- Phase 2: Filter out cooldown + existing, then fetch channel details ---
   const toEvaluate: any[] = [];
@@ -529,6 +363,158 @@ async function runDiscovery(
       .filter(Boolean);
   }
 
+  // --- Phase 4: Fetch video stats (batched 50 at a time) ---
+  const videoIdToChannel: Record<string, string> = {};
+  const allVideoIds: string[] = [];
+  for (const c of bandPassed) {
+    for (const vid of channelVideos[c.id] || []) {
+      if (!(vid in videoIdToChannel)) {
+        videoIdToChannel[vid] = c.id;
+        allVideoIds.push(vid);
+      }
+    }
+  }
+
+  const videoStats: Record<string, any> = {};
+  for (const ids of chunk(allVideoIds, 50)) {
+    const statsKey = keyFor();
+    if (!statsKey) { log.quota_exhausted = true; break; }
+    let res: Response;
+    try { res = await yt(`https://www.googleapis.com/youtube/v3/videos?part=snippet,statistics,contentDetails&id=${ids.join(",")}`, statsKey); } catch { continue; }
+    if (!res.ok) continue;
+    usedKeys.add(keys.indexOf(statsKey));
+    let body: any;
+    try { body = await res.json(); } catch { continue; }
+    for (const v of body.items || []) videoStats[v.id] = v;
+  }
+  // --- Phase 5: Score channels ---
+  const channelsMap: Record<string, any> = {};
+  for (const c of bandPassed) {
+    channelsMap[c.id] = {
+      channelName: c.name,
+      channelUrl: c.url,
+      subscribers: c.subs,
+      channelDescription: c.desc,
+      latestVideos: [],
+    };
+  }
+
+  for (const vid of allVideoIds) {
+    const chId = videoIdToChannel[vid];
+    const ch = channelsMap[chId];
+    const v = videoStats[vid];
+    if (!ch || !v) continue;
+    const durationSec = parseDuration(v?.contentDetails?.duration);
+    if (durationSec > 0 && durationSec <= cfg.shortsMaxSeconds) continue;
+    if (ch.latestVideos.length >= cfg.maxLongformPerChannel) continue;
+    ch.latestVideos.push({
+      viewCount: parseInt(v?.statistics?.viewCount || "0", 10),
+      likeCount: parseInt(v?.statistics?.likeCount || "0", 10),
+      commentCount: parseInt(v?.statistics?.commentCount || "0", 10),
+      uploadedAt: v?.snippet?.publishedAt || "",
+      daysAgo: daysAgo(v?.snippet?.publishedAt),
+      isOffTopic:
+        containsAny(v?.snippet?.title, dbNeg) ||
+        containsAny(v?.snippet?.description, dbNeg),
+    });
+  }
+
+  const scored: any[] = [];
+  for (const id in channelsMap) {
+    const ch = channelsMap[id];
+    const videos = ch.latestVideos;
+    if (videos.length < cfg.minLongformVideos) continue;
+    videos.sort((a: any, b: any) => a.daysAgo - b.daysAgo);
+    const totalEngagements = videos.reduce((s: number, v: any) => s + v.likeCount + v.commentCount, 0);
+    const viewCounts = videos.map((v: any) => v.viewCount).sort((a: number, b: number) => a - b);
+    const trimmed = viewCounts.length >= 3 ? viewCounts.slice(1, -1) : viewCounts;
+    const avgViews = trimmed.length ? Math.round(trimmed.reduce((a: number, b: number) => a + b, 0) / trimmed.length) : 0;
+    const totalViews = viewCounts.reduce((a: number, b: number) => a + b, 0);
+    const engagementRate = totalViews > 0 ? parseFloat((totalEngagements / totalViews * 100).toFixed(2)) : 0;
+    const onTopicCount = videos.filter((v: any) => !v.isOffTopic).length;
+    scored.push({
+      channelName: ch.channelName,
+      channelUrl: ch.channelUrl,
+      subscribers: ch.subscribers,
+      avgViews,
+      engagementRate,
+      daysSinceLastUpload: videos[0].daysAgo,
+      onTopicCount,
+      onTopicRatio: videos.length > 0 ? parseFloat((onTopicCount / videos.length).toFixed(2)) : 0,
+      bioIsNiche: containsAny(ch.channelDescription, dbBio),
+      totalVideos: videos.length,
+    });
+  }
+
+  // Shortlist + sort by bio match, on-topic ratio, engagement
+  let shortlisted = scored.filter(
+    (c) =>
+      c.avgViews >= cfg.minAvgViews &&
+      c.engagementRate >= cfg.minEngagementPct &&
+      c.daysSinceLastUpload <= cfg.maxDaysSinceUpload &&
+      c.onTopicCount >= 1 &&
+      c.subscribers >= cfg.subscriberMin &&
+      (cfg.subscriberMax == null || c.subscribers <= cfg.subscriberMax)
+  );
+  shortlisted.sort((a: any, b: any) => {
+    if ((b.bioIsNiche ? 1 : 0) !== (a.bioIsNiche ? 1 : 0))
+      return (b.bioIsNiche ? 1 : 0) - (a.bioIsNiche ? 1 : 0);
+    if (b.onTopicRatio !== a.onTopicRatio)
+      return b.onTopicRatio - a.onTopicRatio;
+    return b.engagementRate - a.engagementRate;
+  });
+  log.shortlisted = shortlisted.length;
+
+  // Only insert channels not already in the CRM
+  const fresh = shortlisted.filter(
+    (c) => !exUrls.has(normalizeUrl(c.channelUrl))
+  );
+  log.fresh = fresh.length;
+
+  const inserts = fresh.slice(0, cfg.targetCount);
+  let inserted = 0;
+  if (inserts.length) {
+    const now = new Date().toISOString();
+    const rows = inserts.map((c) => ({
+      user_id: userId,
+      name: c.channelName,
+      channel_link: c.channelUrl,
+      niche: raw.niche || "Desk Setups",
+      avg_views: c.avgViews,
+      platform: raw.platform || "youtube",
+      pipeline_status: "new",
+      on_roster: false,
+      notes: `Subs: ${c.subscribers} | Engagement: ${c.engagementRate}% | Avg views: ${c.avgViews} | Days: ${c.daysSinceLastUpload}`,
+      updated_at: now,
+      created_at: now,
+    }));
+    const { error } = await admin.from("creators").insert(rows);
+    if (error) log.error = String(error.message);
+    else inserted = rows.length;
+  }
+  log.inserted = inserted;
+  log.api_keys_used = usedKeys.size;
+
+  // Remember searched channels for cooldown (only those we actually evaluated)
+  if (found.size) {
+    const arr = [...found.values()].filter(
+      (c: any) => !cdUrls.has(normalizeUrl(c.url))
+    );
+    if (arr.length) {
+      await admin.from("searched_channels").upsert(
+        arr.map((c: any) => ({
+          user_id: userId,
+          channel_url: normalizeUrl(c.url),
+          channel_id: c.id,
+          last_searched_at: ranAt,
+        })),
+        { onConflict: "user_id,channel_url" }
+      );
+    }
+  }
+
+  await persistRun(admin, userId, log, ranAt);
+  return log;
 }
 
 
