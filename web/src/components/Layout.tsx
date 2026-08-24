@@ -10,6 +10,7 @@ const NAV = [
   { to: '/app/outreach', label: 'Outreach', ico: '02' },
   { to: '/app/search', label: 'Search', ico: '03' },
   { to: '/app/creators', label: 'Creators', ico: '04' },
+  { to: '/app/discovery', label: 'Discovery', ico: '10' },
   { to: '/app/brands', label: 'Brands', ico: '05' },
   { to: '/app/deleted', label: 'Deleted', ico: '06' },
   { to: '/app/campaigns', label: 'Campaigns', ico: '07' },

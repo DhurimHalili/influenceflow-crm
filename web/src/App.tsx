@@ -12,6 +12,7 @@ import { CalendarPage } from './pages/CalendarPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { SearchPage } from './pages/SearchPage'
 import { DeletedPage } from './pages/DeletedPage'
+import { DiscoveryPage } from './pages/DiscoveryPage'
 import { HelpPage, HirePage } from './pages/HelpHirePages'
 import { PrivacyPage, TermsPage } from './pages/LegalPages'
 
@@ -52,6 +53,7 @@ export default function App() {
             <Route path="deleted" element={<DeletedPage />} />
             <Route path="campaigns" element={<CampaignsPage />} />
             <Route path="calendar" element={<CalendarPage />} />
+            <Route path="discovery" element={<DiscoveryPage />} />
             <Route path="settings" element={<SettingsPage />} />
             <Route path="help" element={<HelpPage />} />
             <Route path="hire" element={<HirePage />} />

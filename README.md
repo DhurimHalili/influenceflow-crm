@@ -74,6 +74,42 @@ Each account gets an isolated workspace — other users cannot see your data.
 
 ---
 
+## Creator Discovery — automated, free, runs itself
+
+The **Discovery** page in the app runs a YouTube influencer search on a schedule and writes
+the shortlist straight into your `creators` table. No PC needed — it runs on Supabase's servers.
+
+**How it stays free and quota-safe**
+
+| Mechanism | What it does |
+|---|---|
+| 5 API keys (`YOUTUBE_API_KEYS`) | Rotates across keys; a 403 (quota hit) on one key switches to the next |
+| Keyword rotation | Each run searches only `max_keywords_per_run` keywords from your pool, cycling daily — never the whole list at once |
+| 7-day cooldown (`searched_channels`) | A channel is evaluated **once**; it's skipped for `cooldown_days` even if it keeps appearing in searches |
+| Cheap-first pipeline | Subscriber-band filter **before** any video enrichment; channel/video lookups are batched (≤50 IDs per 1-unit call) |
+| Cron tick | pg_cron fires every 5 min; the function only runs a user's search at *their* chosen time/timezone, once per day |
+
+**Setup (one time)**
+
+1. **If the app shows "Loading…" forever**, your free Supabase project is probably **paused**
+   (free projects pause after ~1 week of inactivity). Restore it:
+   Supabase Dashboard → your project → **Restore project**. The daily scheduled run counts as
+   activity, so once the cron is live it should not pause again.
+2. Apply [`supabase/migrations/20260823000000_creator_discovery.sql`](supabase/migrations/20260823000000_creator_discovery.sql)
+   in the Supabase SQL Editor (creates the settings / cooldown / run-log tables + RLS).
+3. Set secrets and deploy the function:
+   ```powershell
+   supabase secrets set YOUTUBE_API_KEYS=key1,key2,key3,key4,key5 DISCOVERY_SECRET=some-long-random-string
+   supabase functions deploy discover-creators
+   ```
+4. Enable the `pg_cron` and `pg_net` extensions, then add the 5-minute tick from the bottom of
+   the migration file (fill in your project URL, anon key, and `DISCOVERY_SECRET`).
+5. Open **Discovery** in the app: paste your keywords + negatives, pick your **time and
+   timezone**, toggle auto-run on/off, and use **Run now** for an immediate search.
+   A manual run never cancels the scheduled one.
+
+---
+
 ## Roadmap — discovery + matching
 
 The CRM manages people you **already know**. The next layer finds the people you **need**.
