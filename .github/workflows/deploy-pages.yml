@@ -29,8 +29,13 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
       - name: Build site
+        env:
+          VITE_SUPABASE_URL: https://oyyuugucxqtenuqbbbur.supabase.co
+          VITE_SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im95eXV1Z3VjeHF0ZW51cWJiYnVyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM1OTU1MzcsImV4cCI6MjA5OTE3MTUzN30.i8B0F_kvW1zyKnd7-KtuLmVZ4UeCzACAt2z1Ee1U3Hg
         run: |
           cd web
+          echo "VITE_SUPABASE_URL=$VITE_SUPABASE_URL" > .env
+          echo "VITE_SUPABASE_ANON_KEY=$VITE_SUPABASE_ANON_KEY" >> .env
           npm ci
           npm run build
           cd ..
