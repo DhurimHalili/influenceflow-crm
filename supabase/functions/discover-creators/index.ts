@@ -272,14 +272,14 @@ async function runDiscovery(
       lastErr = `fetch failed keyword="${keyword}": ${String(e?.message || e)}`;
       continue;
     }
-    if (res.status === 403) {
-      // Try to read body for quota vs other 403
+    if (res.status === 403 || res.status === 429) {
+      // Try to read body for quota vs other 403/429
       let bodyText = "";
       try { bodyText = await res.text(); } catch {}
       // Mark key exhausted, try next key on next keyword. Don't count as performed.
       exhausted.add(keys.indexOf(searchKey));
       log.quota_exhausted = true;
-      lastErr = `quota 403 on key ${keys.indexOf(searchKey)} for "${keyword}": ${bodyText.slice(0, 300)}`;
+      lastErr = `quota ${res.status} on key ${keys.indexOf(searchKey)} for "${keyword}": ${bodyText.slice(0, 300)}`;
       // If all keys exhausted, stop keyword loop
       if (exhausted.size >= keys.length) break;
       continue;
@@ -320,7 +320,7 @@ async function runDiscovery(
     if (!lookKey) break;
     let res: Response;
     try { res = await yt(`https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics,contentDetails&id=${ids.join(",")}`, lookKey); } catch { continue; }
-    if (res.status === 403) { exhausted.add(keys.indexOf(lookKey)); continue; }
+    if (res.status === 403 || res.status === 429) { exhausted.add(keys.indexOf(lookKey)); log.quota_exhausted = true; continue; }
     if (!res.ok) continue;
     usedKeys.add(keys.indexOf(lookKey));
     let body: any;

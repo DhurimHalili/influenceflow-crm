@@ -136,6 +136,11 @@ export function DiscoveryPage() {
   async function createDefault() {
     if (!user) return
     setBusy(true)
+    // If user left fields empty, let DB defaults fill 520/40/17 — don't overwrite with empty array
+    const kw = keywords.split('\n').map((k) => k.trim()).filter(Boolean)
+    const neg = negativeKw.split('\n').map((k) => k.trim()).filter(Boolean)
+    const bio = nicheBioKw.split('\n').map((k) => k.trim()).filter(Boolean)
+    const yk = youtubeKeys.split('\n').map((k) => k.trim()).filter(Boolean)
     const base: any = {
       user_id: user.id,
       niche: 'Desk Setups & Battlestations',
@@ -145,10 +150,6 @@ export function DiscoveryPage() {
       schedule_timezone: 'Etc/UTC',
       max_keywords_per_run: 10,
       cooldown_days: 7,
-      keywords: keywords.split('\n').map((k) => k.trim()).filter(Boolean),
-      negative_kw: negativeKw.split('\n').map((k) => k.trim()).filter(Boolean),
-      niche_bio_kw: nicheBioKw.split('\n').map((k) => k.trim()).filter(Boolean),
-      youtube_api_keys: youtubeKeys.split('\n').map((k) => k.trim()).filter(Boolean),
       subscriber_min: 50000,
       subscriber_max: 1000000,
       min_avg_views: 50000,
@@ -156,6 +157,10 @@ export function DiscoveryPage() {
       max_days_since_upload: 21,
       target_count: 50,
     }
+    if (kw.length) base.keywords = kw
+    if (neg.length) base.negative_kw = neg
+    if (bio.length) base.niche_bio_kw = bio
+    if (yk.length) base.youtube_api_keys = yk
     const { data, error } = await supabase.from('creator_discovery_settings').upsert(base).select('*').single()
     setBusy(false)
     if (error) {
@@ -215,25 +220,27 @@ if (!loaded) return <div className="empty">Loading…</div>
       {result && <div className="card" style={{ marginBottom: '1rem' }}>{result}</div>}
 
       {!settings && (
-        <div className="card">
-          <h3 style={{ marginTop: 0 }}>Set up automated discovery</h3>
-          <p style={{ color: 'var(--text-muted)' }}>
-            Paste your search keywords (one per line), then save. Negative keywords keep results on-topic. You can turn
-            auto-run on/off and pick a time + timezone below.
+        <div className="card" style={{ border: '1px solid rgba(124,58,237,.18)', background: 'linear-gradient(135deg, rgba(124,58,237,.06), rgba(14,165,233,.04))' }}>
+          <h3 style={{ marginTop: 0 }}>Set up automated discovery — 1 click with defaults</h3>
+          <p style={{ color: 'var(--text-muted)', lineHeight: 1.6 }}>
+            New accounts are <strong>auto-created with 520 desk-setup keywords + 40 negatives + 17 bio terms</strong> (your niche). Just click <strong>Enable discovery</strong> to use them, or paste your own. No empty start.
           </p>
+          <div style={{ background: 'rgba(255,255,255,.06)', border: '1px solid rgba(255,255,255,.08)', borderRadius: 12, padding: 12, marginBottom: 12, fontSize: '.9rem', lineHeight: 1.6 }}>
+            <strong>Don't have keywords?</strong> Copy the AI prompts below (Search → Negative → Niche bio), paste into ChatGPT/Claude with your niche, get lists in seconds, then paste here. No manual research needed.
+          </div>
           <form onSubmit={createDefault}>
             <Field label="Niche (shown on each creator)">
               <input className="input" value={'Desk Setups & Battlestations'} readOnly />
             </Field>
-            <Field label="Search keywords — one per line">
-              <textarea className="textarea" style={{ minHeight: 160 }} value={keywords} onChange={(e) => setKeywords(e.target.value)} />
+            <Field label="Search keywords — one per line (520 prefilled if you leave empty)">
+              <textarea className="textarea" style={{ minHeight: 160 }} value={keywords} onChange={(e) => setKeywords(e.target.value)} placeholder={'Leave empty to auto-fill 520 desk-setup defaults on Enable, or paste your 500 here...\ndorm gaming setup minimal\ncontent creator setup evolution\n...'} />
             </Field>
             <Field label="Negative keywords — one per line (terms to exclude)">
-              <textarea className="textarea" style={{ minHeight: 120 }} value={negativeKw} onChange={(e) => setNegativeKw(e.target.value)} />
+              <textarea className="textarea" style={{ minHeight: 120 }} value={negativeKw} onChange={(e) => setNegativeKw(e.target.value)} placeholder={'Leave empty for 40 defaults or paste yours...\nkitchen setup\nschool desk\n...'} />
             </Field>
             <div className="actions">
               <button className="btn btn-primary" type="submit" disabled={busy}>
-                Enable discovery
+                Enable discovery with defaults
               </button>
             </div>
           </form>
@@ -336,6 +343,52 @@ if (!loaded) return <div className="empty">Loading…</div>
                 <strong>What is this?</strong> After the subscriber/view/engagement gates pass, channels are ranked. If the channel's <em>About</em> description contains any of these terms, it's considered <strong>true on-topic</strong> and ranked higher (more of its videos are likely desk-setup content). Not a filter — a boost. Edit and save — next run uses it immediately.
               </div>
             </Field>
+          </div>
+
+          <div className="card" style={{ marginTop: '1rem', border: '1px dashed rgba(124,58,237,.22)', background: 'rgba(124,58,237,.04)' }}>
+            <h3 style={{ marginTop: 0, display: 'flex', alignItems: 'center', gap: 8 }}>How to get keywords with AI <span style={{ fontSize: '.7rem', padding: '4px 8px', borderRadius: 999, background: '#7c3aed', color: '#fff' }}>COPY & PASTE</span></h3>
+            <p style={{ color: 'var(--text-muted)', marginTop: 0, fontSize: '.9rem', lineHeight: 1.6 }}>
+              New users start with desk-setup defaults. Changing niche? Copy a prompt below, replace <code>[YOUR NICHE]</code>, paste into ChatGPT/Claude, get a clean list, then paste here and Save. Niche bio is <strong>not auto-generated</strong> — it boosts channels whose About contains these terms.
+            </p>
+            <div style={{ display: 'grid', gap: 12 }}>
+              <details style={{ background: '#fff', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 12px' }}>
+                <summary style={{ cursor: 'pointer', fontWeight: 700 }}>Prompt: 500 search keywords</summary>
+                <pre style={{ whiteSpace: 'pre-wrap', fontSize: '.82rem', lineHeight: 1.6, margin: '10px 0 0', background: 'rgba(0,0,0,.04)', padding: 10, borderRadius: 8, fontFamily: 'monospace' }}>
+{`You are a YouTube keyword expert for influencer discovery.
+
+Give me 500 YouTube search keywords for creators in niche [YOUR NICHE, e.g. "Desk Setups & Battlestations"].
+
+Rules:
+- One keyword per line, no numbering, no quotes
+- 2-4 words each, focused on YouTube video titles people actually search (e.g. "desk setup tour", "battlestation build")
+- Avoid generic single words
+- Mix: tours, builds, setups, essentials, transformations, minimal, rgb, white theme, etc.
+- No duplicates`}
+                </pre>
+                <button type="button" className="btn btn-ghost" style={{ marginTop: 8, fontSize: '.8rem' }} onClick={() => navigator.clipboard.writeText(`You are a YouTube keyword expert for influencer discovery.\n\nGive me 500 YouTube search keywords for creators in niche [YOUR NICHE, e.g. \"Desk Setups & Battlestations\"].\n\nRules:\n- One keyword per line, no numbering, no quotes\n- 2-4 words each, focused on YouTube video titles people actually search (e.g. \"desk setup tour\", \"battlestation build\")\n- Avoid generic single words\n- Mix: tours, builds, setups, essentials, transformations, minimal, rgb, white theme, etc.\n- No duplicates`)}>Copy prompt</button>
+              </details>
+              <details style={{ background: '#fff', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 12px' }}>
+                <summary style={{ cursor: 'pointer', fontWeight: 700 }}>Prompt: 40 negative keywords</summary>
+                <pre style={{ whiteSpace: 'pre-wrap', fontSize: '.82rem', lineHeight: 1.6, margin: '10px 0 0', background: 'rgba(0,0,0,.04)', padding: 10, borderRadius: 8, fontFamily: 'monospace' }}>
+{`Give me 40 negative keywords to exclude off-topic YouTube results for niche [YOUR NICHE].
+
+One per line, 1-3 words each. These are terms that appear in titles but are NOT my niche (e.g. for desk setups: "kitchen setup", "school desk", "trading desk", etc.). No numbering.`}
+                </pre>
+                <button type="button" className="btn btn-ghost" style={{ marginTop: 8, fontSize: '.8rem' }} onClick={() => navigator.clipboard.writeText(`Give me 40 negative keywords to exclude off-topic YouTube results for niche [YOUR NICHE].\n\nOne per line, 1-3 words each. These are terms that appear in titles but are NOT my niche (e.g. for desk setups: \"kitchen setup\", \"school desk\", \"trading desk\", etc.). No numbering.`)}>Copy prompt</button>
+              </details>
+              <details style={{ background: '#fff', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 12px' }} open>
+                <summary style={{ cursor: 'pointer', fontWeight: 700 }}>Prompt: 15-20 niche bio keywords (the one you asked about)</summary>
+                <pre style={{ whiteSpace: 'pre-wrap', fontSize: '.82rem', lineHeight: 1.6, margin: '10px 0 0', background: 'rgba(0,0,0,.04)', padding: 10, borderRadius: 8, fontFamily: 'monospace' }}>
+{`Give me 15-20 niche bio keywords for niche [YOUR NICHE].
+
+These are short words/phrases that appear in a YouTuber's channel About/description if they are truly on-topic (e.g. for desk setups: "desk setup", "battlestation", "workspace", "cable management", "peripherals").
+
+One per line, lower case, 1-2 words each. No sentences, no numbering. These will be used to rank channels higher if their bio contains any.`}
+                </pre>
+                <button type="button" className="btn btn-ghost" style={{ marginTop: 8, fontSize: '.8rem' }} onClick={() => navigator.clipboard.writeText(`Give me 15-20 niche bio keywords for niche [YOUR NICHE].\n\nThese are short words/phrases that appear in a YouTuber's channel About/description if they are truly on-topic (e.g. for desk setups: \"desk setup\", \"battlestation\", \"workspace\", \"cable management\", \"peripherals\").\n\nOne per line, lower case, 1-2 words each. No sentences, no numbering. These will be used to rank channels higher if their bio contains any.`)}>Copy prompt</button>
+                <div style={{ marginTop: 8, color: 'var(--text-muted)', fontSize: '.82rem', lineHeight: 1.5 }}>What it does: after filters (subs/views/engagement) pass, channels are sorted. If About contains any bio keyword → ranked higher. Not a filter, a boost. Leave as-is for desk setups or regenerate for your niche.</div>
+              </details>
+            </div>
           </div>
 
           <div className="card" style={{ marginTop: '1rem' }}>
