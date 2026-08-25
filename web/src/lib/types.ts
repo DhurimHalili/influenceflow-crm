@@ -59,6 +59,8 @@ export interface Creator {
   notes: string | null
   personalization: string | null
   archived_at: string | null
+  draft_subject: string | null
+  draft_body: string | null
   created_at: string
   updated_at: string
 }

@@ -20,6 +20,13 @@ const emptyForm = {
   on_roster: false,
 }
 
+function pipelineDotColor(s: PipelineStatus): string | null {
+  if (s === 'contacted' || s === 'replied' || s === 'reach_back_1' || s === 'reach_back_2' || s === 'reach_back_3') return '#38bdf8' // blue
+  if (s === 'roster' || s === 'signed') return '#22c55e' // green
+  if (s === 'negotiating') return '#f59e0b' // orange
+  return null
+}
+
 export function CreatorsPage() {
   const { user } = useAuth()
   const log = useActivityLogger()
@@ -475,7 +482,14 @@ export function CreatorsPage() {
                     onDragStart={(e) => e.dataTransfer.setData('text/plain', c.id)}
                     onClick={() => openEdit(c)}
                   >
-                    <strong>{c.name}</strong>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      {(() => {
+                        const pc = pipelineDotColor(c.pipeline_status)
+                        const hasDraft = !!(c.draft_subject || c.draft_body)
+                        return <>{pc && <span title={STATUS_LABELS[c.pipeline_status]} style={{ width: 8, height: 8, borderRadius: 999, background: pc, boxShadow: `0 0 6px ${pc}66` }} />}{hasDraft && <span title="Draft saved" style={{ width: 8, height: 8, borderRadius: 999, background: '#eab308', boxShadow: '0 0 6px #eab30866' }} />}</>
+                      })()}
+                      <strong>{c.name}</strong>
+                    </div>
                     <div style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>{c.niche || c.contact_email || '—'}</div>
                   </div>
                 ))}
@@ -514,7 +528,20 @@ export function CreatorsPage() {
                       <input type="checkbox" aria-label={`Select ${c.name}`} checked={selected.has(c.id)} onChange={() => toggleOne(c.id)} />
                     </td>
                     <td>
-                      <Link to={`/app/creators/${c.id}`}>{c.name}</Link>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                        {(() => {
+                          const pc = pipelineDotColor(c.pipeline_status)
+                          const hasDraft = !!(c.draft_subject || c.draft_body)
+                          return (
+                            <>
+                              {pc && <span title={STATUS_LABELS[c.pipeline_status]} style={{ width: 8, height: 8, borderRadius: 999, background: pc, display: 'inline-block', boxShadow: `0 0 6px ${pc}66` }} />}
+                              {hasDraft && <span title="Draft email saved" style={{ width: 8, height: 8, borderRadius: 999, background: '#eab308', display: 'inline-block', boxShadow: '0 0 6px #eab30866' }} />}
+                              {!pc && !hasDraft && <span style={{ width: 8, height: 8, borderRadius: 999, background: 'var(--border)', display: 'inline-block' }} />}
+                            </>
+                          )
+                        })()}
+                        <Link to={`/app/creators/${c.id}`}>{c.name}</Link>
+                      </span>
                     </td>
                     <td>{c.contact_email || '—'}</td>
                     <td>{c.niche || '—'}</td>
@@ -541,7 +568,12 @@ export function CreatorsPage() {
               <div className={`mobile-card${selected.has(c.id) ? ' row-selected' : ''}`} key={c.id}>
                 <label className="mobile-select">
                   <input type="checkbox" checked={selected.has(c.id)} onChange={() => toggleOne(c.id)} />
-                  <h3>
+                  <h3 style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                    {(() => {
+                      const pc = pipelineDotColor(c.pipeline_status)
+                      const hasDraft = !!(c.draft_subject || c.draft_body)
+                      return <>{pc && <span title={STATUS_LABELS[c.pipeline_status]} style={{ width: 8, height: 8, borderRadius: 999, background: pc, boxShadow: `0 0 6px ${pc}66`, display: 'inline-block' }} />}{hasDraft && <span title="Draft saved" style={{ width: 8, height: 8, borderRadius: 999, background: '#eab308', boxShadow: '0 0 6px #eab30866', display: 'inline-block' }} />}</>
+                    })()}
                     <Link to={`/app/creators/${c.id}`}>{c.name}</Link>
                   </h3>
                 </label>
@@ -651,12 +683,18 @@ export function CreatorDetailPage() {
   const [c, setC] = useState<Creator | null>(null)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
+  const [draftSubject, setDraftSubject] = useState('')
+  const [draftBody, setDraftBody] = useState('')
+  const [draftBusy, setDraftBusy] = useState(false)
 
   async function load() {
     if (!id) return
     setLoading(true)
     const { data } = await supabase.from('creators').select('*').eq('id', id).maybeSingle()
-    setC(data as Creator | null)
+    const row = data as Creator | null
+    setC(row)
+    setDraftSubject(row?.draft_subject || '')
+    setDraftBody(row?.draft_body || '')
     setLoading(false)
   }
 
@@ -685,8 +723,24 @@ export function CreatorDetailPage() {
     load()
   }
 
+  async function saveDraft() {
+    if (!c) return
+    setDraftBusy(true)
+    const { error } = await supabase.from('creators').update({ draft_subject: draftSubject || null, draft_body: draftBody || null, updated_at: new Date().toISOString() }).eq('id', c.id)
+    setDraftBusy(false)
+    if (error) { show(error.message); return }
+    show(draftSubject || draftBody ? 'Draft saved — yellow dot will show in list' : 'Draft cleared')
+    await log(`Draft ${draftSubject || draftBody ? 'saved' : 'cleared'} for ${c.name}`)
+    load()
+  }
+
+  async function copy(text: string, label: string) {
+    try { await navigator.clipboard.writeText(text); show(`${label} copied`) } catch { show('Copy failed — select and copy manually') }
+  }
+
   if (loading) return <Empty>Loading…</Empty>
   if (!c) return <Empty>Creator not found</Empty>
+  const hasDraft = !!(c.draft_subject || c.draft_body)
   return (
     <div>
       {Toast}
@@ -701,7 +755,10 @@ export function CreatorDetailPage() {
       <div className="grid-2">
         <div className="card">
           <p>
-            <StatusBadge status={c.pipeline_status} />
+            <StatusBadge status={c.pipeline_status} />{' '}
+            {hasDraft && <span title="Draft saved" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginLeft: 8, padding: '3px 8px', borderRadius: 999, background: 'rgba(234,179,8,.14)', border: '1px solid rgba(234,179,8,.3)', fontSize: '.78rem', fontWeight: 700, color: '#a16207' }}><span style={{ width: 7, height: 7, borderRadius: 999, background: '#eab308' }} /> Draft</span>}
+            {' '}
+            {(() => { const pc = pipelineDotColor(c.pipeline_status); return pc ? <span title={STATUS_LABELS[c.pipeline_status]} style={{ width: 10, height: 10, borderRadius: 999, background: pc, display: 'inline-block', verticalAlign: 'middle', boxShadow: `0 0 8px ${pc}66`, marginLeft: 6 }} /> : null })()}
           </p>
           <p>Platform: {c.platform || '—'}</p>
           <p>Channel: {c.channel_link ? <a href={c.channel_link} target="_blank" rel="noreferrer">{c.channel_link}</a> : '—'}</p>
@@ -722,6 +779,34 @@ export function CreatorDetailPage() {
           <h3>Notes</h3>
           <p style={{ whiteSpace: 'pre-wrap' }}>{c.notes || '—'}</p>
         </div>
+      </div>
+
+      <div className="card" style={{ marginTop: 16, border: hasDraft ? '1px solid rgba(234,179,8,.28)' : undefined, background: hasDraft ? 'color-mix(in srgb, #eab308 6%, var(--bg-elevated))' : undefined }}>
+        <h3 style={{ marginTop: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+          Draft email <span style={{ fontSize: '.72rem', padding: '3px 8px', borderRadius: 999, background: '#eab308', color: '#422006', fontWeight: 800 }}>YELLOW DOT</span>
+          <span style={{ color: 'var(--text-muted)', fontWeight: 500, fontSize: '.82rem' }}>— subject + body you can copy anytime</span>
+        </h3>
+        <p style={{ color: 'var(--text-muted)', fontSize: '.82rem', lineHeight: 1.5, marginTop: 0 }}>Save a draft here. A <strong style={{ color: '#a16207' }}>yellow dot</strong> will appear next to the name in <strong style={{ color: 'var(--text)' }}>Creators → table/board/cards</strong>. <strong style={{ color: '#38bdf8' }}>Blue = contacted</strong> · <strong style={{ color: '#f59e0b' }}>Orange = negotiating</strong> · <strong style={{ color: '#22c55e' }}>Green = roster</strong>.</p>
+        <div className="grid-2" style={{ gap: 12 }}>
+          <Field label="Subject">
+            <div style={{ display: 'flex', gap: 8 }}>
+              <input className="input" value={draftSubject} onChange={(e) => setDraftSubject(e.target.value)} placeholder="Re: Desk setup collab — quick idea for {{channel}}" style={{ flex: 1 }} />
+              <button type="button" className="btn btn-ghost" onClick={() => copy(draftSubject, 'Subject')} disabled={!draftSubject.trim()}>Copy</button>
+            </div>
+          </Field>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', justifyContent: 'flex-end' }}>
+            <button type="button" className="btn btn-ghost" onClick={() => { setDraftSubject(''); setDraftBody('') }} disabled={draftBusy || (!draftSubject && !draftBody)}>Clear</button>
+            <button type="button" className="btn btn-primary" onClick={saveDraft} disabled={draftBusy}>{draftBusy ? 'Saving…' : 'Save draft'}</button>
+          </div>
+        </div>
+        <Field label="Body">
+          <textarea className="textarea" value={draftBody} onChange={(e) => setDraftBody(e.target.value)} placeholder={`Hi {{name}},\n\nLoved your latest desk tour — that pegboard is clean. We run campaigns for desk-setup brands and think you'd be a great fit...\n\n— Dhurim`} style={{ minHeight: 180 }} />
+          <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+            <button type="button" className="btn btn-ghost" onClick={() => copy(draftBody, 'Body')} disabled={!draftBody.trim()}>Copy body</button>
+            <button type="button" className="btn btn-ghost" onClick={() => copy(`${draftSubject}\n\n${draftBody}`, 'Subject + body')} disabled={!(draftSubject.trim() || draftBody.trim())}>Copy subject + body</button>
+            {hasDraft && <span style={{ alignSelf: 'center', color: 'var(--text-muted)', fontSize: '.82rem' }}>Saved draft will show yellow dot in list</span>}
+          </div>
+        </Field>
       </div>
     </div>
   )
