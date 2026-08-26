@@ -1,0 +1,825 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>InfluenceFlow CRM — Dashboard & Pipeline Preview</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@500;700&display=swap');
+    
+    :root {
+      --bg: #0a0a0f;
+      --bg-elevated: #121218;
+      --card: #16161e;
+      --card-hover: #1e1e28;
+      --border: rgba(255, 255, 255, 0.08);
+      --border-accent: rgba(124, 58, 237, 0.3);
+      --text: #f3f4f6;
+      --muted: #9ca3af;
+      --accent: #7c3aed;
+      --accent-gradient: linear-gradient(135deg, #7c3aed 0%, #ec4899 50%, #38bdf8 100%);
+      --blue: #38bdf8;
+      --green: #22c55e;
+      --orange: #f59e0b;
+      --yellow: #eab308;
+      --purple: #a78bfa;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      background-color: var(--bg);
+      color: var(--text);
+      width: 1440px;
+      height: 900px;
+      overflow: hidden;
+      display: flex;
+      background-image: 
+        radial-gradient(800px 500px at 15% 10%, rgba(124, 58, 237, 0.12), transparent 70%),
+        radial-gradient(600px 400px at 85% 85%, rgba(56, 189, 248, 0.08), transparent 70%);
+    }
+
+    /* SIDEBAR */
+    .sidebar {
+      width: 250px;
+      background: rgba(18, 18, 24, 0.95);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      padding: 24px 16px;
+      gap: 28px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-weight: 900;
+      font-size: 1.1rem;
+      letter-spacing: -0.02em;
+    }
+    .brand-icon {
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
+      background: var(--accent-gradient);
+      display: grid;
+      place-items: center;
+      box-shadow: 0 8px 20px rgba(124, 58, 237, 0.35);
+    }
+    .brand-icon-inner {
+      width: 16px;
+      height: 16px;
+      background: #fff;
+      border-radius: 4px;
+    }
+    .brand-tag {
+      font-size: 0.65rem;
+      padding: 2px 6px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--muted);
+      font-weight: 700;
+      letter-spacing: 0.05em;
+    }
+
+    .nav-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .nav-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 14px;
+      border-radius: 12px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      color: var(--muted);
+      text-decoration: none;
+      transition: all 0.2s;
+    }
+    .nav-item.active {
+      background: rgba(124, 58, 237, 0.15);
+      color: #fff;
+      border: 1px solid rgba(124, 58, 237, 0.3);
+    }
+    .nav-icon {
+      font-size: 1.1rem;
+      width: 20px;
+      text-align: center;
+    }
+    .badge-count {
+      margin-left: auto;
+      background: rgba(124, 58, 237, 0.3);
+      color: var(--purple);
+      font-size: 0.75rem;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-weight: 700;
+    }
+
+    .user-card {
+      margin-top: auto;
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 12px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .avatar {
+      width: 34px;
+      height: 34px;
+      border-radius: 999px;
+      background: linear-gradient(135deg, #7c3aed, #ec4899);
+      display: grid;
+      place-items: center;
+      font-weight: 800;
+      font-size: 0.85rem;
+    }
+    .user-info {
+      display: flex;
+      flex-direction: column;
+    }
+    .user-name { font-size: 0.85rem; font-weight: 700; }
+    .user-role { font-size: 0.72rem; color: var(--muted); }
+
+    /* MAIN CONTAINER */
+    .main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* TOPBAR */
+    .topbar {
+      height: 70px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 32px;
+      background: rgba(10, 10, 15, 0.5);
+      backdrop-filter: blur(12px);
+    }
+    .search-box {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 8px 16px;
+      width: 340px;
+      color: var(--muted);
+      font-size: 0.88rem;
+    }
+    .topbar-actions {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+    .btn {
+      padding: 9px 16px;
+      border-radius: 10px;
+      font-size: 0.85rem;
+      font-weight: 700;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      border: 1px solid var(--border);
+      background: var(--card);
+      color: var(--text);
+      cursor: pointer;
+    }
+    .btn-primary {
+      background: var(--accent-gradient);
+      border: none;
+      color: #fff;
+      box-shadow: 0 4px 15px rgba(124, 58, 237, 0.35);
+    }
+    .status-pill {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 12px;
+      border-radius: 999px;
+      background: rgba(34, 197, 94, 0.1);
+      border: 1px solid rgba(34, 197, 94, 0.25);
+      color: var(--green);
+      font-size: 0.78rem;
+      font-weight: 700;
+    }
+    .status-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 999px;
+      background: var(--green);
+      box-shadow: 0 0 8px var(--green);
+    }
+
+    /* DASHBOARD CONTENT */
+    .content {
+      flex: 1;
+      padding: 24px 32px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      overflow-y: auto;
+    }
+
+    .page-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+    }
+    .page-title {
+      font-size: 1.6rem;
+      font-weight: 900;
+      letter-spacing: -0.03em;
+    }
+    .page-subtitle {
+      color: var(--muted);
+      font-size: 0.88rem;
+      margin-top: 4px;
+    }
+
+    /* METRICS GRID */
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 16px;
+    }
+    .metric-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      position: relative;
+      overflow: hidden;
+    }
+    .metric-card::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 2px;
+      background: var(--border);
+    }
+    .metric-card.accent::before { background: var(--accent-gradient); }
+    .metric-card.blue::before { background: var(--blue); }
+    .metric-card.green::before { background: var(--green); }
+    .metric-card.orange::before { background: var(--orange); }
+
+    .metric-label {
+      font-size: 0.78rem;
+      font-weight: 700;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .metric-value {
+      font-size: 1.7rem;
+      font-weight: 900;
+      letter-spacing: -0.02em;
+    }
+    .metric-subtext {
+      font-size: 0.78rem;
+      color: var(--muted);
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .trend-up { color: var(--green); font-weight: 700; }
+
+    /* LAYOUT: KANBAN & DISCOVERY FEED */
+    .workspace-grid {
+      display: grid;
+      grid-template-columns: 1fr 340px;
+      gap: 20px;
+      flex: 1;
+    }
+
+    /* KANBAN BOARD */
+    .kanban-section {
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .kanban-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .section-title {
+      font-size: 1.05rem;
+      font-weight: 800;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .view-toggle {
+      display: flex;
+      background: rgba(255, 255, 255, 0.05);
+      padding: 3px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+    }
+    .toggle-btn {
+      padding: 4px 10px;
+      font-size: 0.75rem;
+      font-weight: 700;
+      border-radius: 6px;
+      border: none;
+      color: var(--muted);
+      background: transparent;
+    }
+    .toggle-btn.active {
+      background: var(--accent);
+      color: #fff;
+    }
+
+    .kanban-columns {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      flex: 1;
+    }
+    .kanban-col {
+      background: rgba(10, 10, 15, 0.6);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .col-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 0.8rem;
+      font-weight: 800;
+      color: var(--muted);
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border);
+    }
+    .col-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+    }
+    .dot-new { background: var(--purple); box-shadow: 0 0 6px var(--purple); }
+    .dot-contacted { background: var(--blue); box-shadow: 0 0 6px var(--blue); }
+    .dot-negotiating { background: var(--orange); box-shadow: 0 0 6px var(--orange); }
+    .dot-roster { background: var(--green); box-shadow: 0 0 6px var(--green); }
+
+    .creator-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+      transition: transform 0.2s, border-color 0.2s;
+    }
+    .creator-card:hover {
+      border-color: var(--border-accent);
+      transform: translateY(-2px);
+    }
+    .card-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .creator-name {
+      font-size: 0.88rem;
+      font-weight: 800;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .indicator-draft {
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: var(--yellow);
+      box-shadow: 0 0 6px var(--yellow);
+    }
+    .creator-niche {
+      font-size: 0.72rem;
+      color: var(--muted);
+    }
+    .card-stats {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 0.75rem;
+      padding-top: 6px;
+      border-top: 1px dashed var(--border);
+    }
+    .stat-badge {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.72rem;
+      color: var(--purple);
+      background: rgba(167, 139, 250, 0.1);
+      padding: 2px 6px;
+      border-radius: 6px;
+    }
+
+    /* DISCOVERY FEED RIGHT SIDEBAR */
+    .discovery-feed {
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .feed-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .feed-badge {
+      font-size: 0.7rem;
+      font-weight: 800;
+      padding: 3px 8px;
+      border-radius: 999px;
+      background: rgba(124, 58, 237, 0.2);
+      color: var(--purple);
+      border: 1px solid rgba(124, 58, 237, 0.3);
+    }
+
+    .discovery-item {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .discovery-item-title {
+      font-size: 0.85rem;
+      font-weight: 800;
+      color: #fff;
+    }
+    .discovery-meta {
+      display: flex;
+      gap: 8px;
+      font-size: 0.72rem;
+      color: var(--muted);
+      flex-wrap: wrap;
+    }
+    .tag-match {
+      background: rgba(34, 197, 94, 0.15);
+      color: var(--green);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-weight: 700;
+    }
+    .btn-add {
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid var(--border);
+      color: #fff;
+      font-size: 0.75rem;
+      font-weight: 700;
+      padding: 6px;
+      border-radius: 8px;
+      width: 100%;
+      text-align: center;
+      margin-top: 4px;
+    }
+    .btn-add:hover { background: var(--accent); border-color: var(--accent); }
+  </style>
+</head>
+<body>
+
+  <!-- SIDEBAR NAVIGATION -->
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-icon"><div class="brand-icon-inner"></div></div>
+      InfluenceFlow <span class="brand-tag">CRM</span>
+    </div>
+
+    <nav class="nav-list">
+      <a href="#" class="nav-item">
+        <span class="nav-icon">📊</span> Dashboard
+      </a>
+      <a href="#" class="nav-item active">
+        <span class="nav-icon">👥</span> Creators
+        <span class="badge-count">247</span>
+      </a>
+      <a href="#" class="nav-item">
+        <span class="nav-icon">🏢</span> Brands & Contacts
+      </a>
+      <a href="#" class="nav-item">
+        <span class="nav-icon">✨</span> Discovery
+        <span class="badge-count" style="background: rgba(34,197,94,0.2); color: var(--green);">AUTO</span>
+      </a>
+      <a href="#" class="nav-item">
+        <span class="nav-icon">⚡</span> Campaigns
+      </a>
+      <a href="#" class="nav-item">
+        <span class="nav-icon">📅</span> Calendar
+      </a>
+      <a href="#" class="nav-item">
+        <span class="nav-icon">⚙️</span> Settings
+      </a>
+    </nav>
+
+    <div class="user-card">
+      <div class="avatar">DH</div>
+      <div class="user-info">
+        <div class="user-name">Dhurim Halili</div>
+        <div class="user-role">Agency Owner · RLS</div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- MAIN CONTENT AREA -->
+  <main class="main">
+    
+    <!-- TOPBAR -->
+    <header class="topbar">
+      <div class="search-box">
+        <span>🔍</span> Search creators, brands, campaigns...
+      </div>
+      <div class="topbar-actions">
+        <div class="status-pill">
+          <div class="status-dot"></div>
+          YouTube Discovery Cron Active (08:00 Berlin)
+        </div>
+        <button class="btn btn-primary">
+          <span>⚡</span> Run Discovery Now
+        </button>
+      </div>
+    </header>
+
+    <!-- CONTENT BODY -->
+    <div class="content">
+      
+      <!-- PAGE HEADER -->
+      <div class="page-header">
+        <div>
+          <h1 class="page-title">Influencer CRM & Discovery Board</h1>
+          <p class="page-subtitle">Desk Setups & Tech Creators Pipeline · Private Workspace</p>
+        </div>
+        <div style="display: flex; gap: 10px;">
+          <button class="btn">Export CSV</button>
+          <button class="btn">Bulk Import</button>
+          <button class="btn btn-primary">+ Add Creator</button>
+        </div>
+      </div>
+
+      <!-- METRICS GRID -->
+      <div class="metrics-grid">
+        <div class="metric-card accent">
+          <div class="metric-label">Total Creators</div>
+          <div class="metric-value">247</div>
+          <div class="metric-subtext"><span class="trend-up">↑ +28</span> auto-added this week</div>
+        </div>
+        <div class="metric-card blue">
+          <div class="metric-label">Active Campaigns</div>
+          <div class="metric-value">8 Deals</div>
+          <div class="metric-subtext">$42,500 total deal value</div>
+        </div>
+        <div class="metric-card green">
+          <div class="metric-label">Roster Creators</div>
+          <div class="metric-value">34 Signed</div>
+          <div class="metric-subtext">Verified email & rates</div>
+        </div>
+        <div class="metric-card orange">
+          <div class="metric-label">Discovery Quota</div>
+          <div class="metric-value">5 Keys</div>
+          <div class="metric-subtext">520 keywords · 52-day rotation</div>
+        </div>
+      </div>
+
+      <!-- MAIN WORKSPACE: KANBAN & DISCOVERY FEED -->
+      <div class="workspace-grid">
+        
+        <!-- KANBAN PIPELINE -->
+        <section class="kanban-section">
+          <div class="kanban-header">
+            <div class="section-title">
+              <span>📋</span> Creators Pipeline Board
+            </div>
+            <div class="view-toggle">
+              <button class="toggle-btn active">Kanban</button>
+              <button class="toggle-btn">Table</button>
+            </div>
+          </div>
+
+          <div class="kanban-columns">
+            
+            <!-- STAGE 1: NEW -->
+            <div class="kanban-col">
+              <div class="col-header">
+                <div style="display: flex; align-items: center; gap: 6px;">
+                  <div class="col-dot dot-new"></div> NEW (47)
+                </div>
+              </div>
+
+              <div class="creator-card">
+                <div class="card-top">
+                  <div class="creator-name">
+                    <div class="indicator-draft" title="Draft email saved"></div>
+                    Rory Alexander
+                  </div>
+                </div>
+                <div class="creator-niche">Minimal Desk Setup</div>
+                <div class="card-stats">
+                  <span>YouTube</span>
+                  <span class="stat-badge">247K subs</span>
+                </div>
+              </div>
+
+              <div class="creator-card">
+                <div class="card-top">
+                  <div class="creator-name">James Baldwin</div>
+                </div>
+                <div class="creator-niche">Battlestations & RGB</div>
+                <div class="card-stats">
+                  <span>YouTube</span>
+                  <span class="stat-badge">184K subs</span>
+                </div>
+              </div>
+
+              <div class="creator-card">
+                <div class="card-top">
+                  <div class="creator-name">
+                    <div class="indicator-draft" title="Draft email saved"></div>
+                    TechCraft Studio
+                  </div>
+                </div>
+                <div class="creator-niche">Productivity Workspaces</div>
+                <div class="card-stats">
+                  <span>YouTube</span>
+                  <span class="stat-badge">92K subs</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- STAGE 2: CONTACTED -->
+            <div class="kanban-col">
+              <div class="col-header">
+                <div style="display: flex; align-items: center; gap: 6px;">
+                  <div class="col-dot dot-contacted"></div> CONTACTED (18)
+                </div>
+              </div>
+
+              <div class="creator-card">
+                <div class="card-top">
+                  <div class="creator-name">MinimalMatt</div>
+                </div>
+                <div class="creator-niche">White Setup Aesthetics</div>
+                <div class="card-stats">
+                  <span style="color: var(--blue);">Sent 2d ago</span>
+                  <span class="stat-badge">310K subs</span>
+                </div>
+              </div>
+
+              <div class="creator-card">
+                <div class="card-top">
+                  <div class="creator-name">Alex Tech Room</div>
+                </div>
+                <div class="creator-niche">Desk Accessories</div>
+                <div class="card-stats">
+                  <span style="color: var(--blue);">Sent 4d ago</span>
+                  <span class="stat-badge">125K subs</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- STAGE 3: NEGOTIATING -->
+            <div class="kanban-col">
+              <div class="col-header">
+                <div style="display: flex; align-items: center; gap: 6px;">
+                  <div class="col-dot dot-negotiating"></div> NEGOTIATING (6)
+                </div>
+              </div>
+
+              <div class="creator-card">
+                <div class="card-top">
+                  <div class="creator-name">David Setup TV</div>
+                </div>
+                <div class="creator-niche">Dedicated Video Sponsor</div>
+                <div class="card-stats">
+                  <span style="color: var(--orange); font-weight: 700;">$1,800 offer</span>
+                  <span class="stat-badge">520K subs</span>
+                </div>
+              </div>
+
+              <div class="creator-card">
+                <div class="card-top">
+                  <div class="creator-name">ErgoDesk Reviews</div>
+                </div>
+                <div class="creator-niche">Integrated Dedicated</div>
+                <div class="card-stats">
+                  <span style="color: var(--orange); font-weight: 700;">$950 offer</span>
+                  <span class="stat-badge">140K subs</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- STAGE 4: ROSTER -->
+            <div class="kanban-col">
+              <div class="col-header">
+                <div style="display: flex; align-items: center; gap: 6px;">
+                  <div class="col-dot dot-roster"></div> ROSTER (34)
+                </div>
+              </div>
+
+              <div class="creator-card" style="border-color: rgba(34,197,94,0.3);">
+                <div class="card-top">
+                  <div class="creator-name" style="color: var(--green);">Setup Wars Pro</div>
+                </div>
+                <div class="creator-niche">Signed Roster Creator</div>
+                <div class="card-stats">
+                  <span style="color: var(--green); font-weight: 700;">Campaign Ready</span>
+                  <span class="stat-badge" style="color: var(--green); background: rgba(34,197,94,0.1);">850K subs</span>
+                </div>
+              </div>
+
+              <div class="creator-card" style="border-color: rgba(34,197,94,0.3);">
+                <div class="card-top">
+                  <div class="creator-name" style="color: var(--green);">CozyGamingSpace</div>
+                </div>
+                <div class="creator-niche">Signed Roster Creator</div>
+                <div class="card-stats">
+                  <span style="color: var(--green); font-weight: 700;">Campaign Ready</span>
+                  <span class="stat-badge" style="color: var(--green); background: rgba(34,197,94,0.1);">210K subs</span>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </section>
+
+        <!-- AUTOMATED YOUTUBE DISCOVERY FEED -->
+        <aside class="discovery-feed">
+          <div class="feed-header">
+            <div style="font-weight: 800; font-size: 0.95rem; display: flex; align-items: center; gap: 6px;">
+              <span>✨</span> Nightly Auto-Discovery
+            </div>
+            <span class="feed-badge">10 Keywords/Night</span>
+          </div>
+
+          <div style="font-size: 0.78rem; color: var(--muted); line-height: 1.4;">
+            Last run added <strong>12 fresh YouTubers</strong> matching your 50k subs / 1% engagement gates.
+          </div>
+
+          <div class="discovery-item">
+            <div class="discovery-item-title">Desk Setup Tour 2026</div>
+            <div class="discovery-meta">
+              <span>247K subs</span> · <span>84K avg views</span>
+              <span class="tag-match">Bio: battlestation ✓</span>
+            </div>
+            <button class="btn-add">+ Add to CRM Pipeline</button>
+          </div>
+
+          <div class="discovery-item">
+            <div class="discovery-item-title">Minimalist Tech Haven</div>
+            <div class="discovery-meta">
+              <span>92K subs</span> · <span>41K avg views</span>
+              <span class="tag-match">Bio: desk tour ✓</span>
+            </div>
+            <button class="btn-add">+ Add to CRM Pipeline</button>
+          </div>
+
+          <div class="discovery-item">
+            <div class="discovery-item-title">Ultimate Ultrawide Build</div>
+            <div class="discovery-meta">
+              <span>180K subs</span> · <span>62K avg views</span>
+              <span class="tag-match">Bio: workspace ✓</span>
+            </div>
+            <button class="btn-add">+ Add to CRM Pipeline</button>
+          </div>
+
+          <div style="margin-top: auto; padding: 10px; background: rgba(124, 58, 237, 0.1); border: 1px solid rgba(124, 58, 237, 0.2); border-radius: 10px; font-size: 0.75rem; color: var(--purple); text-align: center;">
+            ⚙️ Scheduled: 08:00 Berlin · 52-Day Rotation
+          </div>
+        </aside>
+
+      </div>
+
+    </div>
+
+  </main>
+
+</body>
+</html>
