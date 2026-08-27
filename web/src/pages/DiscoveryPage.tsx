@@ -136,14 +136,14 @@ export function DiscoveryPage() {
   async function createDefault() {
     if (!user) return
     setBusy(true)
-    // If user left fields empty, let DB defaults fill 520/40/17 — don't overwrite with empty array
+    // If user left fields empty, let DB defaults fill hardware-curated pool — don't overwrite with empty array
     const kw = keywords.split('\n').map((k) => k.trim()).filter(Boolean)
     const neg = negativeKw.split('\n').map((k) => k.trim()).filter(Boolean)
     const bio = nicheBioKw.split('\n').map((k) => k.trim()).filter(Boolean)
     const yk = youtubeKeys.split('\n').map((k) => k.trim()).filter(Boolean)
     const base: any = {
       user_id: user.id,
-      niche: 'Desk Setups & Battlestations',
+      niche: 'Desk Setups · Hardware Tests',
       platform: 'youtube',
       enabled: true,
       schedule_time: '08:00',
@@ -232,22 +232,27 @@ if (!loaded) return <div className="empty">Loading…</div>
 
       {!settings && (
         <div className="card" style={{ border: '1px solid rgba(124,58,237,.18)', background: 'linear-gradient(135deg, rgba(124,58,237,.06), rgba(14,165,233,.04))' }}>
-          <h3 style={{ marginTop: 0 }}>Set up automated discovery — 1 click with defaults</h3>
+          <h3 style={{ marginTop: 0 }}>Set up automated discovery — 1 click with hardware-accurate defaults</h3>
           <p style={{ color: 'var(--text-muted)', lineHeight: 1.6 }}>
-            New accounts are <strong>auto-created with 520 desk-setup keywords + 40 negatives + 17 bio terms</strong> (your niche). Just click <strong>Enable discovery</strong> to use them, or paste your own. No empty start.
+            New accounts are <strong>auto-created with hardware-curated keywords</strong> (desk setups <em>that test motherboards / GPUs / gaming PC builds</em>) + negatives + bio terms. Just click <strong>Enable discovery</strong> — no empty start, no Shorts-only, no India targeting.
           </p>
-          <div style={{ background: 'rgba(255,255,255,.06)', border: '1px solid rgba(255,255,255,.08)', borderRadius: 12, padding: 12, marginBottom: 12, fontSize: '.9rem', lineHeight: 1.6 }}>
-            <strong>Don't have keywords?</strong> Copy the AI prompts below (Search → Negative → Niche bio), paste into ChatGPT/Claude with your niche, get lists in seconds, then paste here. No manual research needed.
+          <div style={{ display: 'grid', gap: 8, marginBottom: 12, fontSize: '.85rem', lineHeight: 1.6 }}>
+            <div style={{ background: 'rgba(34,197,94,.08)', border: '1px solid rgba(34,197,94,.18)', borderRadius: 10, padding: '10px 12px' }}>
+              ✅ <strong>What’s filtered now:</strong> requires <strong>≥1 desk video</strong> <em>and</em> <strong>≥1 hardware-test video</strong> (motherboard / GPU / PC build / benchmark) — pure gamers skipped · <strong>≥5 longform</strong>, &lt;75% Shorts (duration + #shorts tag) — Shorts-only skipped · <strong>India/Hindi auto-excluded</strong> (language + country + negatives) · US English bias.
+            </div>
+            <div style={{ background: 'rgba(255,255,255,.06)', border: '1px solid rgba(255,255,255,.08)', borderRadius: 12, padding: 12, fontSize: '.9rem' }}>
+              <strong>Don't have keywords?</strong> Copy the AI prompts below (Search → Negative → Niche bio), paste into ChatGPT/Claude with your niche, get lists in seconds, then paste here. No manual research needed.
+            </div>
           </div>
           <form onSubmit={createDefault}>
             <Field label="Niche (shown on each creator)">
-              <input className="input" value={'Desk Setups & Battlestations'} readOnly />
+              <input className="input" value={'Desk Setups · Hardware Tests'} readOnly />
             </Field>
-            <Field label="Search keywords — one per line (520 prefilled if you leave empty)">
-              <textarea className="textarea" style={{ minHeight: 160 }} value={keywords} onChange={(e) => setKeywords(e.target.value)} placeholder={'Leave empty to auto-fill 520 desk-setup defaults on Enable, or paste your 500 here...\ndorm gaming setup minimal\ncontent creator setup evolution\n...'} />
+            <Field label="Search keywords — one per line (36 curated hardware+desk prefilled if you leave empty)">
+              <textarea className="textarea" style={{ minHeight: 160 }} value={keywords} onChange={(e) => setKeywords(e.target.value)} placeholder={'Leave empty to auto-fill 36 hardware+desk defaults on Enable, or paste your 500 here...\ndesk setup tour\nmotherboard review\n gpu test\n...'} />
             </Field>
             <Field label="Negative keywords — one per line (terms to exclude)">
-              <textarea className="textarea" style={{ minHeight: 120 }} value={negativeKw} onChange={(e) => setNegativeKw(e.target.value)} placeholder={'Leave empty for 40 defaults or paste yours...\nkitchen setup\nschool desk\n...'} />
+              <textarea className="textarea" style={{ minHeight: 120 }} value={negativeKw} onChange={(e) => setNegativeKw(e.target.value)} placeholder={'Leave empty for 38 defaults (includes gameplay + Hindi) or paste yours...\nkitchen setup\ngameplay\n hindi\n...'} />
             </Field>
             <div className="actions">
               <button className="btn btn-primary" type="submit" disabled={busy}>
@@ -337,21 +342,21 @@ if (!loaded) return <div className="empty">Loading…</div>
           <div className="card" style={{ marginTop: '1rem' }}>
             <h3 style={{ marginTop: 0 }}>Search content</h3>
             <Field label={`Search keywords (${keywords.split('\n').filter((k) => k.trim()).length} in pool) — one per line`}>
-              <textarea className="textarea" style={{ minHeight: 200 }} value={keywords} onChange={(e) => setKeywords(e.target.value)} placeholder="One keyword per line — e.g. desk setup tour, battlestation, etc. Next auto-run will use the new list immediately." />
+              <textarea className="textarea" style={{ minHeight: 200 }} value={keywords} onChange={(e) => setKeywords(e.target.value)} placeholder="One keyword per line — e.g. desk setup tour, motherboard review, gpu test, etc. Next auto-run will use the new list immediately." />
               <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: 6 }}>
-                Add as many as you want (you have 520). Each run searches <strong>{settings.max_keywords_per_run}</strong> of them, rotating daily — 520 ÷ 10 = 52-day cycle. More keywords = more variety without extra quota per run.
+                Each run searches <strong>{settings.max_keywords_per_run}</strong> of them, rotating daily — <strong>{keywords.split('\n').filter((k) => k.trim()).length} ÷ {settings.max_keywords_per_run} = {Math.max(1, Math.ceil(keywords.split('\n').filter((k) => k.trim()).length / Math.max(1, settings.max_keywords_per_run)))}-day cycle</strong>. More keywords = more variety without extra quota per run. Hardware-accurate: each channel must have <strong>≥1 desk video + ≥1 hardware test</strong> (otherwise skipped).
               </div>
             </Field>
             <Field label={`Negative keywords (${negativeKw.split('\n').filter((k) => k.trim()).length} in pool) — one per line`}>
               <textarea className="textarea" style={{ minHeight: 140 }} value={negativeKw} onChange={(e) => setNegativeKw(e.target.value)} placeholder="One term per line — excluded from YouTube search (as -&quot;term&quot;) and from video title/description checks." />
               <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: 6 }}>
-                Filters out off-topic results (e.g. `kitchen setup`, `baby nursery`). Next run uses the new list immediately.
+                Filters out off-topic + <strong>gameplay-only</strong> (<code>gameplay</code>, <code>let's play</code> without desk/hardware) and <strong>India/Hindi</strong> (<code>hindi</code>, <code>bgmi</code>, <code>free fire india</code> — also hardcoded). Next run uses the new list immediately. Pure gamers & Hindi/Devanagari channels are also hard-filtered even if you clear this list.
               </div>
             </Field>
             <Field label={`Niche bio keywords (${nicheBioKw.split('\n').filter((k) => k.trim()).length} in pool) — one per line`}>
-              <textarea className="textarea" style={{ minHeight: 100 }} value={nicheBioKw} onChange={(e) => setNicheBioKw(e.target.value)} placeholder="e.g. desk setup, battlestation, workspace — if any appear in channel About tab, channel gets ranking boost." />
+              <textarea className="textarea" style={{ minHeight: 100 }} value={nicheBioKw} onChange={(e) => setNicheBioKw(e.target.value)} placeholder="e.g. desk setup, motherboard, gpu, hardware — if any appear in channel About, channel ranked higher." />
               <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: 6 }}>
-                <strong>What is this?</strong> After the subscriber/view/engagement gates pass, channels are ranked. If the channel's <em>About</em> description contains any of these terms, it's considered <strong>true on-topic</strong> and ranked higher (more of its videos are likely desk-setup content). Not a filter — a boost. Edit and save — next run uses it immediately.
+                <strong>What is this?</strong> After the subscriber/view/engagement + <strong>desk ≥1 & hardware ≥1</strong> gates pass, channels are ranked. If About contains any bio term (<code>motherboard</code>, <code>gpu</code>, <code>desk setup</code>…), it's <strong>hardware-ranked higher</strong>. Shorts-only (&ge;75% Shorts or &lt;5 longform) already removed. Edit and save — next run uses it immediately.
               </div>
             </Field>
           </div>
@@ -359,45 +364,52 @@ if (!loaded) return <div className="empty">Loading…</div>
           <div className="card" style={{ marginTop: '1rem', border: '1px dashed var(--border-strong)', background: 'color-mix(in srgb, var(--accent-soft) 55%, transparent)' }}>
             <h3 style={{ marginTop: 0, display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text)' }}>How to get keywords with AI <span style={{ fontSize: '.7rem', padding: '4px 8px', borderRadius: 999, background: 'var(--accent)', color: '#fff' }}>COPY & PASTE</span></h3>
             <p style={{ color: 'var(--text-muted)', marginTop: 0, fontSize: '.9rem', lineHeight: 1.6 }}>
-              New users start with desk-setup defaults. Changing niche? Copy a prompt below, replace <code style={{ background: 'var(--bg-soft)', padding: '2px 6px', borderRadius: 4, color: 'var(--text)' }}>[YOUR NICHE]</code>, paste into ChatGPT/Claude, get a clean list, then paste here and Save. Niche bio is <strong style={{ color: 'var(--text)' }}>not auto-generated</strong> — it boosts channels whose About contains these terms.
+              New users start with <strong style={{ color: 'var(--text)' }}>hardware-curated defaults</strong> (desk + motherboard/GPU). Changing niche? Copy a prompt below, replace <code style={{ background: 'var(--bg-soft)', padding: '2px 6px', borderRadius: 4, color: 'var(--text)' }}>[YOUR NICHE]</code>, paste into ChatGPT/Claude, get a clean list, then paste here and Save. Accuracy is now <strong style={{ color: 'var(--text)' }}>desk ≥1 & hardware ≥1 + no Shorts-only + no India</strong> — generic gamers are auto-skipped.
             </p>
             <div style={{ display: 'grid', gap: 12 }}>
               <details style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 12px' }}>
-                <summary style={{ cursor: 'pointer', fontWeight: 700, color: 'var(--text)' }}>Prompt: 500 search keywords</summary>
+                <summary style={{ cursor: 'pointer', fontWeight: 700, color: 'var(--text)' }}>Prompt: 500 search keywords (desk + hardware)</summary>
                 <pre style={{ whiteSpace: 'pre-wrap', fontSize: '.82rem', lineHeight: 1.6, margin: '10px 0 0', background: 'var(--bg-soft)', padding: 10, borderRadius: 8, fontFamily: 'var(--mono)', color: 'var(--text)', border: '1px solid var(--border)', overflowX: 'auto' }}>
 {`You are a YouTube keyword expert for influencer discovery.
 
-Give me 500 YouTube search keywords for creators in niche [YOUR NICHE, e.g. "Desk Setups & Battlestations"].
+Give me 500 YouTube search keywords for creators in niche [YOUR NICHE, e.g. "Desk Setups · Hardware Tests — desk setups that test motherboards, GPUs, gaming PC builds"].
 
 Rules:
 - One keyword per line, no numbering, no quotes
-- 2-4 words each, focused on YouTube video titles people actually search (e.g. "desk setup tour", "battlestation build")
-- Avoid generic single words
-- Mix: tours, builds, setups, essentials, transformations, minimal, rgb, white theme, etc.
+- 2-4 words each, focused on YouTube video titles people actually search
+- Must combine DESK + HARDWARE intent: e.g. "desk setup tour", "battlestation build", "motherboard review", "gpu test gaming setup", "pc build showcase", "nvidia rtx desk", "benchmark gaming setup"
+- Avoid generic single words and pure gameplay ("gameplay", "let's play" are excluded)
+- Mix: desk tours, builds, rgb, ultrawide, standing desk, water cooling, cable management, motherboard unboxing, graphics card test, etc.
 - No duplicates`}
                 </pre>
-                <button type="button" className="btn btn-ghost" style={{ marginTop: 8, fontSize: '.8rem' }} onClick={() => navigator.clipboard.writeText(`You are a YouTube keyword expert for influencer discovery.\n\nGive me 500 YouTube search keywords for creators in niche [YOUR NICHE, e.g. \"Desk Setups & Battlestations\"].\n\nRules:\n- One keyword per line, no numbering, no quotes\n- 2-4 words each, focused on YouTube video titles people actually search (e.g. \"desk setup tour\", \"battlestation build\")\n- Avoid generic single words\n- Mix: tours, builds, setups, essentials, transformations, minimal, rgb, white theme, etc.\n- No duplicates`)}>Copy prompt</button>
+                <button type="button" className="btn btn-ghost" style={{ marginTop: 8, fontSize: '.8rem' }} onClick={() => navigator.clipboard.writeText(`You are a YouTube keyword expert for influencer discovery.\n\nGive me 500 YouTube search keywords for creators in niche [YOUR NICHE, e.g. \"Desk Setups · Hardware Tests — desk setups that test motherboards, GPUs, gaming PC builds\"].\n\nRules:\n- One keyword per line, no numbering, no quotes\n- 2-4 words each, focused on YouTube video titles people actually search\n- Must combine DESK + HARDWARE intent: e.g. \"desk setup tour\", \"battlestation build\", \"motherboard review\", \"gpu test gaming setup\", \"pc build showcase\", \"nvidia rtx desk\", \"benchmark gaming setup\"\n- Avoid generic single words and pure gameplay (\"gameplay\", \"let's play\" are excluded)\n- Mix: desk tours, builds, rgb, ultrawide, standing desk, water cooling, cable management, motherboard unboxing, graphics card test, etc.\n- No duplicates`)}>Copy prompt</button>
               </details>
               <details style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 12px' }}>
-                <summary style={{ cursor: 'pointer', fontWeight: 700, color: 'var(--text)' }}>Prompt: 40 negative keywords</summary>
+                <summary style={{ cursor: 'pointer', fontWeight: 700, color: 'var(--text)' }}>Prompt: 40 negative keywords (now includes gameplay + Hindi)</summary>
                 <pre style={{ whiteSpace: 'pre-wrap', fontSize: '.82rem', lineHeight: 1.6, margin: '10px 0 0', background: 'var(--bg-soft)', padding: 10, borderRadius: 8, fontFamily: 'var(--mono)', color: 'var(--text)', border: '1px solid var(--border)', overflowX: 'auto' }}>
-{`Give me 40 negative keywords to exclude off-topic YouTube results for niche [YOUR NICHE].
+{`Give me 40 negative keywords to exclude off-topic YouTube results for niche [YOUR NICHE — desk setups + hardware tests].
 
-One per line, 1-3 words each. These are terms that appear in titles but are NOT my niche (e.g. for desk setups: "kitchen setup", "school desk", "trading desk", etc.). No numbering.`}
+One per line, 1-3 words each. Must EXCLUDE:
+- Off-topic rooms (kitchen setup, school desk, etc.)
+- Pure gameplay without hardware/desk (gameplay, let's play, walkthrough, speedrun, no commentary)
+- India/Hindi targeting (hindi, tamil, telugu, bgmi, free fire india, desi — if you target EU/US)
+
+No numbering. These are added as -"term" to YouTube search.`}
                 </pre>
-                <button type="button" className="btn btn-ghost" style={{ marginTop: 8, fontSize: '.8rem' }} onClick={() => navigator.clipboard.writeText(`Give me 40 negative keywords to exclude off-topic YouTube results for niche [YOUR NICHE].\n\nOne per line, 1-3 words each. These are terms that appear in titles but are NOT my niche (e.g. for desk setups: \"kitchen setup\", \"school desk\", \"trading desk\", etc.). No numbering.`)}>Copy prompt</button>
+                <button type="button" className="btn btn-ghost" style={{ marginTop: 8, fontSize: '.8rem' }} onClick={() => navigator.clipboard.writeText(`Give me 40 negative keywords to exclude off-topic YouTube results for niche [YOUR NICHE — desk setups + hardware tests].\n\nOne per line, 1-3 words each. Must EXCLUDE:\n- Off-topic rooms (kitchen setup, school desk, etc.)\n- Pure gameplay without hardware/desk (gameplay, let's play, walkthrough, speedrun, no commentary)\n- India/Hindi targeting (hindi, tamil, telugu, bgmi, free fire india, desi — if you target EU/US)\n\nNo numbering. These are added as -\"term\" to YouTube search.`)}>Copy prompt</button>
               </details>
               <details style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 12px' }} open>
-                <summary style={{ cursor: 'pointer', fontWeight: 700, color: 'var(--text)' }}>Prompt: 15-20 niche bio keywords (the one you asked about)</summary>
+                <summary style={{ cursor: 'pointer', fontWeight: 700, color: 'var(--text)' }}>Prompt: 15-20 niche bio keywords (desk + hardware)</summary>
                 <pre style={{ whiteSpace: 'pre-wrap', fontSize: '.82rem', lineHeight: 1.6, margin: '10px 0 0', background: 'var(--bg-soft)', padding: 10, borderRadius: 8, fontFamily: 'var(--mono)', color: 'var(--text)', border: '1px solid var(--border)', overflowX: 'auto' }}>
-{`Give me 15-20 niche bio keywords for niche [YOUR NICHE].
+{`Give me 15-20 niche bio keywords for niche [YOUR NICHE — Desk Setups · Hardware Tests].
 
-These are short words/phrases that appear in a YouTuber's channel About/description if they are truly on-topic (e.g. for desk setups: "desk setup", "battlestation", "workspace", "cable management", "peripherals").
+These are short words/phrases that appear in a YouTuber's channel About if they are truly on-topic.
+Must cover BOTH desk AND hardware: (e.g. "desk setup", "battlestation", "workspace", "motherboard", "gpu", "graphics card", "nvidia", "amd", "intel", "cpu", "ram", "hardware", "peripherals").
 
-One per line, lower case, 1-2 words each. No sentences, no numbering. These will be used to rank channels higher if their bio contains any.`}
+One per line, lower case, 1-2 words each. No sentences, no numbering. These boost ranking if About contains any.`}
                 </pre>
-                <button type="button" className="btn btn-ghost" style={{ marginTop: 8, fontSize: '.8rem' }} onClick={() => navigator.clipboard.writeText(`Give me 15-20 niche bio keywords for niche [YOUR NICHE].\n\nThese are short words/phrases that appear in a YouTuber's channel About/description if they are truly on-topic (e.g. for desk setups: \"desk setup\", \"battlestation\", \"workspace\", \"cable management\", \"peripherals\").\n\nOne per line, lower case, 1-2 words each. No sentences, no numbering. These will be used to rank channels higher if their bio contains any.`)}>Copy prompt</button>
-                <div style={{ marginTop: 8, color: 'var(--text-muted)', fontSize: '.82rem', lineHeight: 1.5 }}>What it does: after filters (subs/views/engagement) pass, channels are sorted. If About contains any bio keyword → ranked higher. Not a filter, a boost. Leave as-is for desk setups or regenerate for your niche.</div>
+                <button type="button" className="btn btn-ghost" style={{ marginTop: 8, fontSize: '.8rem' }} onClick={() => navigator.clipboard.writeText(`Give me 15-20 niche bio keywords for niche [YOUR NICHE — Desk Setups · Hardware Tests].\n\nThese are short words/phrases that appear in a YouTuber's channel About if they are truly on-topic.\nMust cover BOTH desk AND hardware: (e.g. \"desk setup\", \"battlestation\", \"workspace\", \"motherboard\", \"gpu\", \"graphics card\", \"nvidia\", \"amd\", \"intel\", \"cpu\", \"ram\", \"hardware\", \"peripherals\").\n\nOne per line, lower case, 1-2 words each. No sentences, no numbering. These boost ranking if About contains any.`)}>Copy prompt</button>
+                <div style={{ marginTop: 8, color: 'var(--text-muted)', fontSize: '.82rem', lineHeight: 1.5 }}>What it does: after the hard gates (desk ≥1 & hardware ≥1 + no Shorts-only + no India) pass, channels are <em>ranked</em> by bio hardware match → hardware count → desk count → engagement. Not just a filter — a quality sort.</div>
               </details>
             </div>
           </div>

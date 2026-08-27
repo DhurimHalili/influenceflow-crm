@@ -16,10 +16,43 @@ const DEFAULTS = {
   minAvgViews: 5e4,
   minEngagementPct: 1,
   maxDaysSinceUpload: 21,
-  minLongformVideos: 3,
+  minLongformVideos: 5, // was 3 — now stricter: must prove longform
   maxLongformPerChannel: 12,
-  shortsMaxSeconds: 60,
+  shortsMaxSeconds: 70, // 60 + buffer; + #shorts tag check (covers 3-min Shorts)
 };
+
+// -------- Hardware / Desk accuracy (user requested) --------
+// Desk setup = must have desk/battlestation/workspace visual
+const DESK_TERMS = [
+  "desk setup", "battlestation", "setup tour", "desk tour", "gaming setup", "gaming desk",
+  "workspace", "cable management", "standing desk", "monitor setup", "ultrawide", "rgb setup",
+  "peripherals", "aesthetic setup", "white setup", "minimal setup", "room tour",
+];
+// Hardware testing = motherboard, GPU, etc. — the core you asked for
+const HARDWARE_TEST_TERMS = [
+  "motherboard", " gpu", "graphics card", "rtx", "gtx", "radeon", "nvidia", "intel ", " amd ",
+  " cpu", "processor", "ram", " ddr", "ssd ", "nvme", "pc build", "build showcase", "pc case",
+  "hardware review", "benchmark", "test bench", "pc components", "gaming pc build", "modded pc",
+  "custom pc", "water cooling", "aio cooler", "power supply", "psu ", "hardware test",
+];
+
+const HARDWARE_TERMS = [...new Set([...DESK_TERMS, ...HARDWARE_TEST_TERMS].map((s) => s.trim()))];
+
+// Gaming-only traps — titles that are pure gameplay, not setup/hardware
+const GAMING_TRAP_TERMS = [
+  "gameplay", "let's play", "lets play", "walkthrough", "speedrun", "no commentary",
+  "funny moments", "montage", "highlights", "livestream", "live stream",
+];
+
+// India / Hindi exclusion — user wants EU/US English creators, not India-targeted
+const INDIAN_EXCLUSION_TERMS = [
+  "hindi", "urdu", "tamil", "telugu", "malayalam", "kannada", "punjabi", "bengali", "gujarati",
+  "marathi", "bhojpuri", "odia", "assamese",
+  "india", "indian", "desi", "bharat", "hindustan",
+  "mumbai", "delhi", "kolkata", "chennai", "hyderabad", "pune", "bangalore", "bengaluru", "jaipur", "lucknow",
+  "bgmi", "free fire", "ludo king",
+];
+const HINDI_RE = /[\u0900-\u097F]/; // Devanagari
 
 function normalizeUrl(url: string): string {
   let u = (url || "").trim();
@@ -29,7 +62,6 @@ function normalizeUrl(url: string): string {
 
 function rotate(arr: string[], cursor: number, count: number) {
   if (arr.length === 0) return { selected: [] as string[], nextCursor: 0 };
-  // Never return duplicates within a single run: cap to pool size
   const effective = Math.min(count, arr.length);
   const selected: string[] = [];
   for (let i = 0; i < effective; i++) selected.push(arr[(cursor + i) % arr.length]);
@@ -57,7 +89,29 @@ function daysAgo(dateStr: string | null | undefined): number {
 function containsAny(text: string | null | undefined, terms: string[]): boolean {
   if (!text) return false;
   const lower = text.toLowerCase();
-  return terms.some((t) => lower.includes(t.toLowerCase()));
+  return terms.some((t) => lower.includes(t.toLowerCase().trim()));
+}
+
+function containsHindi(text: string | null | undefined): boolean {
+  if (!text) return false;
+  return HINDI_RE.test(text);
+}
+
+function isProbablyIndian(title: string | null | undefined, desc: string | null | undefined): boolean {
+  const t = `${title || ""} ${desc || ""}`;
+  if (containsHindi(t)) return true;
+  if (containsAny(t, INDIAN_EXCLUSION_TERMS)) return true;
+  return false;
+}
+
+function isShortVideo(title: string | null | undefined, desc: string | null | undefined, durationSec: number, shortsMax: number): boolean {
+  if (durationSec > 0 && durationSec <= shortsMax) return true;
+  // YouTube Shorts can now be up to 3 min — detect via hashtag regardless of duration
+  const t = `${title || ""} ${desc || ""}`.toLowerCase();
+  if (t.includes("#shorts") || t.includes("#short")) return true;
+  // Very short + vertical-style tags
+  if (durationSec > 0 && durationSec <= 180 && t.includes("shorts")) return true;
+  return false;
 }
 
 function apiKeysFromEnv(): string[] {
@@ -89,7 +143,6 @@ function normalizeCfg(s: any): any {
   cfg.maxKeywordsPerRun = s.max_keywords_per_run ?? cfg.maxKeywordsPerRun;
   cfg.cooldownDays = s.cooldown_days ?? cfg.cooldownDays;
   cfg.subscriberMin = s.subscriber_min ?? cfg.subscriberMin;
-  // null = no upper limit (user left Max empty) — keep null, don't fallback to 1M
   if (s.subscriber_max === null || s.subscriber_max === undefined || s.subscriber_max === "") {
     cfg.subscriberMax = null;
   } else {
@@ -113,10 +166,7 @@ function isDueNow(row: any): boolean {
   const wantH = parseInt(hStr, 10);
   const wantM = parseInt(mStr, 10);
   if (isNaN(wantH) || isNaN(wantM)) return false;
-
-  // Current date/time in the user's timezone
   const now = new Date();
-  // Use Intl to extract wall-clock time in that timezone
   const fmt = new Intl.DateTimeFormat("en-CA", {
     timeZone: tz,
     year: "numeric",
@@ -134,15 +184,10 @@ function isDueNow(row: any): boolean {
   const curH = parseInt(get("hour"), 10);
   const curM = parseInt(get("minute"), 10);
   const todayStr = `${curY}-${curMo}-${curD}`;
-
-  // Already ran today?
   if (row.last_scheduled_run_date === todayStr) return false;
-
-  // Within the 5-minute tick window: current minute is >= scheduled minute and < scheduled + 5
   const wantTotal = wantH * 60 + wantM;
   const curTotal = curH * 60 + curM;
   const diff = curTotal - wantTotal;
-  // Allow running if we are 0-4 minutes after the scheduled time
   return diff >= 0 && diff < 5;
 }
 
@@ -184,7 +229,6 @@ async function runDiscovery(
   ranAt: string
 ) {
   const cfg = normalizeCfg(raw);
-  // Top-level: each agency must use own quota. Owner's 5 global keys (YOUTUBE_API_KEYS secret) are private to the owner only — not shared.
   const OWNER_IDS = new Set(["16674a1c-c22d-487b-80d7-b9c11f083f8d"]);
   const perUserKeys = Array.isArray(raw.youtube_api_keys)
     ? (raw.youtube_api_keys as string[]).map((k) => String(k || "").trim()).filter(Boolean)
@@ -197,23 +241,46 @@ async function runDiscovery(
     keys = perUserKeys;
     usingPerUser = true;
   } else if (OWNER_IDS.has(userId) && globalKeys.length) {
-    // Owner fallback — your 5 private keys stay yours, not shared with other agencies
     keys = globalKeys;
     usingOwnerGlobal = true;
   } else {
     keys = [];
   }
 
-  // Resolve keyword pools from DB or fall back to defaults (desk setups niche)
+  // Resolve keyword pools from DB or fall back to HIGH-ACCURACY defaults (desk + hardware)
   const dbKeywords = Array.isArray(raw.keywords) && raw.keywords.length
     ? raw.keywords
-    : ["gaming setup","battlestation","desk setup","triple monitor setup","cable management","dual monitor setup","white gaming setup","rgb setup","mechanical keyboard setup","gaming room setup","streamer setup","pc build showcase","study desk setup","productivity desk setup","minimalist gaming setup","gaming chair setup","cozy gaming setup","pink gaming setup","desk tour","gaming corner","custom pc setup","ultrawide monitor setup","standing desk gaming","modded pc build","home office gaming setup","gaming desk","room setup","desk cable management","monitor setup","content creator setup"];
+    : [
+      // Desk setup — broad but visual
+      "desk setup tour", "battlestation tour", "gaming setup tour", "minimal desk setup", "rgb desk setup",
+      "cable management setup", "dual monitor desk setup", "triple monitor battlestation", "ultrawide desk setup", "standing desk gaming setup",
+      "white gaming setup", "aesthetic desk setup", "cozy gaming setup", "gaming corner setup", "streamer desk setup",
+      // PC build / hardware — the core you asked for (motherboard / GPU / gaming PC)
+      "pc build showcase", "custom pc build", "gaming pc build 2024", "motherboard review", "motherboard unboxing", "gpu review", "graphics card test",
+      "nvidia rtx setup", "amd gpu build", "intel vs amd build", "ram upgrade gaming setup", "ssd nvme pc build",
+      "pc case setup", "water cooling pc build", "hardware review desk", "benchmark gaming setup", "pc components setup tour",
+      "content creator desk setup", "productivity desk setup", "home office gaming setup", "modded pc battlestation",
+    ];
   const dbNeg = Array.isArray(raw.negative_kw) && raw.negative_kw.length
     ? raw.negative_kw
-    : ["kitchen setup","school desk","office furniture wholesale","stock trading setup","forex setup","call center setup","dentist office setup","photography studio setup","wedding setup","camping setup","tattoo studio setup","makeup vanity setup","aquarium setup","home theater setup","network server setup","vpn setup tutorial","printer setup","router setup","accounting desk","law office setup","realtor desk","baby nursery setup","toy room setup","classroom desk setup","church sound setup","DJ booth setup","sound system setup home","garage workshop setup","sewing room setup","art studio setup","giveaway free desk setup"];
+    : [
+      // Off-topic rooms / furniture
+      "kitchen setup","school desk","stock trading setup","forex setup","call center setup","dentist office setup","photography studio setup",
+      "wedding setup","camping setup","tattoo studio setup","makeup vanity setup","aquarium setup","home theater setup","network server setup",
+      "vpn setup tutorial","printer setup","router setup","accounting desk","law office setup","realtor desk","baby nursery setup","toy room setup",
+      "classroom desk setup","church sound setup","DJ booth setup","garage workshop setup","sewing room setup","art studio setup",
+      // Gaming-only traps (no desk/hardware) — we want setup + hardware, not pure gameplay
+      "gameplay","let's play","lets play","walkthrough","speedrun","no commentary","funny moments","montage",
+      // India / Hindi — user requested EU/US English creators
+      "hindi","tamil","telugu","malayalam","bengali","punjabi","bgmi","free fire india","desi gaming",
+    ];
   const dbBio = Array.isArray(raw.niche_bio_kw) && raw.niche_bio_kw.length
     ? raw.niche_bio_kw
-    : ["gaming setup","battlestation","desk setup","pc setup","setup tour","rig","workspace","streamer","desk","cable management","keyboard","monitor","gaming room","gaming pc","rgb","setup","peripherals"];
+    : [
+      "desk setup", "battlestation", "setup tour", "gaming setup", "workspace", "cable management",
+      "pc build", "motherboard", "gpu", "graphics card", "nvidia", "amd", "intel", "cpu", "ram",
+      "hardware", "peripherals", "monitor", "ultrawide", "mechanical keyboard", "rgb",
+    ];
 
   const log: any = {
     trigger, keywords_searched: 0, searches_performed: 0,
@@ -229,10 +296,13 @@ async function runDiscovery(
     return log;
   }
 
-  // Build negative query for YouTube search
-  const NEG_QUERY = dbNeg.map((k: string) => k.includes(" ") ? `-"${k}"` : `-${k}`).join(" ");
+  // Build negative query for YouTube search — user negatives + hardcoded India exclusion (always)
+  const userNegQuery = dbNeg.map((k: string) => k.includes(" ") ? `-"${k}"` : `-${k}`).join(" ");
+  // Hardcoded extra negatives that ALWAYS apply (even if user cleared their list) — India + gameplay traps
+  const HARDCODED_EXTRA_NEG = ["hindi", "bgmi", "\"free fire\""].map((k) => k.includes(" ") ? `-"${k}"` : `-${k}`).join(" ");
+  const NEG_QUERY = `${userNegQuery} ${HARDCODED_EXTRA_NEG}`.trim();
 
-  // 7-day cooldown: don't re-evaluate channels already searched this week
+  // 7-day cooldown
   const cooldownCutoff = new Date(Date.now() - cfg.cooldownDays * 864e5).toISOString();
   const { data: cdRows } = await admin
     .from("searched_channels")
@@ -245,7 +315,7 @@ async function runDiscovery(
     .select("channel_link").eq("user_id", userId).not("channel_link", "is", null);
   const exUrls = new Set((exRows || []).map((r: any) => normalizeUrl(r.channel_link)));
 
-  // Rotate keywords — different subset each run (capped to pool size so no duplicates per run)
+  // Rotate keywords
   const { selected, nextCursor } = rotate(dbKeywords, raw.keyword_cursor || 0, cfg.maxKeywordsPerRun);
   await admin.from("creator_discovery_settings")
     .update({ keyword_cursor: nextCursor, updated_at: new Date().toISOString() })
@@ -270,7 +340,8 @@ async function runDiscovery(
     if (!searchKey) { log.quota_exhausted = true; break; }
     log.keywords_searched++;
     const q = `${keyword} ${NEG_QUERY}`;
-    const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(q)}&type=video&maxResults=50&relevanceLanguage=en`;
+    // regionCode=US + relevanceLanguage=en biases to English/US-EU, helps exclude India automatically
+    const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(q)}&type=video&maxResults=50&relevanceLanguage=en&regionCode=US`;
     let res: Response;
     try {
       res = await yt(url, searchKey);
@@ -279,14 +350,11 @@ async function runDiscovery(
       continue;
     }
     if (res.status === 403 || res.status === 429) {
-      // Try to read body for quota vs other 403/429
       let bodyText = "";
       try { bodyText = await res.text(); } catch {}
-      // Mark key exhausted, try next key on next keyword. Don't count as performed.
       exhausted.add(keys.indexOf(searchKey));
       log.quota_exhausted = true;
       lastErr = `quota ${res.status} on key ${keys.indexOf(searchKey)} for "${keyword}": ${bodyText.slice(0, 300)}`;
-      // If all keys exhausted, stop keyword loop
       if (exhausted.size >= keys.length) break;
       continue;
     }
@@ -301,14 +369,21 @@ async function runDiscovery(
     for (const item of body.items || []) {
       const cid = item?.snippet?.channelId;
       if (!cid) continue;
-      if (containsAny(item.snippet?.title, dbNeg) || containsAny(item.snippet?.description, dbNeg)) continue;
+      // Pre-filter at search result level: skip obvious Indian / Hindi / gameplay-only titles immediately
+      const title = item.snippet?.title || "";
+      const desc = item.snippet?.description || "";
+      if (isProbablyIndian(title, desc)) continue;
+      if (containsAny(title, GAMING_TRAP_TERMS) && !containsAny(title, HARDWARE_TERMS) && !containsAny(title, DESK_TERMS)) {
+        // pure gameplay without desk/hardware signal — skip
+        continue;
+      }
+      if (containsAny(title, dbNeg) || containsAny(desc, dbNeg)) continue;
       const u = normalizeUrl(`https://www.youtube.com/channel/${cid}`);
       if (!found.has(u)) found.set(u, { id: cid, url: u, name: item.snippet?.channelTitle || "" });
     }
   }
   log.channels_found = found.size;
   log.api_keys_used = usedKeys.size;
-  // Only set error if no channels found and we have a diagnostic
   if (found.size === 0 && lastErr && !log.error) log.error = lastErr.slice(0, 500);
 
   // --- Phase 2: Filter out cooldown + existing, then fetch channel details ---
@@ -319,7 +394,7 @@ async function runDiscovery(
     toEvaluate.push(ch);
   }
 
-  // Fetch channel details (subscriber count filter) — batched 50 at a time
+  // Fetch channel details (subscriber count + country + language + description)
   const bandPassed: any[] = [];
   for (const ids of chunk(toEvaluate.map((c) => c.id), 50)) {
     const lookKey = keyFor();
@@ -334,12 +409,22 @@ async function runDiscovery(
     for (const ch of body.items || []) {
       const subs = parseInt(ch?.statistics?.subscriberCount || "0", 10);
       if (subs < cfg.subscriberMin || (cfg.subscriberMax != null && subs > cfg.subscriberMax)) continue;
+      const desc: string = ch?.snippet?.description || "";
+      const title: string = ch?.snippet?.title || "";
+      const country: string = (ch?.snippet?.country || "").toUpperCase();
+      const lang: string = (ch?.snippet?.defaultLanguage || "").toLowerCase();
+      // Hard India filter at channel level
+      if (country === "IN") continue;
+      if (lang.startsWith("hi")) continue;
+      if (isProbablyIndian(title, desc)) continue;
+      // Also skip channels whose About is still empty/irrelevant — must at least mention desk/hardware or be rankable, but don't reject yet
       bandPassed.push({
         id: ch.id,
         url: normalizeUrl(`https://www.youtube.com/channel/${ch.id}`),
         name: ch?.snippet?.title || "Unknown",
         subs,
-        desc: ch?.snippet?.description || "",
+        desc,
+        country,
         uploads: ch?.contentDetails?.relatedPlaylists?.uploads || null,
       });
     }
@@ -387,7 +472,7 @@ async function runDiscovery(
     try { body = await res.json(); } catch { continue; }
     for (const v of body.items || []) videoStats[v.id] = v;
   }
-  // --- Phase 5: Score channels ---
+  // --- Phase 5: Score channels — HARDWARE + DESK + NO-SHORTS-ONLY + NO-INDIA ---
   const channelsMap: Record<string, any> = {};
   for (const c of bandPassed) {
     channelsMap[c.id] = {
@@ -396,6 +481,7 @@ async function runDiscovery(
       subscribers: c.subs,
       channelDescription: c.desc,
       latestVideos: [],
+      rawVideoCount: (channelVideos[c.id] || []).length,
     };
   }
 
@@ -405,17 +491,30 @@ async function runDiscovery(
     const v = videoStats[vid];
     if (!ch || !v) continue;
     const durationSec = parseDuration(v?.contentDetails?.duration);
-    if (durationSec > 0 && durationSec <= cfg.shortsMaxSeconds) continue;
+    const title = v?.snippet?.title || "";
+    const desc = v?.snippet?.description || "";
+    // Skip if Indian content at video level
+    if (isProbablyIndian(title, desc)) continue;
+    // Strict shorts filter: duration + #shorts tag
+    if (isShortVideo(title, desc, durationSec, cfg.shortsMaxSeconds)) continue;
     if (ch.latestVideos.length >= cfg.maxLongformPerChannel) continue;
+    const isOffTopic =
+        containsAny(title, dbNeg) ||
+        containsAny(desc, dbNeg);
+    const isHardware = containsAny(`${title} ${desc}`, HARDWARE_TERMS);
+    const isDesk = containsAny(`${title} ${desc}`, DESK_TERMS);
+    const isGameplayTrap = containsAny(title, GAMING_TRAP_TERMS);
     ch.latestVideos.push({
       viewCount: parseInt(v?.statistics?.viewCount || "0", 10),
       likeCount: parseInt(v?.statistics?.likeCount || "0", 10),
       commentCount: parseInt(v?.statistics?.commentCount || "0", 10),
       uploadedAt: v?.snippet?.publishedAt || "",
       daysAgo: daysAgo(v?.snippet?.publishedAt),
-      isOffTopic:
-        containsAny(v?.snippet?.title, dbNeg) ||
-        containsAny(v?.snippet?.description, dbNeg),
+      title,
+      isOffTopic,
+      isHardware,
+      isDesk,
+      isGameplayTrap,
     });
   }
 
@@ -423,7 +522,13 @@ async function runDiscovery(
   for (const id in channelsMap) {
     const ch = channelsMap[id];
     const videos = ch.latestVideos;
+    // Must have enough true longform — shorts-only channels already filtered but enforce ratio too
     if (videos.length < cfg.minLongformVideos) continue;
+    // Longform ratio check: if we fetched 30 but only 3-4 survived, it's likely a shorts-dominated channel
+    const longformRatio = ch.rawVideoCount > 0 ? videos.length / ch.rawVideoCount : 1;
+    if (longformRatio < 0.25) continue; // >75% shorts — skip
+    // Skip if any Hindi / Indian signal in channel About (already checked country/lang but double check)
+    if (isProbablyIndian(ch.channelName, ch.channelDescription)) continue;
     videos.sort((a: any, b: any) => a.daysAgo - b.daysAgo);
     const totalEngagements = videos.reduce((s: number, v: any) => s + v.likeCount + v.commentCount, 0);
     const viewCounts = videos.map((v: any) => v.viewCount).sort((a: number, b: number) => a - b);
@@ -432,6 +537,14 @@ async function runDiscovery(
     const totalViews = viewCounts.reduce((a: number, b: number) => a + b, 0);
     const engagementRate = totalViews > 0 ? parseFloat((totalEngagements / totalViews * 100).toFixed(2)) : 0;
     const onTopicCount = videos.filter((v: any) => !v.isOffTopic).length;
+    const hardwareCount = videos.filter((v: any) => v.isHardware).length;
+    const deskCount = videos.filter((v: any) => v.isDesk).length;
+    const gameplayTrapCount = videos.filter((v: any) => v.isGameplayTrap && !v.isHardware && !v.isDesk).length;
+    // Must be desk + hardware focused, not pure gameplay
+    // Require at least 1 desk video AND at least 1 hardware video (your exact ask)
+    if (deskCount < 1) continue;
+    if (hardwareCount < 1) continue; // <-- ensures motherboard/GPU/gaming setup testing
+    if (gameplayTrapCount >= Math.ceil(videos.length * 0.5)) continue; // >50% pure gameplay — skip
     scored.push({
       channelName: ch.channelName,
       channelUrl: ch.channelUrl,
@@ -441,26 +554,39 @@ async function runDiscovery(
       daysSinceLastUpload: videos[0].daysAgo,
       onTopicCount,
       onTopicRatio: videos.length > 0 ? parseFloat((onTopicCount / videos.length).toFixed(2)) : 0,
+      hardwareCount,
+      deskCount,
       bioIsNiche: containsAny(ch.channelDescription, dbBio),
+      bioIsHardware: containsAny(ch.channelDescription, HARDWARE_TEST_TERMS),
       totalVideos: videos.length,
+      longformRatio,
     });
   }
 
-  // Shortlist + sort by bio match, on-topic ratio, engagement
+  // Shortlist — strict gates + sorted by hardware/desk relevance first
   let shortlisted = scored.filter(
     (c) =>
       c.avgViews >= cfg.minAvgViews &&
       c.engagementRate >= cfg.minEngagementPct &&
       c.daysSinceLastUpload <= cfg.maxDaysSinceUpload &&
       c.onTopicCount >= 1 &&
+      c.hardwareCount >= 1 &&
+      c.deskCount >= 1 &&
       c.subscribers >= cfg.subscriberMin &&
       (cfg.subscriberMax == null || c.subscribers <= cfg.subscriberMax)
   );
   shortlisted.sort((a: any, b: any) => {
-    if ((b.bioIsNiche ? 1 : 0) !== (a.bioIsNiche ? 1 : 0))
-      return (b.bioIsNiche ? 1 : 0) - (a.bioIsNiche ? 1 : 0);
-    if (b.onTopicRatio !== a.onTopicRatio)
-      return b.onTopicRatio - a.onTopicRatio;
+    // 1) Bio mentions hardware+desk → top
+    const aBio = (a.bioIsHardware ? 1 : 0) + (a.bioIsNiche ? 1 : 0);
+    const bBio = (b.bioIsHardware ? 1 : 0) + (b.bioIsNiche ? 1 : 0);
+    if (bBio !== aBio) return bBio - aBio;
+    // 2) More hardware videos
+    if (b.hardwareCount !== a.hardwareCount) return b.hardwareCount - a.hardwareCount;
+    // 3) More desk videos
+    if (b.deskCount !== a.deskCount) return b.deskCount - a.deskCount;
+    // 4) Higher longform ratio (less shorts)
+    if (b.longformRatio !== a.longformRatio) return b.longformRatio - a.longformRatio;
+    // 5) Engagement
     return b.engagementRate - a.engagementRate;
   });
   log.shortlisted = shortlisted.length;
@@ -479,12 +605,12 @@ async function runDiscovery(
       user_id: userId,
       name: c.channelName,
       channel_link: c.channelUrl,
-      niche: raw.niche || "Desk Setups",
+      niche: raw.niche || "Desk Setups · Hardware Tests",
       avg_views: c.avgViews,
       platform: raw.platform || "youtube",
       pipeline_status: "new",
       on_roster: false,
-      notes: `Subs: ${c.subscribers} | Engagement: ${c.engagementRate}% | Avg views: ${c.avgViews} | Days: ${c.daysSinceLastUpload}`,
+      notes: `Subs: ${c.subscribers} | HW:${c.hardwareCount} Desk:${c.deskCount} | Eng: ${c.engagementRate}% | Avg: ${c.avgViews} | ${c.daysSinceLastUpload}d ago | LF ratio ${(c.longformRatio*100).toFixed(0)}%`,
       updated_at: now,
       created_at: now,
     }));
@@ -531,22 +657,17 @@ Deno.serve(async (req) => {
   const presentedSecret = req.headers.get("x-discovery-secret");
   const expectedSecret = Deno.env.get("DISCOVERY_SECRET");
 
-  // Cron tick: either no auth header (legacy pg_cron) OR valid x-discovery-secret
   const isCronTick = !authHeader;
   const hasValidSecret = expectedSecret && presentedSecret === expectedSecret;
 
   if (isCronTick) {
-    // Security: if DISCOVERY_SECRET is configured, require it for unauthenticated cron ticks
     if (expectedSecret && !hasValidSecret) {
-      // No secret supplied but one is expected — reject bare anon calls so only pg_cron (with secret) and authenticated users trigger discovery
-      // However, pg_cron jobs created before secret rotation will fail — log and return 403 with hint
       return new Response(JSON.stringify({ error: "Forbidden: missing x-discovery-secret for cron tick" }), {
         status: 403,
         headers: { ...cors, "Content-Type": "application/json" },
       });
     }
 
-    // Scheduled tick — process only users whose slot is due NOW
     const { data: rows } = await admin
       .from("creator_discovery_settings")
       .select("*").eq("enabled", true);
@@ -560,7 +681,6 @@ Deno.serve(async (req) => {
       const summary = await runDiscovery(
         admin, row.user_id, row, "cron", new Date().toISOString()
       );
-      // Compute today's date in the user's timezone for idempotency
       const tz = row.schedule_timezone || "Etc/UTC";
       const todayParts = new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date());
       const get = (t: string) => todayParts.find((p) => p.type === t)?.value || "0";
@@ -580,7 +700,6 @@ Deno.serve(async (req) => {
     );
   }
 
-  // Manual run (JWT from UI "Run now" button) — authenticated
   if (authHeader) {
     let anonKey = Deno.env.get("SUPABASE_ANON_KEY") || "";
     if (!anonKey) {
