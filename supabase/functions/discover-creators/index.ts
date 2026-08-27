@@ -116,12 +116,58 @@ function isProbablyIndian(title: string | null | undefined, desc: string | null 
 
 function isShortVideo(title: string | null | undefined, desc: string | null | undefined, durationSec: number, shortsMax: number): boolean {
   if (durationSec > 0 && durationSec <= shortsMax) return true;
-  // YouTube Shorts can now be up to 3 min — detect via hashtag regardless of duration
   const t = `${title || ""} ${desc || ""}`.toLowerCase();
   if (t.includes("#shorts") || t.includes("#short")) return true;
-  // Very short + vertical-style tags
   if (durationSec > 0 && durationSec <= 180 && t.includes("shorts")) return true;
   return false;
+}
+
+// -------- Optional transcript (0 quota, boost only — if missing, no penalty) --------
+async function fetchTranscriptText(videoId: string): Promise<string | null> {
+  try {
+    const watchUrl = `https://www.youtube.com/watch?v=${videoId}`;
+    const resp = await fetch(watchUrl, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "Accept-Language": "en-US,en;q=0.9",
+      },
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!resp.ok) return null;
+    const html = await resp.text();
+    // Try to extract caption baseUrl directly — most reliable via regex
+    // html contains: "baseUrl":"https://www.youtube.com/api/timedtext?v=...&lang=en..."
+    let baseUrl: string | null = null;
+    const m = html.match(/"baseUrl":"(https:\/\/www\.youtube\.com\/api\/timedtext[^"]+)"/);
+    if (m && m[1]) {
+      try { baseUrl = JSON.parse(`"${m[1]}"`); } catch { baseUrl = m[1].replace(/\\u0026/g, "&"); }
+    }
+    if (!baseUrl) return null;
+    if (!baseUrl.includes("fmt=")) baseUrl += "&fmt=json3";
+    // Ensure lang=en if not present — prefer English
+    const trResp = await fetch(baseUrl, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Accept-Language": "en-US,en;q=0.9",
+      },
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!trResp.ok) return null;
+    const json: any = await trResp.json().catch(() => null);
+    if (!json || !Array.isArray(json.events)) return null;
+    let text = "";
+    for (const ev of json.events) {
+      if (ev.segs) {
+        for (const seg of ev.segs) {
+          if (seg.utf8) text += seg.utf8 + " ";
+        }
+      }
+    }
+    text = text.trim();
+    return text.length > 30 ? text : null;
+  } catch {
+    return null;
+  }
 }
 
 function apiKeysFromEnv(): string[] {
@@ -520,6 +566,7 @@ async function runDiscovery(
     const isGear = isHardware || isDesk || containsAny(`${title} ${desc}`, BROAD_SETUP_GEAR_TERMS);
     const isGameplayTrap = containsAny(title, GAMING_TRAP_TERMS);
     ch.latestVideos.push({
+      videoId: vid,
       viewCount: parseInt(v?.statistics?.viewCount || "0", 10),
       likeCount: parseInt(v?.statistics?.likeCount || "0", 10),
       commentCount: parseInt(v?.statistics?.commentCount || "0", 10),
@@ -562,6 +609,7 @@ async function runDiscovery(
     if (gearCount < 2) continue;
     if (gameplayTrapCount >= Math.ceil(videos.length * 0.5)) continue; // >50% pure gameplay — skip
     scored.push({
+      channelId: id,
       channelName: ch.channelName,
       channelUrl: ch.channelUrl,
       subscribers: ch.subscribers,
@@ -573,10 +621,13 @@ async function runDiscovery(
       hardwareCount,
       deskCount,
       gearCount,
+      videoIds: videos.slice(0, 5).map((v: any) => v.videoId).filter(Boolean),
       bioIsNiche: containsAny(ch.channelDescription, dbBio),
       bioIsHardware: containsAny(ch.channelDescription, GEAR_TERMS),
       totalVideos: videos.length,
       longformRatio,
+      transcriptGearHits: 0,
+      transcriptChecked: 0,
     });
   }
 
@@ -591,21 +642,65 @@ async function runDiscovery(
       c.subscribers >= cfg.subscriberMin &&
       (cfg.subscriberMax == null || c.subscribers <= cfg.subscriberMax)
   );
+
+  // ---- Optional transcript boost (0 quota, no penalty if missing) ----
+  // Fetch transcripts for up to 12 shortlisted channels, 2 videos each — if text contains gear terms, it's a PLUS, not a gate.
+  if (shortlisted.length > 0) {
+    const TRANSCRIPT_CHANNELS = Math.min(shortlisted.length, 12);
+    const VIDS_PER_CHANNEL = 2;
+    const gearTermsForTranscript = BROAD_SETUP_GEAR_TERMS;
+    try {
+      const tasks: Promise<void>[] = [];
+      for (let i = 0; i < TRANSCRIPT_CHANNELS; i++) {
+        const c: any = shortlisted[i];
+        const vids: string[] = (c.videoIds || []).slice(0, VIDS_PER_CHANNEL);
+        c.transcriptChecked = vids.length;
+        if (!vids.length) continue;
+        const t = (async () => {
+          let hits = 0;
+          const results = await Promise.allSettled(vids.map((vid) => fetchTranscriptText(vid)));
+          for (const r of results) {
+            if (r.status === "fulfilled" && r.value) {
+              const txt: string = r.value as string;
+              if (containsAny(txt, gearTermsForTranscript)) hits++;
+            }
+          }
+          c.transcriptGearHits = hits;
+        })();
+        tasks.push(t);
+      }
+      await Promise.allSettled(tasks);
+      // Cap total transcript time — if it took >18s, continue anyway (best-effort)
+    } catch {
+      // best-effort: transcript failure never blocks shortlist
+    }
+  }
+
   shortlisted.sort((a: any, b: any) => {
     // 1) Bio mentions gear → top
     const aBio = (a.bioIsHardware ? 1 : 0) + (a.bioIsNiche ? 1 : 0);
     const bBio = (b.bioIsHardware ? 1 : 0) + (b.bioIsNiche ? 1 : 0);
     if (bBio !== aBio) return bBio - aBio;
-    // 2) More gear videos (desk+keyboard+chair+GPU all count)
+    // 2) Transcript says gear too → confirmed setup/gear (optional plus, 0 if no transcript)
+    const aTx = (a.transcriptGearHits || 0);
+    const bTx = (b.transcriptGearHits || 0);
+    if (bTx !== aTx) return bTx - aTx;
+    // 3) More gear videos (desk+keyboard+chair+GPU all count)
     if (b.gearCount !== a.gearCount) return b.gearCount - a.gearCount;
-    // 3) More hardware depth
+    // 4) More hardware depth
     if (b.hardwareCount !== a.hardwareCount) return b.hardwareCount - a.hardwareCount;
-    // 4) Higher longform ratio (less shorts)
+    // 5) Higher longform ratio (less shorts)
     if (b.longformRatio !== a.longformRatio) return b.longformRatio - a.longformRatio;
-    // 5) Engagement
+    // 6) Engagement
     return b.engagementRate - a.engagementRate;
   });
   log.shortlisted = shortlisted.length;
+  try {
+    const txBoosted = shortlisted.filter((c:any)=> (c.transcriptGearHits||0) >0).length;
+    const txChecked = shortlisted.reduce((s:number,c:any)=> s+(c.transcriptChecked||0),0);
+    (log as any).transcript_checked = txChecked;
+    (log as any).transcript_boosted = txBoosted;
+  } catch {}
 
   // Only insert channels not already in the CRM
   const fresh = shortlisted.filter(
@@ -617,19 +712,22 @@ async function runDiscovery(
   let inserted = 0;
   if (inserts.length) {
     const now = new Date().toISOString();
-    const rows = inserts.map((c) => ({
-      user_id: userId,
-      name: c.channelName,
-      channel_link: c.channelUrl,
-      niche: raw.niche || "Desk Setups · Gaming PC Gear",
-      avg_views: c.avgViews,
-      platform: raw.platform || "youtube",
-      pipeline_status: "new",
-      on_roster: false,
-      notes: `Subs: ${c.subscribers} | Gear:${c.gearCount} (HW:${c.hardwareCount} Desk:${c.deskCount}) | Eng: ${c.engagementRate}% | Avg: ${c.avgViews} | ${c.daysSinceLastUpload}d ago | LF ${(c.longformRatio*100).toFixed(0)}%`,
-      updated_at: now,
-      created_at: now,
-    }));
+    const rows = inserts.map((c) => {
+      const tx = (c.transcriptGearHits > 0 ? ` | Tx:${c.transcriptGearHits}/${c.transcriptChecked} gear in captions` : "");
+      return {
+        user_id: userId,
+        name: c.channelName,
+        channel_link: c.channelUrl,
+        niche: raw.niche || "Desk Setups · Gaming PC Gear",
+        avg_views: c.avgViews,
+        platform: raw.platform || "youtube",
+        pipeline_status: "new",
+        on_roster: false,
+        notes: `Subs: ${c.subscribers} | Gear:${c.gearCount} (HW:${c.hardwareCount} Desk:${c.deskCount})${tx} | Eng: ${c.engagementRate}% | Avg: ${c.avgViews} | ${c.daysSinceLastUpload}d ago | LF ${(c.longformRatio*100).toFixed(0)}%`,
+        updated_at: now,
+        created_at: now,
+      };
+    });
     const { error } = await admin.from("creators").insert(rows);
     if (error) log.error = String(error.message);
     else inserted = rows.length;

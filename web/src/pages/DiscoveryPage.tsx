@@ -238,7 +238,7 @@ if (!loaded) return <div className="empty">Loading…</div>
           </p>
           <div style={{ display: 'grid', gap: 8, marginBottom: 12, fontSize: '.85rem', lineHeight: 1.6 }}>
             <div style={{ background: 'rgba(34,197,94,.08)', border: '1px solid rgba(34,197,94,.18)', borderRadius: 10, padding: '10px 12px' }}>
-              ✅ <strong>What’s filtered now:</strong> requires <strong>≥2 setup/gear videos</strong> (desk / battlestation / keyboard / chair / monitor / headset / mouse / motherboard / GPU / PC build — any) — pure gamers skipped · <strong>≥5 longform</strong>, &lt;75% Shorts (duration + #shorts) — Shorts-only skipped · <strong>India/Hindi auto-excluded</strong> · US English bias.
+              ✅ <strong>What’s filtered now:</strong> requires <strong>≥2 setup/gear videos</strong> (desk / battlestation / keyboard / chair / monitor / headset / mouse / motherboard / GPU / PC build — any) — pure gamers skipped · <strong>≥5 longform</strong>, &lt;75% Shorts — Shorts-only skipped · <strong>India/Hindi auto-excluded</strong> · US English bias · <strong>Optional transcript (0 quota)</strong>: if captions contain gear terms it’s a <em>plus</em> (ranked higher), if no captions — no penalty.
             </div>
             <div style={{ background: 'rgba(255,255,255,.06)', border: '1px solid rgba(255,255,255,.08)', borderRadius: 12, padding: 12, fontSize: '.9rem' }}>
               <strong>Don't have keywords?</strong> Copy the AI prompts below (Search → Negative → Niche bio), paste into ChatGPT/Claude with your niche, get lists in seconds, then paste here. No manual research needed.
