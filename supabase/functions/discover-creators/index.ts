@@ -21,22 +21,32 @@ const DEFAULTS = {
   shortsMaxSeconds: 70, // 60 + buffer; + #shorts tag check (covers 3-min Shorts)
 };
 
-// -------- Hardware / Desk accuracy (user requested) --------
-// Desk setup = must have desk/battlestation/workspace visual
+// -------- Broad gaming-PC setup / gear accuracy --------
+// User wants ALL desk + gaming-PC gear: desks, battlestations, keyboards, chairs, monitors, etc. — not just motherboard/GPU
 const DESK_TERMS = [
   "desk setup", "battlestation", "setup tour", "desk tour", "gaming setup", "gaming desk",
   "workspace", "cable management", "standing desk", "monitor setup", "ultrawide", "rgb setup",
-  "peripherals", "aesthetic setup", "white setup", "minimal setup", "room tour",
+  "peripherals", "aesthetic setup", "white setup", "minimal setup", "room tour", "desk makeover",
+  "gaming corner", "streamer setup", "home office setup", "productivity setup",
 ];
-// Hardware testing = motherboard, GPU, etc. — the core you asked for
-const HARDWARE_TEST_TERMS = [
+// Broad gear: keyboards, mice, chairs, monitors, headsets — everything around a gaming PC, not only motherboard/GPU
+const GEAR_TERMS = [
+  // core hardware (keep motherboard/GPU but not required exclusively)
   "motherboard", " gpu", "graphics card", "rtx", "gtx", "radeon", "nvidia", "intel ", " amd ",
   " cpu", "processor", "ram", " ddr", "ssd ", "nvme", "pc build", "build showcase", "pc case",
   "hardware review", "benchmark", "test bench", "pc components", "gaming pc build", "modded pc",
   "custom pc", "water cooling", "aio cooler", "power supply", "psu ", "hardware test",
+  // peripherals & furniture — the broad coverage you asked for
+  "gaming chair", "ergonomic chair", "secretlab", "chair review", "office chair",
+  "mechanical keyboard", "keyboard review", "keycaps", "keyboard switches", "gaming keyboard",
+  "gaming mouse", "mouse review", "desk mat", "mousepad", "mouse pad",
+  "monitor", "oled monitor", "144hz", "240hz", "ultrawide monitor", "dual monitor", "triple monitor",
+  "headset", "headphones", "microphone", " mic ", "speakers", "webcam",
+  "gaming accessories", "peripherals", "desk accessories", "setup accessories", "rgb", "led strip", "gaming gear",
 ];
 
-const HARDWARE_TERMS = [...new Set([...DESK_TERMS, ...HARDWARE_TEST_TERMS].map((s) => s.trim()))];
+const HARDWARE_TERMS = [...new Set([...DESK_TERMS, ...GEAR_TERMS].map((s) => s.trim()))];
+const BROAD_SETUP_GEAR_TERMS = HARDWARE_TERMS; // alias for clarity — anything desk OR gear counts
 
 // Gaming-only traps — titles that are pure gameplay, not setup/hardware
 const GAMING_TRAP_TERMS = [
@@ -247,16 +257,20 @@ async function runDiscovery(
     keys = [];
   }
 
-  // Resolve keyword pools from DB or fall back to HIGH-ACCURACY defaults (desk + hardware)
+  // Resolve keyword pools from DB or fall back to BROAD gaming-PC setup/gear defaults (desk + ALL peripherals, not only motherboard/GPU)
   const dbKeywords = Array.isArray(raw.keywords) && raw.keywords.length
     ? raw.keywords
     : [
-      // Desk setup — broad but visual
+      // Desk / battlestation — core
       "desk setup tour", "battlestation tour", "gaming setup tour", "minimal desk setup", "rgb desk setup",
       "cable management setup", "dual monitor desk setup", "triple monitor battlestation", "ultrawide desk setup", "standing desk gaming setup",
       "white gaming setup", "aesthetic desk setup", "cozy gaming setup", "gaming corner setup", "streamer desk setup",
-      // PC build / hardware — the core you asked for (motherboard / GPU / gaming PC)
-      "pc build showcase", "custom pc build", "gaming pc build 2024", "motherboard review", "motherboard unboxing", "gpu review", "graphics card test",
+      // Broad gaming-PC gear — keyboards, chairs, monitors, headsets, etc. (user wants ALL gear, not only GPU/motherboard)
+      "gaming chair review", "ergonomic chair setup", "mechanical keyboard review", "gaming keyboard setup", "keycaps setup",
+      "gaming mouse review", "desk mat setup", "monitor review gaming setup", "ultrawide monitor setup", "headset review setup",
+      "microphone setup tour", "rgb lighting setup", "peripherals setup tour", "gaming accessories setup",
+      // PC build / hardware — still included, but not exclusive
+      "pc build showcase", "custom pc build", "gaming pc build 2024", "motherboard review", "gpu review", "graphics card test",
       "nvidia rtx setup", "amd gpu build", "intel vs amd build", "ram upgrade gaming setup", "ssd nvme pc build",
       "pc case setup", "water cooling pc build", "hardware review desk", "benchmark gaming setup", "pc components setup tour",
       "content creator desk setup", "productivity desk setup", "home office gaming setup", "modded pc battlestation",
@@ -279,7 +293,7 @@ async function runDiscovery(
     : [
       "desk setup", "battlestation", "setup tour", "gaming setup", "workspace", "cable management",
       "pc build", "motherboard", "gpu", "graphics card", "nvidia", "amd", "intel", "cpu", "ram",
-      "hardware", "peripherals", "monitor", "ultrawide", "mechanical keyboard", "rgb",
+      "hardware", "peripherals", "monitor", "ultrawide", "mechanical keyboard", "gaming chair", "gaming mouse", "headset", "rgb",
     ];
 
   const log: any = {
@@ -503,6 +517,7 @@ async function runDiscovery(
         containsAny(desc, dbNeg);
     const isHardware = containsAny(`${title} ${desc}`, HARDWARE_TERMS);
     const isDesk = containsAny(`${title} ${desc}`, DESK_TERMS);
+    const isGear = isHardware || isDesk || containsAny(`${title} ${desc}`, BROAD_SETUP_GEAR_TERMS);
     const isGameplayTrap = containsAny(title, GAMING_TRAP_TERMS);
     ch.latestVideos.push({
       viewCount: parseInt(v?.statistics?.viewCount || "0", 10),
@@ -514,6 +529,7 @@ async function runDiscovery(
       isOffTopic,
       isHardware,
       isDesk,
+      isGear,
       isGameplayTrap,
     });
   }
@@ -539,11 +555,11 @@ async function runDiscovery(
     const onTopicCount = videos.filter((v: any) => !v.isOffTopic).length;
     const hardwareCount = videos.filter((v: any) => v.isHardware).length;
     const deskCount = videos.filter((v: any) => v.isDesk).length;
-    const gameplayTrapCount = videos.filter((v: any) => v.isGameplayTrap && !v.isHardware && !v.isDesk).length;
-    // Must be desk + hardware focused, not pure gameplay
-    // Require at least 1 desk video AND at least 1 hardware video (your exact ask)
-    if (deskCount < 1) continue;
-    if (hardwareCount < 1) continue; // <-- ensures motherboard/GPU/gaming setup testing
+    const gearCount = videos.filter((v: any) => v.isGear).length;
+    const gameplayTrapCount = videos.filter((v: any) => v.isGameplayTrap && !v.isGear).length;
+    // Broad gaming-PC setups: allow ANY desk OR gear (keyboard/chair/monitor/motherboard/GPU/PC build) — not only motherboard/GPU
+    // Require at least 2 setup/gear videos so pure gamers (0) are skipped, but chair/keyboard channels pass
+    if (gearCount < 2) continue;
     if (gameplayTrapCount >= Math.ceil(videos.length * 0.5)) continue; // >50% pure gameplay — skip
     scored.push({
       channelName: ch.channelName,
@@ -556,34 +572,34 @@ async function runDiscovery(
       onTopicRatio: videos.length > 0 ? parseFloat((onTopicCount / videos.length).toFixed(2)) : 0,
       hardwareCount,
       deskCount,
+      gearCount,
       bioIsNiche: containsAny(ch.channelDescription, dbBio),
-      bioIsHardware: containsAny(ch.channelDescription, HARDWARE_TEST_TERMS),
+      bioIsHardware: containsAny(ch.channelDescription, GEAR_TERMS),
       totalVideos: videos.length,
       longformRatio,
     });
   }
 
-  // Shortlist — strict gates + sorted by hardware/desk relevance first
+  // Shortlist — broad gear gates (keyboard/chair/monitor/desk/GPU all count)
   let shortlisted = scored.filter(
     (c) =>
       c.avgViews >= cfg.minAvgViews &&
       c.engagementRate >= cfg.minEngagementPct &&
       c.daysSinceLastUpload <= cfg.maxDaysSinceUpload &&
       c.onTopicCount >= 1 &&
-      c.hardwareCount >= 1 &&
-      c.deskCount >= 1 &&
+      c.gearCount >= 2 &&
       c.subscribers >= cfg.subscriberMin &&
       (cfg.subscriberMax == null || c.subscribers <= cfg.subscriberMax)
   );
   shortlisted.sort((a: any, b: any) => {
-    // 1) Bio mentions hardware+desk → top
+    // 1) Bio mentions gear → top
     const aBio = (a.bioIsHardware ? 1 : 0) + (a.bioIsNiche ? 1 : 0);
     const bBio = (b.bioIsHardware ? 1 : 0) + (b.bioIsNiche ? 1 : 0);
     if (bBio !== aBio) return bBio - aBio;
-    // 2) More hardware videos
+    // 2) More gear videos (desk+keyboard+chair+GPU all count)
+    if (b.gearCount !== a.gearCount) return b.gearCount - a.gearCount;
+    // 3) More hardware depth
     if (b.hardwareCount !== a.hardwareCount) return b.hardwareCount - a.hardwareCount;
-    // 3) More desk videos
-    if (b.deskCount !== a.deskCount) return b.deskCount - a.deskCount;
     // 4) Higher longform ratio (less shorts)
     if (b.longformRatio !== a.longformRatio) return b.longformRatio - a.longformRatio;
     // 5) Engagement
@@ -605,12 +621,12 @@ async function runDiscovery(
       user_id: userId,
       name: c.channelName,
       channel_link: c.channelUrl,
-      niche: raw.niche || "Desk Setups · Hardware Tests",
+      niche: raw.niche || "Desk Setups · Gaming PC Gear",
       avg_views: c.avgViews,
       platform: raw.platform || "youtube",
       pipeline_status: "new",
       on_roster: false,
-      notes: `Subs: ${c.subscribers} | HW:${c.hardwareCount} Desk:${c.deskCount} | Eng: ${c.engagementRate}% | Avg: ${c.avgViews} | ${c.daysSinceLastUpload}d ago | LF ratio ${(c.longformRatio*100).toFixed(0)}%`,
+      notes: `Subs: ${c.subscribers} | Gear:${c.gearCount} (HW:${c.hardwareCount} Desk:${c.deskCount}) | Eng: ${c.engagementRate}% | Avg: ${c.avgViews} | ${c.daysSinceLastUpload}d ago | LF ${(c.longformRatio*100).toFixed(0)}%`,
       updated_at: now,
       created_at: now,
     }));
