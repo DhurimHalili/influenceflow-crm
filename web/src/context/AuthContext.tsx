@@ -41,7 +41,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const loadProfile = useCallback(async (userId: string) => {
     const { data } = await supabase.from('profiles').select('*').eq('id', userId).maybeSingle()
     if (data) {
-      const theme = normalizeTheme((data as Profile).theme)
+      // Explicit choice on this device (localStorage) always wins — it reflects
+      // the last theme the user actually picked. DB value is only a fallback
+      // for new devices, then mirrored locally so later reloads stay stable
+      // (this stops the "flips to another theme seconds after load" bug).
+      const local = localStorage.getItem('if-theme')
+      const theme = local && isTheme(local) ? local : normalizeTheme((data as Profile).theme)
+      if (!local || !isTheme(local)) localStorage.setItem('if-theme', theme)
       setProfile({ ...(data as Profile), theme })
       document.documentElement.dataset.theme = theme
     }
@@ -98,6 +104,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signOut = useCallback(async () => {
     await supabase.auth.signOut()
+    // Drop the device-level choice so the next login starts from that
+    // account's saved theme (or the default) instead of inheriting this one.
+    localStorage.removeItem('if-theme')
+    document.documentElement.dataset.theme = DEFAULT_THEME
     setProfile(null)
   }, [])
 

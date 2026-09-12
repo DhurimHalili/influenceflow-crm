@@ -27,9 +27,9 @@ export const THEMES: ThemeMeta[] = [
   {
     id: 'dark',
     name: 'Dark',
-    tagline: 'Warm charcoal for late-night work. Muted, never neon.',
-    swatches: ['#171310', '#221D17', '#D08A4E'],
-    dot: '#D08A4E',
+    tagline: 'True black for late-night work. Neutral, never brown, never neon.',
+    swatches: ['#0B0B0D', '#141416', '#E07A39'],
+    dot: '#E07A39',
   },
   {
     id: 'honey',
