@@ -22,7 +22,7 @@ export function HelpPage() {
       <div style={{ display: 'grid', gap: '1rem' }}>
         <div className="card" style={{ borderLeft: '4px solid #7c3aed', background: 'linear-gradient(180deg, rgba(124,58,237,.08), transparent)' }}>
           <h3 style={{ marginTop: 0, display: 'flex', gap: 10, alignItems: 'center' }}>1 · Create your private workspace <span style={{ fontSize: '.7rem', padding: '4px 8px', borderRadius: 999, background: '#7c3aed', color: '#fff' }}>PRIVATE BY DEFAULT</span></h3>
-          <p style={{ color: 'var(--text-muted)', lineHeight: 1.6 }}>Sign up with email + password (8+ characters). Every account is isolated with RLS — no one sees your creators, brands or campaigns. Confirm email if prompted, then log in. You are ready in 20 seconds.</p>
+          <p style={{ color: 'var(--text-muted)', lineHeight: 1.6 }}>Sign up with email + password (8+ characters) and log straight in. Every account is isolated with RLS — no one sees your creators, brands or campaigns. You are ready in 20 seconds.</p>
         </div>
 
         <div className="card">

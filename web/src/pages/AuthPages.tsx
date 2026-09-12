@@ -96,7 +96,8 @@ export function SignupPage() {
       return
     }
     if (data.session) nav('/app')
-    else setInfo('Check your email to confirm your account, then log in.')
+    else if (data.user && !data.session) setInfo('Account created — log in to continue.')
+    else setInfo('Account created — log in to continue.')
   }
 
   return (
@@ -107,12 +108,12 @@ export function SignupPage() {
           <div className="brand-mark" style={{ width: 38, height: 38, borderRadius: 12 }} />
           <div>
             <div style={{ fontFamily: 'var(--display)', fontWeight: 800, letterSpacing: '-0.03em', fontSize: '1.02rem', lineHeight: 1 }}>InfluenceFlow <span style={{ fontWeight: 500, color: 'var(--text-muted)' }}>CRM</span></div>
-            <div style={{ fontFamily: 'var(--mono)', fontSize: '0.62rem', letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-faint)', fontWeight: 700 }}>Free · Private · Gmail-ready</div>
+            <div style={{ fontFamily: 'var(--mono)', fontSize: '0.62rem', letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-faint)', fontWeight: 700 }}>Free · Private</div>
           </div>
           <span style={{ marginLeft: 'auto', fontFamily: 'var(--mono)', fontSize: '0.62rem', letterSpacing: '0.08em', textTransform: 'uppercase', fontWeight: 800, color: '#fff', background: 'linear-gradient(135deg, var(--accent), var(--accent-2))', padding: '4px 8px', borderRadius: 999, boxShadow: '0 4px 12px rgba(45,212,191,0.22)' }}>New</span>
         </div>
         <h1>Create account</h1>
-        <p className="sub">Free forever. Private workspace. Send from your own Gmail in 60 seconds.</p>
+        <p className="sub">Free forever. Private workspace. Ready in 30 seconds.</p>
         <Field label="Your name">
           <input className="input" value={displayName} onChange={(e) => setDisplayName(e.target.value)} autoComplete="name" placeholder="Alex Rivera" style={{ borderRadius: 12 }} />
         </Field>
