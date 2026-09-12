@@ -28,14 +28,14 @@ export function LoginPage() {
   return (
     <div className="auth-page">
       <form className="auth-card" onSubmit={onSubmit} style={{ position: 'relative', overflow: 'hidden' }}>
-        <div style={{ position: 'absolute', inset: '0 0 auto 0', height: 1, background: 'linear-gradient(90deg, transparent, rgba(45,212,191,0.22), transparent)', pointerEvents: 'none' }} />
+        <div style={{ position: 'absolute', inset: '0 0 auto 0', height: 1, background: 'linear-gradient(90deg, transparent, rgba(182,92,46,0.22), transparent)', pointerEvents: 'none' }} />
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
           <div className="brand-mark" style={{ width: 38, height: 38, borderRadius: 12 }} />
           <div>
             <div style={{ fontFamily: 'var(--display)', fontWeight: 800, letterSpacing: '-0.03em', fontSize: '1.02rem', lineHeight: 1 }}>InfluenceFlow <span style={{ fontWeight: 500, color: 'var(--text-muted)' }}>CRM</span></div>
             <div style={{ fontFamily: 'var(--mono)', fontSize: '0.62rem', letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-faint)', fontWeight: 700 }}>Creator OS · Private workspace</div>
           </div>
-          <span style={{ marginLeft: 'auto', fontFamily: 'var(--mono)', fontSize: '0.62rem', letterSpacing: '0.08em', textTransform: 'uppercase', fontWeight: 800, color: 'var(--accent)', background: 'var(--accent-soft)', border: '1px solid rgba(45,212,191,0.16)', padding: '4px 8px', borderRadius: 999 }}>Secure</span>
+          <span style={{ marginLeft: 'auto', fontFamily: 'var(--mono)', fontSize: '0.62rem', letterSpacing: '0.08em', textTransform: 'uppercase', fontWeight: 800, color: 'var(--accent)', background: 'var(--accent-soft)', border: '1px solid rgba(182,92,46,0.16)', padding: '4px 8px', borderRadius: 999 }}>Secure</span>
         </div>
         <h1>Welcome back</h1>
         <p className="sub">Sign in to your private workspace. Every record is isolated — yours only.</p>
@@ -103,14 +103,14 @@ export function SignupPage() {
   return (
     <div className="auth-page">
       <form className="auth-card" onSubmit={onSubmit} style={{ position: 'relative', overflow: 'hidden' }}>
-        <div style={{ position: 'absolute', inset: '0 0 auto 0', height: 1, background: 'linear-gradient(90deg, transparent, rgba(45,212,191,0.22), transparent)', pointerEvents: 'none' }} />
+        <div style={{ position: 'absolute', inset: '0 0 auto 0', height: 1, background: 'linear-gradient(90deg, transparent, rgba(182,92,46,0.22), transparent)', pointerEvents: 'none' }} />
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
           <div className="brand-mark" style={{ width: 38, height: 38, borderRadius: 12 }} />
           <div>
             <div style={{ fontFamily: 'var(--display)', fontWeight: 800, letterSpacing: '-0.03em', fontSize: '1.02rem', lineHeight: 1 }}>InfluenceFlow <span style={{ fontWeight: 500, color: 'var(--text-muted)' }}>CRM</span></div>
             <div style={{ fontFamily: 'var(--mono)', fontSize: '0.62rem', letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-faint)', fontWeight: 700 }}>Free · Private</div>
           </div>
-          <span style={{ marginLeft: 'auto', fontFamily: 'var(--mono)', fontSize: '0.62rem', letterSpacing: '0.08em', textTransform: 'uppercase', fontWeight: 800, color: '#fff', background: 'linear-gradient(135deg, var(--accent), var(--accent-2))', padding: '4px 8px', borderRadius: 999, boxShadow: '0 4px 12px rgba(45,212,191,0.22)' }}>New</span>
+          <span style={{ marginLeft: 'auto', fontFamily: 'var(--mono)', fontSize: '0.62rem', letterSpacing: '0.08em', textTransform: 'uppercase', fontWeight: 800, color: '#fff', background: 'linear-gradient(135deg, var(--accent), var(--accent-2))', padding: '4px 8px', borderRadius: 999, boxShadow: '0 4px 12px rgba(182,92,46,0.22)' }}>New</span>
         </div>
         <h1>Create account</h1>
         <p className="sub">Free forever. Private workspace. Ready in 30 seconds.</p>

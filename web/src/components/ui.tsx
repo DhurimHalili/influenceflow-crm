@@ -28,7 +28,7 @@ export function Modal({
     <div className="modal-backdrop" onClick={onClose}>
       <div className={`modal ${wide ? 'wide' : ''}`} onClick={(e) => e.stopPropagation()}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
-          <span style={{ width: 32, height: 32, borderRadius: 10, background: 'linear-gradient(135deg, var(--accent), var(--accent-2))', display: 'grid', placeItems: 'center', color: '#04201C', fontWeight: 800, fontSize: '0.82rem', flexShrink: 0, boxShadow: '0 4px 12px rgba(45,212,191,0.22)' }}>✦</span>
+          <span style={{ width: 32, height: 32, borderRadius: 10, background: 'linear-gradient(135deg, var(--accent), var(--accent-2))', display: 'grid', placeItems: 'center', color: '#2E1A0C', fontWeight: 800, fontSize: '0.82rem', flexShrink: 0, boxShadow: '0 4px 12px rgba(182,92,46,0.22)' }}>✦</span>
           <h2 style={{ margin: 0 }}>{title}</h2>
         </div>
         <div style={{ height: 1, background: 'var(--border)', margin: '8px 0 14px', opacity: 0.9 }} />
@@ -99,7 +99,7 @@ export function useToast() {
     Toast: msg ? (
       <div className="toast">
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ width: 20, height: 20, borderRadius: 999, background: 'var(--accent)', display: 'grid', placeItems: 'center', color: '#04201C', fontSize: '0.72rem', fontWeight: 800, flexShrink: 0 }}>✓</span>
+          <span style={{ width: 20, height: 20, borderRadius: 999, background: 'var(--accent)', display: 'grid', placeItems: 'center', color: '#2E1A0C', fontSize: '0.72rem', fontWeight: 800, flexShrink: 0 }}>✓</span>
           {msg}
         </span>
       </div>

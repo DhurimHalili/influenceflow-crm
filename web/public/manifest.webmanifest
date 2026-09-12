@@ -3,8 +3,8 @@
   "short_name": "InfluenceFlow",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#0e1116",
-  "theme_color": "#0e1116",
+  "background_color": "#EAE3D3",
+  "theme_color": "#EAE3D3",
   "description": "Free influencer marketing CRM",
   "icons": [
     {

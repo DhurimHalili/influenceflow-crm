@@ -5,6 +5,7 @@ import { supabase } from '../lib/supabase'
 import { HIRE } from '../lib/types'
 import { stripHtml } from '../lib/utils'
 import { FEATURES } from '../lib/features'
+import { DEFAULT_THEME, THEMES, themeName } from '../lib/themes'
 
 type NavItem = { to: string; label: string; end?: boolean; ico: string; desc?: string }
 
@@ -21,21 +22,33 @@ const NAV_MAIN_ALL: NavItem[] = [
 
 const NAV_GROWTH_ALL: NavItem[] = [
   { to: '/app/discovery', label: 'Discovery', ico: '◐', desc: 'YouTube' },
-  { to: '/app/deleted', label: 'Archive', ico: '◑', desc: 'Trash' },
+  { to: '/app/deleted', label: 'Archive', ico: '❐', desc: 'Trash · deleted' },
 ]
 
-const NAV_MAIN: NavItem[] = NAV_MAIN_ALL.filter((i) => FEATURES.outreachEnabled || i.to !== '/app/outreach')
+// Clear, self-explanatory labels: every item says what it is + what lives inside.
+const NAV_LABELS: Record<string, { label: string; ico: string; desc: string; end?: boolean }> = {
+  '/app': { label: 'Dashboard', ico: '✦', desc: 'Home · overview', end: true },
+  '/app/creators': { label: 'Creators', ico: '◍', desc: 'People · talent' },
+  '/app/brands': { label: 'Brands', ico: '⬢', desc: 'Companies · clients' },
+  '/app/campaigns': { label: 'Campaigns', ico: '⬣', desc: 'Deals · tracked' },
+  '/app/calendar': { label: 'Calendar', ico: '▦', desc: 'Schedule · meets' },
+}
+
+const NAV_MAIN: NavItem[] = NAV_MAIN_ALL.filter((i) => FEATURES.outreachEnabled || i.to !== '/app/outreach').map((i) =>
+  NAV_LABELS[i.to] ? { to: i.to, ...NAV_LABELS[i.to] } : i,
+)
 const NAV_GROWTH: NavItem[] = NAV_GROWTH_ALL.filter((i) => FEATURES.discoveryEnabled || i.to !== '/app/discovery')
 
 const NAV_SYSTEM: NavItem[] = [
-  { to: '/app/settings', label: 'Settings', ico: '⬔', desc: 'Workspace' },
-  { to: '/app/help', label: 'Help', ico: '?', desc: 'Docs' },
+  { to: '/app/themes', label: 'Themes', ico: '◑', desc: 'Style · colors' },
+  { to: '/app/settings', label: 'Settings', ico: '⬔', desc: 'Setup · profile' },
+  { to: '/app/help', label: 'Help', ico: '?', desc: 'Guide · how-to' },
 ]
 
 type SearchHit = { type: string; id: string; label: string; sub?: string; path: string }
 
 export function AppLayout() {
-  const { profile, setTheme, signOut, user } = useAuth()
+  const { profile, signOut, user } = useAuth()
   const [open, setOpen] = useState(false)
   const [q, setQ] = useState('')
   const [hits, setHits] = useState<SearchHit[]>([])
@@ -90,7 +103,8 @@ export function AppLayout() {
     return () => clearTimeout(t)
   }, [q])
 
-  const theme = profile?.theme || 'dark'
+  const theme = profile?.theme || DEFAULT_THEME
+  const THEME_DOT = THEMES.find((t) => t.id === theme)?.dot || THEMES[0].dot
   const initials = (profile?.display_name || user?.email || 'I').slice(0, 2).toUpperCase()
 
   function handleNavMouseMove(e: React.MouseEvent<HTMLAnchorElement>) {
@@ -115,58 +129,64 @@ export function AppLayout() {
         </div>
 
         <nav className="nav" onClick={() => setOpen(false)}>
+          <div className="nav-section-label">Overview</div>
+          {NAV_MAIN.filter((i) => i.to === '/app').map((item) => (
+            <NavLink key={item.to} to={item.to} end={item.end} className={({ isActive }) => (isActive ? 'active' : '')} onMouseMove={handleNavMouseMove}>
+              <span className="nav-ico">{item.ico}</span>
+              <span className="nav-text">
+                <span className="nav-label">{item.label}</span>
+                <span className="nav-sub">{item.desc}</span>
+              </span>
+            </NavLink>
+          ))}
+
+          <div className="nav-section-label">Manage</div>
+          {NAV_MAIN.filter((i) => i.to !== '/app').map((item) => (
+            <NavLink key={item.to} to={item.to} end={item.end} className={({ isActive }) => (isActive ? 'active' : '')} onMouseMove={handleNavMouseMove}>
+              <span className="nav-ico">{item.ico}</span>
+              <span className="nav-text">
+                <span className="nav-label">{item.label}</span>
+                <span className="nav-sub">{item.desc}</span>
+              </span>
+            </NavLink>
+          ))}
+
+          {FEATURES.discoveryEnabled &&
+            NAV_GROWTH.filter((i) => i.to === '/app/discovery').map((item) => (
+              <NavLink key={item.to} to={item.to} end={item.end} className={({ isActive }) => (isActive ? 'active' : '')} onMouseMove={handleNavMouseMove}>
+                <span className="nav-ico">{item.ico}</span>
+                <span className="nav-text">
+                  <span className="nav-label">{item.label}</span>
+                  <span className="nav-sub">{item.desc}</span>
+                </span>
+              </NavLink>
+            ))}
+
           <div className="nav-section-label">Workspace</div>
-          {NAV_MAIN.map((item) => (
-            <NavLink key={item.to} to={item.to} end={item.end} className={({ isActive }) => (isActive ? 'active' : '')} onMouseMove={handleNavMouseMove}>
-              <span className="nav-ico">{item.ico}</span>
-              <span style={{ flex: 1, display: 'flex', flexDirection: 'column', lineHeight: 1.1 }}>
-                <span>{item.label}</span>
-                <span style={{ fontSize: '0.66rem', fontFamily: 'var(--mono)', letterSpacing: '0.04em', color: 'var(--text-faint)', fontWeight: 500, textTransform: 'uppercase' }}>{item.desc}</span>
-              </span>
-            </NavLink>
-          ))}
-
-          <div className="nav-section-label">Growth</div>
-          {NAV_GROWTH.map((item) => (
-            <NavLink key={item.to} to={item.to} end={item.end} className={({ isActive }) => (isActive ? 'active' : '')} onMouseMove={handleNavMouseMove}>
-              <span className="nav-ico">{item.ico}</span>
-              <span style={{ flex: 1, display: 'flex', flexDirection: 'column', lineHeight: 1.1 }}>
-                <span>{item.label}</span>
-                <span style={{ fontSize: '0.66rem', fontFamily: 'var(--mono)', letterSpacing: '0.04em', color: 'var(--text-faint)', fontWeight: 500, textTransform: 'uppercase' }}>{item.desc}</span>
-              </span>
-            </NavLink>
-          ))}
-
-          <div className="nav-section-label">System</div>
           {NAV_SYSTEM.map((item) => (
             <NavLink key={item.to} to={item.to} end={item.end} className={({ isActive }) => (isActive ? 'active' : '')} onMouseMove={handleNavMouseMove}>
               <span className="nav-ico">{item.ico}</span>
-              <span style={{ flex: 1, display: 'flex', flexDirection: 'column', lineHeight: 1.1 }}>
-                <span>{item.label}</span>
-                <span style={{ fontSize: '0.66rem', fontFamily: 'var(--mono)', letterSpacing: '0.04em', color: 'var(--text-faint)', fontWeight: 500, textTransform: 'uppercase' }}>{item.desc}</span>
+              <span className="nav-text">
+                <span className="nav-label">{item.label}</span>
+                <span className="nav-sub">{item.desc}</span>
+              </span>
+            </NavLink>
+          ))}
+          {NAV_GROWTH.filter((i) => i.to === '/app/deleted').map((item) => (
+            <NavLink key={item.to} to={item.to} end={item.end} className={({ isActive }) => (isActive ? 'active' : '')} onMouseMove={handleNavMouseMove}>
+              <span className="nav-ico">{item.ico}</span>
+              <span className="nav-text">
+                <span className="nav-label">{item.label}</span>
+                <span className="nav-sub">{item.desc}</span>
               </span>
             </NavLink>
           ))}
 
-          <Link
-            to="/app/hire"
-            style={{
-              marginTop: 10,
-              display: 'flex',
-              alignItems: 'center',
-              gap: 10,
-              padding: '10px 11px',
-              borderRadius: 12,
-              background: 'linear-gradient(135deg, rgba(45,212,191,0.08), rgba(56,189,248,0.05))',
-              border: '1px solid rgba(45,212,191,0.12)',
-              color: 'var(--text)',
-              textDecoration: 'none',
-            }}
-          >
-            <span style={{ width: 28, height: 28, borderRadius: 8, background: 'linear-gradient(135deg, var(--accent), var(--accent-2))', display: 'grid', placeItems: 'center', fontSize: '0.78rem', fontWeight: 800, color: '#04201C', flexShrink: 0 }}>↗</span>
+          <Link to="/app/hire" className="hire-card">
+            <span className="hire-ico">↗</span>
             <span style={{ flex: 1, lineHeight: 1.2 }}>
-              <span style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, letterSpacing: '-0.01em' }}>Hire studio</span>
-              <span style={{ display: 'block', fontSize: '0.68rem', color: 'var(--text-muted)' }}>By Dhurim — see work</span>
+              <span className="hire-title">Hire studio</span>
+              <span className="hire-sub">By Dhurim — see work</span>
             </span>
           </Link>
         </nav>
@@ -175,56 +195,26 @@ export function AppLayout() {
           <div className="sidebar-user">
             <div className="sidebar-avatar">{initials.slice(0, 1)}</div>
             <div style={{ flex: 1, minWidth: 0, lineHeight: 1.25 }}>
-              <div style={{ fontSize: '0.84rem', fontWeight: 700, letterSpacing: '-0.01em', color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              <div className="sidebar-user-name">
                 {profile?.display_name || user?.email?.split('@')[0] || 'Workspace'}
               </div>
-              <div style={{ fontFamily: 'var(--mono)', fontSize: '0.66rem', color: 'var(--text-faint)', letterSpacing: '0.04em', fontWeight: 600, textTransform: 'uppercase', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                {FEATURES.outreachEnabled ? (profile?.gmail_connected ? '● Gmail live' : '○ Gmail off') + ' · ' : ''}{theme} · Private
-              </div>
+              <Link to="/app/themes" className="sidebar-theme-link" title="Change theme">
+                <span className="sidebar-theme-dot" style={{ background: THEME_DOT }} />
+                {themeName(theme)} · Private
+              </Link>
             </div>
-            <button
-              className="btn btn-ghost"
-              type="button"
-              onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-              style={{ minHeight: 30, padding: '4px 9px', fontSize: '0.72rem', borderRadius: 999, border: '1px solid var(--border)', flexShrink: 0 }}
-              aria-label="Toggle theme"
-            >
-              {theme === 'dark' ? '☾' : '☀'}
-            </button>
           </div>
 
           <div style={{ display: 'flex', gap: 6 }}>
-            <a
-              href={HIRE.whatsapp}
-              target="_blank"
-              rel="noreferrer"
-              style={{
-                flex: 1,
-                textAlign: 'center',
-                padding: '7px 8px',
-                borderRadius: 999,
-                background: 'var(--bg-soft)',
-                border: '1px solid var(--border)',
-                fontSize: '0.76rem',
-                fontWeight: 600,
-                color: 'var(--text-muted)',
-              }}
-            >
+            <a href={HIRE.whatsapp} target="_blank" rel="noreferrer" className="sidebar-btn">
               WhatsApp
             </a>
-            <button
-              className="btn btn-ghost"
-              type="button"
-              onClick={() => signOut()}
-              style={{ flex: 1, minHeight: 34, fontSize: '0.76rem', border: '1px solid var(--border)', background: 'var(--bg-soft)' }}
-            >
+            <button type="button" onClick={() => signOut()} className="sidebar-btn sidebar-btn-action">
               Log out
             </button>
           </div>
 
-          <div style={{ textAlign: 'center', fontFamily: 'var(--mono)', fontSize: '0.62rem', color: 'var(--text-faint)', letterSpacing: '0.06em', textTransform: 'uppercase', fontWeight: 600, paddingTop: 2 }}>
-            Obsidian Flow · v2.0
-          </div>
+          <div className="sidebar-version">InfluenceFlow · v3.0</div>
         </div>
       </aside>
 
@@ -283,7 +273,7 @@ export function AppLayout() {
                     }}
                   >
                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                      <span style={{ width: 28, height: 28, borderRadius: 8, background: 'var(--accent-soft)', border: '1px solid rgba(45,212,191,0.14)', display: 'grid', placeItems: 'center', fontFamily: 'var(--mono)', fontSize: '0.66rem', fontWeight: 700, color: 'var(--accent)' }}>{h.type[0]}</span>
+                      <span style={{ width: 28, height: 28, borderRadius: 8, background: 'var(--accent-soft)', border: '1px solid rgba(182,92,46,0.14)', display: 'grid', placeItems: 'center', fontFamily: 'var(--mono)', fontSize: '0.66rem', fontWeight: 700, color: 'var(--accent)' }}>{h.type[0]}</span>
                       <span>
                         <strong style={{ fontWeight: 700 }}>{h.label}</strong>
                         {h.sub ? <span style={{ color: 'var(--text-muted)', fontWeight: 500 }}> · {h.sub}</span> : null}
@@ -359,7 +349,7 @@ export function PageHeader({
       <div style={{ minWidth: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
           <h1>{title}</h1>
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 8px', borderRadius: 999, background: 'var(--accent-soft)', border: '1px solid rgba(45,212,191,0.14)', fontFamily: 'var(--mono)', fontSize: '0.62rem', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--accent)' }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 8px', borderRadius: 999, background: 'var(--accent-soft)', border: '1px solid rgba(182,92,46,0.14)', fontFamily: 'var(--mono)', fontSize: '0.62rem', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--accent)' }}>
             <span style={{ width: 6, height: 6, borderRadius: 999, background: 'var(--accent)', boxShadow: '0 0 8px var(--accent-glow)' }} />
             Live
           </span>
@@ -375,10 +365,10 @@ export function OnboardingBanner() {
   const { profile, updateProfile } = useAuth()
   if (!profile || profile.onboarding_done) return null
   return (
-    <div className="card animate-entry animate-entry-1" style={{ marginBottom: 16, border: '1px solid rgba(45,212,191,0.16)', background: 'linear-gradient(135deg, rgba(45,212,191,0.07) 0%, rgba(56,189,248,0.04) 100%), var(--bg-elevated)', overflow: 'hidden' }}>
+    <div className="card animate-entry animate-entry-1" style={{ marginBottom: 16, border: '1px solid rgba(182,92,46,0.16)', background: 'linear-gradient(135deg, rgba(182,92,46,0.07) 0%, rgba(58,90,64,0.04) 100%), var(--bg-elevated)', overflow: 'hidden' }}>
       <div style={{ position: 'absolute', inset: '0 0 auto 0', height: 2, background: 'linear-gradient(90deg, var(--accent), var(--accent-2))', opacity: 0.9 }} />
       <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start', flexWrap: 'wrap' }}>
-        <div style={{ width: 36, height: 36, borderRadius: 12, background: 'linear-gradient(135deg, var(--accent), var(--accent-2))', display: 'grid', placeItems: 'center', color: '#04201C', fontWeight: 800, flexShrink: 0, boxShadow: '0 6px 16px rgba(45,212,191,0.28)' }}>✦</div>
+        <div style={{ width: 36, height: 36, borderRadius: 12, background: 'linear-gradient(135deg, var(--accent), var(--accent-2))', display: 'grid', placeItems: 'center', color: '#2E1A0C', fontWeight: 800, flexShrink: 0, boxShadow: '0 6px 16px rgba(182,92,46,0.28)' }}>✦</div>
         <div style={{ flex: 1, minWidth: 240 }}>
           <div style={{ fontFamily: 'var(--display)', fontWeight: 700, letterSpacing: '-0.02em', fontSize: '0.98rem', color: 'var(--text-strong)' }}>Welcome — quick setup</div>
           <div style={{ color: 'var(--text-muted)', fontSize: '0.875rem', lineHeight: 1.6, marginTop: 4 }}>Get your workspace live in 60 seconds. Private, isolated, yours.</div>

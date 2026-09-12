@@ -1,4 +1,4 @@
-export type Theme = 'dark' | 'light'
+export type Theme = 'agency' | 'light' | 'dark' | 'honey' | 'ocean'
 
 export type PipelineStatus =
   | 'new'

@@ -7,6 +7,7 @@ import { downloadJson } from '../lib/utils'
 import { Field, useToast } from '../components/ui'
 import { PageHeader } from '../components/Layout'
 import { FEATURES } from '../lib/features'
+import { THEMES } from '../lib/themes'
 
 const DEFAULTS: Record<string, { subject: string; body_text: string }> = {
   new: {
@@ -293,13 +294,36 @@ export function SettingsPage() {
             </select>
           </Field>
           <Field label="Theme">
-            <div className="actions">
-              <button className="btn" type="button" onClick={() => setTheme('dark')}>
-                Dark
-              </button>
-              <button className="btn" type="button" onClick={() => setTheme('light')}>
-                Light
-              </button>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {THEMES.map((t) => {
+                const active = profile?.theme === t.id
+                return (
+                  <button
+                    key={t.id}
+                    className={`btn btn-sm${active ? ' btn-primary' : ''}`}
+                    type="button"
+                    onClick={() => setTheme(t.id)}
+                    aria-pressed={active}
+                    title={t.tagline}
+                  >
+                    <span
+                      style={{
+                        width: 10,
+                        height: 10,
+                        borderRadius: 999,
+                        background: active ? 'currentColor' : t.dot,
+                        flexShrink: 0,
+                      }}
+                    />
+                    {t.name}
+                  </button>
+                )
+              })}
+            </div>
+            <div style={{ marginTop: 8 }}>
+              <Link to="/app/themes" style={{ fontSize: '0.82rem', fontWeight: 600 }}>
+                Open theme gallery →
+              </Link>
             </div>
           </Field>
           <button className="btn btn-primary" type="submit">

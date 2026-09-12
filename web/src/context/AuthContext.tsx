@@ -10,6 +10,15 @@ import {
 import type { Session, User } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabase'
 import type { Profile, Theme } from '../lib/types'
+import { DEFAULT_THEME, isTheme } from '../lib/themes'
+
+function normalizeTheme(v: unknown): Theme {
+  if (isTheme(v)) return v
+  // legacy values map to closest: dark stays dark, everything else → agency default
+  if (v === 'dark') return 'dark'
+  if (v === 'light') return 'light'
+  return DEFAULT_THEME
+}
 
 interface AuthState {
   session: Session | null
@@ -32,8 +41,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const loadProfile = useCallback(async (userId: string) => {
     const { data } = await supabase.from('profiles').select('*').eq('id', userId).maybeSingle()
     if (data) {
-      setProfile(data as Profile)
-      document.documentElement.dataset.theme = data.theme || 'dark'
+      const theme = normalizeTheme((data as Profile).theme)
+      setProfile({ ...(data as Profile), theme })
+      document.documentElement.dataset.theme = theme
     }
   }, [])
 
@@ -92,9 +102,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   useEffect(() => {
-    const saved = localStorage.getItem('if-theme') as Theme | null
-    if (saved && !profile) document.documentElement.dataset.theme = saved
-    else if (!saved) document.documentElement.dataset.theme = 'dark'
+    const saved = localStorage.getItem('if-theme')
+    if (saved && !profile && isTheme(saved)) document.documentElement.dataset.theme = saved
+    else if (!saved && !profile) document.documentElement.dataset.theme = DEFAULT_THEME
   }, [profile])
 
   const value = useMemo(

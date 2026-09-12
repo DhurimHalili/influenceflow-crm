@@ -78,7 +78,7 @@ export function DashboardPage() {
             padding: 0,
             overflow: 'hidden',
             background:
-              'radial-gradient(520px 280px at 0% 0%, rgba(45,212,191,0.09), transparent 62%), radial-gradient(420px 240px at 96% 12%, rgba(56,189,248,0.07), transparent 60%), var(--bg-elevated)',
+              'radial-gradient(520px 280px at 0% 0%, rgba(182,92,46,0.09), transparent 62%), radial-gradient(420px 240px at 96% 12%, rgba(58,90,64,0.07), transparent 60%), var(--bg-elevated)',
           }}
         >
           <div style={{ padding: '18px 20px 16px', display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', alignItems: 'flex-start' }}>
@@ -128,7 +128,7 @@ export function DashboardPage() {
         </div>
 
         <div style={{ display: 'grid', gap: 12 }}>
-          <div className="card animate-entry animate-entry-1" style={{ padding: 16, background: 'linear-gradient(135deg, rgba(45,212,191,0.07) 0%, rgba(56,189,248,0.05) 100%), var(--bg-elevated)' }}>
+          <div className="card animate-entry animate-entry-1" style={{ padding: 16, background: 'linear-gradient(135deg, rgba(182,92,46,0.07) 0%, rgba(58,90,64,0.05) 100%), var(--bg-elevated)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
               <div>
                 <div style={{ fontFamily: 'var(--mono)', fontSize: '0.64rem', letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 700, color: 'var(--text-faint)' }}>Revenue flow</div>
@@ -141,7 +141,7 @@ export function DashboardPage() {
               <span style={{ fontSize: '0.84rem', color: 'var(--text-muted)', fontWeight: 600 }}>deals in motion</span>
             </div>
             <div style={{ height: 6, borderRadius: 999, background: 'var(--bg-soft)', overflow: 'hidden', marginTop: 12, border: '1px solid var(--border)' }}>
-              <div style={{ height: '100%', width: `${Math.min(100, (stats.campaigns / Math.max(1, 8)) * 100)}%`, background: 'linear-gradient(90deg, var(--accent), var(--accent-2))', borderRadius: 999, boxShadow: '0 0 10px rgba(45,212,191,0.24)' }} />
+              <div style={{ height: '100%', width: `${Math.min(100, (stats.campaigns / Math.max(1, 8)) * 100)}%`, background: 'linear-gradient(90deg, var(--accent), var(--accent-2))', borderRadius: 999, boxShadow: '0 0 10px rgba(182,92,46,0.24)' }} />
             </div>
             <Link to="/app/campaigns" className="btn btn-primary" style={{ width: '100%', marginTop: 12, justifyContent: 'center' }}>Manage campaigns</Link>
           </div>
@@ -238,7 +238,7 @@ export function DashboardPage() {
         <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
           <div style={{ padding: '14px 16px 12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border)', background: 'color-mix(in srgb, var(--bg-soft) 72%, transparent)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <span style={{ width: 28, height: 28, borderRadius: 9, background: 'var(--accent-soft)', border: '1px solid rgba(45,212,191,0.14)', display: 'grid', placeItems: 'center', color: 'var(--accent)', fontSize: '0.78rem' }}>▦</span>
+              <span style={{ width: 28, height: 28, borderRadius: 9, background: 'var(--accent-soft)', border: '1px solid rgba(182,92,46,0.14)', display: 'grid', placeItems: 'center', color: 'var(--accent)', fontSize: '0.78rem' }}>▦</span>
               <span style={{ fontFamily: 'var(--display)', fontWeight: 700, letterSpacing: '-0.02em', color: 'var(--text-strong)' }}>Today’s meetings</span>
               <span className="badge" style={{ fontSize: '0.62rem' }}>{meetings.length}</span>
             </div>
@@ -251,7 +251,7 @@ export function DashboardPage() {
             {meetings.map((m) => (
               <div key={m.id} className="activity-item" style={{ borderBottom: '1px solid color-mix(in srgb, var(--border) 72%, transparent)', padding: '12px 8px', borderRadius: 10, marginBottom: 2 }}>
                 <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
-                  <span style={{ width: 32, height: 32, borderRadius: 8, background: 'linear-gradient(135deg, var(--accent), var(--accent-2))', display: 'grid', placeItems: 'center', color: '#04201C', fontWeight: 800, fontSize: '0.72rem', flexShrink: 0 }}>{new Date(m.starts_at).getHours().toString().padStart(2, '0')}</span>
+                  <span style={{ width: 32, height: 32, borderRadius: 8, background: 'linear-gradient(135deg, var(--accent), var(--accent-2))', display: 'grid', placeItems: 'center', color: '#2E1A0C', fontWeight: 800, fontSize: '0.72rem', flexShrink: 0 }}>{new Date(m.starts_at).getHours().toString().padStart(2, '0')}</span>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <strong style={{ display: 'block', fontSize: '0.92rem', letterSpacing: '-0.01em', color: 'var(--text-strong)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{m.title}</strong>
                     <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem', fontFamily: 'var(--mono)', fontWeight: 500 }}>{formatDateTime(m.starts_at)}</span>
