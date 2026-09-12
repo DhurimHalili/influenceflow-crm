@@ -34,14 +34,14 @@ export const THEMES: ThemeMeta[] = [
   {
     id: 'honey',
     name: 'Honey',
-    tagline: 'Golden ambers and cream. Honey drips from the top, drops fall where you click.',
+    tagline: 'Liquid gold. Honey flows in the background, drips stretch from the edge, and buttons are dipped — press one to release honey drops.',
     swatches: ['#F5E7C8', '#FFF8E8', '#B07C1F'],
     dot: '#B07C1F',
   },
   {
     id: 'ocean',
     name: 'Ocean',
-    tagline: 'Muted slate blues and sea glass. Waves on top, ripples and bubbles where you click.',
+    tagline: 'A living ocean. Caustic light dances on the water, waves roll across the edge, and water-glass buttons splash when pressed.',
     swatches: ['#E7EEF0', '#F7FAFB', '#2E7D8A'],
     dot: '#2E7D8A',
   },

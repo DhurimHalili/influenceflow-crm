@@ -1388,7 +1388,7 @@ tr.row-selected { background: var(--accent-soft) !important; }
 .theme-swatches span { flex: 1; height: 44px; }
 
 /* =========================================================
-   THEME FX — honey drips & ocean ripples (no animals)
+   THEME FX — living liquid honey & living ocean (no animals)
    Only active on [data-theme='honey'] / [data-theme='ocean']
    ========================================================= */
 .fx-edge {
@@ -1396,94 +1396,277 @@ tr.row-selected { background: var(--accent-soft) !important; }
   top: 0;
   left: 0;
   right: 0;
-  height: 16px;
+  height: 26px;
   z-index: 40;
   pointer-events: none;
   overflow: visible;
 }
-.fx-edge-svg { display: block; width: 100%; height: 100%; filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.12)); }
+[data-theme='honey'] .fx-edge { height: 40px; }
+[data-theme='ocean'] .fx-edge { height: 30px; }
+.fx-edge-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  filter: drop-shadow(0 3px 5px rgba(20, 14, 2, 0.18));
+}
 .fx-layer { position: fixed; inset: 0; z-index: 60; pointer-events: none; overflow: hidden; }
 
-/* Honey drop — teardrop that falls, drifts and melts away */
-.fx-honey-drop {
-  position: absolute;
-  transform: translate(-50%, -50%);
-  background: linear-gradient(180deg, #F2C95C 0%, #D9A441 45%, #A86F16 100%);
-  border-radius: 50% 50% 50% 50% / 58% 58% 42% 42%;
-  box-shadow: inset -1px -2px 3px rgba(120, 70, 10, 0.45), inset 1px 2px 2px rgba(255, 240, 200, 0.7), 0 2px 6px rgba(150, 95, 20, 0.35);
-  animation: fx-honey-fall 0.9s var(--ease-premium) forwards;
-}
-.fx-honey-drop::after {
-  content: "";
-  position: absolute;
-  left: 22%;
-  top: 16%;
-  width: 26%;
-  height: 34%;
-  border-radius: 999px;
-  background: rgba(255, 250, 230, 0.85);
-}
-@keyframes fx-honey-fall {
-  0% { opacity: 0; transform: translate(-50%, -50%) scale(0.4); }
-  18% { opacity: 1; transform: translate(calc(-50% + var(--dx, 0px) * 0.15), calc(-50% + 10px)) scale(1); }
-  100% { opacity: 0; transform: translate(calc(-50% + var(--dx, 0px)), calc(-50% + 130px)) scale(0.85, 1.1); }
+/* SVG transform math so CSS animations track each shape's own box */
+.fx-edge-svg g,
+.fx-edge-svg ellipse,
+.fx-edge-svg circle,
+.fx-sea g,
+.fx-sea circle {
+  transform-box: fill-box;
 }
 
-/* Ocean ripple ring + rising bubbles */
-.fx-ripple {
-  position: absolute;
-  width: 12px;
-  height: 12px;
-  transform: translate(-50%, -50%);
-  border: 2px solid rgba(62, 150, 163, 0.75);
-  border-radius: 999px;
-  animation: fx-ripple 0.8s var(--ease-out) forwards;
-}
-@keyframes fx-ripple {
-  0% { opacity: 0.9; transform: translate(-50%, -50%) scale(0.4); }
-  100% { opacity: 0; transform: translate(-50%, -50%) scale(6); }
-}
-.fx-bubble {
-  position: absolute;
-  transform: translate(-50%, -50%);
-  border-radius: 999px;
-  background: radial-gradient(circle at 32% 30%, rgba(255, 255, 255, 0.9) 0%, rgba(160, 210, 218, 0.35) 45%, rgba(62, 150, 163, 0.5) 100%);
-  border: 1px solid rgba(255, 255, 255, 0.5);
-  animation: fx-bubble-rise 1s var(--ease-out) forwards;
-}
-@keyframes fx-bubble-rise {
-  0% { opacity: 0; transform: translate(-50%, -50%) scale(0.5); }
-  20% { opacity: 0.95; }
-  100% { opacity: 0; transform: translate(calc(-50% + var(--dx, 0px)), calc(-50% - 110px)) scale(1); }
-}
-
-/* ——— Realistic scene backdrop (honey flow / aerial ocean) ——— */
+/* ——— Animated scene backdrop ——— */
 .fx-bg { position: fixed; inset: 0; z-index: -2; pointer-events: none; overflow: hidden; }
 .fx-sea { display: block; width: 100%; height: 100%; }
-.fx-veil-honey { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(253, 246, 227, 0.30) 0%, rgba(253, 246, 227, 0.10) 45%, rgba(253, 246, 227, 0.22) 100%); }
-.fx-veil-ocean { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(242, 250, 250, 0.44) 0%, rgba(242, 250, 250, 0.30) 50%, rgba(242, 250, 250, 0.42) 100%); }
+.fx-veil-honey { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(253, 246, 227, 0.32) 0%, rgba(253, 246, 227, 0.12) 45%, rgba(253, 246, 227, 0.26) 100%); }
+.fx-veil-ocean { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(240, 250, 251, 0.30) 0%, rgba(240, 250, 251, 0.12) 50%, rgba(240, 250, 251, 0.28) 100%); }
 .fx-drift-a { animation: fx-drift-a 26s ease-in-out infinite alternate; }
 .fx-drift-b { animation: fx-drift-b 34s ease-in-out infinite alternate; }
 @keyframes fx-drift-a { from { transform: translate(0, 0); } to { transform: translate(-46px, 26px); } }
 @keyframes fx-drift-b { from { transform: translate(0, 0); } to { transform: translate(40px, -22px); } }
 
-/* ——— Honey theme dressing: dipped buttons, gloss, readable ink ——— */
+/* Ocean swells sliding across the surface — one period per loop, seamless */
+@keyframes fx-wave-slide { from { transform: translateX(0); } to { transform: translateX(-480px); } }
+.fx-oce-wave-a { animation: fx-wave-slide 9s linear infinite; }
+.fx-oce-wave-b { animation: fx-wave-slide 15s linear infinite; }
+.fx-oce-swell-1 { animation: fx-wave-slide 38s linear infinite; }
+.fx-oce-swell-2 { animation: fx-wave-slide 54s linear infinite; }
+.fx-oce-swell-3 { animation: fx-wave-slide 68s linear infinite; }
+
+/* Sun glints twinkling on the water */
+.fx-glint {
+  opacity: 0;
+  transform-origin: center;
+  animation: fx-glint 4s ease-in-out infinite;
+}
+@keyframes fx-glint {
+  0%, 100% { opacity: 0; transform: scale(0.5); }
+  50% { opacity: 0.85; transform: scale(1); }
+}
+
+/* Honey edge — drips slowly stretch, droplets swell and detach */
+.fx-honey-stretch {
+  transform-origin: 50% 0;
+  animation: fx-honey-stretch 4.6s ease-in-out infinite;
+}
+@keyframes fx-honey-stretch {
+  0%, 100% { transform: scaleY(1); }
+  45% { transform: scaleY(1.55); }
+  62% { transform: scaleY(1.3); }
+}
+.fx-honey-fall {
+  opacity: 0;
+  transform-origin: 50% 0;
+  animation: fx-honey-edge-fall 4.6s cubic-bezier(0.5, 0, 0.85, 0.45) infinite;
+}
+@keyframes fx-honey-edge-fall {
+  0% { opacity: 0; transform: translateY(2px) scaleY(0.45); }
+  10% { opacity: 1; transform: translateY(4px) scaleY(1); }
+  38% { opacity: 1; transform: translateY(11px) scaleY(1.3); }
+  82% { opacity: 1; transform: translateY(27px) scaleY(1.1); }
+  100% { opacity: 0; transform: translateY(42px) scaleY(0.9); }
+}
+
+/* Bubbles rising through the honey */
+.fx-honey-bub {
+  opacity: 0;
+  animation: fx-honey-bub 16s ease-in infinite;
+}
+@keyframes fx-honey-bub {
+  0% { opacity: 0; transform: translateY(0) scale(0.7); }
+  10% { opacity: 0.55; }
+  60% { opacity: 0.38; }
+  100% { opacity: 0; transform: translateY(-190px) scale(1.05); }
+}
+
+/* ——— Click particles ——— */
+
+/* Honey drop released on click — glossy teardrop with trailing streak */
+.fx-honey-drop {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  background: linear-gradient(180deg, #FFE08A 0%, #E9B94E 32%, #C08A24 70%, #9A6714 100%);
+  border-radius: 50% 50% 50% 50% / 58% 58% 42% 42%;
+  box-shadow:
+    inset -1px -2px 3px rgba(122, 72, 10, 0.5),
+    inset 1px 2px 2px rgba(255, 244, 208, 0.75),
+    0 2px 7px rgba(150, 95, 20, 0.4);
+  animation: fx-honey-drop-fall 1s var(--ease-premium) forwards;
+}
+.fx-honey-drop::after {
+  content: "";
+  position: absolute;
+  left: 22%;
+  top: 14%;
+  width: 26%;
+  height: 34%;
+  border-radius: 999px;
+  background: rgba(255, 252, 238, 0.9);
+}
+.fx-honey-drop::before {
+  content: "";
+  position: absolute;
+  left: 38%;
+  top: -48%;
+  width: 24%;
+  height: 54%;
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(233, 185, 78, 0) 0%, rgba(216, 156, 43, 0.7) 100%);
+}
+@keyframes fx-honey-drop-fall {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(0.4); }
+  16% { opacity: 1; transform: translate(calc(-50% + var(--dx, 0px) * 0.15), calc(-50% + 10px)) scale(1); }
+  60% { transform: translate(calc(-50% + var(--dx, 0px) * 0.6), calc(-50% + 66px)) scale(0.94, 1.2) rotate(2deg); }
+  100% { opacity: 0; transform: translate(calc(-50% + var(--dx, 0px)), calc(-50% + 138px)) scale(0.86, 1.12) rotate(-2deg); }
+}
+
+/* Golden splash ring when a dipped button is pressed */
+.fx-honey-splash {
+  position: absolute;
+  width: 30px;
+  height: 30px;
+  transform: translate(-50%, -50%);
+  border: 2.5px solid rgba(233, 185, 78, 0.85);
+  border-radius: 999px;
+  box-shadow: 0 0 16px rgba(220, 168, 63, 0.4);
+  animation: fx-honey-splash 0.65s var(--ease-out) forwards;
+}
+@keyframes fx-honey-splash {
+  0% { opacity: 0.95; transform: translate(-50%, -50%) scale(0.35); }
+  100% { opacity: 0; transform: translate(-50%, -50%) scale(3.4); }
+}
+
+/* Ocean ripple ring — single or double splash */
+.fx-ripple {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  transform: translate(-50%, -50%);
+  border: 2px solid rgba(111, 195, 205, 0.8);
+  border-radius: 999px;
+  box-shadow: 0 0 12px rgba(127, 205, 209, 0.3), inset 0 0 6px rgba(255, 255, 255, 0.35);
+  animation: fx-ripple 0.85s var(--ease-out) forwards;
+}
+.fx-ripple-big { width: 22px; height: 22px; border-width: 3px; --rs: 7; }
+@keyframes fx-ripple {
+  0% { opacity: 0.95; transform: translate(-50%, -50%) scale(0.35); }
+  100% { opacity: 0; transform: translate(-50%, -50%) scale(var(--rs, 6)); }
+}
+
+/* Water droplets leaping out of a pressed button — arc up, fall back */
+.fx-droplet {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  border-radius: 999px;
+  background: radial-gradient(circle at 32% 30%, #FFFFFF 0%, rgba(190, 238, 245, 0.9) 45%, rgba(46, 132, 148, 0.95) 100%);
+  box-shadow: 0 1px 4px rgba(20, 80, 92, 0.4), inset 0 0 2px rgba(255, 255, 255, 0.8);
+  animation: fx-droplet 0.75s cubic-bezier(0.2, 0.6, 0.4, 1) forwards;
+}
+@keyframes fx-droplet {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(0.3); }
+  14% { opacity: 1; transform: translate(calc(-50% + var(--dx, 0px) * 0.3), calc(-50% + var(--dy, -30px) * 0.34)) scale(1); }
+  58% { opacity: 1; transform: translate(calc(-50% + var(--dx, 0px) * 0.74), calc(-50% + var(--dy, -30px) * 0.62 + 12px)) scale(0.92); }
+  100% { opacity: 0; transform: translate(calc(-50% + var(--dx, 0px)), calc(-50% + var(--dy, -30px) * 0.4 + 30px)) scale(0.62); }
+}
+
+/* Rising bubbles */
+.fx-bubble {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  border-radius: 999px;
+  background: radial-gradient(circle at 32% 30%, rgba(255, 255, 255, 0.95) 0%, rgba(170, 222, 230, 0.4) 45%, rgba(62, 150, 163, 0.55) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  animation: fx-bubble-rise 1.1s var(--ease-out) forwards;
+}
+@keyframes fx-bubble-rise {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(0.5); }
+  20% { opacity: 0.95; }
+  100% { opacity: 0; transform: translate(calc(-50% + var(--dx, 0px)), calc(-50% - 115px)) scale(1); }
+}
+
+/* ——— Honey theme dressing: buttons dipped in liquid gold ——— */
 [data-theme='honey'] .page-header h1 { text-shadow: 0 1px 0 rgba(255, 248, 232, 0.55); }
+[data-theme='honey'] .btn {
+  background: linear-gradient(180deg, #FFF8E6 0%, #F5E8C4 100%);
+  border-color: #C9A96A;
+  box-shadow:
+    0 2px 6px rgba(150, 95, 20, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.85),
+    inset 0 -2px 5px rgba(196, 156, 84, 0.28);
+}
+[data-theme='honey'] .btn:hover:not(:disabled) {
+  border-color: #A87917;
+  box-shadow:
+    var(--shadow-soft),
+    0 0 0 3px rgba(220, 168, 63, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
 [data-theme='honey'] .btn-primary {
+  overflow: visible;
   background:
-    linear-gradient(180deg, rgba(255, 248, 224, 0.7) 0%, rgba(255, 248, 224, 0) 30%),
-    linear-gradient(180deg, #E7B84B 0%, #A86F16 100%);
-  border-color: #7D5510;
-  color: #2A1C05;
-  text-shadow: 0 1px 0 rgba(255, 244, 214, 0.5);
-  box-shadow: 0 8px 22px rgba(150, 95, 20, 0.5), inset 0 2px 3px rgba(255, 250, 230, 0.8), inset 0 -4px 7px rgba(120, 70, 10, 0.5);
+    radial-gradient(130% 105% at 50% -22%, rgba(255, 250, 224, 0.85) 0%, rgba(255, 250, 224, 0) 56%),
+    linear-gradient(180deg, #F2C14E 0%, #D99A28 46%, #A76D12 100%);
+  border-color: #8A5D0E;
+  color: #33230A;
+  text-shadow: 0 1px 0 rgba(255, 248, 220, 0.6);
+  box-shadow:
+    0 10px 26px rgba(150, 95, 20, 0.45),
+    0 2px 5px rgba(150, 95, 20, 0.3),
+    inset 0 2px 3px rgba(255, 250, 230, 0.9),
+    inset 0 -5px 9px rgba(122, 72, 10, 0.5);
+}
+/* molten gold sheen gliding across the surface */
+[data-theme='honey'] .btn-primary::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(105deg, transparent 20%, rgba(255, 244, 208, 0) 36%, rgba(255, 246, 214, 0.55) 48%, rgba(255, 244, 208, 0) 60%, transparent 80%);
+  background-size: 260% 100%;
+  background-position: 130% 0;
+  animation: fx-sheen-sweep 5.2s ease-in-out infinite;
+}
+/* a drop of honey hanging from the underside, slowly stretching */
+[data-theme='honey'] .btn-primary::after {
+  content: "";
+  position: absolute;
+  left: 18%;
+  bottom: -7px;
+  width: 7px;
+  height: 11px;
+  pointer-events: none;
+  background: linear-gradient(180deg, #D99A28 0%, #B4771B 100%);
+  border-radius: 3px 3px 6px 6px / 2px 2px 7px 7px;
+  box-shadow: inset 1px 1px 1px rgba(255, 244, 208, 0.6), 0 2px 3px rgba(122, 72, 10, 0.35);
+  transform-origin: top center;
+  animation: fx-honey-hang 5.6s ease-in-out infinite;
 }
 [data-theme='honey'] .btn-primary:hover:not(:disabled) {
-  filter: brightness(1.06);
-  box-shadow: 0 12px 28px rgba(150, 95, 20, 0.55), 0 0 0 3px rgba(220, 168, 63, 0.3), inset 0 2px 3px rgba(255, 250, 230, 0.85), inset 0 -4px 7px rgba(120, 70, 10, 0.5);
+  filter: brightness(1.05);
+  box-shadow:
+    0 14px 30px rgba(150, 95, 20, 0.5),
+    0 0 0 3px rgba(220, 168, 63, 0.3),
+    inset 0 2px 3px rgba(255, 250, 230, 0.95),
+    inset 0 -5px 9px rgba(122, 72, 10, 0.5);
 }
 [data-theme='honey'] .btn-primary:active:not(:disabled) {
-  box-shadow: 0 2px 6px rgba(150, 95, 20, 0.5), inset 0 3px 8px rgba(120, 70, 10, 0.55);
+  box-shadow: 0 2px 6px rgba(150, 95, 20, 0.45), inset 0 3px 8px rgba(122, 72, 10, 0.55);
+}
+@keyframes fx-sheen-sweep {
+  0%, 100% { background-position: 130% 0; }
+  50% { background-position: -30% 0; }
+}
+@keyframes fx-honey-hang {
+  0%, 100% { transform: scaleY(1); }
+  48% { transform: scaleY(1.6); }
+  66% { transform: scaleY(1.25); }
 }
 [data-theme='honey'] .brand-mark {
   background: linear-gradient(135deg, #E9B94E 0%, #9A6714 100%);
@@ -1492,23 +1675,59 @@ tr.row-selected { background: var(--accent-soft) !important; }
 [data-theme='honey'] .nav a.active .nav-ico { box-shadow: 0 2px 10px rgba(242, 193, 78, 0.5); }
 [data-theme='honey'] .card-eyebrow-dot { box-shadow: 0 0 10px rgba(176, 124, 31, 0.6); }
 
-/* ——— Ocean theme dressing: glassy water buttons, foam light ——— */
+/* ——— Ocean theme dressing: water-glass buttons, refracted light ——— */
 [data-theme='ocean'] .page-header h1 { text-shadow: 0 1px 0 rgba(255, 255, 255, 0.5); }
+[data-theme='ocean'] .btn {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.95) 0%, #E4F1F4 100%);
+  border-color: #A5C6CD;
+  box-shadow:
+    0 2px 6px rgba(28, 92, 102, 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    inset 0 -2px 5px rgba(148, 190, 200, 0.3);
+}
+[data-theme='ocean'] .btn:hover:not(:disabled) {
+  border-color: #2A8494;
+  box-shadow:
+    var(--shadow-soft),
+    0 0 0 3px rgba(62, 150, 163, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.95);
+}
 [data-theme='ocean'] .btn-primary {
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.35) 0%, rgba(255, 255, 255, 0) 32%),
-    linear-gradient(180deg, #3E96A3 0%, #1C5C66 100%);
-  border-color: #174E57;
-  color: #F2FAFA;
-  text-shadow: 0 1px 2px rgba(10, 40, 45, 0.4);
-  box-shadow: 0 8px 22px rgba(28, 92, 102, 0.45), inset 0 2px 3px rgba(255, 255, 255, 0.4), inset 0 -3px 6px rgba(10, 45, 52, 0.45);
+    radial-gradient(135% 110% at 50% -24%, rgba(219, 246, 250, 0.9) 0%, rgba(219, 246, 250, 0) 58%),
+    linear-gradient(180deg, #48A7B4 0%, #2A8494 46%, #175664 100%);
+  border-color: #14505C;
+  color: #F0FBFC;
+  text-shadow: 0 1px 2px rgba(8, 40, 46, 0.45);
+  box-shadow:
+    0 10px 26px rgba(23, 86, 100, 0.45),
+    0 2px 5px rgba(23, 86, 100, 0.3),
+    inset 0 2px 3px rgba(255, 255, 255, 0.55),
+    inset 0 -5px 9px rgba(8, 50, 60, 0.5);
+}
+/* light refracting through moving water */
+[data-theme='ocean'] .btn-primary::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(100deg, transparent 22%, rgba(255, 255, 255, 0.05) 38%, rgba(198, 246, 252, 0.5) 50%, rgba(255, 255, 255, 0.05) 62%, transparent 78%);
+  background-size: 260% 100%;
+  background-position: 130% 0;
+  animation: fx-sheen-sweep 4.4s ease-in-out infinite;
 }
 [data-theme='ocean'] .btn-primary:hover:not(:disabled) {
-  filter: brightness(1.08);
-  box-shadow: 0 12px 28px rgba(28, 92, 102, 0.5), 0 0 0 3px rgba(62, 150, 163, 0.25), inset 0 2px 3px rgba(255, 255, 255, 0.5), inset 0 -3px 6px rgba(10, 45, 52, 0.45);
+  border-color: #6FC3CD;
+  filter: brightness(1.07);
+  box-shadow:
+    0 14px 30px rgba(23, 86, 100, 0.5),
+    0 0 0 3px rgba(62, 150, 163, 0.3),
+    inset 0 2px 3px rgba(255, 255, 255, 0.65),
+    inset 0 -5px 9px rgba(8, 50, 60, 0.5);
 }
 [data-theme='ocean'] .btn-primary:active:not(:disabled) {
-  box-shadow: 0 2px 6px rgba(28, 92, 102, 0.45), inset 0 3px 8px rgba(10, 45, 52, 0.5);
+  box-shadow: 0 2px 6px rgba(23, 86, 100, 0.45), inset 0 3px 8px rgba(8, 50, 60, 0.5);
 }
 [data-theme='ocean'] .brand-mark {
   background: linear-gradient(135deg, #3E96A3 0%, #1C5C66 100%);
@@ -1516,9 +1735,28 @@ tr.row-selected { background: var(--accent-soft) !important; }
 }
 [data-theme='ocean'] .nav a.active .nav-ico { box-shadow: 0 2px 10px rgba(127, 205, 209, 0.5); }
 
+/* Let the scene breathe through on auth pages */
+[data-theme='honey'] .auth-page,
+[data-theme='ocean'] .auth-page {
+  background:
+    radial-gradient(600px 380px at 15% 10%, var(--accent-soft), transparent 60%),
+    radial-gradient(560px 380px at 88% 88%, var(--accent-soft-2), transparent 60%);
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .fx-honey-drop, .fx-bubble, .fx-ripple { animation-duration: 0.01ms; }
+  .fx-honey-drop, .fx-droplet, .fx-bubble, .fx-ripple, .fx-honey-splash { animation-duration: 0.01ms; }
   .fx-edge { display: none; }
+  .fx-edge-svg *,
+  .fx-sea .fx-honey-bub,
+  .fx-sea .fx-glint,
+  .fx-oce-wave-a, .fx-oce-wave-b,
+  .fx-oce-swell-1, .fx-oce-swell-2, .fx-oce-swell-3,
+  .fx-drift-a, .fx-drift-b,
+  [data-theme='honey'] .btn-primary::before,
+  [data-theme='honey'] .btn-primary::after,
+  [data-theme='ocean'] .btn-primary::before {
+    animation: none !important;
+  }
 }
 
 /* ——— Responsive ——— */
