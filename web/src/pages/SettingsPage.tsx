@@ -6,6 +6,7 @@ import type { EmailTemplate } from '../lib/types'
 import { downloadJson } from '../lib/utils'
 import { Field, useToast } from '../components/ui'
 import { PageHeader } from '../components/Layout'
+import { FEATURES } from '../lib/features'
 
 const DEFAULTS: Record<string, { subject: string; body_text: string }> = {
   new: {
@@ -58,6 +59,7 @@ export function SettingsPage() {
   }, [profile])
 
   useEffect(() => {
+    if (!FEATURES.outreachEnabled) return // hidden module — ignore OAuth return hash
     const hash = window.location.hash || ''
     if (hash.includes('gmail=connected')) {
       refreshProfile()
@@ -153,7 +155,7 @@ export function SettingsPage() {
 
   async function clearAllCrmData() {
     if (!user) return
-    if (!confirm('Delete ALL CRM data for this account (creators, brands, campaigns, meetings, activity, outreach logs)?')) return
+    if (!confirm('Delete ALL CRM data for this account (creators, brands, campaigns, meetings, activity)?')) return
     if (!confirm('Final confirm: this cannot be undone. Export a backup first if you need it.')) return
 
     const tables = [
@@ -247,34 +249,41 @@ export function SettingsPage() {
   return (
     <div>
       {Toast}
-      <PageHeader title="Settings" subtitle="Workspace, Gmail, templates and backup · tuned for speed" />
+      <PageHeader title="Settings" subtitle="Workspace, backup and preferences" />
 
       <div className="grid-2">
         <form className="card" onSubmit={saveProfile}>
-          <h3 style={{ marginTop: 0 }}>Profile & send limits</h3>
+          <h3 style={{ marginTop: 0 }}>Profile</h3>
           <Field label="Display name">
             <input className="input" value={form.display_name} onChange={(e) => setForm({ ...form, display_name: e.target.value })} />
           </Field>
-          <Field label="Sender name (signature)">
-            <input className="input" value={form.sender_name} onChange={(e) => setForm({ ...form, sender_name: e.target.value })} />
-          </Field>
-          <div className="grid-2">
-            <Field label="Daily send limit">
-              <input className="input" type="number" value={form.daily_send_limit} onChange={(e) => setForm({ ...form, daily_send_limit: Number(e.target.value) })} />
-            </Field>
-            <Field label="Reach-back days">
-              <input className="input" type="number" value={form.reach_back_days} onChange={(e) => setForm({ ...form, reach_back_days: Number(e.target.value) })} />
-            </Field>
-            <Field label="Delay min (sec)">
-              <input className="input" type="number" value={form.send_delay_min} onChange={(e) => setForm({ ...form, send_delay_min: Number(e.target.value) })} />
-            </Field>
-            <Field label="Delay max (sec)">
-              <input className="input" type="number" value={form.send_delay_max} onChange={(e) => setForm({ ...form, send_delay_max: Number(e.target.value) })} />
-            </Field>
-            <Field label="Max reach-backs">
-              <input className="input" type="number" min={0} max={10} value={form.max_reach_backs} onChange={(e) => setForm({ ...form, max_reach_backs: Number(e.target.value) })} />
-            </Field>
-          </div>
+          {/* Hidden but preserved: sender + send-limit fields (FEATURES.outreachEnabled)
+          <Field label="Sender name (signature)">…</Field>
+          Daily send limit / Reach-back days / Delay min-max / Max reach-backs */}
+          {FEATURES.outreachEnabled && (
+            <>
+              <Field label="Sender name (signature)">
+                <input className="input" value={form.sender_name} onChange={(e) => setForm({ ...form, sender_name: e.target.value })} />
+              </Field>
+              <div className="grid-2">
+                <Field label="Daily send limit">
+                  <input className="input" type="number" value={form.daily_send_limit} onChange={(e) => setForm({ ...form, daily_send_limit: Number(e.target.value) })} />
+                </Field>
+                <Field label="Reach-back days">
+                  <input className="input" type="number" value={form.reach_back_days} onChange={(e) => setForm({ ...form, reach_back_days: Number(e.target.value) })} />
+                </Field>
+                <Field label="Delay min (sec)">
+                  <input className="input" type="number" value={form.send_delay_min} onChange={(e) => setForm({ ...form, send_delay_min: Number(e.target.value) })} />
+                </Field>
+                <Field label="Delay max (sec)">
+                  <input className="input" type="number" value={form.send_delay_max} onChange={(e) => setForm({ ...form, send_delay_max: Number(e.target.value) })} />
+                </Field>
+                <Field label="Max reach-backs">
+                  <input className="input" type="number" min={0} max={10} value={form.max_reach_backs} onChange={(e) => setForm({ ...form, max_reach_backs: Number(e.target.value) })} />
+                </Field>
+              </div>
+            </>
+          )}
           <Field label="Reminders">
             <select className="select" value={form.reminder_prefs} onChange={(e) => setForm({ ...form, reminder_prefs: e.target.value as typeof form.reminder_prefs })}>
               <option value="browser">Browser</option>
@@ -299,31 +308,36 @@ export function SettingsPage() {
         </form>
 
         <div className="card">
-          <h3 style={{ marginTop: 0 }}>Gmail</h3>
-          <p style={{ color: 'var(--text-muted)' }}>
-            Status: <strong>{profile?.gmail_connected ? 'Connected' : 'Not connected'}</strong>
-          </p>
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>
-            Each user connects their own Gmail. Tokens stay on the server. See <Link to="/help">Help</Link> for OAuth setup.
-          </p>
-          <button className="btn btn-primary" type="button" onClick={connectGmail}>
-            Connect Gmail
-          </button>
-          {profile?.gmail_connected && (
-            <button
-              className="btn"
-              type="button"
-              style={{ marginLeft: 8 }}
-              onClick={async () => {
-                await updateProfile({ gmail_connected: false })
-                show('Disconnected (local flag). Revoke token in Google if needed.')
-              }}
-            >
-              Disconnect
-            </button>
+          {/* Hidden but preserved: Gmail connect (FEATURES.outreachEnabled) */}
+          {FEATURES.outreachEnabled && (
+            <>
+              <h3 style={{ marginTop: 0 }}>Gmail</h3>
+              <p style={{ color: 'var(--text-muted)' }}>
+                Status: <strong>{profile?.gmail_connected ? 'Connected' : 'Not connected'}</strong>
+              </p>
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>
+                Each user connects their own Gmail. Tokens stay on the server. See <Link to="/help">Help</Link> for OAuth setup.
+              </p>
+              <button className="btn btn-primary" type="button" onClick={connectGmail}>
+                Connect Gmail
+              </button>
+              {profile?.gmail_connected && (
+                <button
+                  className="btn"
+                  type="button"
+                  style={{ marginLeft: 8 }}
+                  onClick={async () => {
+                    await updateProfile({ gmail_connected: false })
+                    show('Disconnected (local flag). Revoke token in Google if needed.')
+                  }}
+                >
+                  Disconnect
+                </button>
+              )}
+            </>
           )}
 
-          <h3>Backup</h3>
+          <h3 style={{ marginTop: FEATURES.outreachEnabled ? undefined : 0 }}>Backup</h3>
           <div className="actions">
             <button className="btn" type="button" onClick={exportBackup}>
               Export JSON
@@ -344,7 +358,7 @@ export function SettingsPage() {
 
           <h3 style={{ color: 'var(--danger)' }}>Danger zone</h3>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>
-            Permanently wipe creators, brands, campaigns, meetings, activity, and outreach logs. Keeps your profile, Gmail connection, and email templates.
+            Permanently wipe creators, brands, campaigns, meetings and activity. Keeps your profile.
           </p>
           <button className="btn btn-danger" type="button" onClick={clearAllCrmData}>
             Clear all CRM data
@@ -352,6 +366,8 @@ export function SettingsPage() {
         </div>
       </div>
 
+      {/* Hidden but preserved: Email templates (FEATURES.outreachEnabled) */}
+      {FEATURES.outreachEnabled && (
       <div className="card" style={{ marginTop: '1rem' }}>
         <h3 style={{ marginTop: 0 }}>Email templates</h3>
         <div className="tabs">
@@ -395,6 +411,7 @@ export function SettingsPage() {
           <p style={{ color: 'var(--text-muted)' }}>No template row — click Reset default.</p>
         )}
       </div>
+      )}
     </div>
   )
 }

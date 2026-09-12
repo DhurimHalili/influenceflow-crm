@@ -6,6 +6,7 @@ import { formatDateTime, stripHtml } from '../lib/utils'
 import type { Activity, Meeting, PipelineStatus } from '../lib/types'
 import { CREATOR_STATUSES, STATUS_LABELS } from '../lib/types'
 import { OnboardingBanner, PageHeader } from '../components/Layout'
+import { FEATURES } from '../lib/features'
 
 export function DashboardPage() {
   const { user, profile } = useAuth()
@@ -60,9 +61,10 @@ export function DashboardPage() {
         <Link className="btn" to="/app/creators" style={{ borderRadius: 999 }}>
           View creators
         </Link>
-        <Link className="btn btn-primary" to="/app/outreach">
-          Open outreach →
+        <Link className="btn btn-primary" to="/app/campaigns">
+          View campaigns →
         </Link>
+        {/* Hidden but preserved: {FEATURES.outreachEnabled && <Link to="/app/outreach">Open outreach →</Link>} */}
       </PageHeader>
 
       <OnboardingBanner />
@@ -92,10 +94,8 @@ export function DashboardPage() {
               </div>
             </div>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              <Link to="/app/discovery" className="btn" style={{ fontSize: '0.78rem', padding: '7px 12px' }}>Discovery →</Link>
-              <span style={{ fontFamily: 'var(--mono)', fontSize: '0.66rem', color: 'var(--text-faint)', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', border: '1px solid var(--border)', padding: '5px 8px', borderRadius: 999, background: 'var(--bg-soft)' }}>
-                {stats.sentToday}/{limit} sent today
-              </span>
+              <Link to="/app/campaigns" className="btn" style={{ fontSize: '0.78rem', padding: '7px 12px' }}>Campaigns →</Link>
+              {/* Hidden but preserved: Discovery link + sent-today badge (FEATURES.discoveryEnabled / FEATURES.outreachEnabled) */}
             </div>
           </div>
 
@@ -123,10 +123,7 @@ export function DashboardPage() {
             <Link to="/app/creators" className="btn" style={{ fontSize: '0.78rem', padding: '6px 12px' }}>＋ Add creator</Link>
             <Link to="/app/brands" className="btn" style={{ fontSize: '0.78rem', padding: '6px 12px' }}>＋ Add brand</Link>
             <Link to="/app/calendar" className="btn" style={{ fontSize: '0.78rem', padding: '6px 12px' }}>Schedule meet</Link>
-            <span style={{ marginLeft: 'auto', fontFamily: 'var(--mono)', fontSize: '0.68rem', color: 'var(--text-faint)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span style={{ width: 6, height: 6, borderRadius: 999, background: 'var(--success)', boxShadow: '0 0 8px rgba(52,211,153,0.5)' }} />
-              {stats.dueReach} reach-backs due
-            </span>
+            {/* Hidden but preserved: reach-backs due (FEATURES.outreachEnabled) */}
           </div>
         </div>
 
@@ -149,26 +146,39 @@ export function DashboardPage() {
             <Link to="/app/campaigns" className="btn btn-primary" style={{ width: '100%', marginTop: 12, justifyContent: 'center' }}>Manage campaigns</Link>
           </div>
 
-          <div className="card animate-entry animate-entry-2" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontFamily: 'var(--mono)', fontSize: '0.64rem', letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 700, color: 'var(--text-faint)' }}>Outreach today</span>
-              <span className={`badge ${stats.dueReach ? 'warning' : 'new'}`}>{stats.dueReach} due</span>
+          {/* Hidden but preserved: Outreach-today card — code kept, gated by FEATURES.outreachEnabled */}
+          {FEATURES.outreachEnabled && (
+            <div className="card animate-entry animate-entry-2" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontFamily: 'var(--mono)', fontSize: '0.64rem', letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 700, color: 'var(--text-faint)' }}>Outreach today</span>
+                <span className={`badge ${stats.dueReach ? 'warning' : 'new'}`}>{stats.dueReach} due</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                <span style={{ fontFamily: 'var(--display)', fontSize: '1.7rem', fontWeight: 800, letterSpacing: '-0.04em', lineHeight: 1 }}>{stats.sentToday}</span>
+                <span style={{ fontSize: '0.9rem', color: 'var(--text-muted)', fontWeight: 600 }}>/ {limit}</span>
+                <span style={{ marginLeft: 'auto', fontFamily: 'var(--mono)', fontSize: '0.68rem', fontWeight: 700, color: stats.sentToday >= limit ? 'var(--warning)' : 'var(--success)', background: stats.sentToday >= limit ? 'rgba(245,158,11,0.08)' : 'rgba(52,211,153,0.08)', border: `1px solid ${stats.sentToday >= limit ? 'rgba(245,158,11,0.18)' : 'rgba(52,211,153,0.18)'}`, padding: '3px 7px', borderRadius: 999 }}>
+                  {stats.sentToday >= limit ? 'Limit hit' : 'Slotted'}
+                </span>
+              </div>
+              <div style={{ height: 6, borderRadius: 999, background: 'var(--bg-soft)', overflow: 'hidden', border: '1px solid var(--border)' }}>
+                <div style={{ height: '100%', width: `${Math.min(100, (stats.sentToday / Math.max(1, limit)) * 100)}%`, background: stats.sentToday >= limit ? 'linear-gradient(90deg, #F59E0B, #FBBF24)' : 'linear-gradient(90deg, var(--accent), var(--accent-2))', borderRadius: 999 }} />
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <Link to="/app/outreach" className="btn btn-primary" style={{ flex: 1, justifyContent: 'center' }}>Outreach →</Link>
+                <Link to="/app/calendar" className="btn" style={{ flex: 1, justifyContent: 'center' }}>Calendar</Link>
+              </div>
             </div>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-              <span style={{ fontFamily: 'var(--display)', fontSize: '1.7rem', fontWeight: 800, letterSpacing: '-0.04em', lineHeight: 1 }}>{stats.sentToday}</span>
-              <span style={{ fontSize: '0.9rem', color: 'var(--text-muted)', fontWeight: 600 }}>/ {limit}</span>
-              <span style={{ marginLeft: 'auto', fontFamily: 'var(--mono)', fontSize: '0.68rem', fontWeight: 700, color: stats.sentToday >= limit ? 'var(--warning)' : 'var(--success)', background: stats.sentToday >= limit ? 'rgba(245,158,11,0.08)' : 'rgba(52,211,153,0.08)', border: `1px solid ${stats.sentToday >= limit ? 'rgba(245,158,11,0.18)' : 'rgba(52,211,153,0.18)'}`, padding: '3px 7px', borderRadius: 999 }}>
-                {stats.sentToday >= limit ? 'Limit hit' : 'Slotted'}
-              </span>
+          )}
+          {!FEATURES.outreachEnabled && (
+            <div className="card animate-entry animate-entry-2" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div style={{ fontFamily: 'var(--mono)', fontSize: '0.64rem', letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 700, color: 'var(--text-faint)' }}>Next up</div>
+              <div style={{ fontFamily: 'var(--display)', fontSize: '1.1rem', fontWeight: 700, letterSpacing: '-0.03em', color: 'var(--text-strong)' }}>Keep the pipeline moving</div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <Link to="/app/calendar" className="btn btn-primary" style={{ flex: 1, justifyContent: 'center' }}>Calendar →</Link>
+                <Link to="/app/brands" className="btn" style={{ flex: 1, justifyContent: 'center' }}>Brands</Link>
+              </div>
             </div>
-            <div style={{ height: 6, borderRadius: 999, background: 'var(--bg-soft)', overflow: 'hidden', border: '1px solid var(--border)' }}>
-              <div style={{ height: '100%', width: `${Math.min(100, (stats.sentToday / Math.max(1, limit)) * 100)}%`, background: stats.sentToday >= limit ? 'linear-gradient(90deg, #F59E0B, #FBBF24)' : 'linear-gradient(90deg, var(--accent), var(--accent-2))', borderRadius: 999 }} />
-            </div>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <Link to="/app/outreach" className="btn btn-primary" style={{ flex: 1, justifyContent: 'center' }}>Outreach →</Link>
-              <Link to="/app/calendar" className="btn" style={{ flex: 1, justifyContent: 'center' }}>Calendar</Link>
-            </div>
-          </div>
+          )}
         </div>
       </div>
 
@@ -190,14 +200,19 @@ export function DashboardPage() {
           <div className="n">{stats.campaigns}</div>
           <div className="l">Campaigns</div>
         </Link>
-        <Link className="stat card-interactive" to="/app/outreach">
-          <div className="n" style={{ color: stats.dueReach ? 'var(--warning)' : undefined }}>{stats.dueReach}</div>
-          <div className="l">Reach-backs due</div>
-        </Link>
-        <div className="stat">
-          <div className="n">{stats.sentToday}<small>/ {limit}</small></div>
-          <div className="l">Sent today</div>
-        </div>
+        {/* Hidden but preserved: outreach stats (FEATURES.outreachEnabled) */}
+        {FEATURES.outreachEnabled && (
+          <>
+            <Link className="stat card-interactive" to="/app/outreach">
+              <div className="n" style={{ color: stats.dueReach ? 'var(--warning)' : undefined }}>{stats.dueReach}</div>
+              <div className="l">Reach-backs due</div>
+            </Link>
+            <div className="stat">
+              <div className="n">{stats.sentToday}<small>/ {limit}</small></div>
+              <div className="l">Sent today</div>
+            </div>
+          </>
+        )}
       </div>
 
       {/* PIPELINE FUNNEL — premium */}

@@ -31,29 +31,24 @@ export function PrivacyPage() {
             <strong>Account data:</strong> email address, display name, and authentication credentials managed by Supabase Auth.
           </li>
           <li>
-            <strong>CRM data you enter:</strong> creators, brands, contacts, campaigns, notes, meetings, templates, and activity
+            <strong>CRM data you enter:</strong> creators, brands, contacts, campaigns, notes, meetings, and activity
             logs — stored privately under your user account.
           </li>
           <li>
-            <strong>Gmail connection (optional):</strong> if you connect Gmail, we store OAuth tokens needed to send email on your
-            behalf (refresh/access tokens). We do not read your full mailbox; the App requests send-related access only.
-          </li>
-          <li>
-            <strong>Technical data:</strong> basic logs needed to operate authentication and Edge Functions (e.g. request errors).
+            <strong>Technical data:</strong> basic logs needed to operate authentication and backend functions (e.g. request errors).
           </li>
         </ul>
 
         <h3>3. How we use data</h3>
         <ul>
-          <li>To provide the CRM features you request (store contacts, campaigns, calendar, outreach).</li>
-          <li>To send emails you explicitly queue through the App via your connected Gmail account.</li>
+          <li>To provide the CRM features you request (store contacts, campaigns and calendar).</li>
           <li>To secure accounts and prevent abuse.</li>
         </ul>
 
         <h3>4. Data sharing</h3>
         <p>
           We do not sell your data. Data is processed by infrastructure providers required to run the App (currently Supabase for
-          database/auth and Google for optional Gmail OAuth/send). Other users cannot see your CRM data (row-level security per
+          database/auth). Other users cannot see your CRM data (row-level security per
           account).
         </p>
 
@@ -99,7 +94,7 @@ export function TermsPage() {
 
         <h3>1. The service</h3>
         <p>
-          InfluenceFlow is a CRM tool for managing influencer/brand outreach, campaigns, and related workflows. Features may change
+          InfluenceFlow is a CRM tool for managing creators, brands, campaigns, and related workflows. Features may change
           over time.
         </p>
 
@@ -112,9 +107,8 @@ export function TermsPage() {
         <h3>3. Acceptable use</h3>
         <ul>
           <li>Use the App only for lawful purposes.</li>
-          <li>Do not spam, harass, or send emails in violation of applicable anti-spam / marketing laws.</li>
+          <li>Do not harass or misuse the service in violation of applicable laws.</li>
           <li>Do not attempt to access other users’ data or disrupt the service.</li>
-          <li>Only connect Gmail accounts you are authorized to use.</li>
         </ul>
 
         <h3>4. Your content</h3>
@@ -123,10 +117,9 @@ export function TermsPage() {
           solely to operate the App for you.
         </p>
 
-        <h3>5. Gmail / third-party services</h3>
+        <h3>5. Third-party services</h3>
         <p>
-          Optional Gmail sending uses Google OAuth. Your use of Google services is also subject to Google’s terms and policies. We
-          are not responsible for Google account restrictions, quotas, or delivery outcomes.
+          The App uses third-party infrastructure (such as hosting and database providers). Your use of those services is also subject to their terms and policies.
         </p>
 
         <h3>6. No warranty</h3>
@@ -138,7 +131,7 @@ export function TermsPage() {
         <h3>7. Limitation of liability</h3>
         <p>
           To the maximum extent permitted by law, {HIRE.name} is not liable for indirect, incidental, or consequential damages
-          arising from use of the App, including lost business or failed email delivery.
+          arising from use of the App, including lost business.
         </p>
 
         <h3>8. Termination</h3>

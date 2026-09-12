@@ -6,7 +6,7 @@ Thanks for helping make open influencer ops better.
 
 - **Bugs** — open an [issue](https://github.com/DhurimHalili/influenceflow-crm/issues) with steps to reproduce
 - **Docs** — README, setup, or in-app Help clarifications
-- **Features** — especially creator/brand **discovery** filters, ranking, and CRM import UX
+- **Features** — especially CRM import UX, pipeline, campaigns and calendar
 - **UI polish** — mobile layout, accessibility, empty states
 
 ## Dev setup
@@ -18,7 +18,7 @@ npm install
 npm run dev
 ```
 
-You need a Supabase project with migrations from `supabase/migrations/` applied. Gmail send requires Edge Function secrets (see root README).
+You need a Supabase project with migrations from `supabase/migrations/` applied.
 
 ## Pull requests
 

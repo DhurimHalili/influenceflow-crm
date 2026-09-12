@@ -11,3 +11,9 @@ _legacy/
 .supabase/
 .supabase/
 supabase/.temp/
+# PRIVATE — your personal Email Agent (never pushed)
+private-agent/
+private-agent/**
+yt-email-agent/
+.email-agent-keys
+email-agent-preview.html

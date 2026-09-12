@@ -4,10 +4,13 @@ import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabase'
 import { HIRE } from '../lib/types'
 import { stripHtml } from '../lib/utils'
+import { FEATURES } from '../lib/features'
 
 type NavItem = { to: string; label: string; end?: boolean; ico: string; desc?: string }
 
-const NAV_MAIN: NavItem[] = [
+// NOTE: Outreach + Discovery entries preserved below but hidden via FEATURES.
+// Flip FEATURES.outreachEnabled / FEATURES.discoveryEnabled to re-enable.
+const NAV_MAIN_ALL: NavItem[] = [
   { to: '/app', label: 'Dashboard', end: true, ico: '◈', desc: 'Overview' },
   { to: '/app/outreach', label: 'Outreach', ico: '✉', desc: 'Queue' },
   { to: '/app/creators', label: 'Creators', ico: '◎', desc: 'CRM' },
@@ -16,10 +19,13 @@ const NAV_MAIN: NavItem[] = [
   { to: '/app/calendar', label: 'Calendar', ico: '▦', desc: 'Meetings' },
 ]
 
-const NAV_GROWTH: NavItem[] = [
+const NAV_GROWTH_ALL: NavItem[] = [
   { to: '/app/discovery', label: 'Discovery', ico: '◐', desc: 'YouTube' },
   { to: '/app/deleted', label: 'Archive', ico: '◑', desc: 'Trash' },
 ]
+
+const NAV_MAIN: NavItem[] = NAV_MAIN_ALL.filter((i) => FEATURES.outreachEnabled || i.to !== '/app/outreach')
+const NAV_GROWTH: NavItem[] = NAV_GROWTH_ALL.filter((i) => FEATURES.discoveryEnabled || i.to !== '/app/discovery')
 
 const NAV_SYSTEM: NavItem[] = [
   { to: '/app/settings', label: 'Settings', ico: '⬔', desc: 'Workspace' },
@@ -173,7 +179,7 @@ export function AppLayout() {
                 {profile?.display_name || user?.email?.split('@')[0] || 'Workspace'}
               </div>
               <div style={{ fontFamily: 'var(--mono)', fontSize: '0.66rem', color: 'var(--text-faint)', letterSpacing: '0.04em', fontWeight: 600, textTransform: 'uppercase', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                {profile?.gmail_connected ? '● Gmail live' : '○ Gmail off'} · {theme}
+                {FEATURES.outreachEnabled ? (profile?.gmail_connected ? '● Gmail live' : '○ Gmail off') + ' · ' : ''}{theme} · Private
               </div>
             </div>
             <button
@@ -290,19 +296,21 @@ export function AppLayout() {
             {q.trim() && noHit && hits.length === 0 && (
               <div className="search-results">
                 <div style={{ padding: '12px 14px', color: 'var(--text-muted)', fontSize: '0.875rem', lineHeight: 1.5 }}>
-                  No creators for “{q.trim()}” — try another name or <Link to="/app/discovery">Discovery → Find creators</Link>.
+                  No creators for “{q.trim()}” — try another name.
                 </div>
               </div>
             )}
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 'auto' }}>
-            <span
-              className={`badge ${profile?.gmail_connected ? 'replied' : ''}`}
-              style={{ padding: '6px 10px', fontSize: '0.66rem', background: profile?.gmail_connected ? 'rgba(52,211,153,0.09)' : 'var(--bg-soft)', borderRadius: 999 }}
-            >
-              {profile?.gmail_connected ? '● Gmail live' : '○ Gmail off'}
-            </span>
+            {FEATURES.outreachEnabled && (
+              <span
+                className={`badge ${profile?.gmail_connected ? 'replied' : ''}`}
+                style={{ padding: '6px 10px', fontSize: '0.66rem', background: profile?.gmail_connected ? 'rgba(52,211,153,0.09)' : 'var(--bg-soft)', borderRadius: 999 }}
+              >
+                {profile?.gmail_connected ? '● Gmail live' : '○ Gmail off'}
+              </span>
+            )}
             <Link to="/app/settings" className="btn btn-ghost hide-mobile" style={{ minHeight: 38, borderRadius: 999, padding: '8px 14px', border: '1px solid var(--border)', background: 'var(--bg-elevated)', display: 'none' }}>
               Settings
             </Link>
@@ -376,13 +384,13 @@ export function OnboardingBanner() {
           <div style={{ color: 'var(--text-muted)', fontSize: '0.875rem', lineHeight: 1.6, marginTop: 4 }}>Get your workspace live in 60 seconds. Private, isolated, yours.</div>
           <ol style={{ color: 'var(--text-muted)', margin: '10px 0 0', paddingLeft: 18, fontSize: '0.875rem', lineHeight: 1.7 }}>
             <li>
-              <Link to="/app/settings" style={{ fontWeight: 700, color: 'var(--accent)' }}>Connect Gmail</Link> to send from any device
-            </li>
-            <li>
               Add <Link to="/app/creators" style={{ fontWeight: 700 }}>creators</Link> or <Link to="/app/brands" style={{ fontWeight: 700 }}>brands</Link> — manual or CSV bulk
             </li>
             <li>
-              Open <Link to="/app/outreach" style={{ fontWeight: 700 }}>Outreach</Link> to send personalized emails
+              Create a <Link to="/app/campaigns" style={{ fontWeight: 700 }}>campaign</Link> to track deals and payouts
+            </li>
+            <li>
+              Schedule a <Link to="/app/calendar" style={{ fontWeight: 700 }}>meeting</Link> so follow-ups don&apos;t slip
             </li>
           </ol>
         </div>

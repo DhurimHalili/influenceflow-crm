@@ -14,6 +14,7 @@ import { DeletedPage } from './pages/DeletedPage'
 import { DiscoveryPage } from './pages/DiscoveryPage'
 import { HelpPage, HirePage } from './pages/HelpHirePages'
 import { PrivacyPage, TermsPage } from './pages/LegalPages'
+import { FEATURES } from './lib/features'
 
 function RootRedirect() {
   const { user, loading } = useAuth()
@@ -43,8 +44,9 @@ export default function App() {
             }
           >
             <Route index element={<DashboardPage />} />
-            <Route path="outreach" element={<OutreachPage />} />
-            <Route path="search" element={<Navigate to="/app/discovery" replace />} />
+            {/* Hidden but preserved: Outreach + Discovery code stays, UI gated by FEATURES */}
+            <Route path="outreach" element={FEATURES.outreachEnabled ? <OutreachPage /> : <Navigate to="/app" replace />} />
+            <Route path="search" element={<Navigate to="/app/creators" replace />} />
             <Route path="creators" element={<CreatorsPage />} />
             <Route path="creators/:id" element={<CreatorDetailPage />} />
             <Route path="brands" element={<BrandsPage />} />
@@ -52,7 +54,7 @@ export default function App() {
             <Route path="deleted" element={<DeletedPage />} />
             <Route path="campaigns" element={<CampaignsPage />} />
             <Route path="calendar" element={<CalendarPage />} />
-            <Route path="discovery" element={<DiscoveryPage />} />
+            <Route path="discovery" element={FEATURES.discoveryEnabled ? <DiscoveryPage /> : <Navigate to="/app" replace />} />
             <Route path="settings" element={<SettingsPage />} />
             <Route path="help" element={<HelpPage />} />
             <Route path="hire" element={<HirePage />} />
