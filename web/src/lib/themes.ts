@@ -34,14 +34,14 @@ export const THEMES: ThemeMeta[] = [
   {
     id: 'honey',
     name: 'Honey',
-    tagline: 'Golden ambers and cream. Cozy, rich, easy on the eyes.',
+    tagline: 'Golden ambers and cream. Honey drips from the top, drops fall where you click.',
     swatches: ['#F5E7C8', '#FFF8E8', '#B07C1F'],
     dot: '#B07C1F',
   },
   {
     id: 'ocean',
     name: 'Ocean',
-    tagline: 'Muted slate blues and sea glass. Calm and focused.',
+    tagline: 'Muted slate blues and sea glass. Waves on top, ripples and bubbles where you click.',
     swatches: ['#E7EEF0', '#F7FAFB', '#2E7D8A'],
     dot: '#2E7D8A',
   },

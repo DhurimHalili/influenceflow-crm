@@ -15,6 +15,7 @@ import { ThemesPage } from './pages/ThemesPage'
 import { DiscoveryPage } from './pages/DiscoveryPage'
 import { HelpPage, HirePage } from './pages/HelpHirePages'
 import { PrivacyPage, TermsPage } from './pages/LegalPages'
+import { ThemeFX } from './components/ThemeFX'
 import { FEATURES } from './lib/features'
 
 function RootRedirect() {
@@ -28,6 +29,7 @@ export default function App() {
   return (
     <AuthProvider>
       <HashRouter>
+        <ThemeFX />
         <Routes>
           <Route path="/" element={<RootRedirect />} />
           <Route path="/login" element={<LoginPage />} />
