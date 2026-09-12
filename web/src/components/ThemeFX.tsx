@@ -41,116 +41,124 @@ function waveLine(width: number, baseline: number, amp: number): string {
 }
 
 /* ------------------------------------------------------------------ */
-/* HONEY SCENE — slowly flowing liquid gold                            */
+/* HONEY SCENE — golden honeycomb with glossy honey poured from above  */
 /* ------------------------------------------------------------------ */
 
-function HoneyScene() {
+const HEX_R = 30
+const HEX_W = Math.sqrt(3) * HEX_R
+const HEX_V = HEX_R * 1.5
+
+/** Pointy-top hexagon subpath centered at (cx, cy). */
+function hexPath(cx: number, cy: number): string {
+  let d = ''
+  for (let i = 0; i < 6; i++) {
+    const a = (Math.PI / 180) * (60 * i - 90)
+    d += `${i === 0 ? 'M' : 'L'}${(cx + HEX_R * Math.cos(a)).toFixed(1)},${(cy + HEX_R * Math.sin(a)).toFixed(1)}`
+  }
+  return `${d}Z`
+}
+
+/** Closed pour shape: full-width sheet whose bottom edge is a run of scallops. */
+function pourPath(width: number, baseline: number, amp: number, halfW: number): string {
+  let d = `M0,0 H${width} V${baseline}`
+  for (let x = width; x > 0; x -= halfW * 2) {
+    d += ` c ${-halfW / 3},${amp} ${(-halfW * 2) / 3},${amp} ${-halfW},0 c ${-halfW / 3},${-amp} ${(-halfW * 2) / 3},${-amp} ${-halfW},0`
+  }
+  return `${d} Z`
+}
+
+function HoneycombScene() {
+  // build the whole hive as explicit vector geometry — three fill buckets
+  // for honey tone variety, one shared outline, and gloss dots on a few cells
+  const fills = ['', '', '', '', '']
+  let outlines = ''
+  const dots: Array<[number, number]> = []
+  const cols = Math.ceil(1440 / HEX_W) + 2
+  const rows = Math.ceil(900 / HEX_V) + 2
+  for (let row = -1; row < rows; row++) {
+    for (let col = -1; col < cols; col++) {
+      const x = col * HEX_W + (row % 2 ? HEX_W / 2 : 0)
+      const y = row * HEX_V
+      const d = hexPath(x, y)
+      outlines += d
+      const frac = Math.abs(Math.sin(col * 127.1 + row * 311.7) * 43758.5453) % 1
+      const k = Math.floor(frac * 9)
+      const bucket = k < 4 ? 0 : k < 6 ? 1 : k === 6 ? 2 : k === 7 ? 3 : 4
+      fills[bucket] += d
+      if (k === 2 && row % 2 === 0) dots.push([x - 7, y - 9])
+    }
+  }
+  // tongues of honey hanging from the poured sheet
+  const tongues = [
+    { x: 170, w: 24, h: 78 },
+    { x: 420, w: 16, h: 46 },
+    { x: 745, w: 30, h: 148 },
+    { x: 1005, w: 18, h: 58 },
+    { x: 1265, w: 24, h: 96 },
+  ]
   return (
     <svg className="fx-sea" viewBox="0 0 1440 900" preserveAspectRatio="xMidYMid slice" aria-hidden>
       <defs>
-        <linearGradient id="fx-honeybase" x1="0.15" y1="0" x2="0.85" y2="1">
-          <stop offset="0%" stopColor="#FFE9A4" />
-          <stop offset="32%" stopColor="#F4C659" />
-          <stop offset="62%" stopColor="#DB9C2B" />
-          <stop offset="86%" stopColor="#B0741A" />
-          <stop offset="100%" stopColor="#8A560F" />
+        <linearGradient id="fx-combshade" x1="0" y1="0" x2="0.25" y2="1">
+          <stop offset="0%" stopColor="#FFE9A8" stopOpacity="0.35" />
+          <stop offset="55%" stopColor="#F2A93A" stopOpacity="0" />
+          <stop offset="100%" stopColor="#A86308" stopOpacity="0.38" />
         </linearGradient>
-        <radialGradient id="fx-honeyglow" cx="0.24" cy="0.08" r="0.8">
-          <stop offset="0%" stopColor="#FFFDF2" stopOpacity="0.62" />
-          <stop offset="45%" stopColor="#FFF6D8" stopOpacity="0.18" />
-          <stop offset="100%" stopColor="#FFF6D8" stopOpacity="0" />
-        </radialGradient>
-        <radialGradient id="fx-honeyvig" cx="0.5" cy="0.5" r="0.78">
-          <stop offset="55%" stopColor="#4A2E06" stopOpacity="0" />
-          <stop offset="100%" stopColor="#4A2E06" stopOpacity="0.5" />
-        </radialGradient>
-        <linearGradient id="fx-honeysheen" x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0%" stopColor="#FFFDF0" stopOpacity="0" />
-          <stop offset="50%" stopColor="#FFFDF0" stopOpacity="0.55" />
-          <stop offset="100%" stopColor="#FFFDF0" stopOpacity="0" />
+        <linearGradient id="fx-pour" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="0" y2="290">
+          <stop offset="0%" stopColor="#FFE38A" />
+          <stop offset="45%" stopColor="#F7BE45" />
+          <stop offset="80%" stopColor="#DD9420" />
+          <stop offset="100%" stopColor="#CE8517" />
         </linearGradient>
-        <radialGradient id="fx-honeybub" cx="0.32" cy="0.28" r="0.85">
-          <stop offset="0%" stopColor="#FFFBEA" stopOpacity="0.95" />
-          <stop offset="42%" stopColor="#F7D879" stopOpacity="0.4" />
-          <stop offset="100%" stopColor="#B4771B" stopOpacity="0.65" />
+        <radialGradient id="fx-vig2" cx="0.5" cy="0.48" r="0.8">
+          <stop offset="58%" stopColor="#4A2E06" stopOpacity="0" />
+          <stop offset="100%" stopColor="#4A2E06" stopOpacity="0.42" />
         </radialGradient>
-        {/* viscous dark streaks — turbulence slowly morphs so the honey truly flows */}
-        <filter id="fx-honeydark" x="-20%" y="-20%" width="140%" height="140%">
-          <feTurbulence type="fractalNoise" baseFrequency="0.007 0.024" numOctaves="3" seed="11" result="n">
-            <animate
-              attributeName="baseFrequency"
-              dur="38s"
-              values="0.007 0.024;0.011 0.018;0.007 0.024"
-              keyTimes="0;0.5;1"
-              calcMode="spline"
-              keySplines="0.42 0 0.58 1;0.42 0 0.58 1"
-              repeatCount="indefinite"
-            />
-          </feTurbulence>
-          <feColorMatrix in="n" type="matrix" values="0 0 0 0 0.34  0 0 0 0 0.2  0 0 0 0 0.04  1 1 1 0 -1.05" result="a" />
-          <feComposite in="SourceGraphic" in2="a" operator="in" />
-        </filter>
-        {/* pale gold ribbons drifting through the honey */}
-        <filter id="fx-honeylight" x="-20%" y="-20%" width="140%" height="140%">
-          <feTurbulence type="fractalNoise" baseFrequency="0.012 0.02" numOctaves="2" seed="4" result="n">
-            <animate
-              attributeName="baseFrequency"
-              dur="26s"
-              values="0.012 0.02;0.009 0.026;0.012 0.02"
-              keyTimes="0;0.5;1"
-              calcMode="spline"
-              keySplines="0.42 0 0.58 1;0.42 0 0.58 1"
-              repeatCount="indefinite"
-            />
-          </feTurbulence>
-          <feColorMatrix in="n" type="matrix" values="0 0 0 0 1  0 0 0 0 0.93  0 0 0 0 0.6  1.15 1.15 1.15 0 -1.3" result="a" />
-          <feComposite in="SourceGraphic" in2="a" operator="in" />
-        </filter>
+        <radialGradient id="fx-warm" cx="0.5" cy="0.5" r="0.5">
+          <stop offset="0%" stopColor="#FFEDBC" stopOpacity="0.55" />
+          <stop offset="60%" stopColor="#FFEDBC" stopOpacity="0.22" />
+          <stop offset="100%" stopColor="#FFEDBC" stopOpacity="0" />
+        </radialGradient>
+        <radialGradient id="fx-warmdeep" cx="0.5" cy="0.5" r="0.5">
+          <stop offset="0%" stopColor="#CE8517" stopOpacity="0.4" />
+          <stop offset="60%" stopColor="#CE8517" stopOpacity="0.16" />
+          <stop offset="100%" stopColor="#CE8517" stopOpacity="0" />
+        </radialGradient>
       </defs>
 
-      <rect width="1440" height="900" fill="url(#fx-honeybase)" />
-
-      {/* deep amber pools */}
-      <g className="fx-drift-a" opacity="0.38">
-        <rect x="-140" y="-100" width="1720" height="1100" fill="#7A4C0C" filter="url(#fx-honeydark)" />
-      </g>
-      {/* golden ribbons */}
-      <g className="fx-drift-b" opacity="0.42">
-        <rect x="-140" y="-100" width="1720" height="1100" fill="#FFEDB0" filter="url(#fx-honeylight)" />
-      </g>
-
-      {/* glossy sheen bands, rotating slowly through the liquid */}
-      <g opacity="0.22" transform="rotate(24 720 450)">
-        <rect className="fx-drift-a" x="-240" y="-200" width="360" height="1400" fill="url(#fx-honeysheen)" />
-      </g>
-      <g opacity="0.14" transform="rotate(24 720 450)">
-        <rect className="fx-drift-b" x="520" y="-200" width="520" height="1400" fill="url(#fx-honeysheen)" />
-      </g>
-      <g opacity="0.18" transform="rotate(24 720 450)">
-        <rect className="fx-drift-a" x="1080" y="-200" width="260" height="1400" fill="url(#fx-honeysheen)" />
-      </g>
-
-      {/* slow air bubbles rising through the honey */}
-      {[
-        { x: 150, y: 830, r: 8, d: 15 },
-        { x: 420, y: 880, r: 5, d: 19 },
-        { x: 690, y: 810, r: 10, d: 13 },
-        { x: 1010, y: 890, r: 6, d: 21 },
-        { x: 1270, y: 840, r: 8, d: 17 },
-      ].map((b, i) => (
-        <circle
-          key={i}
-          className="fx-honey-bub"
-          cx={b.x}
-          cy={b.y}
-          r={b.r}
-          fill="url(#fx-honeybub)"
-          style={{ animationDuration: `${b.d}s`, animationDelay: `${i * 3.1}s` }}
-        />
+      {/* the hive — amber base with cream and deep-honey cells */}
+      <rect width="1440" height="900" fill="#F7B733" />
+      <path d={fills[1]} fill="#FFE3A0" />
+      <path d={fills[2]} fill="#FFD267" />
+      <path d={fills[3]} fill="#E89427" />
+      <path d={fills[4]} fill="#D07E1C" />
+      <path d={outlines} fill="none" stroke="#B36F12" strokeOpacity="0.5" strokeWidth="1.6" />
+      {dots.map(([x, y], i) => (
+        <ellipse key={i} cx={x} cy={y} rx="7.5" ry="4.4" fill="#FFF8DC" opacity="0.55" />
       ))}
+      {/* warmth and depth across the comb */}
+      <rect width="1440" height="900" fill="url(#fx-combshade)" />
 
-      <rect width="1440" height="900" fill="url(#fx-honeyglow)" />
-      <rect width="1440" height="900" fill="url(#fx-honeyvig)" />
+      {/* sunlight patches warming the comb (soft radial gradients — no filters) */}
+      <ellipse cx="240" cy="310" rx="340" ry="230" fill="url(#fx-warm)" />
+      <ellipse cx="830" cy="540" rx="400" ry="260" fill="url(#fx-warm)" opacity="0.8" />
+      <ellipse cx="1290" cy="250" rx="310" ry="210" fill="url(#fx-warm)" opacity="0.85" />
+      <ellipse cx="1090" cy="780" rx="370" ry="240" fill="url(#fx-warmdeep)" />
+      <ellipse cx="430" cy="800" rx="340" ry="225" fill="url(#fx-warmdeep)" opacity="0.9" />
+
+      {/* glossy honey poured across the top, dripping over the comb */}
+      <path d={pourPath(1440, 112, 20, 60)} fill="url(#fx-pour)" />
+      {tongues.map((t, i) => (
+        <g key={i}>
+          <rect x={t.x - t.w / 2} y={92} width={t.w} height={t.h} rx={t.w / 2} fill="url(#fx-pour)" />
+          <ellipse cx={t.x - t.w * 0.18} cy={100 + t.h * 0.26} rx={t.w * 0.16} ry={t.h * 0.2} fill="#FFF6D6" opacity="0.7" />
+        </g>
+      ))}
+      {/* gloss along the pour's crest */}
+      <rect width="1440" height="12" fill="#FFF6D8" opacity="0.7" />
+      <path d={pourPath(1440, 34, 8, 60)} fill="#FFF1BE" opacity="0.35" />
+
+      <rect width="1440" height="900" fill="url(#fx-vig2)" />
     </svg>
   )
 }
@@ -320,81 +328,6 @@ function OceanScene() {
 
       <rect width="1440" height="900" fill="url(#fx-ocesun)" />
       <rect width="1440" height="900" fill="url(#fx-ocevig)" />
-    </svg>
-  )
-}
-
-/* ------------------------------------------------------------------ */
-/* HONEY EDGE — glossy bar, stretching drips, droplets that detach     */
-/* ------------------------------------------------------------------ */
-
-function HoneyEdge() {
-  // [x, width, length] — static drips
-  const statics: Array<[number, number, number]> = [
-    [34, 13, 10], [96, 9, 7], [180, 18, 17], [285, 10, 8], [352, 14, 12],
-    [455, 20, 22], [560, 9, 6], [625, 15, 13], [742, 11, 9], [830, 17, 15],
-    [945, 10, 7], [1022, 21, 24], [1130, 12, 10], [1218, 15, 12], [1330, 19, 19], [1408, 10, 8],
-  ]
-  // stretching drips [x, width, length, duration, delay]
-  const stretchers: Array<[number, number, number, number, number]> = [
-    [130, 15, 15, 4.6, 0.4],
-    [505, 17, 17, 5.4, 1.6],
-    [878, 14, 14, 4.2, 2.7],
-    [1165, 16, 16, 5.8, 1.1],
-  ]
-  // droplets that form and fall [x, delay, duration]
-  const droplets: Array<[number, number, number]> = [
-    [137.5, 2.9, 4.6],
-    [513.5, 4.4, 5.4],
-    [885, 1.6, 4.2],
-    [1173, 3.8, 5.8],
-  ]
-  return (
-    <svg className="fx-edge-svg" viewBox="0 0 1440 40" preserveAspectRatio="none" aria-hidden>
-      <defs>
-        <linearGradient id="fx-honeybar" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#F8D36E" />
-          <stop offset="55%" stopColor="#E3AC45" />
-          <stop offset="100%" stopColor="#B07C1F" />
-        </linearGradient>
-        <linearGradient id="fx-honeydrip" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#E9B94E" />
-          <stop offset="70%" stopColor="#C08A24" />
-          <stop offset="100%" stopColor="#9A6714" />
-        </linearGradient>
-      </defs>
-
-      {/* bar with a gently scalloped bottom */}
-      <path d={waveFill(1440, 9, 3).replace('V9', 'V6')} fill="url(#fx-honeybar)" transform="translate(0,3)" />
-      <rect x="0" y="0" width="1440" height="2.4" fill="#FFF4D6" opacity="0.9" />
-      <rect x="0" y="7.4" width="1440" height="1.4" fill="#8A5D0E" opacity="0.3" />
-
-      {statics.map(([x, w, h], i) => (
-        <g key={`s${i}`}>
-          <rect x={x} y="6" width={w} height={h} rx={w / 2} fill="url(#fx-honeydrip)" />
-          <ellipse cx={x + w * 0.32} cy={6 + h * 0.3} rx={w * 0.16} ry={h * 0.24} fill="#FFF6DC" opacity="0.6" />
-        </g>
-      ))}
-
-      {stretchers.map(([x, w, h, d, delay], i) => (
-        <g key={`m${i}`} className="fx-honey-stretch" style={{ animationDuration: `${d}s`, animationDelay: `${delay}s` }}>
-          <rect x={x} y="5" width={w} height={h} rx={w / 2} fill="url(#fx-honeydrip)" />
-          <ellipse cx={x + w * 0.32} cy={5 + h * 0.28} rx={w * 0.16} ry={h * 0.26} fill="#FFF6DC" opacity="0.65" />
-        </g>
-      ))}
-
-      {droplets.map(([x, delay, d], i) => (
-        <ellipse
-          key={`d${i}`}
-          className="fx-honey-fall"
-          cx={x}
-          cy="26"
-          rx="3.4"
-          ry="4.6"
-          fill="url(#fx-honeydrip)"
-          style={{ animationDuration: `${d}s`, animationDelay: `${delay}s` }}
-        />
-      ))}
     </svg>
   )
 }
@@ -602,12 +535,15 @@ export function ThemeFX() {
   return (
     <>
       <div className="fx-bg" aria-hidden>
-        {fx === 'honey' ? <HoneyScene /> : <OceanScene />}
+        {fx === 'honey' ? <HoneycombScene /> : <OceanScene />}
+        {fx === 'honey' && <div className="fx-honey-sheen" />}
         <div className={fx === 'honey' ? 'fx-veil-honey' : 'fx-veil-ocean'} />
       </div>
-      <div className="fx-edge" aria-hidden>
-        {fx === 'honey' ? <HoneyEdge /> : <OceanEdge />}
-      </div>
+      {fx === 'ocean' && (
+        <div className="fx-edge" aria-hidden>
+          <OceanEdge />
+        </div>
+      )}
       <div ref={layerRef} className="fx-layer" aria-hidden />
     </>
   )

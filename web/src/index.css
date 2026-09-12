@@ -1401,7 +1401,6 @@ tr.row-selected { background: var(--accent-soft) !important; }
   pointer-events: none;
   overflow: visible;
 }
-[data-theme='honey'] .fx-edge { height: 40px; }
 [data-theme='ocean'] .fx-edge { height: 30px; }
 .fx-edge-svg {
   display: block;
@@ -1424,7 +1423,16 @@ tr.row-selected { background: var(--accent-soft) !important; }
 /* ——— Animated scene backdrop ——— */
 .fx-bg { position: fixed; inset: 0; z-index: -2; pointer-events: none; overflow: hidden; }
 .fx-sea { display: block; width: 100%; height: 100%; }
-.fx-veil-honey { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(253, 246, 227, 0.32) 0%, rgba(253, 246, 227, 0.12) 45%, rgba(253, 246, 227, 0.26) 100%); }
+.fx-veil-honey { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(253, 246, 227, 0.16) 0%, rgba(253, 246, 227, 0.10) 45%, rgba(253, 246, 227, 0.26) 100%); }
+/* slow sheen over the hive — a cheap composited overlay so the SVG stays static */
+.fx-honey-sheen {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(115deg, transparent 32%, rgba(255, 253, 240, 0.10) 45%, rgba(255, 253, 240, 0.17) 50%, rgba(255, 253, 240, 0.10) 55%, transparent 68%);
+  background-size: 300% 100%;
+  background-position: 130% 0;
+  animation: fx-sheen-sweep 22s ease-in-out infinite;
+}
 .fx-veil-ocean { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(240, 250, 251, 0.30) 0%, rgba(240, 250, 251, 0.12) 50%, rgba(240, 250, 251, 0.28) 100%); }
 .fx-drift-a { animation: fx-drift-a 26s ease-in-out infinite alternate; }
 .fx-drift-b { animation: fx-drift-b 34s ease-in-out infinite alternate; }
@@ -1448,41 +1456,6 @@ tr.row-selected { background: var(--accent-soft) !important; }
 @keyframes fx-glint {
   0%, 100% { opacity: 0; transform: scale(0.5); }
   50% { opacity: 0.85; transform: scale(1); }
-}
-
-/* Honey edge — drips slowly stretch, droplets swell and detach */
-.fx-honey-stretch {
-  transform-origin: 50% 0;
-  animation: fx-honey-stretch 4.6s ease-in-out infinite;
-}
-@keyframes fx-honey-stretch {
-  0%, 100% { transform: scaleY(1); }
-  45% { transform: scaleY(1.55); }
-  62% { transform: scaleY(1.3); }
-}
-.fx-honey-fall {
-  opacity: 0;
-  transform-origin: 50% 0;
-  animation: fx-honey-edge-fall 4.6s cubic-bezier(0.5, 0, 0.85, 0.45) infinite;
-}
-@keyframes fx-honey-edge-fall {
-  0% { opacity: 0; transform: translateY(2px) scaleY(0.45); }
-  10% { opacity: 1; transform: translateY(4px) scaleY(1); }
-  38% { opacity: 1; transform: translateY(11px) scaleY(1.3); }
-  82% { opacity: 1; transform: translateY(27px) scaleY(1.1); }
-  100% { opacity: 0; transform: translateY(42px) scaleY(0.9); }
-}
-
-/* Bubbles rising through the honey */
-.fx-honey-bub {
-  opacity: 0;
-  animation: fx-honey-bub 16s ease-in infinite;
-}
-@keyframes fx-honey-bub {
-  0% { opacity: 0; transform: translateY(0) scale(0.7); }
-  10% { opacity: 0.55; }
-  60% { opacity: 0.38; }
-  100% { opacity: 0; transform: translateY(-190px) scale(1.05); }
 }
 
 /* ——— Click particles ——— */
@@ -1590,10 +1563,19 @@ tr.row-selected { background: var(--accent-soft) !important; }
   100% { opacity: 0; transform: translate(calc(-50% + var(--dx, 0px)), calc(-50% - 115px)) scale(1); }
 }
 
-/* ——— Honey theme dressing: buttons dipped in liquid gold ——— */
+/* ——— Honey theme dressing: the hive — honeycomb, poured gold buttons ——— */
 [data-theme='honey'] .page-header h1 { text-shadow: 0 1px 0 rgba(255, 248, 232, 0.55); }
+[data-theme='honey'] .sidebar {
+  background-image:
+    url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20width%3D%2752%27%20height%3D%2790%27%20viewBox%3D%270%200%2052%2090%27%3E%0A%3Cg%20fill%3D%27none%27%20stroke%3D%27%23FFFFFF%27%20stroke-opacity%3D%270.07%27%20stroke-width%3D%271.4%27%3E%0A%3Cpath%20d%3D%27M0%2C-30%20L26%2C-15%20L26%2C15%20L0%2C30%20L-26%2C15%20L-26%2C-15%20Z%27%20transform%3D%27translate(26%2C15)%27%2F%3E%0A%3Cpath%20d%3D%27M0%2C-30%20L26%2C-15%20L26%2C15%20L0%2C30%20L-26%2C15%20L-26%2C-15%20Z%27%20transform%3D%27translate(0%2C60)%27%2F%3E%0A%3Cpath%20d%3D%27M0%2C-30%20L26%2C-15%20L26%2C15%20L0%2C30%20L-26%2C15%20L-26%2C-15%20Z%27%20transform%3D%27translate(52%2C60)%27%2F%3E%0A%3C%2Fg%3E%3C%2Fsvg%3E"),
+    linear-gradient(180deg, var(--sidebar-elevated) 0%, var(--sidebar) 100%);
+  background-size: 52px 90px, auto;
+}
 [data-theme='honey'] .btn {
-  background: linear-gradient(180deg, #FFF8E6 0%, #F5E8C4 100%);
+  padding-top: 3px;
+  background:
+    url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%20240%2046%27%3E%0A%3Cdefs%3E%3ClinearGradient%20id%3D%27p%27%20x1%3D%270%27%20y1%3D%270%27%20x2%3D%270%27%20y2%3D%271%27%3E%0A%3Cstop%20offset%3D%270%27%20stop-color%3D%27%23FFF6CC%27%2F%3E%3Cstop%20offset%3D%27.55%27%20stop-color%3D%27%23FFE79A%27%2F%3E%3Cstop%20offset%3D%271%27%20stop-color%3D%27%23F6C963%27%2F%3E%0A%3C%2FlinearGradient%3E%3C%2Fdefs%3E%0A%3Cpath%20fill%3D%27url(%23p)%27%20d%3D%27M0%2C0%20H240%20V8%20C%20226%2C8%20222%2C18%20208%2C18%20C%20194%2C18%20192%2C8%20176%2C8%20C%20166%2C8%20164%2C14%20154%2C14%20C%20144%2C14%20142%2C8%20126%2C8%20C%20108%2C8%20104%2C22%2086%2C22%20C%2068%2C22%2066%2C10%2048%2C10%20C%2034%2C10%2030%2C16%2018%2C16%20C%2010%2C16%206%2C12%200%2C12%20Z%27%2F%3E%0A%3Crect%20x%3D%27146%27%20y%3D%276%27%20width%3D%2711%27%20height%3D%2736%27%20rx%3D%275.5%27%20fill%3D%27url(%23p)%27%2F%3E%0A%3Crect%20x%3D%2766%27%20y%3D%276%27%20width%3D%278%27%20height%3D%2724%27%20rx%3D%274%27%20fill%3D%27url(%23p)%27%2F%3E%0A%3Cpath%20d%3D%27M240%2C8%20C%20226%2C8%20222%2C18%20208%2C18%20C%20194%2C18%20192%2C8%20176%2C8%20C%20166%2C8%20164%2C14%20154%2C14%20C%20144%2C14%20142%2C8%20126%2C8%20C%20108%2C8%20104%2C22%2086%2C22%20C%2068%2C22%2066%2C10%2048%2C10%20C%2034%2C10%2030%2C16%2018%2C16%20C%2010%2C16%206%2C12%200%2C12%27%20fill%3D%27none%27%20stroke%3D%27%23C08A24%27%20stroke-opacity%3D%27.55%27%20stroke-width%3D%271.6%27%2F%3E%0A%3Crect%20x%3D%27146%27%20y%3D%276%27%20width%3D%2711%27%20height%3D%2736%27%20rx%3D%275.5%27%20fill%3D%27none%27%20stroke%3D%27%23C08A24%27%20stroke-opacity%3D%27.45%27%20stroke-width%3D%271.2%27%2F%3E%0A%3Crect%20x%3D%2766%27%20y%3D%276%27%20width%3D%278%27%20height%3D%2724%27%20rx%3D%274%27%20fill%3D%27none%27%20stroke%3D%27%23C08A24%27%20stroke-opacity%3D%27.45%27%20stroke-width%3D%271.2%27%2F%3E%0A%3Cpath%20d%3D%27M4%2C3%20C%2060%2C-1%20180%2C-1%20236%2C3%20L236%2C6%20C%20180%2C2%2060%2C2%204%2C6%20Z%27%20fill%3D%27%23FFFBEA%27%20opacity%3D%27.85%27%2F%3E%0A%3C%2Fsvg%3E") top center / 100% 54% no-repeat,
+    linear-gradient(180deg, #FFF8E6 0%, #F5E8C4 100%);
   border-color: #C9A96A;
   box-shadow:
     0 2px 6px rgba(150, 95, 20, 0.16),
@@ -1608,52 +1590,40 @@ tr.row-selected { background: var(--accent-soft) !important; }
     inset 0 1px 0 rgba(255, 255, 255, 0.9);
 }
 [data-theme='honey'] .btn-primary {
-  overflow: visible;
   background:
-    radial-gradient(130% 105% at 50% -22%, rgba(255, 250, 224, 0.85) 0%, rgba(255, 250, 224, 0) 56%),
-    linear-gradient(180deg, #F2C14E 0%, #D99A28 46%, #A76D12 100%);
+    url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%20240%2046%27%3E%0A%3Cdefs%3E%3ClinearGradient%20id%3D%27p%27%20x1%3D%270%27%20y1%3D%270%27%20x2%3D%270%27%20y2%3D%271%27%3E%0A%3Cstop%20offset%3D%270%27%20stop-color%3D%27%23FFF0A0%27%2F%3E%3Cstop%20offset%3D%27.5%27%20stop-color%3D%27%23FFD34E%27%2F%3E%3Cstop%20offset%3D%271%27%20stop-color%3D%27%23F2AC24%27%2F%3E%0A%3C%2FlinearGradient%3E%3C%2Fdefs%3E%0A%3Cpath%20fill%3D%27url(%23p)%27%20d%3D%27M0%2C0%20H240%20V8%20C%20226%2C8%20222%2C18%20208%2C18%20C%20194%2C18%20192%2C8%20176%2C8%20C%20166%2C8%20164%2C14%20154%2C14%20C%20144%2C14%20142%2C8%20126%2C8%20C%20108%2C8%20104%2C22%2086%2C22%20C%2068%2C22%2066%2C10%2048%2C10%20C%2034%2C10%2030%2C16%2018%2C16%20C%2010%2C16%206%2C12%200%2C12%20Z%27%2F%3E%0A%3Crect%20x%3D%2726%27%20y%3D%276%27%20width%3D%279%27%20height%3D%2730%27%20rx%3D%274.5%27%20fill%3D%27url(%23p)%27%2F%3E%0A%3Crect%20x%3D%27146%27%20y%3D%276%27%20width%3D%2711%27%20height%3D%2740%27%20rx%3D%275.5%27%20fill%3D%27url(%23p)%27%2F%3E%0A%3Crect%20x%3D%27206%27%20y%3D%276%27%20width%3D%278%27%20height%3D%2722%27%20rx%3D%274%27%20fill%3D%27url(%23p)%27%2F%3E%0A%3Cpath%20d%3D%27M240%2C8%20C%20226%2C8%20222%2C18%20208%2C18%20C%20194%2C18%20192%2C8%20176%2C8%20C%20166%2C8%20164%2C14%20154%2C14%20C%20144%2C14%20142%2C8%20126%2C8%20C%20108%2C8%20104%2C22%2086%2C22%20C%2068%2C22%2066%2C10%2048%2C10%20C%2034%2C10%2030%2C16%2018%2C16%20C%2010%2C16%206%2C12%200%2C12%27%20fill%3D%27none%27%20stroke%3D%27%239A6210%27%20stroke-opacity%3D%27.5%27%20stroke-width%3D%271.6%27%2F%3E%0A%3Crect%20x%3D%2726%27%20y%3D%276%27%20width%3D%279%27%20height%3D%2730%27%20rx%3D%274.5%27%20fill%3D%27none%27%20stroke%3D%27%239A6210%27%20stroke-opacity%3D%27.4%27%20stroke-width%3D%271.2%27%2F%3E%0A%3Crect%20x%3D%27146%27%20y%3D%276%27%20width%3D%2711%27%20height%3D%2740%27%20rx%3D%275.5%27%20fill%3D%27none%27%20stroke%3D%27%239A6210%27%20stroke-opacity%3D%27.4%27%20stroke-width%3D%271.2%27%2F%3E%0A%3Crect%20x%3D%27206%27%20y%3D%276%27%20width%3D%278%27%20height%3D%2722%27%20rx%3D%274%27%20fill%3D%27none%27%20stroke%3D%27%239A6210%27%20stroke-opacity%3D%27.4%27%20stroke-width%3D%271.2%27%2F%3E%0A%3Cellipse%20cx%3D%27151%27%20cy%3D%2714%27%20rx%3D%272.4%27%20ry%3D%276%27%20fill%3D%27%23FFFBE0%27%20opacity%3D%27.9%27%2F%3E%0A%3Cellipse%20cx%3D%2730%27%20cy%3D%2712%27%20rx%3D%271.8%27%20ry%3D%274.5%27%20fill%3D%27%23FFFBE0%27%20opacity%3D%27.85%27%2F%3E%0A%3Cpath%20d%3D%27M4%2C3%20C%2060%2C-1%20180%2C-1%20236%2C3%20L236%2C6%20C%20180%2C2%2060%2C2%204%2C6%20Z%27%20fill%3D%27%23FFF8DC%27%20opacity%3D%27.8%27%2F%3E%0A%3C%2Fsvg%3E") top center / 100% 60% no-repeat,
+    radial-gradient(130% 105% at 50% -22%, rgba(255, 224, 130, 0.4) 0%, rgba(255, 224, 130, 0) 55%),
+    linear-gradient(180deg, #E09B1F 0%, #C07E12 46%, #96590B 100%);
   border-color: #8A5D0E;
   color: #33230A;
-  text-shadow: 0 1px 0 rgba(255, 248, 220, 0.6);
+  text-shadow: 0 1px 0 rgba(255, 248, 220, 0.5);
   box-shadow:
     0 10px 26px rgba(150, 95, 20, 0.45),
     0 2px 5px rgba(150, 95, 20, 0.3),
-    inset 0 2px 3px rgba(255, 250, 230, 0.9),
+    inset 0 2px 3px rgba(255, 250, 230, 0.55),
     inset 0 -5px 9px rgba(122, 72, 10, 0.5);
 }
-/* molten gold sheen gliding across the surface */
+/* molten gold sheen gliding across the pour — kept above the label line */
 [data-theme='honey'] .btn-primary::before {
   content: "";
   position: absolute;
-  inset: 0;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 52%;
   border-radius: inherit;
   pointer-events: none;
-  background: linear-gradient(105deg, transparent 20%, rgba(255, 244, 208, 0) 36%, rgba(255, 246, 214, 0.55) 48%, rgba(255, 244, 208, 0) 60%, transparent 80%);
+  background: linear-gradient(105deg, transparent 20%, rgba(255, 244, 208, 0) 36%, rgba(255, 246, 214, 0.6) 48%, rgba(255, 244, 208, 0) 60%, transparent 80%);
   background-size: 260% 100%;
   background-position: 130% 0;
   animation: fx-sheen-sweep 5.2s ease-in-out infinite;
-}
-/* a drop of honey hanging from the underside, slowly stretching */
-[data-theme='honey'] .btn-primary::after {
-  content: "";
-  position: absolute;
-  left: 18%;
-  bottom: -7px;
-  width: 7px;
-  height: 11px;
-  pointer-events: none;
-  background: linear-gradient(180deg, #D99A28 0%, #B4771B 100%);
-  border-radius: 3px 3px 6px 6px / 2px 2px 7px 7px;
-  box-shadow: inset 1px 1px 1px rgba(255, 244, 208, 0.6), 0 2px 3px rgba(122, 72, 10, 0.35);
-  transform-origin: top center;
-  animation: fx-honey-hang 5.6s ease-in-out infinite;
 }
 [data-theme='honey'] .btn-primary:hover:not(:disabled) {
   filter: brightness(1.05);
   box-shadow:
     0 14px 30px rgba(150, 95, 20, 0.5),
     0 0 0 3px rgba(220, 168, 63, 0.3),
-    inset 0 2px 3px rgba(255, 250, 230, 0.95),
+    inset 0 2px 3px rgba(255, 250, 230, 0.7),
     inset 0 -5px 9px rgba(122, 72, 10, 0.5);
 }
 [data-theme='honey'] .btn-primary:active:not(:disabled) {
@@ -1663,14 +1633,17 @@ tr.row-selected { background: var(--accent-soft) !important; }
   0%, 100% { background-position: 130% 0; }
   50% { background-position: -30% 0; }
 }
-@keyframes fx-honey-hang {
-  0%, 100% { transform: scaleY(1); }
-  48% { transform: scaleY(1.6); }
-  66% { transform: scaleY(1.25); }
-}
+/* the brand mark becomes a honeycomb cell */
 [data-theme='honey'] .brand-mark {
-  background: linear-gradient(135deg, #E9B94E 0%, #9A6714 100%);
-  box-shadow: inset 0 1px 0 rgba(255, 248, 230, 0.5), 0 6px 18px rgba(176, 124, 31, 0.5);
+  border-radius: 0;
+  clip-path: polygon(50% 0%, 93.3% 25%, 93.3% 75%, 50% 100%, 6.7% 75%, 6.7% 25%);
+  background: linear-gradient(160deg, #F6CB5A 0%, #D99A28 55%, #A86D10 100%);
+  box-shadow: none;
+  filter: drop-shadow(0 5px 12px rgba(150, 95, 20, 0.45));
+}
+[data-theme='honey'] .empty-illustration {
+  border-radius: 0;
+  clip-path: polygon(50% 0%, 93.3% 25%, 93.3% 75%, 50% 100%, 6.7% 75%, 6.7% 25%);
 }
 [data-theme='honey'] .nav a.active .nav-ico { box-shadow: 0 2px 10px rgba(242, 193, 78, 0.5); }
 [data-theme='honey'] .card-eyebrow-dot { box-shadow: 0 0 10px rgba(176, 124, 31, 0.6); }
@@ -1705,11 +1678,14 @@ tr.row-selected { background: var(--accent-soft) !important; }
     inset 0 2px 3px rgba(255, 255, 255, 0.55),
     inset 0 -5px 9px rgba(8, 50, 60, 0.5);
 }
-/* light refracting through moving water */
+/* light refracting through the water — kept above the label line */
 [data-theme='ocean'] .btn-primary::before {
   content: "";
   position: absolute;
-  inset: 0;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 52%;
   border-radius: inherit;
   pointer-events: none;
   background: linear-gradient(100deg, transparent 22%, rgba(255, 255, 255, 0.05) 38%, rgba(198, 246, 252, 0.5) 50%, rgba(255, 255, 255, 0.05) 62%, transparent 78%);
@@ -1747,8 +1723,8 @@ tr.row-selected { background: var(--accent-soft) !important; }
   .fx-honey-drop, .fx-droplet, .fx-bubble, .fx-ripple, .fx-honey-splash { animation-duration: 0.01ms; }
   .fx-edge { display: none; }
   .fx-edge-svg *,
-  .fx-sea .fx-honey-bub,
   .fx-sea .fx-glint,
+  .fx-honey-sheen,
   .fx-oce-wave-a, .fx-oce-wave-b,
   .fx-oce-swell-1, .fx-oce-swell-2, .fx-oce-swell-3,
   .fx-drift-a, .fx-drift-b,

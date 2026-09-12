@@ -34,7 +34,7 @@ export const THEMES: ThemeMeta[] = [
   {
     id: 'honey',
     name: 'Honey',
-    tagline: 'Liquid gold. Honey flows in the background, drips stretch from the edge, and buttons are dipped — press one to release honey drops.',
+    tagline: 'Straight from the hive — a golden honeycomb with glossy honey poured across the top. Buttons wear a fresh honey pour; press one and it drips.',
     swatches: ['#F5E7C8', '#FFF8E8', '#B07C1F'],
     dot: '#B07C1F',
   },
