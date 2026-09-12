@@ -35,6 +35,7 @@ function HoneyEdge() {
         </linearGradient>
       </defs>
       <rect x="0" y="0" width="1440" height="7" fill="url(#fx-honey)" />
+      <rect x="0" y="0" width="1440" height="2" fill="#FFF6DC" opacity="0.55" />
       {drips.map((d, i) => (
         <rect key={i} x={d.x} y="4" width={d.w} height={d.h} rx={d.w / 2} fill="url(#fx-honey)" />
       ))}
@@ -64,12 +65,94 @@ function OceanEdge() {
         d="M0,0H1440V5c-72,8-144,8-216,0s-144-8-216,0-144,8-216,0-144-8-216,0-144,8-216,0-144-8-216,0V0Z"
         fill="url(#fx-sea)"
       />
+      <path
+        d="M0,4H1440V6c-72,8-144,8-216,0s-144-8-216,0-144,8-216,0-144-8-216,0-144,8-216,0-144-8-216,0V4Z"
+        fill="#FFFFFF"
+        opacity="0.5"
+      />
+    </svg>
+  )
+}
+
+/** Real flowing honey — viscous vertical streaks, gloss light, dark depth. */
+function HoneySea() {
+  return (
+    <svg className="fx-sea" viewBox="0 0 1440 900" preserveAspectRatio="xMidYMid slice" aria-hidden>
+      <defs>
+        <linearGradient id="fx-honeysea" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stopColor="#F6D47C" />
+          <stop offset="40%" stopColor="#E3AC45" />
+          <stop offset="70%" stopColor="#C08A24" />
+          <stop offset="100%" stopColor="#8F5F14" />
+        </linearGradient>
+        <radialGradient id="fx-honeygloss" cx="0.24" cy="0.1" r="0.75">
+          <stop offset="0%" stopColor="#FFFFFF" stopOpacity="0.5" />
+          <stop offset="45%" stopColor="#FFFFFF" stopOpacity="0" />
+        </radialGradient>
+        <radialGradient id="fx-honeyvig" cx="0.5" cy="0.52" r="0.75">
+          <stop offset="58%" stopColor="#5A370A" stopOpacity="0" />
+          <stop offset="100%" stopColor="#5A370A" stopOpacity="0.42" />
+        </radialGradient>
+        <filter id="fx-honeyflow" x="-20%" y="-20%" width="140%" height="140%">
+          <feTurbulence type="fractalNoise" baseFrequency="0.008 0.03" numOctaves="2" seed="11" result="n" />
+          <feColorMatrix in="n" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0.9 0.9 0.9 0 -0.9" result="a" />
+          <feComposite in="SourceGraphic" in2="a" operator="in" />
+        </filter>
+      </defs>
+      <rect width="1440" height="900" fill="url(#fx-honeysea)" />
+      <g className="fx-drift-a" opacity="0.32">
+        <rect x="-140" y="-100" width="1720" height="1100" fill="#7D5510" filter="url(#fx-honeyflow)" />
+      </g>
+      <g className="fx-drift-b" opacity="0.28">
+        <rect x="-140" y="-100" width="1720" height="1100" fill="#FFE9B0" filter="url(#fx-honeyflow)" />
+      </g>
+      <rect width="1440" height="900" fill="url(#fx-honeygloss)" />
+      <rect width="1440" height="900" fill="url(#fx-honeyvig)" />
+    </svg>
+  )
+}
+
+/** Real aerial ocean — bright shallows, drifting caustic light, deep bands. */
+function OceanSea() {
+  return (
+    <svg className="fx-sea" viewBox="0 0 1440 900" preserveAspectRatio="xMidYMid slice" aria-hidden>
+      <defs>
+        <linearGradient id="fx-seabase" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#C4E2EA" />
+          <stop offset="38%" stopColor="#79B8C6" />
+          <stop offset="68%" stopColor="#3E96A3" />
+          <stop offset="100%" stopColor="#256B77" />
+        </linearGradient>
+        <radialGradient id="fx-seasun" cx="0.72" cy="0.06" r="0.65">
+          <stop offset="0%" stopColor="#FFFFFF" stopOpacity="0.55" />
+          <stop offset="50%" stopColor="#FFFFFF" stopOpacity="0" />
+        </radialGradient>
+        <filter id="fx-seacaustic" x="-20%" y="-20%" width="140%" height="140%">
+          <feTurbulence type="fractalNoise" baseFrequency="0.012 0.02" numOctaves="3" seed="4" result="n" />
+          <feColorMatrix in="n" type="matrix" values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  1.2 1.2 1.2 0 -1.6" result="a" />
+          <feComposite in="SourceGraphic" in2="a" operator="in" />
+        </filter>
+        <filter id="fx-seadeep" x="-20%" y="-20%" width="140%" height="140%">
+          <feTurbulence type="fractalNoise" baseFrequency="0.006 0.011" numOctaves="2" seed="9" result="n" />
+          <feColorMatrix in="n" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  -1 -1 -1 0 2.1" result="a" />
+          <feComposite in="SourceGraphic" in2="a" operator="in" />
+        </filter>
+      </defs>
+      <rect width="1440" height="900" fill="url(#fx-seabase)" />
+      <g className="fx-drift-b" opacity="0.3" style={{ mixBlendMode: 'multiply' }}>
+        <rect x="-140" y="-100" width="1720" height="1100" fill="#174E57" filter="url(#fx-seadeep)" />
+      </g>
+      <g className="fx-drift-a" opacity="0.55" style={{ mixBlendMode: 'soft-light' }}>
+        <rect x="-140" y="-100" width="1720" height="1100" fill="#FFFFFF" filter="url(#fx-seacaustic)" />
+      </g>
+      <rect width="1440" height="900" fill="url(#fx-seasun)" />
     </svg>
   )
 }
 
 /**
  * Theme-only special effects. Renders nothing except on honey/ocean:
+ * - a full realistic scene background (flowing honey / aerial ocean)
  * - a decorative top edge (honey drips / ocean waves)
  * - click particles (falling honey drops / water ripples + rising bubbles)
  * No animals, pointer-events none, capped for performance.
@@ -140,6 +223,10 @@ export function ThemeFX() {
   if (!fx) return null
   return (
     <>
+      <div className="fx-bg" aria-hidden>
+        {fx === 'honey' ? <HoneySea /> : <OceanSea />}
+        <div className={fx === 'honey' ? 'fx-veil-honey' : 'fx-veil-ocean'} />
+      </div>
       <div className="fx-edge" aria-hidden>
         {fx === 'honey' ? <HoneyEdge /> : <OceanEdge />}
       </div>
