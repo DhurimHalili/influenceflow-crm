@@ -17,3 +17,4 @@ private-agent/**
 yt-email-agent/
 .email-agent-keys
 email-agent-preview.html
+.mimosa/
