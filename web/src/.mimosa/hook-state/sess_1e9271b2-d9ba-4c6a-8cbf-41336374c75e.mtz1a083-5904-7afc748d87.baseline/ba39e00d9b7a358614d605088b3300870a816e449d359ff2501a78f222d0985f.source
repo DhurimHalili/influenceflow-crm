@@ -22,17 +22,17 @@ export function HelpPage() {
       <div style={{ display: 'grid', gap: '1rem' }}>
         <div className="card" style={{ borderLeft: '4px solid var(--accent)' }}>
           <h3 style={{ marginTop: 0, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>1 · Create your private workspace <span className="badge new">PRIVATE BY DEFAULT</span></h3>
-          <p style={{ color: 'var(--text-muted)', lineHeight: 1.6 }}>Sign up with email + password (8+ characters) and log straight in. Every account is isolated with RLS — no one sees your influencers, brands or campaigns. You are ready in 20 seconds.</p>
+          <p style={{ color: 'var(--text-muted)', lineHeight: 1.6 }}>Sign up with email + password (8+ characters) and log straight in. Every account is isolated with RLS — no one sees your creators, brands or campaigns. You are ready in 20 seconds.</p>
         </div>
 
         <div className="card">
-          <h3 style={{ marginTop: 0 }}>2 · Influencers, brands & pipeline</h3>
-          <p style={{ color: 'var(--text-muted)', lineHeight: 1.6 }}>Add via Influencers → Add or Bulk import (one per line: <code>Name, email, niche</code> or <code>Name, channelUrl</code>). On brand pages, add people with titles. Use pipeline statuses (<code>new → contacted → negotiating → roster/signed</code>) and personal notes per influencer.</p>
+          <h3 style={{ marginTop: 0 }}>2 · Creators, brands & pipeline</h3>
+          <p style={{ color: 'var(--text-muted)', lineHeight: 1.6 }}>Add via Creators → Add or Bulk import (one per line: <code>Name, email, niche</code> or <code>Name, channelUrl</code>). On brand pages, add people with titles. Use pipeline statuses (<code>new → contacted → negotiating → roster/signed</code>) and personal notes per creator.</p>
         </div>
 
         <div className="card">
           <h3 style={{ marginTop: 0 }}>3 · Campaigns, calendar & archiving</h3>
-          <p style={{ color: 'var(--text-muted)', lineHeight: 1.6 }}>Campaigns warn if an influencer already has a brand deal. Calendar holds meetings with browser reminders (see Settings → Reminders). Archive instead of delete — restore from Deleted. Merge duplicate influencers when flagged via normalized names.</p>
+          <p style={{ color: 'var(--text-muted)', lineHeight: 1.6 }}>Campaigns warn if a creator already has a brand deal. Calendar holds meetings with browser reminders (see Settings → Reminders). Archive instead of delete — restore from Deleted. Merge duplicate creators when flagged via normalized names.</p>
         </div>
 
         {/* Hidden but preserved: Discovery + Outreach docs. Re-enable via FEATURES flags.

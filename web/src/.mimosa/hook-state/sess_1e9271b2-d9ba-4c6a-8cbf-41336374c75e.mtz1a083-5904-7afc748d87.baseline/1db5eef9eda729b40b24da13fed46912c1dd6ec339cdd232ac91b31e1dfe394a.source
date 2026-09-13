@@ -2,7 +2,7 @@ import { type FormEvent, useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabase'
-import { CREATOR_STATUSES, STATUS_LABELS, normalizeStatus, type Creator, type PipelineStatus } from '../lib/types'
+import { CREATOR_STATUSES, STATUS_LABELS, type Creator, type PipelineStatus } from '../lib/types'
 import { downloadCsv, formatDate, normalizeName, parseBulkLines } from '../lib/utils'
 import { Empty, Field, FormActions, Modal, StatusBadge, useToast } from '../components/ui'
 import { PageHeader, useActivityLogger } from '../components/Layout'
@@ -21,7 +21,7 @@ const emptyForm = {
 }
 
 function pipelineDotColor(s: PipelineStatus): string | null {
-  if (s === 'contacted' || s === 'replied' || s === 'reach_back') return '#38bdf8' // blue
+  if (s === 'contacted' || s === 'replied' || s === 'reach_back_1' || s === 'reach_back_2' || s === 'reach_back_3') return '#38bdf8' // blue
   if (s === 'roster' || s === 'signed') return '#22c55e' // green
   if (s === 'negotiating') return '#f59e0b' // orange
   return null
@@ -52,8 +52,7 @@ export function CreatorsPage() {
       .select('*')
       .is('archived_at', null)
       .order('updated_at', { ascending: false })
-    // rows created before reach-backs became one status may still carry _1/_2/_3
-    setRows(((data || []) as Creator[]).map((r) => ({ ...r, pipeline_status: normalizeStatus(r.pipeline_status) })))
+    setRows((data || []) as Creator[])
   }
 
   useEffect(() => {
@@ -86,28 +85,6 @@ export function CreatorsPage() {
     return [...map.values()].filter((g) => g.length > 1)
   }, [rows])
 
-  // Duplicate-name check while typing in the add/edit modal.
-  // Exact same spelling (including case) → hard duplicate (red).
-  // Same name with different capitalization → possible duplicate (yellow).
-  const nameTrim = form.name.trim()
-  const dupExact = useMemo(
-    () => !!nameTrim && rows.some((r) => r.name.trim() === nameTrim && (!editing || r.id !== editing.id)),
-    [rows, nameTrim, editing],
-  )
-  const dupLoose = useMemo(
-    () =>
-      !dupExact &&
-      !!nameTrim &&
-      rows.some(
-        (r) => r.name.trim().toLowerCase() === nameTrim.toLowerCase() && (!editing || r.id !== editing.id),
-      ),
-    [rows, nameTrim, editing, dupExact],
-  )
-  const dupLooseRow = useMemo(
-    () => (dupLoose ? rows.find((r) => r.name.trim().toLowerCase() === nameTrim.toLowerCase()) : null),
-    [dupLoose, rows, nameTrim],
-  )
-
   function openCreate() {
     setEditing(null)
     setForm(emptyForm)
@@ -134,12 +111,7 @@ export function CreatorsPage() {
   async function save(e: FormEvent) {
     e.preventDefault()
     if (!user || !form.name.trim()) return
-    if (dupExact) {
-      show(`“${nameTrim}” is already added as an influencer`)
-      return
-    }
     setBusy(true)
-    const now = new Date().toISOString()
     const payload = {
       user_id: user.id,
       name: form.name.trim(),
@@ -152,16 +124,14 @@ export function CreatorsPage() {
       notes: form.notes,
       personalization: form.personalization,
       on_roster: form.on_roster || form.pipeline_status === 'roster',
-      updated_at: now,
+      updated_at: new Date().toISOString(),
     }
     if (editing) {
-      // timestamp dedicated to status changes so the list can show both dates
-      if (editing.pipeline_status !== form.pipeline_status) (payload as Record<string, unknown>).status_updated_at = now
       await supabase.from('creators').update(payload).eq('id', editing.id)
-      await log(`Updated influencer ${payload.name}`)
+      await log(`Updated creator ${payload.name}`)
     } else {
-      await supabase.from('creators').insert({ ...payload, status_updated_at: now })
-      await log(`Added influencer ${payload.name}`)
+      await supabase.from('creators').insert(payload)
+      await log(`Added creator ${payload.name}`)
     }
     setBusy(false)
     setModal(false)
@@ -171,7 +141,7 @@ export function CreatorsPage() {
 
   async function moveToDeleted(c: Creator) {
     await supabase.from('creators').update({ archived_at: new Date().toISOString() }).eq('id', c.id)
-    await log(`Moved influencer ${c.name} to Deleted`)
+    await log(`Moved creator ${c.name} to Deleted`)
     show('Moved to Deleted')
     load()
   }
@@ -188,7 +158,7 @@ export function CreatorsPage() {
   async function applyBulkDelete() {
     if (!user || selected.size === 0) return
     const ids = [...selected]
-    if (!confirm(`Move ${ids.length} influencer${ids.length === 1 ? '' : 's'} to Deleted? Search will skip them.`)) return
+    if (!confirm(`Move ${ids.length} creator${ids.length === 1 ? '' : 's'} to Deleted? Search will skip them.`)) return
     setBusy(true)
     const error = await softDeleteCreators(ids)
     setBusy(false)
@@ -196,7 +166,7 @@ export function CreatorsPage() {
       show(error.message)
       return
     }
-    await log(`Moved ${ids.length} influencers to Deleted`)
+    await log(`Moved ${ids.length} creators to Deleted`)
     setSelected(new Set())
     show(`Moved ${ids.length} to Deleted`)
     load()
@@ -211,10 +181,10 @@ export function CreatorsPage() {
     }
     const ids = (data || []).map((r) => r.id)
     if (!ids.length) {
-      show('No influencers to delete')
+      show('No creators to delete')
       return
     }
-    if (!confirm(`Move ALL ${ids.length} active influencers to Deleted?`)) return
+    if (!confirm(`Move ALL ${ids.length} active creators to Deleted?`)) return
     setBusy(true)
     const error = await softDeleteCreators(ids)
     setBusy(false)
@@ -222,7 +192,7 @@ export function CreatorsPage() {
       show(error.message)
       return
     }
-    await log(`Moved all ${ids.length} influencers to Deleted`)
+    await log(`Moved all ${ids.length} creators to Deleted`)
     setSelected(new Set())
     show(`Moved all ${ids.length} to Deleted`)
     load()
@@ -306,8 +276,8 @@ export function CreatorsPage() {
     setBusy(false)
     setBulkOpen(false)
     setBulk('')
-    show(`Imported ${inserts.length} influencers`)
-    await log(`Bulk imported ${inserts.length} influencers`)
+    show(`Imported ${inserts.length} creators`)
+    await log(`Bulk imported ${inserts.length} creators`)
     load()
   }
 
@@ -339,7 +309,6 @@ export function CreatorsPage() {
         pipeline_status,
         on_roster: pipeline_status === 'roster',
         updated_at: new Date().toISOString(),
-        status_updated_at: new Date().toISOString(),
       })
       .eq('id', id)
     load()
@@ -380,7 +349,6 @@ export function CreatorsPage() {
         pipeline_status: bulkStatus,
         on_roster: bulkStatus === 'roster',
         updated_at: new Date().toISOString(),
-        status_updated_at: new Date().toISOString(),
       })
       .in('id', ids)
     setBusy(false)
@@ -388,15 +356,15 @@ export function CreatorsPage() {
       show(error.message)
       return
     }
-    await log(`Bulk updated ${ids.length} influencers → ${STATUS_LABELS[bulkStatus]}`)
+    await log(`Bulk updated ${ids.length} creators → ${STATUS_LABELS[bulkStatus]}`)
     setSelected(new Set())
-    show(`Updated ${ids.length} influencer${ids.length === 1 ? '' : 's'} → ${STATUS_LABELS[bulkStatus]}`)
+    show(`Updated ${ids.length} creator${ids.length === 1 ? '' : 's'} → ${STATUS_LABELS[bulkStatus]}`)
     load()
   }
 
   function exportCsv() {
     downloadCsv(
-      'influencers.csv',
+      'creators.csv',
       filtered.map((r) => ({
         name: r.name,
         email: r.contact_email,
@@ -412,7 +380,7 @@ export function CreatorsPage() {
   return (
     <div>
       {Toast}
-      <PageHeader title="Influencers" subtitle={`${filtered.length} shown`}>
+      <PageHeader title="Creators" subtitle={`${filtered.length} shown`}>
         <button className="btn" type="button" onClick={() => setView(view === 'table' ? 'board' : 'table')}>
           {view === 'table' ? 'Board' : 'Table'}
         </button>
@@ -434,11 +402,11 @@ export function CreatorsPage() {
           Deleted list
         </Link>
         <button className="btn btn-primary" type="button" onClick={openCreate}>
-          Add influencer
+          Add creator
         </button>
       </PageHeader>
 
-      {/* Hidden: discovery/search volume banner removed — add influencers manually or via bulk import. Code preserved in git history. */}
+      {/* Hidden: discovery/search volume banner removed — add creators manually or via bulk import. Code preserved in git history. */}
 
       <div className="filters">
         <input className="input" style={{ maxWidth: 240 }} placeholder="Filter…" value={q} onChange={(e) => setQ(e.target.value)} />
@@ -537,8 +505,7 @@ export function CreatorsPage() {
                   <th>Email</th>
                   <th>Niche</th>
                   <th>Status</th>
-                  <th>Added</th>
-                  <th>Status updated</th>
+                  <th>Contacted</th>
                   <th></th>
                 </tr>
               </thead>
@@ -561,7 +528,7 @@ export function CreatorsPage() {
                             </>
                           )
                         })()}
-                        <Link to={`/app/influencers/${c.id}`}>{c.name}</Link>
+                        <Link to={`/app/creators/${c.id}`}>{c.name}</Link>
                       </span>
                     </td>
                     <td>{c.contact_email || '—'}</td>
@@ -569,8 +536,7 @@ export function CreatorsPage() {
                     <td>
                       <StatusBadge status={c.pipeline_status} />
                     </td>
-                    <td>{formatDate(c.created_at)}</td>
-                    <td>{formatDate(c.status_updated_at || c.updated_at)}</td>
+                    <td>{formatDate(c.date_contacted || c.last_sent_at)}</td>
                     <td>
                       <button className="btn btn-ghost" type="button" onClick={() => openEdit(c)}>
                         Edit
@@ -583,7 +549,7 @@ export function CreatorsPage() {
                 ))}
               </tbody>
             </table>
-            {filtered.length === 0 && <Empty>No influencers yet. Add one or bulk import.</Empty>}
+            {filtered.length === 0 && <Empty>No creators yet. Add one or bulk import.</Empty>}
           </div>
           <div className="mobile-cards">
             {filtered.map((c) => (
@@ -596,14 +562,11 @@ export function CreatorsPage() {
                       const hasDraft = !!(c.draft_subject || c.draft_body)
                       return <>{pc && <span title={STATUS_LABELS[c.pipeline_status]} style={{ width: 8, height: 8, borderRadius: 999, background: pc, boxShadow: `0 0 6px ${pc}66`, display: 'inline-block' }} />}{hasDraft && <span title="Draft saved" style={{ width: 8, height: 8, borderRadius: 999, background: '#eab308', boxShadow: '0 0 6px #eab30866', display: 'inline-block' }} />}</>
                     })()}
-                    <Link to={`/app/influencers/${c.id}`}>{c.name}</Link>
+                    <Link to={`/app/creators/${c.id}`}>{c.name}</Link>
                   </h3>
                 </label>
                 <StatusBadge status={c.pipeline_status} />
                 <div style={{ color: 'var(--text-muted)', marginTop: 6 }}>{c.contact_email || 'No email'}</div>
-                <div style={{ color: 'var(--text-faint)', fontSize: '0.75rem', marginTop: 4 }}>
-                  Added {formatDate(c.created_at)} · Status updated {formatDate(c.status_updated_at || c.updated_at)}
-                </div>
                 <div className="actions" style={{ marginTop: 8 }}>
                   <button className="btn" type="button" onClick={() => openEdit(c)}>
                     Edit
@@ -615,21 +578,11 @@ export function CreatorsPage() {
         </>
       )}
 
-      <Modal open={modal} title={editing ? 'Edit influencer' : 'Add influencer'} onClose={() => setModal(false)} wide>
+      <Modal open={modal} title={editing ? 'Edit creator' : 'Add creator'} onClose={() => setModal(false)} wide>
         <form onSubmit={save}>
           <div className="grid-2">
             <Field label="Name">
               <input className="input" required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-              {dupExact && (
-                <div className="error" style={{ marginTop: 6, marginBottom: 0 }}>
-                  ⚠ “{nameTrim}” is already added as an influencer.
-                </div>
-              )}
-              {dupLoose && (
-                <div className="warning" style={{ marginTop: 6, marginBottom: 0 }}>
-                  You might have already added this influencer — “{dupLooseRow?.name}” exists with only different capitalization.
-                </div>
-              )}
             </Field>
             <Field label="Email">
               <input className="input" type="email" value={form.contact_email} onChange={(e) => setForm({ ...form, contact_email: e.target.value })} />
@@ -672,11 +625,11 @@ export function CreatorsPage() {
           <Field label="Notes (decks, links…)">
             <textarea className="textarea" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
           </Field>
-          <FormActions onCancel={() => setModal(false)} busy={busy} submitDisabled={dupExact} />
+          <FormActions onCancel={() => setModal(false)} busy={busy} />
         </form>
       </Modal>
 
-      <Modal open={bulkOpen} title="Bulk import influencers" onClose={() => setBulkOpen(false)}>
+      <Modal open={bulkOpen} title="Bulk import creators" onClose={() => setBulkOpen(false)}>
         <form onSubmit={bulkImport}>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', lineHeight: 1.5 }}>
             Paste one per line: <strong style={{ color: 'var(--text)' }}>Name, channelUrl</strong> or <strong style={{ color: 'var(--text)' }}>Name, email, niche</strong> — channel URLs auto-detected.
@@ -726,7 +679,7 @@ export function CreatorDetailPage() {
     if (!id) return
     setLoading(true)
     const { data } = await supabase.from('creators').select('*').eq('id', id).maybeSingle()
-    const row = data ? ({ ...data, pipeline_status: normalizeStatus((data as Creator).pipeline_status) } as Creator) : null
+    const row = data as Creator | null
     setC(row)
     setDraftSubject(row?.draft_subject || '')
     setDraftBody(row?.draft_body || '')
@@ -740,14 +693,12 @@ export function CreatorDetailPage() {
   async function setStatus(pipeline_status: PipelineStatus) {
     if (!c) return
     setBusy(true)
-    const now = new Date().toISOString()
     const { error } = await supabase
       .from('creators')
       .update({
         pipeline_status,
         on_roster: pipeline_status === 'roster',
-        updated_at: now,
-        status_updated_at: now,
+        updated_at: new Date().toISOString(),
       })
       .eq('id', c.id)
     setBusy(false)
@@ -776,14 +727,14 @@ export function CreatorDetailPage() {
   }
 
   if (loading) return <Empty>Loading…</Empty>
-  if (!c) return <Empty>Influencer not found</Empty>
+  if (!c) return <Empty>Creator not found</Empty>
   const hasDraft = !!(c.draft_subject || c.draft_body)
   return (
     <div>
       {Toast}
       <PageHeader title={c.name} subtitle={c.contact_email || undefined}>
         {/* Hidden but preserved: Outreach link (FEATURES.outreachEnabled) */}
-        <Link className="btn" to="/app/influencers">
+        <Link className="btn" to="/app/creators">
           Back
         </Link>
       </PageHeader>
@@ -799,11 +750,9 @@ export function CreatorDetailPage() {
           <p>Channel: {c.channel_link ? <a href={c.channel_link} target="_blank" rel="noreferrer">{c.channel_link}</a> : '—'}</p>
           <p>Niche: {c.niche || '—'}</p>
           <p>Reach-backs: {c.reach_back_count}</p>
-          <p>Added: {formatDate(c.created_at)}</p>
-          <p>Status updated: {formatDate(c.status_updated_at || c.updated_at)}</p>
           <p>Last sent: {formatDate(c.last_sent_at)}</p>
           <div className="quick-row">
-            {(['contacted', 'reach_back', 'replied', 'negotiating', 'roster', 'denied', 'no_reply'] as PipelineStatus[]).map((s) => (
+            {(['contacted', 'replied', 'negotiating', 'roster', 'denied', 'no_reply'] as PipelineStatus[]).map((s) => (
               <button key={s} className="btn btn-ghost" type="button" disabled={busy || c.pipeline_status === s} onClick={() => setStatus(s)}>
                 {STATUS_LABELS[s]}
               </button>
@@ -823,7 +772,7 @@ export function CreatorDetailPage() {
           Draft email <span style={{ fontSize: '.72rem', padding: '3px 8px', borderRadius: 999, background: '#eab308', color: '#422006', fontWeight: 800 }}>YELLOW DOT</span>
           <span style={{ color: 'var(--text-muted)', fontWeight: 500, fontSize: '.82rem' }}>— subject + body you can copy anytime</span>
         </h3>
-        <p style={{ color: 'var(--text-muted)', fontSize: '.82rem', lineHeight: 1.5, marginTop: 0 }}>Save a draft here. A <strong style={{ color: '#a16207' }}>yellow dot</strong> will appear next to the name in <strong style={{ color: 'var(--text)' }}>Influencers → table/board/cards</strong>. <strong style={{ color: '#38bdf8' }}>Blue = contacted</strong> · <strong style={{ color: '#f59e0b' }}>Orange = negotiating</strong> · <strong style={{ color: '#22c55e' }}>Green = roster</strong>.</p>
+        <p style={{ color: 'var(--text-muted)', fontSize: '.82rem', lineHeight: 1.5, marginTop: 0 }}>Save a draft here. A <strong style={{ color: '#a16207' }}>yellow dot</strong> will appear next to the name in <strong style={{ color: 'var(--text)' }}>Creators → table/board/cards</strong>. <strong style={{ color: '#38bdf8' }}>Blue = contacted</strong> · <strong style={{ color: '#f59e0b' }}>Orange = negotiating</strong> · <strong style={{ color: '#22c55e' }}>Green = roster</strong>.</p>
         <div className="grid-2" style={{ gap: 12 }}>
           <Field label="Subject">
             <div style={{ display: 'flex', gap: 8 }}>

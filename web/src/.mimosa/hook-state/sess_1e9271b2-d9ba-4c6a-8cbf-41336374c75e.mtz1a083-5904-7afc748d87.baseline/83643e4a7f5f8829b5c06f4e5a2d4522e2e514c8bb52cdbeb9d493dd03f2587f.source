@@ -3,8 +3,8 @@ import { Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabase'
 import { formatDateTime, stripHtml } from '../lib/utils'
-import type { Activity, Meeting } from '../lib/types'
-import { CREATOR_STATUSES, STATUS_LABELS, normalizeStatus } from '../lib/types'
+import type { Activity, Meeting, PipelineStatus } from '../lib/types'
+import { CREATOR_STATUSES, STATUS_LABELS } from '../lib/types'
 import { OnboardingBanner, PageHeader } from '../components/Layout'
 import { FEATURES } from '../lib/features'
 
@@ -43,10 +43,7 @@ export function DashboardPage() {
       }).length
       const counts: Record<string, number> = {}
       for (const s of CREATOR_STATUSES) counts[s] = 0
-      for (const row of creatorStatuses.data || []) {
-        const s = normalizeStatus(row.pipeline_status)
-        counts[s] = (counts[s] || 0) + 1
-      }
+      for (const row of creatorStatuses.data || []) counts[row.pipeline_status as PipelineStatus] = (counts[row.pipeline_status as PipelineStatus] || 0) + 1
       setFunnel(counts)
       setStats({ creators: c.count || 0, brands: b.count || 0, contacts: p.count || 0, campaigns: camp.count || 0, dueReach: due, sentToday: sent.count || 0 })
       setActivity((act.data || []) as Activity[])
@@ -61,8 +58,8 @@ export function DashboardPage() {
   return (
     <div>
       <PageHeader title="Dashboard" subtitle="Pipeline health, revenue signals and next actions — all live">
-        <Link className="btn" to="/app/influencers" style={{ borderRadius: 999 }}>
-          View influencers
+        <Link className="btn" to="/app/creators" style={{ borderRadius: 999 }}>
+          View creators
         </Link>
         <Link className="btn btn-primary" to="/app/campaigns">
           View campaigns →
@@ -90,7 +87,7 @@ export function DashboardPage() {
                 <span className="card-eyebrow-dot" /> Pipeline overview
               </div>
               <div style={{ fontFamily: 'var(--display)', fontSize: '1.55rem', fontWeight: 800, letterSpacing: '-0.04em', lineHeight: 1, color: 'var(--text-strong)' }}>
-                {totalPipeline} <span style={{ fontWeight: 500, color: 'var(--text-muted)', fontSize: '0.92rem', letterSpacing: '-0.01em' }}>influencers in flow</span>
+                {totalPipeline} <span style={{ fontWeight: 500, color: 'var(--text-muted)', fontSize: '0.92rem', letterSpacing: '-0.01em' }}>creators in flow</span>
               </div>
               <div style={{ fontFamily: 'var(--mono)', fontSize: '0.7rem', letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-faint)', fontWeight: 700, marginTop: 6 }}>
                 {Math.round((stats.creators / Math.max(1, totalPipeline)) * 100) || 0}% roster-ready · auto-synced
@@ -104,7 +101,7 @@ export function DashboardPage() {
 
           <div style={{ padding: '0 12px 12px', display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
             {[
-              { label: 'Influencers', value: stats.creators, sub: `${pct(funnel['new'] || 0)}% new`, href: '/app/influencers', accent: 'var(--accent)' },
+              { label: 'Creators', value: stats.creators, sub: `${pct(funnel['new'] || 0)}% new`, href: '/app/creators', accent: 'var(--accent)' },
               { label: 'Brands', value: stats.brands, sub: `${stats.contacts} people`, href: '/app/brands', accent: 'var(--accent-2)' },
               { label: 'Campaigns', value: stats.campaigns, sub: 'Active + negotiating', href: '/app/campaigns', accent: '#A78BFA' },
             ].map((s) => (
@@ -123,7 +120,7 @@ export function DashboardPage() {
 
           <div style={{ display: 'flex', gap: 8, padding: '12px 14px', flexWrap: 'wrap', alignItems: 'center' }}>
             <span style={{ fontFamily: 'var(--mono)', fontSize: '0.66rem', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-faint)' }}>Quick</span>
-            <Link to="/app/influencers" className="btn" style={{ fontSize: '0.78rem', padding: '6px 12px' }}>＋ Add influencer</Link>
+            <Link to="/app/creators" className="btn" style={{ fontSize: '0.78rem', padding: '6px 12px' }}>＋ Add creator</Link>
             <Link to="/app/brands" className="btn" style={{ fontSize: '0.78rem', padding: '6px 12px' }}>＋ Add brand</Link>
             <Link to="/app/calendar" className="btn" style={{ fontSize: '0.78rem', padding: '6px 12px' }}>Schedule meet</Link>
             {/* Hidden but preserved: reach-backs due (FEATURES.outreachEnabled) */}
@@ -187,9 +184,9 @@ export function DashboardPage() {
 
       {/* STAT GRID — refined */}
       <div className="stat-grid animate-entry animate-entry-2">
-        <Link className="stat card-interactive" to="/app/influencers">
+        <Link className="stat card-interactive" to="/app/creators">
           <div className="n">{stats.creators}<small>total</small></div>
-          <div className="l">Influencers in CRM</div>
+          <div className="l">Creators in CRM</div>
         </Link>
         <Link className="stat card-interactive" to="/app/brands">
           <div className="n">{stats.brands}</div>
@@ -220,14 +217,14 @@ export function DashboardPage() {
 
       {/* PIPELINE FUNNEL — premium */}
       <div className="animate-entry animate-entry-3" style={{ marginBottom: 6, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-        <h3 style={{ margin: 0, fontFamily: 'var(--display)', fontSize: '1rem', fontWeight: 700, letterSpacing: '-0.02em', color: 'var(--text-strong)' }}>Influencer pipeline</h3>
+        <h3 style={{ margin: 0, fontFamily: 'var(--display)', fontSize: '1rem', fontWeight: 700, letterSpacing: '-0.02em', color: 'var(--text-strong)' }}>Creator pipeline</h3>
         <span style={{ fontFamily: 'var(--mono)', fontSize: '0.66rem', letterSpacing: '0.08em', textTransform: 'uppercase', fontWeight: 700, color: 'var(--text-faint)', background: 'var(--bg-soft)', border: '1px solid var(--border)', padding: '4px 8px', borderRadius: 999 }}>
           {totalPipeline} total · click to filter
         </span>
       </div>
       <div className="funnel animate-entry animate-entry-3">
         {CREATOR_STATUSES.map((s) => (
-          <Link key={s} className="funnel-step" to={`/app/influencers`} state={{ status: s }}>
+          <Link key={s} className="funnel-step" to={`/app/creators`} state={{ status: s }}>
             <div className="n">{funnel[s] || 0}</div>
             <div className="l">{STATUS_LABELS[s]}</div>
             <div style={{ height: 3, borderRadius: 999, background: funnel[s] ? 'linear-gradient(90deg, var(--accent), var(--accent-2))' : 'var(--border)', opacity: funnel[s] ? 0.9 : 0.6, marginTop: 8 }} />
@@ -275,7 +272,7 @@ export function DashboardPage() {
             <span style={{ fontFamily: 'var(--mono)', fontSize: '0.64rem', letterSpacing: '0.08em', textTransform: 'uppercase', fontWeight: 700, color: 'var(--text-faint)' }}>Live feed</span>
           </div>
           <div style={{ padding: '6px 8px 8px', maxHeight: 360, overflow: 'auto' }}>
-            {activity.length === 0 && <div style={{ padding: '18px 12px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.875rem' }}>Nothing yet — add an influencer or brand to see activity.</div>}
+            {activity.length === 0 && <div style={{ padding: '18px 12px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.875rem' }}>Nothing yet — add a creator or brand to see activity.</div>}
             {activity.map((a) => (
               <div key={a.id} className="activity-item" style={{ padding: '10px 8px', borderBottom: '1px solid color-mix(in srgb, var(--border) 72%, transparent)', borderRadius: 10, display: 'grid', gridTemplateColumns: '28px 1fr', gap: 10 }}>
                 <span style={{ width: 28, height: 28, borderRadius: 999, background: 'var(--bg-soft)', border: '1px solid var(--border)', display: 'grid', placeItems: 'center', fontSize: '0.66rem', color: 'var(--text-faint)', fontWeight: 700, flexShrink: 0 }}>●</span>

@@ -431,7 +431,7 @@ export function OutreachPage() {
               </span>
             </h1>
             <p style={{ margin: '0 auto', maxWidth: 560, color: 'rgba(255,255,255,.72)', fontSize: '1.02rem', lineHeight: 1.6 }}>
-              Automated sequences, Gmail sync & reach-back scheduling are being polished. Your influencers, brands and campaigns keep working — outreach will unlock here shortly.
+              Automated sequences, Gmail sync & reach-back scheduling are being polished. Your creators, brands and campaigns keep working — outreach will unlock here shortly.
             </p>
             <div style={{ marginTop: '1.6rem', display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
               <span style={{ padding: '10px 16px', borderRadius: 12, background: '#fff', color: '#111', fontWeight: 700, fontSize: '.9rem' }}>Coming soon</span>
@@ -481,7 +481,7 @@ export function OutreachPage() {
         {(
           [
             ['new', `New (${newOnes.length})`],
-            ['reach_back', `Reach back due (${dueReach.length})`],
+            ['reach_back', `Reach-back due (${dueReach.length})`],
             ['queued', 'Queued'],
             ['sent', 'Sent recently'],
           ] as const

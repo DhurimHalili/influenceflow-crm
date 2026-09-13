@@ -53,15 +53,6 @@ export function isTheme(v: unknown): v is Theme {
   return THEMES.some((t) => t.id === v)
 }
 
-/** The theme actually applied to the document right now — the single source of truth. */
-export function getAppliedTheme(): Theme {
-  const t = document.documentElement.dataset.theme
-  if (isTheme(t)) return t
-  const local = localStorage.getItem('if-theme')
-  if (isTheme(local)) return local
-  return DEFAULT_THEME
-}
-
 export function themeName(id: string | null | undefined): string {
   return THEMES.find((t) => t.id === id)?.name ?? 'Agency'
 }

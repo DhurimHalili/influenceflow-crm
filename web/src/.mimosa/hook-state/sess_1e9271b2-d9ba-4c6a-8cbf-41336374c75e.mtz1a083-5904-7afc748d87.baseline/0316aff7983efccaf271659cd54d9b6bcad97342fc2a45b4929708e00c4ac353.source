@@ -45,12 +45,12 @@ export function LandingPage() {
               <span style={{ width: 7, height: 7, borderRadius: 999, background: ACCENT, boxShadow: '0 0 10px rgba(182,92,46,.6)' }} /> PRIVATE CRM · FOR AGENCIES
             </div>
             <h1 style={{ margin: '16px 0 14px', fontSize: 'clamp(2.6rem, 5.2vw, 4.2rem)', lineHeight: 1, letterSpacing: '-.02em', fontWeight: 600, fontFamily: 'Fraunces, Georgia, serif' }}>
-              Run influencers,
+              Run creators,
               <br />
               <span style={{ background: `linear-gradient(90deg,${ACCENT} 0%,${FOREST} 100%)`, WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>brands & deals in one place.</span>
             </h1>
             <p style={{ color: MUTED, fontSize: '1.12rem', lineHeight: 1.65, maxWidth: 580, margin: 0 }}>
-              Your private workspace for influencer work. <strong style={{ color: INK }}>Add influencers, track pipeline, manage campaigns and calendar</strong> — no spreadsheets, no chaos.
+              Your private workspace for influencer work. <strong style={{ color: INK }}>Add creators, track pipeline, manage campaigns and calendar</strong> — no spreadsheets, no chaos.
             </p>
             <div style={{ display: 'flex', gap: 12, marginTop: 24, flexWrap: 'wrap' }}>
               <Link to="/signup" style={{ padding: '16px 26px', borderRadius: 14, background: ACCENT, color: CREAM, textDecoration: 'none', fontWeight: 800, fontSize: '1rem', boxShadow: '0 14px 28px rgba(182,92,46,.35)' }}>Create free account — 30s</Link>
@@ -76,7 +76,7 @@ export function LandingPage() {
               </div>
               <div style={{ background: 'rgba(182,92,46,.08)', border: '1px solid rgba(182,92,46,.22)', borderRadius: 16, padding: 14, display: 'flex', gap: 12, alignItems: 'center' }}>
                 <div style={{ width: 48, height: 48, borderRadius: 14, background: `linear-gradient(135deg,${ACCENT},${FOREST})`, flexShrink: 0 }} />
-                <div><div style={{ fontWeight: 800 }}>Influencer added · Pipeline updated</div><div style={{ color: MUTED, fontSize: '.85rem' }}>Notes, status and campaign linked</div></div>
+                <div><div style={{ fontWeight: 800 }}>Creator added · Pipeline updated</div><div style={{ color: MUTED, fontSize: '.85rem' }}>Notes, status and campaign linked</div></div>
                 <div style={{ marginLeft: 'auto', background: FOREST, color: CREAM, padding: '6px 12px', borderRadius: 999, fontSize: '.78rem', fontWeight: 800 }}>NEW</div>
               </div>
               <div style={{ marginTop: 12, display: 'flex', gap: 8, color: FAINT, fontSize: '.82rem', flexWrap: 'wrap', fontWeight: 600 }}><span>Table + board</span><span>·</span><span>Bulk import</span><span>·</span><span>Campaigns + calendar</span></div>
@@ -93,7 +93,7 @@ export function LandingPage() {
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 14 }}>
             {[
-              { n: '01', t: 'Add influencers', d: 'Manual add or bulk import (Name + email/link). Notes per person. Takes 2 min.', icon: '◍' },
+              { n: '01', t: 'Add creators', d: 'Manual add or bulk import (Name + email/link). Notes per person. Takes 2 min.', icon: '◍' },
               { n: '02', t: 'Add brands', d: 'Brands with their own people, titles and emails. Same pipeline, same privacy.', icon: '⬢' },
               { n: '03', t: 'Track pipeline', d: 'New → Contacted → Negotiating → Roster. Table or drag-and-drop board, bulk status, merge dupes.', icon: '▢' },
               { n: '04', t: 'Close & schedule', d: 'Campaigns with payouts + conflict checks. Calendar meetings with reminders. Nothing slips.', icon: '◆' },
@@ -114,7 +114,7 @@ export function LandingPage() {
             <div style={{ background: `linear-gradient(135deg, #2A2114 0%, #1B160F 100%)`, borderRadius: 24, padding: 26, gridRow: 'span 2', color: CREAM, boxShadow: '0 18px 44px rgba(40,30,15,.28)' }}>
               <div style={{ width: 42, height: 42, borderRadius: 12, background: `linear-gradient(135deg,${ACCENT},${GOLD})`, display: 'grid', placeItems: 'center', color: CREAM, fontWeight: 800 }}>◍</div>
               <h3 style={{ margin: '14px 0 8px', fontSize: '1.35rem', fontWeight: 600, fontFamily: 'Fraunces, Georgia, serif' }}>Pipeline without chaos</h3>
-              <p style={{ margin: 0, color: 'rgba(255,248,239,.72)', lineHeight: 1.65 }}>Influencers and brands in one CRM with clear statuses, notes, and per-person history. No more juggling sheets and chats.</p>
+              <p style={{ margin: 0, color: 'rgba(255,248,239,.72)', lineHeight: 1.65 }}>Creators and brands in one CRM with clear statuses, notes, and per-person history. No more juggling sheets and chats.</p>
               <div style={{ marginTop: 16, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                 {['Table + board', 'Bulk import', 'Merge dupes', 'Notes', 'Archive', 'Search'].map((t) => (
                   <span key={t} style={{ padding: '6px 12px', borderRadius: 999, background: 'rgba(255,248,239,.09)', border: '1px solid rgba(255,248,239,.16)', fontSize: '.78rem', color: 'rgba(255,248,239,.85)', fontWeight: 600 }}>{t}</span>
@@ -130,7 +130,7 @@ export function LandingPage() {
               <p style={{ margin: 0, color: MUTED, lineHeight: 1.6, fontSize: '.92rem' }}>Campaign deals with conflict checks. Calendar meetings with browser reminders. No lost follow-ups.</p>
             </div>
             <div style={{ background: CARD, border: `1px solid ${LINE}`, borderRadius: 24, padding: 24, boxShadow: '0 8px 22px rgba(80,55,25,.08)' }}>
-              <h3 style={{ margin: '0 0 6px', fontWeight: 800 }}>Influencers + Brands</h3>
+              <h3 style={{ margin: '0 0 6px', fontWeight: 800 }}>Creators + Brands</h3>
               <p style={{ margin: 0, color: MUTED, lineHeight: 1.6, fontSize: '.92rem' }}>Store people, titles, emails and pipeline side by side. Filter, export, stay organized.</p>
             </div>
             <div style={{ background: 'rgba(58,90,64,.09)', border: '1px solid rgba(58,90,64,.28)', borderRadius: 24, padding: 24 }}>
@@ -145,9 +145,9 @@ export function LandingPage() {
           <h2 style={{ textAlign: 'center', fontSize: '1.9rem', fontWeight: 600, fontFamily: 'Fraunces, Georgia, serif', margin: '0 0 18px' }}>Questions, answered</h2>
           <div style={{ display: 'grid', gap: 12 }}>
             {[
-              { q: 'How do I add influencers?', a: 'Influencers → Add influencer, or Bulk import → paste “Name, channelUrl” or attach CSV. Duplicates are merged automatically.' },
-              { q: 'How do campaigns work?', a: 'Create a campaign, link a brand + influencers, set deliverables and payout. Conflict warnings stop double-booking the same influencer + brand.' },
-              { q: 'Is my data private?', a: 'Yes. Per-account isolation — other users cannot see your influencers, brands, campaigns or notes. Export anytime.' },
+              { q: 'How do I add creators?', a: 'Creators → Add creator, or Bulk import → paste “Name, channelUrl” or attach CSV. Duplicates are merged automatically.' },
+              { q: 'How do campaigns work?', a: 'Create a campaign, link a brand + creators, set deliverables and payout. Conflict warnings stop double-booking the same creator + brand.' },
+              { q: 'Is my data private?', a: 'Yes. Per-account isolation — other users cannot see your creators, brands, campaigns or notes. Export anytime.' },
               { q: 'Can I change the look?', a: 'Yes — open Themes in the sidebar and pick Agency, Light, Dark, Honey or Ocean. It applies instantly on all your devices.' },
               { q: 'Do I need to install anything?', a: 'No. It runs in your browser. Create an account and log straight in — no email confirmation waiting.' },
             ].map((f) => (
@@ -163,7 +163,7 @@ export function LandingPage() {
         <section style={{ background: `linear-gradient(135deg, #2A2114 0%, #3A2A16 60%, ${FOREST} 130%)`, borderRadius: 24, padding: 32, display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'space-between', margin: '8px 0 28px', boxShadow: '0 18px 44px rgba(40,30,15,.3)' }}>
           <div>
             <div style={{ fontWeight: 600, fontSize: '1.5rem', color: CREAM, fontFamily: 'Fraunces, Georgia, serif' }}>Free for agencies. Private by default.</div>
-            <div style={{ color: 'rgba(255,248,239,.72)', marginTop: 6 }}>Create account → add influencers & brands → track deals in one workspace.</div>
+            <div style={{ color: 'rgba(255,248,239,.72)', marginTop: 6 }}>Create account → add creators & brands → track deals in one workspace.</div>
           </div>
           <Link to="/signup" style={{ padding: '14px 24px', borderRadius: 14, background: GOLD, color: '#2A1F0C', textDecoration: 'none', fontWeight: 800, boxShadow: '0 12px 24px rgba(0,0,0,.25)' }}>Start free now →</Link>
         </section>

@@ -3,24 +3,15 @@ export type Theme = 'agency' | 'light' | 'dark' | 'honey' | 'ocean'
 export type PipelineStatus =
   | 'new'
   | 'contacted'
-  | 'reach_back'
+  | 'reach_back_1'
+  | 'reach_back_2'
+  | 'reach_back_3'
   | 'replied'
   | 'negotiating'
   | 'roster'
   | 'signed'
   | 'denied'
   | 'no_reply'
-
-// Rows created before reach-backs became a single status may still carry these.
-export const LEGACY_REACH_BACK: Record<string, PipelineStatus> = {
-  reach_back_1: 'reach_back',
-  reach_back_2: 'reach_back',
-  reach_back_3: 'reach_back',
-}
-
-export function normalizeStatus(s: string): PipelineStatus {
-  return LEGACY_REACH_BACK[s] || (s as PipelineStatus)
-}
 
 export type CampaignStatus = 'negotiating' | 'active' | 'completed' | 'cancelled'
 
@@ -62,7 +53,6 @@ export interface Creator {
   pipeline_status: PipelineStatus
   on_roster: boolean
   date_contacted: string | null
-  status_updated_at: string | null
   last_sent_at: string | null
   reach_back_count: number
   message_id: string | null
@@ -101,7 +91,6 @@ export interface BrandContact {
   linkedin_url: string | null
   pipeline_status: PipelineStatus
   date_contacted: string | null
-  status_updated_at: string | null
   last_sent_at: string | null
   reach_back_count: number
   message_id: string | null
@@ -191,7 +180,9 @@ export interface SendJobItem {
 export const CREATOR_STATUSES: PipelineStatus[] = [
   'new',
   'contacted',
-  'reach_back',
+  'reach_back_1',
+  'reach_back_2',
+  'reach_back_3',
   'replied',
   'negotiating',
   'roster',
@@ -202,11 +193,9 @@ export const CREATOR_STATUSES: PipelineStatus[] = [
 export const STATUS_LABELS: Record<string, string> = {
   new: 'New',
   contacted: 'Contacted',
-  reach_back: 'Reach back',
-  // legacy rows normalize to 'reach_back' — kept so nothing ever shows raw keys
-  reach_back_1: 'Reach back',
-  reach_back_2: 'Reach back',
-  reach_back_3: 'Reach back',
+  reach_back_1: 'Reach-back 1',
+  reach_back_2: 'Reach-back 2',
+  reach_back_3: 'Reach-back 3',
   replied: 'Replied',
   negotiating: 'Negotiating',
   roster: 'Roster',

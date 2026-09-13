@@ -179,7 +179,7 @@ export function SearchPage() {
       {Toast}
       <PageHeader title="Search" subtitle="Discover influencers for your niche">
         <button className="btn btn-primary" type="button" disabled={running || !nicheId} onClick={runCreatorSearch}>
-          {running ? 'Searching…' : 'Run influencer search'}
+          {running ? 'Searching…' : 'Run creator search'}
         </button>
       </PageHeader>
 
@@ -248,7 +248,7 @@ export function SearchPage() {
             <div className="search-kicker">Pipeline</div>
             <h3 style={{ margin: '0.2rem 0 0.55rem' }}>Find influencers</h3>
             <p style={{ color: 'var(--text-muted)', marginTop: 0 }}>
-              Multi-strategy YouTube discovery for your niche. Skips Influencers + Deleted, and skips any channel
+              Multi-strategy YouTube discovery for your niche. Skips Creators + Deleted, and skips any channel
               already checked in the last 3 weeks so each run digs into new people. After 3 weeks, checked
               channels can be searched again. Keeps going until 50 (or quota / full drain).
             </p>
@@ -294,7 +294,7 @@ export function SearchPage() {
               <strong style={{ color: 'var(--text)' }}>✓ What you can change right here in Search (gets looser immediately):</strong>
               <ul style={{ margin: '6px 0 0', paddingLeft: 18, color: 'var(--text-muted)' }}>
                 <li><strong style={{ color: 'var(--text)' }}>Go broader:</strong> {subnicheId ? (<>you're on a narrow subniche — click <strong>All {niche?.label}</strong> or try the parent <strong>{niche?.label}</strong> niche to 2–3× the pool</>) : (<>try a related niche (e.g. Tech → Content / AI / DIY) or click a broader chip above</>)}.</li>
-                <li><strong style={{ color: 'var(--text)' }}>Run again:</strong> each run skips Influencers + Deleted + 3-week cooldown, so a 2nd/3rd run digs new channels. No need to wait.</li>
+                <li><strong style={{ color: 'var(--text)' }}>Run again:</strong> each run skips Creators + Deleted + 3-week cooldown, so a 2nd/3rd run digs new channels. No need to wait.</li>
                 <li><strong style={{ color: 'var(--text)' }}>Check the meter:</strong> if <code style={{ background: 'var(--bg-soft)', padding: '1px 4px', borderRadius: 4 }}>YouTube scanned</code> is high but <code>found</code> stays low, the niche is small — broadening is the lever.</li>
               </ul>
             </div>
@@ -325,7 +325,7 @@ export function SearchPage() {
           <Empty>
             <strong>No influencers yet</strong>
             <p style={{ margin: '0.35rem 0 0', color: 'var(--text-muted)' }}>
-              Select a niche (e.g. Tech → Desk Setups) and run an influencer search.
+              Select a niche (e.g. Tech → Desk Setups) and run a creator search.
             </p>
           </Empty>
         ) : (
@@ -333,7 +333,7 @@ export function SearchPage() {
             <table className="data">
               <thead>
                 <tr>
-                  <th>Influencer</th>
+                  <th>Creator</th>
                   <th>Subs</th>
                   <th>Avg views</th>
                   <th>ER</th>

@@ -126,19 +126,17 @@ export function FormActions({
   onCancel,
   submitLabel = 'Save',
   busy,
-  submitDisabled,
 }: {
   onCancel: () => void
   submitLabel?: string
   busy?: boolean
-  submitDisabled?: boolean
 }) {
   return (
     <div className="modal-actions">
       <button className="btn btn-ghost" type="button" onClick={onCancel} disabled={busy}>
         Cancel
       </button>
-      <button className="btn btn-primary" type="submit" disabled={busy || submitDisabled}>
+      <button className="btn btn-primary" type="submit" disabled={busy}>
         {busy ? 'Saving…' : submitLabel}
       </button>
     </div>

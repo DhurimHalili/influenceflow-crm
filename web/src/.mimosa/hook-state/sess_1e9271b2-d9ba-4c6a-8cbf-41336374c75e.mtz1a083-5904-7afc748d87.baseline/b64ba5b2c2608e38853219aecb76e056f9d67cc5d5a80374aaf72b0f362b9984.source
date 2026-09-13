@@ -2,7 +2,6 @@ import { type FormEvent, useEffect, useMemo, useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabase'
 import type { Brand, Campaign, Creator } from '../lib/types'
-import { normalizeStatus } from '../lib/types'
 import { downloadCsv, formatDate } from '../lib/utils'
 import { Empty, Field, FormActions, Modal, StatusBadge, useToast } from '../components/ui'
 import { PageHeader, useActivityLogger } from '../components/Layout'
@@ -49,7 +48,7 @@ export function CampaignsPage() {
     ])
     setRows((c.data || []) as Campaign[])
     setBrands((b.data || []) as Brand[])
-    setCreators(((cr.data || []) as Creator[]).map((r) => ({ ...r, pipeline_status: normalizeStatus(r.pipeline_status) })))
+    setCreators((cr.data || []) as Creator[])
     const map: Record<string, string[]> = {}
     for (const row of cc.data || []) {
       map[row.campaign_id] = [...(map[row.campaign_id] || []), row.creator_id]
@@ -121,7 +120,7 @@ export function CampaignsPage() {
     }
     if (brandId) {
       const brand = brands.find((b) => b.id === brandId)
-      const early = ['new', 'contacted', 'no_reply', 'reach_back', 'replied']
+      const early = ['new', 'contacted', 'no_reply', 'reach_back_1', 'reach_back_2', 'reach_back_3', 'replied']
       if (!brand || early.includes(brand.pipeline_status)) {
         await supabase
           .from('brands')
@@ -191,7 +190,7 @@ export function CampaignsPage() {
     await promoteFromCampaign(form.brand_id || null, selectedCreators)
     setBusy(false)
     setModal(false)
-    show('Campaign saved · influencers → roster · brand upgraded if needed')
+    show('Campaign saved · creators → roster · brand upgraded if needed')
     load()
   }
 
@@ -242,7 +241,7 @@ export function CampaignsPage() {
               <th>Status</th>
               <th>Payment</th>
               <th>Due</th>
-              <th>Influencers</th>
+              <th>Creators</th>
               <th></th>
             </tr>
           </thead>
@@ -360,17 +359,17 @@ export function CampaignsPage() {
           <Field label="Notes">
             <textarea className="textarea" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
           </Field>
-          <Field label={`Assign influencers (${selectedCreators.length} selected)`}>
+          <Field label={`Assign creators (${selectedCreators.length} selected)`}>
             <input
               className="input"
               style={{ marginBottom: 8 }}
-              placeholder="Search influencers by name, email, niche…"
+              placeholder="Search creators by name, email, niche…"
               value={creatorSearch}
               onChange={(e) => setCreatorSearch(e.target.value)}
             />
             <div style={{ maxHeight: 180, overflow: 'auto', border: '1px solid var(--border)', borderRadius: 8, padding: 8 }}>
               {filteredCreators.length === 0 && (
-                <div style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>No influencers match.</div>
+                <div style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>No creators match.</div>
               )}
               {filteredCreators.map((c) => (
                 <label key={c.id} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6 }}>
@@ -393,7 +392,7 @@ export function CampaignsPage() {
               ))}
             </div>
             <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', margin: '8px 0 0' }}>
-              Saving puts assigned influencers on your <strong>roster</strong> and upgrades the brand to <strong>negotiating</strong> if it was only contacted/new.
+              Saving puts assigned creators on your <strong>roster</strong> and upgrades the brand to <strong>negotiating</strong> if it was only contacted/new.
             </p>
           </Field>
           {conflictWarn && <p className="error">{conflictWarn}</p>}

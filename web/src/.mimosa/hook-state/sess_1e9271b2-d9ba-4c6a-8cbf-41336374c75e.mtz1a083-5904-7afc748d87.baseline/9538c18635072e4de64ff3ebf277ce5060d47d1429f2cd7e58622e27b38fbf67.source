@@ -71,7 +71,7 @@ export function DeletedPage() {
       show(error.message)
       return
     }
-    await log(`Restored ${ids.length} influencer${ids.length === 1 ? '' : 's'} from Deleted`)
+    await log(`Restored ${ids.length} creator${ids.length === 1 ? '' : 's'} from Deleted`)
     setSelectedCreators(new Set())
     show(`Restored ${ids.length}`)
     load()
@@ -99,7 +99,7 @@ export function DeletedPage() {
     if (!user || !ids.length) return
     if (
       !confirm(
-        `Permanently delete ${ids.length} influencer${ids.length === 1 ? '' : 's'}? Search will never suggest them again.`,
+        `Permanently delete ${ids.length} creator${ids.length === 1 ? '' : 's'}? Search will never suggest them again.`,
       )
     ) {
       return
@@ -122,7 +122,7 @@ export function DeletedPage() {
       show(error.message)
       return
     }
-    await log(`Permanently deleted ${ids.length} influencers (blocked from Search)`)
+    await log(`Permanently deleted ${ids.length} creators (blocked from Search)`)
     setSelectedCreators(new Set())
     show(`Permanently deleted ${ids.length}`)
     load()
@@ -168,12 +168,12 @@ export function DeletedPage() {
       {Toast}
       <PageHeader
         title="Deleted"
-        subtitle="Soft-deleted influencers and brands. Restore them, or permanently delete to block Search forever."
+        subtitle="Soft-deleted creators and brands. Restore them, or permanently delete to block Search forever."
       />
 
       <div className="tabs search-tabs" style={{ marginBottom: '1.1rem' }}>
         <button className={`tab ${tab === 'creators' ? 'active' : ''}`} type="button" onClick={() => setTab('creators')}>
-          Influencers ({creators.length})
+          Creators ({creators.length})
         </button>
         <button className={`tab ${tab === 'brands' ? 'active' : ''}`} type="button" onClick={() => setTab('brands')}>
           Brands ({brands.length})
@@ -188,8 +188,8 @@ export function DeletedPage() {
           value={q}
           onChange={(e) => setQ(e.target.value)}
         />
-        <Link className="btn" to={tab === 'creators' ? '/app/influencers' : '/app/brands'}>
-          Back to {tab === 'creators' ? 'Influencers' : 'Brands'}
+        <Link className="btn" to={tab === 'creators' ? '/app/creators' : '/app/brands'}>
+          Back to {tab === 'creators' ? 'Creators' : 'Brands'}
         </Link>
       </div>
 
@@ -212,9 +212,9 @@ export function DeletedPage() {
           <div className="card">
             {!filteredCreators.length ? (
               <Empty>
-                <strong>No deleted influencers</strong>
+                <strong>No deleted creators</strong>
                 <p style={{ margin: '0.35rem 0 0', color: 'var(--text-muted)' }}>
-                  When you delete an influencer from Influencers, they land here. Search skips everyone on this list.
+                  When you delete a creator from Creators, they land here. Search skips everyone on this list.
                 </p>
               </Empty>
             ) : (

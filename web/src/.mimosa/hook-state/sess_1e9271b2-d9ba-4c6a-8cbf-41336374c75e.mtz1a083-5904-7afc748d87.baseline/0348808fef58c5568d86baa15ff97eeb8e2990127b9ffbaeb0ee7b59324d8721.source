@@ -5,7 +5,7 @@ import { supabase } from '../lib/supabase'
 import { HIRE } from '../lib/types'
 import { stripHtml } from '../lib/utils'
 import { FEATURES } from '../lib/features'
-import { DEFAULT_THEME, THEMES, themeName, getAppliedTheme } from '../lib/themes'
+import { DEFAULT_THEME, THEMES, themeName } from '../lib/themes'
 
 type NavItem = { to: string; label: string; end?: boolean; ico: string; desc?: string }
 
@@ -14,7 +14,7 @@ type NavItem = { to: string; label: string; end?: boolean; ico: string; desc?: s
 const NAV_MAIN_ALL: NavItem[] = [
   { to: '/app', label: 'Dashboard', end: true, ico: '◈', desc: 'Overview' },
   { to: '/app/outreach', label: 'Outreach', ico: '✉', desc: 'Queue' },
-  { to: '/app/influencers', label: 'Influencers', ico: '◎', desc: 'CRM' },
+  { to: '/app/creators', label: 'Creators', ico: '◎', desc: 'CRM' },
   { to: '/app/brands', label: 'Brands', ico: '⬢', desc: 'CRM' },
   { to: '/app/campaigns', label: 'Campaigns', ico: '⬣', desc: 'Deals' },
   { to: '/app/calendar', label: 'Calendar', ico: '▦', desc: 'Meetings' },
@@ -28,7 +28,7 @@ const NAV_GROWTH_ALL: NavItem[] = [
 // Clear, self-explanatory labels: every item says what it is + what lives inside.
 const NAV_LABELS: Record<string, { label: string; ico: string; desc: string; end?: boolean }> = {
   '/app': { label: 'Dashboard', ico: '✦', desc: 'Home · overview', end: true },
-  '/app/influencers': { label: 'Influencers', ico: '◍', desc: 'People · talent' },
+  '/app/creators': { label: 'Creators', ico: '◍', desc: 'People · talent' },
   '/app/brands': { label: 'Brands', ico: '⬢', desc: 'Companies · clients' },
   '/app/campaigns': { label: 'Campaigns', ico: '⬣', desc: 'Deals · tracked' },
   '/app/calendar': { label: 'Calendar', ico: '▦', desc: 'Schedule · meets' },
@@ -95,7 +95,7 @@ export function AppLayout() {
       }
       const next: SearchHit[] = []
       for (const c of data || []) {
-        next.push({ type: 'Influencer', id: c.id, label: c.name, sub: c.contact_email || undefined, path: `/app/influencers/${c.id}` })
+        next.push({ type: 'Creator', id: c.id, label: c.name, sub: c.contact_email || undefined, path: `/app/creators/${c.id}` })
       }
       setHits(next)
       setNoHit(next.length === 0)
@@ -103,7 +103,7 @@ export function AppLayout() {
     return () => clearTimeout(t)
   }, [q])
 
-  const theme = getAppliedTheme() || DEFAULT_THEME
+  const theme = profile?.theme || DEFAULT_THEME
   const THEME_DOT = THEMES.find((t) => t.id === theme)?.dot || THEMES[0].dot
   const initials = (profile?.display_name || user?.email || 'I').slice(0, 2).toUpperCase()
 
@@ -123,7 +123,7 @@ export function AppLayout() {
               InfluenceFlow <small>CRM</small>
             </span>
             <span style={{ fontFamily: 'var(--mono)', fontSize: '0.62rem', letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-faint)', fontWeight: 600 }}>
-              Influencer OS · Private
+              Creator OS · Private
             </span>
           </div>
         </div>
@@ -235,7 +235,7 @@ export function AppLayout() {
               <input
                 ref={searchRef}
                 className="input"
-                placeholder="Search influencers, brands, campaigns…"
+                placeholder="Search creators, brands, campaigns…"
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
                 onKeyDown={(e) => {
@@ -286,7 +286,7 @@ export function AppLayout() {
             {q.trim() && noHit && hits.length === 0 && (
               <div className="search-results">
                 <div style={{ padding: '12px 14px', color: 'var(--text-muted)', fontSize: '0.875rem', lineHeight: 1.5 }}>
-                  No influencers for “{q.trim()}” — try another name.
+                  No creators for “{q.trim()}” — try another name.
                 </div>
               </div>
             )}
@@ -374,7 +374,7 @@ export function OnboardingBanner() {
           <div style={{ color: 'var(--text-muted)', fontSize: '0.875rem', lineHeight: 1.6, marginTop: 4 }}>Get your workspace live in 60 seconds. Private, isolated, yours.</div>
           <ol style={{ color: 'var(--text-muted)', margin: '10px 0 0', paddingLeft: 18, fontSize: '0.875rem', lineHeight: 1.7 }}>
             <li>
-              Add <Link to="/app/influencers" style={{ fontWeight: 700 }}>influencers</Link> or <Link to="/app/brands" style={{ fontWeight: 700 }}>brands</Link> — manual or CSV bulk
+              Add <Link to="/app/creators" style={{ fontWeight: 700 }}>creators</Link> or <Link to="/app/brands" style={{ fontWeight: 700 }}>brands</Link> — manual or CSV bulk
             </li>
             <li>
               Create a <Link to="/app/campaigns" style={{ fontWeight: 700 }}>campaign</Link> to track deals and payouts

@@ -31,7 +31,7 @@ export function PrivacyPage() {
             <strong>Account data:</strong> email address, display name, and authentication credentials managed by Supabase Auth.
           </li>
           <li>
-            <strong>CRM data you enter:</strong> influencers, brands, contacts, campaigns, notes, meetings, and activity
+            <strong>CRM data you enter:</strong> creators, brands, contacts, campaigns, notes, meetings, and activity
             logs — stored privately under your user account.
           </li>
           <li>
@@ -94,7 +94,7 @@ export function TermsPage() {
 
         <h3>1. The service</h3>
         <p>
-          InfluenceFlow is a CRM tool for managing influencers, brands, campaigns, and related workflows. Features may change
+          InfluenceFlow is a CRM tool for managing creators, brands, campaigns, and related workflows. Features may change
           over time.
         </p>
 

@@ -13,7 +13,7 @@ const DEFAULTS: Record<string, { subject: string; body_text: string }> = {
   new: {
     subject: 'Quick question re: {{brand_name}} + YouTube',
     body_text:
-      'Hi {{first_name}},\n\nWe work with a curated roster of tech and AI influencers (250K–2M+ subs). {{brand_name}} would fit naturally into their content.\n\n{{personal_note}}\n\nWould you be open to reviewing a few influencer fits?\n\nBest,\n{{sender_name}}',
+      'Hi {{first_name}},\n\nWe work with a curated roster of tech and AI creators (250K–2M+ subs). {{brand_name}} would fit naturally into their content.\n\n{{personal_note}}\n\nWould you be open to reviewing a few creator fits?\n\nBest,\n{{sender_name}}',
   },
   reach_back_0: {
     subject: 'Re: Quick question re: {{brand_name}} + YouTube',
@@ -156,7 +156,7 @@ export function SettingsPage() {
 
   async function clearAllCrmData() {
     if (!user) return
-    if (!confirm('Delete ALL CRM data for this account (influencers, brands, campaigns, meetings, activity)?')) return
+    if (!confirm('Delete ALL CRM data for this account (creators, brands, campaigns, meetings, activity)?')) return
     if (!confirm('Final confirm: this cannot be undone. Export a backup first if you need it.')) return
 
     const tables = [
@@ -382,7 +382,7 @@ export function SettingsPage() {
 
           <h3 style={{ color: 'var(--danger)' }}>Danger zone</h3>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>
-            Permanently wipe influencers, brands, campaigns, meetings and activity. Keeps your profile.
+            Permanently wipe creators, brands, campaigns, meetings and activity. Keeps your profile.
           </p>
           <button className="btn btn-danger" type="button" onClick={clearAllCrmData}>
             Clear all CRM data

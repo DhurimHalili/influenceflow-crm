@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>Free, open-source CRM for influencer agencies & freelancers.</strong><br />
-  Stop juggling Notion + Sheets + Gmail. Manage creators, brands, campaigns & calendar — in one private workspace.<br />
+  Stop juggling Notion + Sheets + Gmail. Manage influencers, brands, campaigns & calendar — in one private workspace.<br />
 </p>
 
 <p align="center">
@@ -29,7 +29,7 @@
 **You do NOT need your own Supabase. Just sign up.**
 
 1. Go to **[Sign up free](https://dhurimhalili.github.io/influenceflow-crm/#/signup)** → create account
-2. Add creators manually, or **Bulk import** (`Name, channelUrl` paste or CSV file)
+2. Add influencers manually, or **Bulk import** (`Name, channelUrl` paste or CSV file)
 3. Track them: `New → Contacted → Negotiating → Roster` (table or drag-and-drop board)
 4. Create campaigns and schedule meetings in Calendar
 
@@ -43,9 +43,9 @@ That's it. Your data is private to your account — other users can't see it. Ex
 
 | Step | What you do | What InfluenceFlow does |
 |------|-------------|------------------------|
-| **1. Organize** | Add creators and brands manually or via bulk import | Keeps pipeline clean — dedupes, merges duplicates, soft-deletes to trash |
-| **2. Close** | Create a **Campaign** linking Brand + Creators | Calculates agency cut, warns if creator+brand already linked, moves creators to **Roster** |
-| **3. Stay on top** | Add **Calendar** meetings linked to creator/brand/campaign | Browser reminders so follow-ups don't slip |
+| **1. Organize** | Add influencers and brands manually or via bulk import | Keeps pipeline clean — dedupes, merges duplicates, soft-deletes to trash |
+| **2. Close** | Create a **Campaign** linking Brand + Influencers | Calculates agency cut, warns if influencer+brand already linked, moves influencers to **Roster** |
+| **3. Stay on top** | Add **Calendar** meetings linked to influencer/brand/campaign | Browser reminders so follow-ups don't slip |
 
 ---
 
@@ -53,11 +53,11 @@ That's it. Your data is private to your account — other users can't see it. Ex
 
 | Area | How you'd explain it to a teammate |
 |------|-------------------------------------|
-| **Creators CRM** | Table + Kanban board + mobile cards. Filter, bulk-change status, bulk-delete, merge duplicates by name, personal notes per creator |
+| **Influencers CRM** | Table + Kanban board + mobile cards. Filter, bulk-change status, bulk-delete, merge duplicates by name, personal notes per influencer |
 | **Brands & contacts** | Each brand has its own people (first/last name, title, email, LinkedIn). Same pipeline statuses |
 | **Bulk import** | Paste `Rory Alexander, https://youtube.com/channel/UC...` or `Name, email, niche` — or **Attach CSV**. Auto-dedupes by name + link |
-| **Campaigns** | Name, brand, platform, deliverables, payment + agency % → auto payout, status (negotiating/active/completed/cancelled), start/due dates, assign creators, conflict warning |
-| **Calendar** | Meetings with start/end, linked to creator/brand/campaign, `remind_at` → browser notification |
+| **Campaigns** | Name, brand, platform, deliverables, payment + agency % → auto payout, status (negotiating/active/completed/cancelled), start/due dates, assign influencers, conflict warning |
+| **Calendar** | Meetings with start/end, linked to influencer/brand/campaign, `remind_at` → browser notification |
 | **Data & privacy** | Per-user Supabase Auth + RLS (no one sees your data), global search, CSV export, JSON backup export/import (v2 + legacy), Deleted list, activity log |
 | **Polish** | Dark (default) / light, fully responsive, PWA, Obsidian Flow premium UI |
 
@@ -123,7 +123,7 @@ The workflow in `.github/workflows/deploy-pages.yml` builds `web/` with `VITE_SU
 ```text
 influenceflow-crm/
 ├── web/                 ← Vite + React 19 + TypeScript app (source of truth)
-│   ├── src/pages/       ← Creators, Brands, Campaigns, Calendar, Settings ...
+│   ├── src/pages/       ← Influencers, Brands, Campaigns, Calendar, Settings ...
 │   ├── src/lib/         ← supabase client, types, utils, features (visibility flags)
 │   └── public/          ← home.html copy etc.
 ├── supabase/
@@ -141,7 +141,7 @@ influenceflow-crm/
 
 ## Roadmap
 
-- **Done:** Creators (table/kanban), Brands + people, Campaigns + calendar, bulk import, notes, backup
+- **Done:** Influencers (table/kanban), Brands + people, Campaigns + calendar, bulk import, notes, backup
 - **Next:** Tighter calendar reminders, better analytics, team workspaces (optional)
 - Track in [Issues](https://github.com/DhurimHalili/influenceflow-crm/issues) · ideas and PRs welcome
 

@@ -209,7 +209,7 @@ if (!loaded) return <div className="empty">Loading…</div>
   return (
     <div>
       {Toast}
-      <PageHeader title="Influencer Discovery" subtitle="Automated YouTube influencer search straight into your CRM">
+      <PageHeader title="Creator Discovery" subtitle="Automated YouTube influencer search straight into your CRM">
         {settings && (
           <button className={`btn ${settings.enabled ? 'btn-primary' : ''}`} type="button" onClick={runNow} disabled={running}>
             {running ? 'Searching…' : 'Run now'}
@@ -245,7 +245,7 @@ if (!loaded) return <div className="empty">Loading…</div>
             </div>
           </div>
           <form onSubmit={createDefault}>
-            <Field label="Niche (shown on each influencer)">
+            <Field label="Niche (shown on each creator)">
               <input className="input" value={'Desk Setups · Gaming PC Gear'} readOnly />
             </Field>
             <Field label="Search keywords — one per line (44 broad gear+desk prefilled if you leave empty)">
@@ -322,7 +322,7 @@ if (!loaded) return <div className="empty">Loading…</div>
                   onChange={(e) => patch({ cooldown_days: Number(e.target.value) })}
                 />
               </Field>
-              <Field label="Target influencers per run">
+              <Field label="Target creators per run">
                 <input
                   className="input"
                   type="number"
@@ -364,7 +364,7 @@ if (!loaded) return <div className="empty">Loading…</div>
           <div className="card" style={{ marginTop: '1rem', border: '1px dashed var(--border-strong)', background: 'color-mix(in srgb, var(--accent-soft) 55%, transparent)' }}>
             <h3 style={{ marginTop: 0, display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text)' }}>How to get keywords with AI <span style={{ fontSize: '.7rem', padding: '4px 8px', borderRadius: 999, background: 'var(--accent)', color: '#fff' }}>COPY & PASTE</span></h3>
             <p style={{ color: 'var(--text-muted)', marginTop: 0, fontSize: '.9rem', lineHeight: 1.6 }}>
-              New users start with <strong style={{ color: 'var(--text)' }}>broad gear defaults</strong> (desk + chairs, keyboards, mice, monitors, headsets, PC builds, motherboards, GPUs — all). Changing niche? Copy a prompt below, replace <code style={{ background: 'var(--bg-soft)', padding: '2px 6px', borderRadius: 4, color: 'var(--text)' }}>[YOUR NICHE]</code>, paste into ChatGPT/Claude, get a clean list, then paste here and Save. Accuracy is now <strong style={{ color: 'var(--text)' }}>≥2 gear/setup videos + no Shorts-only + no India</strong> — pure gamers are auto-skipped, but keyboard/chair/monitor influencers pass.
+              New users start with <strong style={{ color: 'var(--text)' }}>broad gear defaults</strong> (desk + chairs, keyboards, mice, monitors, headsets, PC builds, motherboards, GPUs — all). Changing niche? Copy a prompt below, replace <code style={{ background: 'var(--bg-soft)', padding: '2px 6px', borderRadius: 4, color: 'var(--text)' }}>[YOUR NICHE]</code>, paste into ChatGPT/Claude, get a clean list, then paste here and Save. Accuracy is now <strong style={{ color: 'var(--text)' }}>≥2 gear/setup videos + no Shorts-only + no India</strong> — pure gamers are auto-skipped, but keyboard/chair/monitor creators pass.
             </p>
             <div style={{ display: 'grid', gap: 12 }}>
               <details style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 12px' }}>
@@ -528,7 +528,7 @@ One per line, lower case, 1-2 words each. No sentences, no numbering. These boos
                 <li><strong style={{ color: 'var(--text)' }}>Min avg views</strong> 50K → 30K → 20K → 15K — biggest lever. Try 30K first.</li>
                 <li><strong style={{ color: 'var(--text)' }}>Min engagement %</strong> 1% → 0.7% → 0.5% → 0.3% — second lever for new channels.</li>
                 <li><strong style={{ color: 'var(--text)' }}>Max days since upload</strong> 21 → 30 — catches monthly posters.</li>
-                <li><strong style={{ color: 'var(--text)' }}>Min subscribers</strong> 50K → 20K — if niche is micro-influencers.</li>
+                <li><strong style={{ color: 'var(--text)' }}>Min subscribers</strong> 50K → 20K — if niche is micro-creators.</li>
                 <li><strong style={{ color: 'var(--text)' }}>Max subscribers</strong> leave empty = no cap — only set if you truly need upper bound.</li>
               </ul>
               <div style={{ color: 'var(--text-muted)', fontSize: '.78rem' }}>Tip: Change one lever at a time, Save, Run now. Check <strong style={{ color: 'var(--text)' }}>Recent runs</strong> below — if `shortlisted` jumps, you’ve found your sweet spot. Need help? See <strong style={{ color: 'var(--text)' }}>Help → Discovery</strong>.</div>

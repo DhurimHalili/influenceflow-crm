@@ -49,11 +49,9 @@ export default function App() {
             <Route index element={<DashboardPage />} />
             {/* Hidden but preserved: Outreach + Discovery code stays, UI gated by FEATURES */}
             <Route path="outreach" element={FEATURES.outreachEnabled ? <OutreachPage /> : <Navigate to="/app" replace />} />
-            <Route path="search" element={<Navigate to="/app/influencers" replace />} />
-            <Route path="creators" element={<Navigate to="/app/influencers" replace />} />
-            <Route path="creators/:id" element={<Navigate to="/app/influencers" replace />} />
-            <Route path="influencers" element={<CreatorsPage />} />
-            <Route path="influencers/:id" element={<CreatorDetailPage />} />
+            <Route path="search" element={<Navigate to="/app/creators" replace />} />
+            <Route path="creators" element={<CreatorsPage />} />
+            <Route path="creators/:id" element={<CreatorDetailPage />} />
             <Route path="brands" element={<BrandsPage />} />
             <Route path="brands/:id" element={<BrandDetailPage />} />
             <Route path="deleted" element={<DeletedPage />} />

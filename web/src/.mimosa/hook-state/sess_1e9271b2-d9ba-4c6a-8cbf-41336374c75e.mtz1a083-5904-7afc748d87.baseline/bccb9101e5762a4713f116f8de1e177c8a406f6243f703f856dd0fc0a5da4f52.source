@@ -2,7 +2,7 @@ import { type FormEvent, useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabase'
-import { STATUS_LABELS, normalizeStatus, type Brand, type BrandContact, type PipelineStatus } from '../lib/types'
+import { STATUS_LABELS, type Brand, type BrandContact, type PipelineStatus } from '../lib/types'
 import { downloadCsv, formatDate, isValidEmail, normalizeName, parseBulkLines } from '../lib/utils'
 import { Empty, Field, FormActions, Modal, StatusBadge, useToast } from '../components/ui'
 import { PageHeader, useActivityLogger } from '../components/Layout'
@@ -10,7 +10,9 @@ import { PageHeader, useActivityLogger } from '../components/Layout'
 const brandStatuses: PipelineStatus[] = [
   'new',
   'contacted',
-  'reach_back',
+  'reach_back_1',
+  'reach_back_2',
+  'reach_back_3',
   'replied',
   'negotiating',
   'signed',
@@ -48,8 +50,7 @@ export function BrandsPage() {
       .select('*')
       .is('archived_at', null)
       .order('updated_at', { ascending: false })
-    // normalize legacy reach_back_1/2/3 rows to the single reach_back status
-    setRows(((data || []) as Brand[]).map((r) => ({ ...r, pipeline_status: normalizeStatus(r.pipeline_status) })))
+    setRows((data || []) as Brand[])
   }
 
   useEffect(() => {
@@ -458,8 +459,8 @@ export function BrandDetailPage() {
       supabase.from('brands').select('*').eq('id', id).maybeSingle(),
       supabase.from('brand_contacts').select('*').eq('brand_id', id).is('archived_at', null).order('created_at', { ascending: false }),
     ])
-    setBrand(b ? ({ ...b, pipeline_status: normalizeStatus((b as Brand).pipeline_status) } as Brand) : null)
-    setPeople(((p || []) as BrandContact[]).map((r) => ({ ...r, pipeline_status: normalizeStatus(r.pipeline_status) })))
+    setBrand(b as Brand | null)
+    setPeople((p || []) as BrandContact[])
   }
 
   useEffect(() => {

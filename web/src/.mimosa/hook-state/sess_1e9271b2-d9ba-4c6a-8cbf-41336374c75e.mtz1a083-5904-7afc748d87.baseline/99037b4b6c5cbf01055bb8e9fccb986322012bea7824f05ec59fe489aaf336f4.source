@@ -1,28 +1,17 @@
-import { useEffect, useState } from 'react'
 import { useAuth } from '../context/AuthContext'
-import { THEMES, getAppliedTheme } from '../lib/themes'
+import { THEMES } from '../lib/themes'
 import { useToast } from '../components/ui'
 import { PageHeader } from '../components/Layout'
 
 export function ThemesPage() {
   const { profile, updateProfile } = useAuth()
   const { show, Toast } = useToast()
-  // Track the theme that is actually applied to the document — not the profile
-  // row, which can be stale if a previous save failed or hasn't landed yet.
-  const [current, setCurrent] = useState(getAppliedTheme)
-
-  useEffect(() => {
-    setCurrent(getAppliedTheme())
-    const mo = new MutationObserver(() => setCurrent(getAppliedTheme()))
-    mo.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
-    return () => mo.disconnect()
-  }, [profile?.theme])
+  const current = profile?.theme || 'agency'
 
   async function apply(id: (typeof THEMES)[number]['id']) {
     if (id === current) return
     document.documentElement.dataset.theme = id
     localStorage.setItem('if-theme', id)
-    setCurrent(id)
     await updateProfile({ theme: id })
     show(`${THEMES.find((t) => t.id === id)?.name} theme applied`)
   }

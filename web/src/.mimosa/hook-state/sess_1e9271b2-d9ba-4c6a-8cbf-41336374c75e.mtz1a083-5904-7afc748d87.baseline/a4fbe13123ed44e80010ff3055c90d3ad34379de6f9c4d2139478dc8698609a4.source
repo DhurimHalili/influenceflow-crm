@@ -33,7 +33,7 @@ export function LoginPage() {
           <div className="brand-mark" style={{ width: 38, height: 38, borderRadius: 12 }} />
           <div>
             <div style={{ fontFamily: 'var(--display)', fontWeight: 800, letterSpacing: '-0.03em', fontSize: '1.02rem', lineHeight: 1 }}>InfluenceFlow <span style={{ fontWeight: 500, color: 'var(--text-muted)' }}>CRM</span></div>
-            <div style={{ fontFamily: 'var(--mono)', fontSize: '0.62rem', letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-faint)', fontWeight: 700 }}>Influencer OS · Private workspace</div>
+            <div style={{ fontFamily: 'var(--mono)', fontSize: '0.62rem', letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-faint)', fontWeight: 700 }}>Creator OS · Private workspace</div>
           </div>
           <span style={{ marginLeft: 'auto', fontFamily: 'var(--mono)', fontSize: '0.62rem', letterSpacing: '0.08em', textTransform: 'uppercase', fontWeight: 800, color: 'var(--accent)', background: 'var(--accent-soft)', border: '1px solid rgba(182,92,46,0.16)', padding: '4px 8px', borderRadius: 999 }}>Secure</span>
         </div>
