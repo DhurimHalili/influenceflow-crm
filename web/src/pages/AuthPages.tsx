@@ -92,9 +92,10 @@ export function SignupPage() {
     })
     setBusy(false)
     if (err) {
-      if (/already registered/i.test(err.message)) setError('This email is already registered — log in instead.')
-      else if (/rate limit/i.test(err.message)) setError('Too many attempts — please wait a few minutes and try again.')
-      else setError(err.message)
+      const msg = err.message && err.message !== '{}' ? err.message : 'Something went wrong — please try again.'
+      if (/already registered/i.test(msg)) setError('This email is already registered — log in instead.')
+      else if (/rate limit/i.test(msg)) setError('Too many attempts — please wait a few minutes and try again.')
+      else setError(msg)
       return
     }
     if (data.session) nav('/app')
