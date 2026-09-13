@@ -3,7 +3,7 @@ import { Link, useParams } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabase'
 import { STATUS_LABELS, normalizeStatus, type Brand, type BrandContact, type PipelineStatus } from '../lib/types'
-import { downloadCsv, formatDate, isValidEmail, normalizeName, parseBulkLines } from '../lib/utils'
+import { downloadCsv, domainUrl, formatDate, isValidEmail, normalizeName, parseBulkLines } from '../lib/utils'
 import { Empty, Field, FormActions, Modal, StatusBadge, useToast } from '../components/ui'
 import { PageHeader, useActivityLogger } from '../components/Layout'
 
@@ -16,6 +16,23 @@ const brandStatuses: PipelineStatus[] = [
   'signed',
   'denied',
   'no_reply',
+]
+
+// suggestions for the brand type field — anything custom can be typed freely
+const BRAND_TYPES = [
+  'PC Hardware',
+  'Peripherals',
+  'Monitor / Display',
+  'Gaming Gear',
+  'Chair / Ergonomics',
+  'Desk / Furniture',
+  'Audio',
+  'Software / App',
+  'Streaming Tools',
+  'Apparel / Merch',
+  'Food & Beverage',
+  'Telecom / Internet',
+  'Other',
 ]
 
 export function BrandsPage() {
@@ -31,6 +48,7 @@ export function BrandsPage() {
   const [form, setForm] = useState({
     name: '',
     domain: '',
+    brand_type: '',
     contact_email: '',
     pipeline_status: 'new' as PipelineStatus,
     notes: '',
@@ -61,7 +79,7 @@ export function BrandsPage() {
       if (status !== 'all' && r.pipeline_status !== status) return false
       const s = q.toLowerCase()
       if (!s) return true
-      return [r.name, r.domain, r.contact_email].some((v) => (v || '').toLowerCase().includes(s))
+      return [r.name, r.domain, r.contact_email, r.brand_type].some((v) => (v || '').toLowerCase().includes(s))
     })
   }, [rows, q, status])
 
@@ -74,7 +92,7 @@ export function BrandsPage() {
 
   function openCreate() {
     setEditing(null)
-    setForm({ name: '', domain: '', contact_email: '', pipeline_status: 'new', notes: '', personalization: '' })
+    setForm({ name: '', domain: '', brand_type: '', contact_email: '', pipeline_status: 'new', notes: '', personalization: '' })
     setModal(true)
   }
 
@@ -83,6 +101,7 @@ export function BrandsPage() {
     setForm({
       name: b.name,
       domain: b.domain || '',
+      brand_type: b.brand_type || '',
       contact_email: b.contact_email || '',
       pipeline_status: b.pipeline_status,
       notes: b.notes || '',
@@ -99,6 +118,7 @@ export function BrandsPage() {
       user_id: user.id,
       name: form.name.trim(),
       domain: form.domain.trim() || null,
+      brand_type: form.brand_type.trim() || null,
       contact_email: form.contact_email.trim() || null,
       pipeline_status: form.pipeline_status,
       notes: form.notes,
@@ -274,7 +294,7 @@ export function BrandsPage() {
     <div>
       {Toast}
       <PageHeader title="Brands" subtitle={`${filtered.length} shown`}>
-        <button className="btn" type="button" onClick={() => downloadCsv('brands.csv', filtered.map((b) => ({ name: b.name, domain: b.domain, email: b.contact_email, status: b.pipeline_status, notes: b.notes })))}>
+        <button className="btn" type="button" onClick={() => downloadCsv('brands.csv', filtered.map((b) => ({ name: b.name, type: b.brand_type, domain: b.domain, email: b.contact_email, status: b.pipeline_status, notes: b.notes })))}>
           Export CSV
         </button>
         <button className="btn" type="button" onClick={() => setBulkOpen(true)}>
@@ -341,6 +361,7 @@ export function BrandsPage() {
                 />
               </th>
               <th>Brand</th>
+              <th>Type</th>
               <th>Domain</th>
               <th>Email</th>
               <th>Status</th>
@@ -356,7 +377,16 @@ export function BrandsPage() {
                 <td>
                   <Link to={`/app/brands/${b.id}`}>{b.name}</Link>
                 </td>
-                <td>{b.domain || '—'}</td>
+                <td>{b.brand_type || '—'}</td>
+                <td>
+                  {domainUrl(b.domain) ? (
+                    <a href={domainUrl(b.domain) || '#'} target="_blank" rel="noreferrer" title="Open website">
+                      {b.domain} ↗
+                    </a>
+                  ) : (
+                    '—'
+                  )}
+                </td>
                 <td>{b.contact_email || '—'}</td>
                 <td>
                   <StatusBadge status={b.pipeline_status} />
@@ -386,7 +416,10 @@ export function BrandsPage() {
               </h3>
             </label>
             <StatusBadge status={b.pipeline_status} />
-            <div style={{ color: 'var(--text-muted)', marginTop: 6 }}>{b.contact_email || b.domain || '—'}</div>
+            {b.brand_type && <div style={{ color: 'var(--text-muted)', marginTop: 6 }}>{b.brand_type}</div>}
+            <div style={{ color: 'var(--text-muted)', marginTop: 6 }}>
+              {b.contact_email || (domainUrl(b.domain) ? <a href={domainUrl(b.domain) || '#'} target="_blank" rel="noreferrer">{b.domain} ↗</a> : '—')}
+            </div>
           </div>
         ))}
       </div>
@@ -398,7 +431,21 @@ export function BrandsPage() {
               <input className="input" required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
             </Field>
             <Field label="Domain">
-              <input className="input" value={form.domain} onChange={(e) => setForm({ ...form, domain: e.target.value })} />
+              <input className="input" value={form.domain} onChange={(e) => setForm({ ...form, domain: e.target.value })} placeholder="nvidia.com" />
+            </Field>
+            <Field label="Brand type">
+              <input
+                className="input"
+                list="brand-type-options"
+                value={form.brand_type}
+                onChange={(e) => setForm({ ...form, brand_type: e.target.value })}
+                placeholder="PC Hardware, Peripherals, …"
+              />
+              <datalist id="brand-type-options">
+                {BRAND_TYPES.map((t) => (
+                  <option key={t} value={t} />
+                ))}
+              </datalist>
             </Field>
             <Field label="Primary email">
               <input className="input" type="email" value={form.contact_email} onChange={(e) => setForm({ ...form, contact_email: e.target.value })} />
@@ -493,7 +540,7 @@ export function BrandDetailPage() {
   return (
     <div>
       {Toast}
-      <PageHeader title={brand.name} subtitle={brand.domain || brand.contact_email || undefined}>
+      <PageHeader title={brand.name} subtitle={brand.contact_email || undefined}>
         <Link className="btn" to="/app/brands">
           Back
         </Link>
@@ -505,6 +552,19 @@ export function BrandDetailPage() {
       <div className="grid-2" style={{ marginBottom: '1rem' }}>
         <div className="card">
           <StatusBadge status={brand.pipeline_status} />
+          <p style={{ margin: '10px 0 4px' }}>
+            Type: <strong>{brand.brand_type || '—'}</strong>
+          </p>
+          <p style={{ margin: '4px 0' }}>
+            Website:{' '}
+            {domainUrl(brand.domain) ? (
+              <a href={domainUrl(brand.domain) || '#'} target="_blank" rel="noreferrer" title="Open website">
+                {brand.domain} ↗
+              </a>
+            ) : (
+              '—'
+            )}
+          </p>
           <p style={{ whiteSpace: 'pre-wrap' }}>{brand.notes || 'No notes'}</p>
         </div>
         <div className="card">

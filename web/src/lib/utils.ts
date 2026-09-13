@@ -18,6 +18,14 @@ export function normalizeName(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]/g, '')
 }
 
+/** Turn a stored domain ("nvidia.com" or a full URL) into a clickable URL. */
+export function domainUrl(domain: string | null | undefined): string | null {
+  const d = (domain || '').trim()
+  if (!d) return null
+  if (/^https?:\/\//i.test(d)) return d
+  return `https://${d.replace(/^\/+/, '')}`
+}
+
 export function downloadCsv(filename: string, rows: Record<string, unknown>[]) {
   if (!rows.length) return
   const headers = Object.keys(rows[0])

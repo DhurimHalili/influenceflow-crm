@@ -80,6 +80,7 @@ export interface Brand {
   user_id: string
   name: string
   domain: string | null
+  brand_type: string | null
   contact_email: string | null
   pipeline_status: PipelineStatus
   date_contacted: string | null
