@@ -1,75 +1,79 @@
-import { HashRouter, Navigate, Route, Routes } from 'react-router-dom'
-import { AuthProvider, useAuth } from './context/AuthContext'
-import { AppLayout, RequireAuth } from './components/Layout'
-import { LoginPage, SignupPage } from './pages/AuthPages'
-import { LandingPage } from './pages/LandingPage'
-import { DashboardPage } from './pages/DashboardPage'
-import { CreatorsPage, CreatorDetailPage } from './pages/CreatorsPage'
-import { BrandsPage, BrandDetailPage } from './pages/BrandsPage'
-import { CampaignsPage } from './pages/CampaignsPage'
-import { OutreachPage } from './pages/OutreachPage'
-import { CalendarPage } from './pages/CalendarPage'
-import { SettingsPage } from './pages/SettingsPage'
-import { DeletedPage } from './pages/DeletedPage'
-import { ThemesPage } from './pages/ThemesPage'
-import { DiscoveryPage } from './pages/DiscoveryPage'
-import { HelpPage, HirePage } from './pages/HelpHirePages'
-import { PrivacyPage, TermsPage } from './pages/LegalPages'
-import { ThemeFX } from './components/ThemeFX'
-import { FEATURES } from './lib/features'
+import { lazy, Suspense, type ReactNode } from "react";
+import { HashRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
+import { LoaderCircle } from "lucide-react";
+import { AuthProvider, useAuth } from "./contexts/AuthContext";
+import { DataProvider } from "./contexts/DataContext";
+import { ToastProvider } from "./contexts/ToastContext";
 
-function RootRedirect() {
-  const { user, loading } = useAuth()
-  if (loading) return <div className="auth-page">Loading…</div>
-  if (user) return <Navigate to="/app" replace />
-  return <LandingPage />
+const AppShell = lazy(() => import("./components/AppShell"));
+const LandingPage = lazy(() => import("./pages/PublicPages").then((module) => ({ default: module.LandingPage })));
+const LoginPage = lazy(() => import("./pages/PublicPages").then((module) => ({ default: module.LoginPage })));
+const SignupPage = lazy(() => import("./pages/PublicPages").then((module) => ({ default: module.SignupPage })));
+const LegalPage = lazy(() => import("./pages/PublicPages").then((module) => ({ default: module.LegalPage })));
+const HelpPage = lazy(() => import("./pages/PublicPages").then((module) => ({ default: module.HelpPage })));
+const HirePage = lazy(() => import("./pages/PublicPages").then((module) => ({ default: module.HirePage })));
+const DashboardPage = lazy(() => import("./pages/DashboardPage"));
+const InfluencersPage = lazy(() => import("./pages/InfluencersPage"));
+const InfluencerDetailPage = lazy(() => import("./pages/InfluencersPage").then((module) => ({ default: module.InfluencerDetailPage })));
+const BrandsPage = lazy(() => import("./pages/BrandsPage"));
+const BrandDetailPage = lazy(() => import("./pages/BrandsPage").then((module) => ({ default: module.BrandDetailPage })));
+const CampaignsPage = lazy(() => import("./pages/CampaignsPage"));
+const CalendarPage = lazy(() => import("./pages/CalendarPage"));
+const SettingsPage = lazy(() => import("./pages/WorkspacePages").then((module) => ({ default: module.SettingsPage })));
+const ThemesPage = lazy(() => import("./pages/WorkspacePages").then((module) => ({ default: module.ThemesPage })));
+const DeletedPage = lazy(() => import("./pages/WorkspacePages").then((module) => ({ default: module.DeletedPage })));
+
+function LoadingScreen() {
+  return <div className="loading-screen"><div className="logo-mark"><span /><span /><span /></div><LoaderCircle className="spin" /><span>Opening your workspace</span></div>;
+}
+
+function RequireAuth({ children }: { children: ReactNode }) {
+  const { user, loading } = useAuth();
+  const location = useLocation();
+  if (loading) return <LoadingScreen />;
+  if (!user) return <Navigate to="/login" state={{ from: location }} replace />;
+  return children;
+}
+
+function NotFound() {
+  return <div className="not-found"><span>404</span><h1>This path is out of flow.</h1><p>The page may have moved or no longer exists.</p><a href="#/">Return home</a></div>;
 }
 
 export default function App() {
   return (
-    <AuthProvider>
-      <HashRouter>
-        <ThemeFX />
-        <Routes>
-          <Route path="/" element={<RootRedirect />} />
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/signup" element={<SignupPage />} />
-          <Route path="/privacy" element={<PrivacyPage />} />
-          <Route path="/terms" element={<TermsPage />} />
-          <Route path="/help" element={<HelpPage />} />
-          <Route path="/hire" element={<HirePage />} />
-          <Route
-            path="/app"
-            element={
-              <RequireAuth>
-                <AppLayout />
-              </RequireAuth>
-            }
-          >
-            <Route index element={<DashboardPage />} />
-            {/* Hidden but preserved: Outreach + Discovery code stays, UI gated by FEATURES */}
-            <Route path="outreach" element={FEATURES.outreachEnabled ? <OutreachPage /> : <Navigate to="/app" replace />} />
-            <Route path="search" element={<Navigate to="/app/influencers" replace />} />
-            <Route path="creators" element={<Navigate to="/app/influencers" replace />} />
-            <Route path="creators/:id" element={<Navigate to="/app/influencers" replace />} />
-            <Route path="influencers" element={<CreatorsPage />} />
-            <Route path="influencers/:id" element={<CreatorDetailPage />} />
-            <Route path="brands" element={<BrandsPage />} />
-            <Route path="brands/:id" element={<BrandDetailPage />} />
-            <Route path="deleted" element={<DeletedPage />} />
-            <Route path="campaigns" element={<CampaignsPage />} />
-            <Route path="calendar" element={<CalendarPage />} />
-            <Route path="discovery" element={FEATURES.discoveryEnabled ? <DiscoveryPage /> : <Navigate to="/app" replace />} />
-            <Route path="themes" element={<ThemesPage />} />
-            <Route path="settings" element={<SettingsPage />} />
-            <Route path="help" element={<HelpPage />} />
-            <Route path="hire" element={<HirePage />} />
-            <Route path="privacy" element={<PrivacyPage />} />
-            <Route path="terms" element={<TermsPage />} />
-          </Route>
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </HashRouter>
-    </AuthProvider>
-  )
+    <HashRouter>
+      <AuthProvider>
+        <ToastProvider>
+          <DataProvider>
+            <Suspense fallback={<LoadingScreen />}>
+              <Routes>
+                <Route path="/" element={<LandingPage />} />
+                <Route path="/login" element={<LoginPage />} />
+                <Route path="/signup" element={<SignupPage />} />
+                <Route path="/privacy" element={<LegalPage type="privacy" />} />
+                <Route path="/terms" element={<LegalPage type="terms" />} />
+                <Route path="/help" element={<HelpPage />} />
+                <Route path="/hire" element={<HirePage />} />
+                <Route path="/app" element={<RequireAuth><AppShell /></RequireAuth>}>
+                  <Route index element={<DashboardPage />} />
+                  <Route path="influencers" element={<InfluencersPage />} />
+                  <Route path="influencers/:id" element={<InfluencerDetailPage />} />
+                  <Route path="brands" element={<BrandsPage />} />
+                  <Route path="brands/:id" element={<BrandDetailPage />} />
+                  <Route path="campaigns" element={<CampaignsPage />} />
+                  <Route path="calendar" element={<CalendarPage />} />
+                  <Route path="settings" element={<SettingsPage />} />
+                  <Route path="themes" element={<ThemesPage />} />
+                  <Route path="deleted" element={<DeletedPage />} />
+                  <Route path="help" element={<HelpPage embedded />} />
+                  <Route path="hire" element={<HirePage embedded />} />
+                </Route>
+                <Route path="*" element={<NotFound />} />
+              </Routes>
+            </Suspense>
+          </DataProvider>
+        </ToastProvider>
+      </AuthProvider>
+    </HashRouter>
+  );
 }

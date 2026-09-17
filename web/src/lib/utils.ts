@@ -1,110 +1,54 @@
-export function renderTemplate(
-  template: string,
-  vars: Record<string, string | null | undefined>,
-): string {
-  return template.replace(/\{\{(\w+)\}\}/g, (_, key: string) => {
-    const val = vars[key]
-    return val == null || val === '' ? '' : String(val)
-  })
-}
+import { formatDistanceToNow, isBefore, parseISO } from "date-fns";
 
-export function estimateSendMinutes(count: number, delayMin: number, delayMax: number): number {
-  if (count <= 1) return 1
-  const avg = (delayMin + delayMax) / 2
-  return Math.max(1, Math.ceil(((count - 1) * avg) / 60))
-}
+export const uid = () => crypto.randomUUID();
 
-export function normalizeName(name: string): string {
-  return name.toLowerCase().replace(/[^a-z0-9]/g, '')
-}
+export const today = () => new Date().toISOString().slice(0, 10);
 
-/** Turn a stored domain ("nvidia.com" or a full URL) into a clickable URL. */
-export function domainUrl(domain: string | null | undefined): string | null {
-  const d = (domain || '').trim()
-  if (!d) return null
-  if (/^https?:\/\//i.test(d)) return d
-  return `https://${d.replace(/^\/+/, '')}`
-}
+export const sanitize = (value: string) => value.replace(/<[^>]*>/g, "").trim();
 
-export function downloadCsv(filename: string, rows: Record<string, unknown>[]) {
-  if (!rows.length) return
-  const headers = Object.keys(rows[0])
-  const escape = (v: unknown) => {
-    const s = v == null ? '' : String(v)
-    if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`
-    return s
-  }
-  const csv = [headers.join(','), ...rows.map((r) => headers.map((h) => escape(r[h])).join(','))].join(
-    '\n',
-  )
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  a.click()
-  URL.revokeObjectURL(url)
-}
+export const money = (value: number) =>
+  new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(value || 0);
 
-export function downloadJson(filename: string, data: unknown) {
-  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  a.click()
-  URL.revokeObjectURL(url)
-}
+export const compact = (value: number) =>
+  new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(value || 0);
 
-export function parseBulkLines(text: string): { name: string; email?: string; extra?: string }[] {
-  return text
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter(Boolean)
-    .map((line) => {
-      const parts = line.split(/[,\t|]/).map((p) => p.trim())
-      return { name: parts[0] || '', email: parts[1], extra: parts[2] }
-    })
-    .filter((r) => r.name)
-}
+export const dateLabel = (value?: string | null) => {
+  if (!value) return "Not set";
+  return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(new Date(value));
+};
 
-export function isValidEmail(email: string): boolean {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())
-}
+export const timeLabel = (value: string) =>
+  new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit" }).format(new Date(value));
 
-export function formatDate(iso: string | null | undefined): string {
-  if (!iso) return '—'
-  try {
-    return new Date(iso).toLocaleDateString()
-  } catch {
-    return iso
-  }
-}
+export const relativeTime = (value: string) => formatDistanceToNow(new Date(value), { addSuffix: true });
 
-export function formatDateTime(iso: string | null | undefined): string {
-  if (!iso) return '—'
-  try {
-    return new Date(iso).toLocaleString()
-  } catch {
-    return iso
-  }
-}
+export const initials = (name: string) =>
+  name
+    .split(/\s+/)
+    .map((part) => part[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
 
-export function stripHtml(input: string): string {
-  return input
-    .replace(/<[^>]*>/g, '')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .trim()
-}
+export const normalize = (value: string) => value.trim().toLocaleLowerCase().replace(/\/+$/, "");
 
-export function escapeHtml(input: string): string {
-  return input
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-}
+export const isOverdue = (value: string) => isBefore(parseISO(value), new Date());
+
+export const download = (name: string, value: string, type = "application/json") => {
+  const url = URL.createObjectURL(new Blob([value], { type }));
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = name;
+  anchor.click();
+  URL.revokeObjectURL(url);
+};
+
+export const toCSV = (rows: Record<string, string | number | boolean | null | undefined>[]) => {
+  if (!rows.length) return "";
+  const keys = Object.keys(rows[0]);
+  const escape = (value: unknown) => `"${String(value ?? "").replace(/"/g, '""')}"`;
+  return [keys.map(escape).join(","), ...rows.map((row) => keys.map((key) => escape(row[key])).join(","))].join("\n");
+};
+
+export const isValidEmail = (value: string) => !value || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+export const isValidUrl = (value: string) => !value || /^(https?:\/\/)?[\w.-]+\.[a-z]{2,}/i.test(value);

@@ -1,405 +1,58 @@
-import { type FormEvent, useEffect, useMemo, useState } from 'react'
-import { useAuth } from '../context/AuthContext'
-import { supabase } from '../lib/supabase'
-import type { Brand, Campaign, Creator } from '../lib/types'
-import { normalizeStatus } from '../lib/types'
-import { downloadCsv, formatDate } from '../lib/utils'
-import { Empty, Field, FormActions, Modal, StatusBadge, useToast } from '../components/ui'
-import { PageHeader, useActivityLogger } from '../components/Layout'
+import { AlertTriangle, Archive, ArrowLeft, ArrowRight, BarChart3, CalendarClock, Check, CheckCircle2, CircleDollarSign, Download, Plus, SlidersHorizontal, Sparkles, Users, X } from "lucide-react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { Link, useSearchParams } from "react-router-dom";
+import { Avatar, Button, EmptyState, Input, Modal, PageHeader, SearchInput, Select, StatusBadge, Textarea } from "../components/ui";
+import { useData } from "../contexts/DataContext";
+import { useToast } from "../contexts/ToastContext";
+import { compact, dateLabel, download, isOverdue, money, relativeTime, toCSV, uid } from "../lib/utils";
+import { CAMPAIGN_STATUSES, PLATFORMS, STATUS_LABELS, type Campaign, type CampaignStatus, type Platform } from "../types";
 
-export function CampaignsPage() {
-  const { user } = useAuth()
-  const log = useActivityLogger()
-  const { show, Toast } = useToast()
-  const [rows, setRows] = useState<Campaign[]>([])
-  const [brands, setBrands] = useState<Brand[]>([])
-  const [creators, setCreators] = useState<Creator[]>([])
-  const [assignments, setAssignments] = useState<Record<string, string[]>>({})
-  const [external, setExternal] = useState<{ brand_id: string; creator_name: string }[]>([])
-  const [q, setQ] = useState('')
-  const [status, setStatus] = useState('all')
-  const [modal, setModal] = useState(false)
-  const [editing, setEditing] = useState<Campaign | null>(null)
-  const [selectedCreators, setSelectedCreators] = useState<string[]>([])
-  const [form, setForm] = useState({
-    name: '',
-    brand_id: '',
-    platform: 'youtube',
-    deliverables: '',
-    agreed_payment: '',
-    agency_percent: '20',
-    status: 'negotiating',
-    start_date: '',
-    due_date: '',
-    notes: '',
-  })
-  const [busy, setBusy] = useState(false)
-  const [conflictWarn, setConflictWarn] = useState('')
-  const [creatorSearch, setCreatorSearch] = useState('')
-  const [brandSearch, setBrandSearch] = useState('')
+type CampaignDraft = { name: string; brand_id: string; platform: Platform; deliverables: string; agreed_payment: string; agency_percent: string; status: CampaignStatus; start_date: string; due_date: string; notes: string; next_action: string; creator_ids: string[] };
+const blank: CampaignDraft = { name: "", brand_id: "", platform: "YouTube", deliverables: "", agreed_payment: "", agency_percent: "20", status: "negotiating", start_date: "", due_date: "", notes: "", next_action: "", creator_ids: [] };
 
-  async function load() {
-    if (!user) return
-    const [c, b, cr, cc, ex] = await Promise.all([
-      supabase.from('campaigns').select('*, brands(name)').is('archived_at', null).order('updated_at', { ascending: false }),
-      supabase.from('brands').select('*').is('archived_at', null).order('name'),
-      supabase.from('creators').select('*').is('archived_at', null).order('name'),
-      supabase.from('campaign_creators').select('campaign_id,creator_id'),
-      supabase.from('external_links').select('brand_id,creator_name'),
-    ])
-    setRows((c.data || []) as Campaign[])
-    setBrands((b.data || []) as Brand[])
-    setCreators(((cr.data || []) as Creator[]).map((r) => ({ ...r, pipeline_status: normalizeStatus(r.pipeline_status) })))
-    const map: Record<string, string[]> = {}
-    for (const row of cc.data || []) {
-      map[row.campaign_id] = [...(map[row.campaign_id] || []), row.creator_id]
-    }
-    setAssignments(map)
-    setExternal((ex.data || []) as { brand_id: string; creator_name: string }[])
-  }
+export default function CampaignsPage() {
+  const data = useData(); const { toast } = useToast(); const [params, setParams] = useSearchParams();
+  const [query, setQuery] = useState(""); const [status, setStatus] = useState("all"); const [brand, setBrand] = useState("all"); const [sort, setSort] = useState("due"); const [open, setOpen] = useState(false); const [draft, setDraft] = useState<CampaignDraft>(blank);
+  const activeCampaign = data.campaigns.find((item) => item.id === params.get("id"));
+  useEffect(() => { if (params.get("new")) { setDraft({ ...blank, brand_id: params.get("brand") || "", creator_ids: params.get("creator") ? [params.get("creator")!] : [] }); setOpen(true); } }, [params]);
+  const close = () => { setOpen(false); setParams((current) => { current.delete("new"); current.delete("brand"); current.delete("creator"); return current; }, { replace: true }); };
+  const rows = useMemo(() => data.campaigns.filter((item) => !item.archived_at).filter((item) => (!query || item.name.toLowerCase().includes(query.toLowerCase())) && (status === "all" || item.status === status) && (brand === "all" || item.brand_id === brand)).sort((a, b) => sort === "value" ? b.agreed_payment - a.agreed_payment : sort === "newest" ? b.created_at.localeCompare(a.created_at) : sort === "status" ? CAMPAIGN_STATUSES.indexOf(a.status) - CAMPAIGN_STATUSES.indexOf(b.status) : a.due_date.localeCompare(b.due_date)), [data.campaigns, query, status, brand, sort]);
+  const create = (event: FormEvent) => { event.preventDefault(); const campaign = data.addCampaign({ name: draft.name, brand_id: draft.brand_id, platform: draft.platform, deliverables: draft.deliverables.split("\n").map((text) => text.trim()).filter(Boolean).map((text) => ({ id: uid(), text, done: false })), agreed_payment: Number(draft.agreed_payment), agency_percent: Number(draft.agency_percent), status: draft.status, start_date: draft.start_date, due_date: draft.due_date, notes: draft.notes, next_action: draft.next_action, creator_ids: draft.creator_ids }); toast(`${campaign.name} created`); close(); setParams({ id: campaign.id }); };
+  const livePayout = Number(draft.agreed_payment || 0) * Number(draft.agency_percent || 0) / 100;
+  const conflictRows = data.campaigns.filter((campaign) => campaign.status === "active" && campaign.brand_id === draft.brand_id && campaign.creator_ids.some((id) => draft.creator_ids.includes(id)));
+  const totals = { value: rows.reduce((sum, item) => sum + item.agreed_payment, 0), payout: rows.reduce((sum, item) => sum + item.creator_payout, 0), active: rows.filter((item) => item.status === "active").length, overdue: rows.filter((item) => item.status === "active" && isOverdue(item.due_date)).length };
+  const exportCampaigns = () => { download("influenceflow-campaigns.csv", toCSV(rows.map((item) => ({ name: item.name, brand: data.brands.find((brand) => brand.id === item.brand_id)?.name, platform: item.platform, agreed_payment: item.agreed_payment, agency_percent: item.agency_percent, creator_payout: item.creator_payout, status: item.status, start_date: item.start_date, due_date: item.due_date, influencers: item.creator_ids.map((id) => data.creators.find((creator) => creator.id === id)?.name).filter(Boolean).join("; "), notes: item.notes }))), "text/csv"); toast("Campaigns exported"); };
+  if (activeCampaign) return <CampaignDetail campaign={activeCampaign} close={() => setParams((current) => { current.delete("id"); return current; })} />;
 
-  useEffect(() => {
-    load()
-  }, [user])
+  return <div className="campaigns-page"><PageHeader eyebrow="Revenue workspace" title="Campaigns" description="Run every deal from negotiation through delivery, payout and close." actions={<><Button variant="secondary" onClick={exportCampaigns}><Download size={15} /> Export</Button><Button onClick={() => setOpen(true)}><Plus size={16} /> New campaign</Button></>} />
+    <section className="campaign-metrics"><div><span>Pipeline value <CircleDollarSign /></span><strong>{money(totals.value)}</strong><small>Across {rows.length} campaigns</small></div><div><span>Creator payouts <Users /></span><strong>{money(totals.payout)}</strong><small>{totals.value ? Math.round(totals.payout / totals.value * 100) : 0}% of deal value</small></div><div><span>Active work <Sparkles /></span><strong>{totals.active}</strong><small>{rows.filter((item) => item.status === "completed").length} completed</small></div><div className={totals.overdue ? "metric-alert" : ""}><span>Overdue <CalendarClock /></span><strong>{totals.overdue}</strong><small>{totals.overdue ? "Needs attention" : "Everything on track"}</small></div></section>
+    <div className="entity-toolbar"><SearchInput value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search campaigns..." /><div className="toolbar-filters"><label className="inline-select"><select value={status} onChange={(event) => setStatus(event.target.value)}><option value="all">All statuses</option>{CAMPAIGN_STATUSES.map((item) => <option key={item} value={item}>{STATUS_LABELS[item]}</option>)}</select></label><label className="inline-select"><select value={brand} onChange={(event) => setBrand(event.target.value)}><option value="all">All brands</option>{data.brands.filter((item) => !item.archived_at).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label className="inline-select"><SlidersHorizontal size={14} /><select value={sort} onChange={(event) => setSort(event.target.value)}><option value="due">Due date</option><option value="value">Deal value</option><option value="newest">Newest</option><option value="status">Status</option></select></label></div></div>
+    <div className="results-meta"><span><strong>{rows.length}</strong> campaigns</span></div>
+    {!rows.length ? <EmptyState title="Create your first campaign" text="Connect a brand and the right influencers, calculate payouts, and keep delivery on track." action={<Button onClick={() => setOpen(true)}>New campaign</Button>} /> : <div className="campaign-list">{rows.map((campaign) => { const brandItem = data.brands.find((item) => item.id === campaign.brand_id); const creators = data.creators.filter((item) => campaign.creator_ids.includes(item.id)); const progress = campaign.deliverables.length ? Math.round(campaign.deliverables.filter((item) => item.done).length / campaign.deliverables.length * 100) : 0; const overdue = campaign.status === "active" && isOverdue(campaign.due_date); return <button key={campaign.id} className={overdue ? "overdue" : ""} onClick={() => setParams({ id: campaign.id })}><div className="campaign-status-line"><StatusBadge status={campaign.status} />{overdue && <span className="overdue-label"><AlertTriangle size={12} /> Overdue</span>}</div><div className="campaign-title"><span className="campaign-logo">{brandItem?.name[0] || "C"}</span><div><h3>{campaign.name}</h3><p>{brandItem?.name || "No brand"} / {campaign.platform}</p></div></div><div className="campaign-people"><div>{creators.slice(0, 4).map((creator) => <Avatar name={creator.name} size="sm" key={creator.id} />)}</div><span>{creators.length} influencer{creators.length === 1 ? "" : "s"}</span></div><div className="campaign-progress"><span><b>{progress}%</b> deliverables</span><i><b style={{ width: `${progress}%` }} /></i></div><div className="campaign-dates"><span><small>Due date</small><b>{dateLabel(campaign.due_date)}</b></span><span><small>Deal value</small><b>{money(campaign.agreed_payment)}</b></span></div><ArrowRight className="campaign-arrow" /></button>; })}</div>}
+    <Modal open={open} onClose={close} title="Create campaign" description="Build the deal, calculate the split, then assign creators with full performance context." wide><form onSubmit={create} className="campaign-form"><section><h3>Campaign details</h3><div className="form-grid"><Input label="Campaign name" value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} required autoFocus /><Select label="Brand" value={draft.brand_id} onChange={(event) => setDraft({ ...draft, brand_id: event.target.value })} required><option value="">Choose a brand</option>{data.brands.filter((item) => !item.archived_at).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</Select><Select label="Platform" value={draft.platform} onChange={(event) => setDraft({ ...draft, platform: event.target.value as Platform })}>{PLATFORMS.map((item) => <option key={item}>{item}</option>)}</Select><Select label="Status" value={draft.status} onChange={(event) => setDraft({ ...draft, status: event.target.value as CampaignStatus })}>{CAMPAIGN_STATUSES.map((item) => <option key={item} value={item}>{STATUS_LABELS[item]}</option>)}</Select><Input label="Start date" type="date" value={draft.start_date} onChange={(event) => setDraft({ ...draft, start_date: event.target.value })} required /><Input label="Due date" type="date" value={draft.due_date} onChange={(event) => setDraft({ ...draft, due_date: event.target.value })} required /></div><Textarea label="Deliverables" hint="One deliverable per line. Each becomes a trackable checklist item." rows={4} value={draft.deliverables} onChange={(event) => setDraft({ ...draft, deliverables: event.target.value })} placeholder={`1 x 60-second integration\n3 x story frames\n30-day usage rights`} /></section>
+      <section className="payment-builder"><h3>Payment math</h3><div className="form-grid"><Input label="Agreed payment ($)" type="number" min="0" value={draft.agreed_payment} onChange={(event) => setDraft({ ...draft, agreed_payment: event.target.value })} required /><Input label="Creator payout percent" type="number" min="0" max="100" value={draft.agency_percent} onChange={(event) => setDraft({ ...draft, agency_percent: event.target.value })} required /></div><div className="live-math"><span><small>Deal value</small><strong>{money(Number(draft.agreed_payment))}</strong></span><i><X size={13} /> {draft.agency_percent || 0}%</i><span><small>Creator payout</small><strong>{money(livePayout)}</strong></span><span><small>Agency revenue</small><strong>{money(Number(draft.agreed_payment) - livePayout)}</strong></span></div></section>
+      <section><div className="form-section-head"><div><h3>Assign influencers</h3><p>Engagement, platform, niche, views and status stay visible while you choose.</p></div><span>{draft.creator_ids.length} selected</span></div><CreatorPicker selected={draft.creator_ids} onChange={(creator_ids) => setDraft({ ...draft, creator_ids })} />{conflictRows.length > 0 && <div className="conflict-warning"><AlertTriangle /><div><strong>Potential brand conflict</strong><p>The selected influencer is already assigned to an active campaign for this brand: {conflictRows.map((item) => item.name).join(", ")}.</p></div></div>}</section>
+      <section><div className="form-grid"><Input label="Next action" value={draft.next_action} onChange={(event) => setDraft({ ...draft, next_action: event.target.value })} placeholder="Send agreement for signature" /><Textarea label="Notes" value={draft.notes} onChange={(event) => setDraft({ ...draft, notes: event.target.value })} rows={3} /></div></section><div className="modal-actions"><Button type="button" variant="ghost" onClick={close}>Cancel</Button><Button type="submit" disabled={!draft.name || !draft.brand_id || !draft.start_date || !draft.due_date}>Create campaign</Button></div></form></Modal>
+  </div>;
+}
 
-  const filtered = useMemo(() => {
-    return rows.filter((r) => {
-      if (status !== 'all' && r.status !== status) return false
-      if (!q.trim()) return true
-      return r.name.toLowerCase().includes(q.toLowerCase())
-    })
-  }, [rows, q, status])
+function CreatorPicker({ selected, onChange }: { selected: string[]; onChange: (ids: string[]) => void }) {
+  const data = useData(); const [query, setQuery] = useState(""); const [platform, setPlatform] = useState("all"); const [sort, setSort] = useState("engagement");
+  const creators = data.creators.filter((item) => !item.archived_at && (!query || [item.name, item.niche].some((value) => value.toLowerCase().includes(query.toLowerCase()))) && (platform === "all" || item.platform === platform)).sort((a, b) => sort === "views" ? b.avg_views - a.avg_views : sort === "name" ? a.name.localeCompare(b.name) : b.engagement_rate - a.engagement_rate);
+  return <div className="creator-picker"><div className="picker-tools"><SearchInput value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search name or niche..." /><select value={platform} onChange={(event) => setPlatform(event.target.value)}><option value="all">All platforms</option>{PLATFORMS.map((item) => <option key={item}>{item}</option>)}</select><select value={sort} onChange={(event) => setSort(event.target.value)}><option value="engagement">Highest engagement</option><option value="views">Highest avg. views</option><option value="name">Name A-Z</option></select></div><div className="picker-list">{creators.map((creator) => <button type="button" className={selected.includes(creator.id) ? "selected" : ""} key={creator.id} onClick={() => onChange(selected.includes(creator.id) ? selected.filter((id) => id !== creator.id) : [...selected, creator.id])}><span className="picker-check">{selected.includes(creator.id) && <Check size={13} />}</span><Avatar name={creator.name} size="sm" /><span><strong>{creator.name}</strong><small>{creator.platform} / {creator.niche || "No niche"}</small></span><em><strong>{creator.engagement_rate}%</strong><small>engagement</small></em><em><strong>{compact(creator.avg_views)}</strong><small>avg. views</small></em><StatusBadge status={creator.pipeline_status} /></button>)}</div></div>;
+}
 
-  const filteredCreators = useMemo(() => {
-    const s = creatorSearch.trim().toLowerCase()
-    if (!s) return creators
-    return creators.filter((c) =>
-      [c.name, c.contact_email, c.niche, c.channel_link].some((v) => (v || '').toLowerCase().includes(s)),
-    )
-  }, [creators, creatorSearch])
-
-  const filteredBrands = useMemo(() => {
-    const s = brandSearch.trim().toLowerCase()
-    if (!s) return brands
-    return brands.filter((b) => [b.name, b.domain, b.contact_email].some((v) => (v || '').toLowerCase().includes(s)))
-  }, [brands, brandSearch])
-
-  function openCreate() {
-    setEditing(null)
-    setSelectedCreators([])
-    setConflictWarn('')
-    setCreatorSearch('')
-    setBrandSearch('')
-    setForm({
-      name: '',
-      brand_id: '',
-      platform: 'youtube',
-      deliverables: '',
-      agreed_payment: '',
-      agency_percent: '20',
-      status: 'negotiating',
-      start_date: '',
-      due_date: '',
-      notes: '',
-    })
-    setModal(true)
-  }
-
-  async function promoteFromCampaign(brandId: string | null, creatorIds: string[]) {
-    if (!user) return
-    const now = new Date().toISOString()
-    if (creatorIds.length) {
-      await supabase
-        .from('creators')
-        .update({
-          pipeline_status: 'roster',
-          on_roster: true,
-          updated_at: now,
-        })
-        .in('id', creatorIds)
-        .eq('user_id', user.id)
-    }
-    if (brandId) {
-      const brand = brands.find((b) => b.id === brandId)
-      const early = ['new', 'contacted', 'no_reply', 'reach_back', 'replied']
-      if (!brand || early.includes(brand.pipeline_status)) {
-        await supabase
-          .from('brands')
-          .update({
-            pipeline_status: 'negotiating',
-            updated_at: now,
-          })
-          .eq('id', brandId)
-          .eq('user_id', user.id)
-      }
-    }
-  }
-
-  function checkConflicts(brandId: string, creatorIds: string[]) {
-    if (!brandId) return ''
-    const names = creators.filter((c) => creatorIds.includes(c.id)).map((c) => c.name.toLowerCase())
-    const hits = external.filter((e) => e.brand_id === brandId && names.includes(e.creator_name.toLowerCase()))
-    if (!hits.length) return ''
-    return `Conflict: ${hits.map((h) => h.creator_name).join(', ')} already linked externally to this brand.`
-  }
-
-  async function save(e: FormEvent) {
-    e.preventDefault()
-    if (!user) return
-    const warn = checkConflicts(form.brand_id, selectedCreators)
-    if (warn && !conflictWarn) {
-      setConflictWarn(warn + ' Save again to override.')
-      return
-    }
-    setBusy(true)
-    const payment = form.agreed_payment ? Number(form.agreed_payment) : null
-    const pct = form.agency_percent ? Number(form.agency_percent) : 20
-    const payout = payment != null ? payment * (1 - pct / 100) : null
-    const payload = {
-      user_id: user.id,
-      name: form.name.trim(),
-      brand_id: form.brand_id || null,
-      platform: form.platform,
-      deliverables: form.deliverables,
-      agreed_payment: payment,
-      agency_percent: pct,
-      creator_payout: payout,
-      status: form.status,
-      start_date: form.start_date || null,
-      due_date: form.due_date || null,
-      notes: form.notes,
-      updated_at: new Date().toISOString(),
-    }
-    let campaignId = editing?.id
-    if (editing) {
-      await supabase.from('campaigns').update(payload).eq('id', editing.id)
-      await supabase.from('campaign_creators').delete().eq('campaign_id', editing.id)
-    } else {
-      const { data } = await supabase.from('campaigns').insert(payload).select('id').single()
-      campaignId = data?.id
-      await log(`Created campaign <strong>${payload.name}</strong>`)
-    }
-    if (campaignId && selectedCreators.length) {
-      await supabase.from('campaign_creators').insert(
-        selectedCreators.map((creator_id) => ({
-          user_id: user.id,
-          campaign_id: campaignId!,
-          creator_id,
-        })),
-      )
-    }
-    await promoteFromCampaign(form.brand_id || null, selectedCreators)
-    setBusy(false)
-    setModal(false)
-    show('Campaign saved · influencers → roster · brand upgraded if needed')
-    load()
-  }
-
-  return (
-    <div>
-      {Toast}
-      <PageHeader title="Campaigns" subtitle={`${filtered.length} active records`}>
-        <button
-          className="btn"
-          type="button"
-          onClick={() =>
-            downloadCsv(
-              'campaigns.csv',
-              filtered.map((c) => ({
-                name: c.name,
-                brand: (c as Campaign & { brands?: { name?: string } }).brands?.name,
-                status: c.status,
-                payment: c.agreed_payment,
-                due: c.due_date,
-              })),
-            )
-          }
-        >
-          Export CSV
-        </button>
-        <button className="btn btn-primary" type="button" onClick={openCreate}>
-          New campaign
-        </button>
-      </PageHeader>
-
-      <div className="filters">
-        <input className="input" style={{ maxWidth: 240 }} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filter…" />
-        <select className="select" style={{ maxWidth: 180 }} value={status} onChange={(e) => setStatus(e.target.value)}>
-          <option value="all">All</option>
-          <option value="negotiating">Negotiating</option>
-          <option value="active">Active</option>
-          <option value="completed">Completed</option>
-          <option value="cancelled">Cancelled</option>
-        </select>
-      </div>
-
-      <div className="table-wrap">
-        <table className="data">
-          <thead>
-            <tr>
-              <th>Campaign</th>
-              <th>Brand</th>
-              <th>Status</th>
-              <th>Payment</th>
-              <th>Due</th>
-              <th>Influencers</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map((c) => (
-              <tr key={c.id}>
-                <td>{c.name}</td>
-                <td>{(c as Campaign & { brands?: { name?: string } }).brands?.name || '—'}</td>
-                <td>
-                  <StatusBadge status={c.status} />
-                </td>
-                <td>{c.agreed_payment != null ? `$${c.agreed_payment}` : '—'}</td>
-                <td>{formatDate(c.due_date)}</td>
-                <td>{(assignments[c.id] || []).length}</td>
-                <td>
-                  <button
-                    className="btn btn-ghost"
-                    type="button"
-                    onClick={() => {
-                      setEditing(c)
-                      setSelectedCreators(assignments[c.id] || [])
-                      setConflictWarn('')
-                      setCreatorSearch('')
-                      setBrandSearch('')
-                      setForm({
-                        name: c.name,
-                        brand_id: c.brand_id || '',
-                        platform: c.platform || 'youtube',
-                        deliverables: c.deliverables || '',
-                        agreed_payment: c.agreed_payment != null ? String(c.agreed_payment) : '',
-                        agency_percent: c.agency_percent != null ? String(c.agency_percent) : '20',
-                        status: c.status,
-                        start_date: c.start_date || '',
-                        due_date: c.due_date || '',
-                        notes: c.notes || '',
-                      })
-                      setModal(true)
-                    }}
-                  >
-                    Edit
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {filtered.length === 0 && <Empty>No campaigns yet.</Empty>}
-      </div>
-
-      <Modal open={modal} title={editing ? 'Edit campaign' : 'New campaign'} onClose={() => setModal(false)} wide>
-        <form onSubmit={save}>
-          <div className="grid-2">
-            <Field label="Name">
-              <input className="input" required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-            </Field>
-            <Field label="Brand">
-              <input
-                className="input"
-                style={{ marginBottom: 6 }}
-                placeholder="Search brands…"
-                value={brandSearch}
-                onChange={(e) => setBrandSearch(e.target.value)}
-              />
-              <select className="select" value={form.brand_id} onChange={(e) => setForm({ ...form, brand_id: e.target.value })}>
-                <option value="">Select…</option>
-                {filteredBrands.map((b) => (
-                  <option key={b.id} value={b.id}>
-                    {b.name}
-                    {b.pipeline_status ? ` (${b.pipeline_status})` : ''}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <Field label="Payment">
-              <input className="input" inputMode="decimal" value={form.agreed_payment} onChange={(e) => setForm({ ...form, agreed_payment: e.target.value })} />
-            </Field>
-            <Field label="Agency %">
-              <input className="input" inputMode="decimal" value={form.agency_percent} onChange={(e) => setForm({ ...form, agency_percent: e.target.value })} />
-            </Field>
-            <Field label="Start">
-              <input
-                className="input"
-                type="date"
-                min="2000-01-01"
-                max="2099-12-31"
-                value={form.start_date}
-                onChange={(e) => setForm({ ...form, start_date: e.target.value })}
-              />
-            </Field>
-            <Field label="Due">
-              <input
-                className="input"
-                type="date"
-                min="2000-01-01"
-                max="2099-12-31"
-                value={form.due_date}
-                onChange={(e) => setForm({ ...form, due_date: e.target.value })}
-              />
-            </Field>
-            <Field label="Status">
-              <select className="select" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
-                <option value="negotiating">Negotiating</option>
-                <option value="active">Active</option>
-                <option value="completed">Completed</option>
-                <option value="cancelled">Cancelled</option>
-              </select>
-            </Field>
-            <Field label="Platform">
-              <input className="input" value={form.platform} onChange={(e) => setForm({ ...form, platform: e.target.value })} />
-            </Field>
-          </div>
-          <Field label="Deliverables">
-            <textarea className="textarea" value={form.deliverables} onChange={(e) => setForm({ ...form, deliverables: e.target.value })} />
-          </Field>
-          <Field label="Notes">
-            <textarea className="textarea" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
-          </Field>
-          <Field label={`Assign influencers (${selectedCreators.length} selected)`}>
-            <input
-              className="input"
-              style={{ marginBottom: 8 }}
-              placeholder="Search influencers by name, email, niche…"
-              value={creatorSearch}
-              onChange={(e) => setCreatorSearch(e.target.value)}
-            />
-            <div style={{ maxHeight: 180, overflow: 'auto', border: '1px solid var(--border)', borderRadius: 8, padding: 8 }}>
-              {filteredCreators.length === 0 && (
-                <div style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>No influencers match.</div>
-              )}
-              {filteredCreators.map((c) => (
-                <label key={c.id} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6 }}>
-                  <input
-                    type="checkbox"
-                    checked={selectedCreators.includes(c.id)}
-                    onChange={(e) => {
-                      setSelectedCreators((prev) => (e.target.checked ? [...prev, c.id] : prev.filter((x) => x !== c.id)))
-                    }}
-                  />
-                  <span>
-                    <strong>{c.name}</strong>
-                    <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>
-                      {' '}
-                      · {c.pipeline_status}
-                      {c.contact_email ? ` · ${c.contact_email}` : ''}
-                    </span>
-                  </span>
-                </label>
-              ))}
-            </div>
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', margin: '8px 0 0' }}>
-              Saving puts assigned influencers on your <strong>roster</strong> and upgrades the brand to <strong>negotiating</strong> if it was only contacted/new.
-            </p>
-          </Field>
-          {conflictWarn && <p className="error">{conflictWarn}</p>}
-          <FormActions onCancel={() => setModal(false)} busy={busy} />
-        </form>
-      </Modal>
-    </div>
-  )
+function CampaignDetail({ campaign, close }: { campaign: Campaign; close: () => void }) {
+  const data = useData(); const { toast } = useToast(); const brand = data.brands.find((item) => item.id === campaign.brand_id); const creators = data.creators.filter((item) => campaign.creator_ids.includes(item.id)); const meetings = data.meetings.filter((item) => item.related_type === "campaign" && item.related_id === campaign.id); const activities = data.activities.filter((item) => item.entity_id === campaign.id); const [notes, setNotes] = useState(campaign.notes); const [assignOpen, setAssignOpen] = useState(false); const [selected, setSelected] = useState(campaign.creator_ids); const [completionOpen, setCompletionOpen] = useState(false);
+  const progress = campaign.deliverables.length ? Math.round(campaign.deliverables.filter((item) => item.done).length / campaign.deliverables.length * 100) : 0; const overdue = campaign.status === "active" && isOverdue(campaign.due_date); const dueSoon = campaign.status === "active" && !overdue && new Date(campaign.due_date).getTime() - Date.now() < 5 * 86400000;
+  const status = (next: CampaignStatus) => { data.updateCampaign(campaign.id, { status: next }); toast(`Campaign moved to ${STATUS_LABELS[next]}`); if (next === "completed" && creators.some((item) => !["roster", "signed"].includes(item.pipeline_status))) setCompletionOpen(true); };
+  return <div className="detail-page campaign-detail"><button className="back-link" onClick={close}><ArrowLeft size={15} /> Campaigns</button><header className="detail-header"><div className="detail-identity"><span className="campaign-detail-mark"><BarChart3 /></span><div><span className="eyebrow">{brand?.name || "Campaign"}</span><h1>{campaign.name}</h1><div><StatusBadge status={campaign.status} /><span>{campaign.platform}</span>{overdue && <span className="due-state overdue-label"><AlertTriangle size={12} /> Overdue</span>}{dueSoon && <span className="due-state soon">Due soon</span>}</div></div></div><div className="page-actions"><Select value={campaign.status} onChange={(event) => status(event.target.value as CampaignStatus)}>{CAMPAIGN_STATUSES.map((item) => <option key={item} value={item}>{STATUS_LABELS[item]}</option>)}</Select><button className="icon-btn danger" onClick={() => { if (confirm("Archive this campaign?")) { data.archive("campaign", [campaign.id]); toast("Campaign archived"); close(); } }}><Archive size={17} /></button></div></header>
+    <section className="detail-stats"><div><span>Deal value</span><strong>{money(campaign.agreed_payment)}</strong><small>agreed payment</small></div><div><span>Agency revenue</span><strong>{money(campaign.agreed_payment - campaign.creator_payout)}</strong><small>{100 - campaign.agency_percent}% retained</small></div><div><span>Creator payout</span><strong>{money(campaign.creator_payout)}</strong><small>{campaign.agency_percent}% of value</small></div><div><span>Delivery progress</span><strong>{progress}%</strong><small>{campaign.deliverables.filter((item) => item.done).length}/{campaign.deliverables.length} complete</small></div></section>
+    <div className="detail-grid"><main><section className="detail-section"><div className="detail-section-head"><div><span>Delivery</span><h2>Deliverables</h2></div><span className="detail-progress"><i><b style={{ width: `${progress}%` }} /></i>{progress}%</span></div><div className="deliverable-list">{campaign.deliverables.map((item) => <label key={item.id} className={item.done ? "done" : ""}><input type="checkbox" checked={item.done} onChange={() => data.updateCampaign(campaign.id, { deliverables: campaign.deliverables.map((deliverable) => deliverable.id === item.id ? { ...deliverable, done: !deliverable.done } : deliverable) })} /><span><Check size={13} /></span><strong>{item.text}</strong></label>)}{!campaign.deliverables.length && <p className="muted-copy">No deliverables added.</p>}</div></section>
+      <section className="detail-section"><div className="detail-section-head"><div><span>Talent</span><h2>Assigned influencers</h2></div><Button size="sm" variant="secondary" onClick={() => setAssignOpen(true)}>Manage assignment</Button></div><div className="assigned-grid">{creators.map((creator) => <Link to={`/app/influencers/${creator.id}`} key={creator.id}><Avatar name={creator.name} /><span><strong>{creator.name}</strong><small>{creator.platform} / {creator.niche}</small></span><em><b>{creator.engagement_rate}% ER</b><small>{compact(creator.avg_views)} avg views</small></em><StatusBadge status={creator.pipeline_status} /></Link>)}</div></section>
+      <section className="detail-section"><div className="detail-section-head"><div><span>Notes</span><h2>Campaign context</h2></div><Button size="sm" variant="secondary" onClick={() => { data.updateCampaign(campaign.id, { notes }); toast("Campaign notes saved"); }}>Save notes</Button></div><Textarea value={notes} onChange={(event) => setNotes(event.target.value)} rows={6} /><Input label="Next action" value={campaign.next_action || ""} onChange={(event) => data.updateCampaign(campaign.id, { next_action: event.target.value })} /></section></main>
+      <aside><section className="detail-side-section"><span>Schedule</span><h2>Key dates</h2><div className="campaign-date-rail"><div><i /><span><small>Starts</small><strong>{dateLabel(campaign.start_date)}</strong></span></div><div className={overdue ? "overdue" : ""}><i /><span><small>Due</small><strong>{dateLabel(campaign.due_date)}</strong></span></div></div></section><section className="detail-side-section"><span>Brand</span><h2>Account</h2>{brand ? <Link className="brand-link-block" to={`/app/brands/${brand.id}`}><Avatar name={brand.name} /><span><strong>{brand.name}</strong><small>{brand.domain}</small></span><ArrowRight /></Link> : <p className="muted-copy">No brand linked.</p>}</section><section className="detail-side-section"><span>Meetings</span><h2>Campaign calls</h2>{meetings.map((meeting) => <Link className="mini-meeting" to="/app/calendar" key={meeting.id}><b>{new Date(meeting.starts_at).getDate()}</b><span>{meeting.title}<small>{dateLabel(meeting.starts_at)}</small></span></Link>)}{!meetings.length && <Link className="text-link" to={`/app/calendar?new=1&type=campaign&id=${campaign.id}`}>Schedule a meeting <Plus size={13} /></Link>}</section><section className="detail-side-section"><span>Activity</span><h2>Audit trail</h2><div className="mini-activity">{activities.map((activity) => <p key={activity.id}>{activity.text}<small>{relativeTime(activity.at)}</small></p>)}</div></section></aside></div>
+    <Modal open={assignOpen} onClose={() => setAssignOpen(false)} title="Manage influencers" description="Compare performance before changing this campaign roster." wide><CreatorPicker selected={selected} onChange={setSelected} /><div className="modal-actions"><Button variant="ghost" onClick={() => setAssignOpen(false)}>Cancel</Button><Button onClick={() => { data.updateCampaign(campaign.id, { creator_ids: selected }); toast("Campaign assignments updated"); setAssignOpen(false); }}>Save assignments</Button></div></Modal>
+    <Modal open={completionOpen} onClose={() => setCompletionOpen(false)} title="Campaign completed" description="Keep your relationship pipeline in sync with the win."><div className="completion-prompt"><CheckCircle2 /><h3>Move assigned influencers forward?</h3><p>Mark these creators as Roster or Signed and add the change to their audit trail.</p><div>{creators.filter((item) => !["roster", "signed"].includes(item.pipeline_status)).map((creator) => <span key={creator.id}><Avatar name={creator.name} size="sm" />{creator.name}</span>)}</div><div className="modal-actions"><Button variant="ghost" onClick={() => setCompletionOpen(false)}>Not now</Button><Button variant="secondary" onClick={() => { creators.forEach((item) => data.updateCreator(item.id, { pipeline_status: "roster" })); toast("Influencers moved to Roster"); setCompletionOpen(false); }}>Move to Roster</Button><Button onClick={() => { creators.forEach((item) => data.updateCreator(item.id, { pipeline_status: "signed" })); toast("Influencers marked Signed"); setCompletionOpen(false); }}>Mark Signed</Button></div></div></Modal>
+  </div>;
 }

@@ -1,379 +1,41 @@
-import { type FormEvent, useEffect, useMemo, useState } from 'react'
-import {
-  addMonths,
-  eachDayOfInterval,
-  endOfMonth,
-  endOfWeek,
-  format,
-  isSameDay,
-  isSameMonth,
-  isToday,
-  parseISO,
-  startOfMonth,
-  startOfWeek,
-} from 'date-fns'
-import { useAuth } from '../context/AuthContext'
-import { supabase } from '../lib/supabase'
-import type { Campaign, Meeting } from '../lib/types'
-import { Field, FormActions, Modal, useToast } from '../components/ui'
-import { PageHeader } from '../components/Layout'
+import { addDays, addMonths, eachDayOfInterval, endOfMonth, endOfWeek, format, isSameDay, isSameMonth, startOfMonth, startOfWeek, subMonths } from "date-fns";
+import { ArrowRight, Bell, ChevronLeft, ChevronRight, Clock3, Link2, Plus, Video } from "lucide-react";
+import { useEffect, useState, type FormEvent } from "react";
+import { useSearchParams } from "react-router-dom";
+import { Button, EmptyState, Input, Modal, PageHeader, Select, Tabs, Textarea } from "../components/ui";
+import { useData } from "../contexts/DataContext";
+import { useToast } from "../contexts/ToastContext";
+import { timeLabel } from "../lib/utils";
 
-type CalEvent = {
-  id: string
-  title: string
-  starts_at: string
-  ends_at?: string | null
-  notes?: string | null
-  kind: 'meeting' | 'campaign_start' | 'campaign_due'
-  sourceId: string
-}
+type MeetingDraft = { title: string; starts_at: string; ends_at: string; related_type: "creator" | "brand" | "campaign" | ""; related_id: string; notes: string; remind_at: string };
+const localInput = (date: Date) => { const offset = date.getTimezoneOffset(); return new Date(date.getTime() - offset * 60000).toISOString().slice(0, 16); };
+const initialDraft = (): MeetingDraft => { const start = new Date(); start.setMinutes(0, 0, 0); start.setHours(start.getHours() + 1); const end = new Date(start.getTime() + 30 * 60000); return { title: "", starts_at: localInput(start), ends_at: localInput(end), related_type: "", related_id: "", notes: "", remind_at: localInput(new Date(start.getTime() - 30 * 60000)) }; };
 
-function toLocalInput(iso: string) {
-  const d = new Date(iso)
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
-}
+export default function CalendarPage() {
+  const data = useData(); const { toast } = useToast(); const [params, setParams] = useSearchParams(); const [view, setView] = useState("month"); const [cursor, setCursor] = useState(new Date()); const [open, setOpen] = useState(false); const [draft, setDraft] = useState<MeetingDraft>(initialDraft()); const [selectedDay, setSelectedDay] = useState(new Date());
+  useEffect(() => { if (params.get("new")) { const next = initialDraft(); const type = params.get("type"); setDraft({ ...next, related_type: type === "creator" || type === "brand" || type === "campaign" ? type : "", related_id: params.get("id") || "" }); setOpen(true); } }, [params]);
+  const close = () => { setOpen(false); setParams((current) => { ["new", "type", "id"].forEach((key) => current.delete(key)); return current; }, { replace: true }); };
+  const monthDays = eachDayOfInterval({ start: startOfWeek(startOfMonth(cursor)), end: endOfWeek(endOfMonth(cursor)) });
+  const weekDays = eachDayOfInterval({ start: startOfWeek(cursor), end: endOfWeek(cursor) });
+  const visibleDays = view === "month" ? monthDays : view === "week" ? weekDays : [selectedDay];
+  const meetings = data.meetings.slice().sort((a, b) => a.starts_at.localeCompare(b.starts_at));
+  const upcoming = meetings.filter((item) => new Date(item.ends_at).getTime() >= Date.now()).slice(0, 8);
+  const linkedOptions = draft.related_type === "creator" ? data.creators.filter((item) => !item.archived_at).map((item) => ({ id: item.id, label: `${item.name} / ${item.platform}` })) : draft.related_type === "brand" ? data.brands.filter((item) => !item.archived_at).map((item) => ({ id: item.id, label: `${item.name} / ${item.domain}` })) : draft.related_type === "campaign" ? data.campaigns.filter((item) => !item.archived_at).map((item) => ({ id: item.id, label: `${item.name} / ${item.status}` })) : [];
+  const create = (event: FormEvent) => { event.preventDefault(); if (new Date(draft.ends_at) <= new Date(draft.starts_at)) { toast("Meeting end must be after the start", "error"); return; } data.addMeeting({ title: draft.title, starts_at: new Date(draft.starts_at).toISOString(), ends_at: new Date(draft.ends_at).toISOString(), related_type: draft.related_type || null, related_id: draft.related_id || null, notes: draft.notes, remind_at: draft.remind_at ? new Date(draft.remind_at).toISOString() : null }); toast("Meeting added to your calendar"); close(); setDraft(initialDraft()); };
+  const setDuration = (minutes: number) => setDraft((current) => ({ ...current, ends_at: localInput(new Date(new Date(current.starts_at).getTime() + minutes * 60000)) }));
+  const entityName = (type: string | null, id: string | null) => type === "creator" ? data.creators.find((item) => item.id === id)?.name : type === "brand" ? data.brands.find((item) => item.id === id)?.name : type === "campaign" ? data.campaigns.find((item) => item.id === id)?.name : null;
+  const navigateDate = (direction: number) => { if (view === "month") setCursor(direction > 0 ? addMonths(cursor, 1) : subMonths(cursor, 1)); else { const next = addDays(cursor, direction * (view === "week" ? 7 : 1)); setCursor(next); setSelectedDay(next); } };
+  const dayCreate = (day: Date) => { const start = new Date(day); start.setHours(10, 0, 0, 0); const end = new Date(start.getTime() + 30 * 60000); setDraft({ ...initialDraft(), starts_at: localInput(start), ends_at: localInput(end), remind_at: localInput(new Date(start.getTime() - 30 * 60000)) }); setOpen(true); };
 
-function dayKey(d: Date) {
-  return format(d, 'yyyy-MM-dd')
-}
-
-export function CalendarPage() {
-  const { user, profile } = useAuth()
-  const { show, Toast } = useToast()
-  const [meetings, setMeetings] = useState<Meeting[]>([])
-  const [campaigns, setCampaigns] = useState<Campaign[]>([])
-  const [cursor, setCursor] = useState(() => startOfMonth(new Date()))
-  const [selectedDay, setSelectedDay] = useState(() => new Date())
-  const [modal, setModal] = useState(false)
-  const [editing, setEditing] = useState<Meeting | null>(null)
-  const [form, setForm] = useState({
-    title: '',
-    starts_at: '',
-    ends_at: '',
-    notes: '',
-    remind_at: '',
-  })
-
-  async function load() {
-    if (!user) return
-    const [m, c] = await Promise.all([
-      supabase.from('meetings').select('*').order('starts_at', { ascending: true }),
-      supabase.from('campaigns').select('*').is('archived_at', null).neq('status', 'cancelled'),
-    ])
-    setMeetings((m.data || []) as Meeting[])
-    setCampaigns((c.data || []) as Campaign[])
-  }
-
-  useEffect(() => {
-    load()
-  }, [user])
-
-  useEffect(() => {
-    if (!profile || profile.reminder_prefs === 'off') return
-    if (!('Notification' in window)) return
-    const due = meetings.filter((m) => {
-      if (!m.remind_at || m.reminder_sent) return false
-      const t = new Date(m.remind_at).getTime()
-      return t <= Date.now() && t >= Date.now() - 86400000
-    })
-    if (!due.length) return
-    ;(async () => {
-      if (Notification.permission === 'default') await Notification.requestPermission()
-      if (Notification.permission === 'granted' && (profile.reminder_prefs === 'browser' || profile.reminder_prefs === 'both')) {
-        for (const m of due) {
-          new Notification('InfluenceFlow reminder', { body: m.title })
-          await supabase.from('meetings').update({ reminder_sent: true }).eq('id', m.id)
-        }
-        load()
-      }
-    })()
-  }, [meetings, profile])
-
-  const events: CalEvent[] = useMemo(() => {
-    const list: CalEvent[] = meetings.map((m) => ({
-      id: `m-${m.id}`,
-      title: m.title,
-      starts_at: m.starts_at,
-      ends_at: m.ends_at,
-      notes: m.notes,
-      kind: 'meeting',
-      sourceId: m.id,
-    }))
-    for (const c of campaigns) {
-      if (c.start_date) {
-        list.push({
-          id: `cs-${c.id}`,
-          title: `Start · ${c.name}`,
-          starts_at: `${c.start_date}T09:00:00`,
-          kind: 'campaign_start',
-          sourceId: c.id,
-        })
-      }
-      if (c.due_date) {
-        list.push({
-          id: `cd-${c.id}`,
-          title: `Due · ${c.name}`,
-          starts_at: `${c.due_date}T17:00:00`,
-          kind: 'campaign_due',
-          sourceId: c.id,
-        })
-      }
-    }
-    return list
-  }, [meetings, campaigns])
-
-  const days = useMemo(() => {
-    const start = startOfWeek(startOfMonth(cursor), { weekStartsOn: 1 })
-    const end = endOfWeek(endOfMonth(cursor), { weekStartsOn: 1 })
-    return eachDayOfInterval({ start, end })
-  }, [cursor])
-
-  const eventsByDay = useMemo(() => {
-    const map = new Map<string, CalEvent[]>()
-    for (const ev of events) {
-      const key = dayKey(parseISO(ev.starts_at))
-      map.set(key, [...(map.get(key) || []), ev])
-    }
-    for (const [, list] of map) {
-      list.sort((a, b) => a.starts_at.localeCompare(b.starts_at))
-    }
-    return map
-  }, [events])
-
-  const selectedEvents = eventsByDay.get(dayKey(selectedDay)) || []
-
-  function openNewForDay(day: Date) {
-    setEditing(null)
-    setSelectedDay(day)
-    const base = new Date(day)
-    base.setHours(10, 0, 0, 0)
-    const end = new Date(base)
-    end.setHours(11, 0, 0, 0)
-    setForm({
-      title: '',
-      starts_at: toLocalInput(base.toISOString()),
-      ends_at: toLocalInput(end.toISOString()),
-      notes: '',
-      remind_at: '',
-    })
-    setModal(true)
-  }
-
-  function openEditMeeting(m: Meeting) {
-    setEditing(m)
-    setForm({
-      title: m.title,
-      starts_at: toLocalInput(m.starts_at),
-      ends_at: m.ends_at ? toLocalInput(m.ends_at) : '',
-      notes: m.notes || '',
-      remind_at: m.remind_at ? toLocalInput(m.remind_at) : '',
-    })
-    setModal(true)
-  }
-
-  async function save(e: FormEvent) {
-    e.preventDefault()
-    if (!user) return
-    const start = new Date(form.starts_at)
-    if (Number.isNaN(start.getTime())) {
-      show('Invalid start date/time')
-      return
-    }
-    if (start.getFullYear() < 2000 || start.getFullYear() > 2099) {
-      show('Year must be between 2000 and 2099')
-      return
-    }
-    const payload = {
-      user_id: user.id,
-      title: form.title.trim(),
-      starts_at: start.toISOString(),
-      ends_at: form.ends_at ? new Date(form.ends_at).toISOString() : null,
-      notes: form.notes,
-      remind_at: form.remind_at ? new Date(form.remind_at).toISOString() : null,
-      reminder_sent: false,
-    }
-    if (editing) {
-      await supabase.from('meetings').update(payload).eq('id', editing.id)
-      show('Meeting updated')
-    } else {
-      await supabase.from('meetings').insert(payload)
-      show('Meeting added')
-    }
-    setModal(false)
-    setEditing(null)
-    load()
-  }
-
-  async function removeMeeting(id: string) {
-    if (!confirm('Delete this meeting?')) return
-    await supabase.from('meetings').delete().eq('id', id)
-    show('Deleted')
-    load()
-  }
-
-  return (
-    <div>
-      {Toast}
-      <PageHeader title="Calendar" subtitle="Meetings and campaign dates · click any day to add">
-        <button className="btn" type="button" onClick={() => setCursor(startOfMonth(new Date()))}>
-          Today
-        </button>
-        <button className="btn btn-primary" type="button" onClick={() => openNewForDay(selectedDay)}>
-          Add meeting
-        </button>
-      </PageHeader>
-
-      <div className="cal-shell">
-        <div className="cal-board card">
-          <div className="cal-toolbar">
-            <button className="btn btn-ghost" type="button" onClick={() => setCursor((c) => addMonths(c, -1))} aria-label="Previous month">
-              ←
-            </button>
-            <h2>{format(cursor, 'MMMM yyyy')}</h2>
-            <button className="btn btn-ghost" type="button" onClick={() => setCursor((c) => addMonths(c, 1))} aria-label="Next month">
-              →
-            </button>
-          </div>
-
-          <div className="cal-weekdays">
-            {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => (
-              <div key={d}>{d}</div>
-            ))}
-          </div>
-
-          <div className="cal-grid">
-            {days.map((day) => {
-              const key = dayKey(day)
-              const dayEvents = eventsByDay.get(key) || []
-              const inMonth = isSameMonth(day, cursor)
-              const selected = isSameDay(day, selectedDay)
-              return (
-                <button
-                  key={key}
-                  type="button"
-                  className={`cal-day ${inMonth ? '' : 'muted'} ${selected ? 'selected' : ''} ${isToday(day) ? 'today' : ''}`}
-                  onClick={() => setSelectedDay(day)}
-                  onDoubleClick={() => openNewForDay(day)}
-                >
-                  <span className="cal-day-num">{format(day, 'd')}</span>
-                  <div className="cal-dots">
-                    {dayEvents.slice(0, 3).map((ev) => (
-                      <span key={ev.id} className={`cal-pill ${ev.kind}`} title={ev.title}>
-                        {ev.title}
-                      </span>
-                    ))}
-                    {dayEvents.length > 3 && <span className="cal-more">+{dayEvents.length - 3}</span>}
-                  </div>
-                </button>
-              )
-            })}
-          </div>
-          <p className="cal-hint">Double-click a day to add a meeting · Single-click to inspect</p>
-        </div>
-
-        <aside className="cal-side card">
-          <div className="cal-side-head">
-            <div>
-              <div className="cal-side-label">Selected</div>
-              <h3>{format(selectedDay, 'EEEE, MMM d')}</h3>
-            </div>
-            <button className="btn btn-primary" type="button" onClick={() => openNewForDay(selectedDay)}>
-              + Add
-            </button>
-          </div>
-
-          {selectedEvents.length === 0 && <p className="cal-empty">Nothing scheduled. Add a meeting for this day.</p>}
-
-          <div className="cal-event-list">
-            {selectedEvents.map((ev) => (
-              <div key={ev.id} className={`cal-event ${ev.kind}`}>
-                <div className="cal-event-time">
-                  {ev.kind === 'meeting' ? format(parseISO(ev.starts_at), 'HH:mm') : ev.kind === 'campaign_start' ? 'Start' : 'Due'}
-                </div>
-                <div className="cal-event-body">
-                  <strong>{ev.title}</strong>
-                  {ev.notes ? <p>{ev.notes}</p> : null}
-                  {ev.kind === 'meeting' && (
-                    <div className="actions" style={{ marginTop: 8 }}>
-                      <button
-                        className="btn btn-ghost"
-                        type="button"
-                        onClick={() => {
-                          const m = meetings.find((x) => x.id === ev.sourceId)
-                          if (m) openEditMeeting(m)
-                        }}
-                      >
-                        Edit
-                      </button>
-                      <button className="btn btn-ghost" type="button" onClick={() => removeMeeting(ev.sourceId)}>
-                        Delete
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-
-          <div className="cal-legend">
-            <span>
-              <i className="meeting" /> Meeting
-            </span>
-            <span>
-              <i className="campaign_start" /> Campaign start
-            </span>
-            <span>
-              <i className="campaign_due" /> Campaign due
-            </span>
-          </div>
-        </aside>
-      </div>
-
-      <Modal open={modal} title={editing ? 'Edit meeting' : 'Add meeting'} onClose={() => setModal(false)}>
-        <form onSubmit={save}>
-          <Field label="Title">
-            <input className="input" required maxLength={120} value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
-          </Field>
-          <div className="grid-2">
-            <Field label="Starts">
-              <input
-                className="input"
-                type="datetime-local"
-                required
-                min="2000-01-01T00:00"
-                max="2099-12-31T23:59"
-                value={form.starts_at}
-                onChange={(e) => setForm({ ...form, starts_at: e.target.value })}
-              />
-            </Field>
-            <Field label="Ends">
-              <input
-                className="input"
-                type="datetime-local"
-                min="2000-01-01T00:00"
-                max="2099-12-31T23:59"
-                value={form.ends_at}
-                onChange={(e) => setForm({ ...form, ends_at: e.target.value })}
-              />
-            </Field>
-          </div>
-          <Field label="Remind at (optional)">
-            <input
-              className="input"
-              type="datetime-local"
-              min="2000-01-01T00:00"
-              max="2099-12-31T23:59"
-              value={form.remind_at}
-              onChange={(e) => setForm({ ...form, remind_at: e.target.value })}
-            />
-          </Field>
-          <Field label="Notes">
-            <textarea className="textarea" maxLength={2000} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
-          </Field>
-          <FormActions onCancel={() => setModal(false)} submitLabel={editing ? 'Save' : 'Add'} />
-        </form>
-      </Modal>
+  return <div className="calendar-page"><PageHeader eyebrow="Follow-up workspace" title="Calendar" description="Put every conversation, deadline and reminder in the context of the relationship." actions={<Button onClick={() => setOpen(true)}><Plus size={16} /> New meeting</Button>} />
+    <div className="calendar-toolbar"><div className="calendar-nav"><button onClick={() => navigateDate(-1)}><ChevronLeft /></button><button className="today-button" onClick={() => { setCursor(new Date()); setSelectedDay(new Date()); }}>Today</button><button onClick={() => navigateDate(1)}><ChevronRight /></button><h2>{view === "month" ? format(cursor, "MMMM yyyy") : view === "week" ? `${format(weekDays[0], "MMM d")} - ${format(weekDays[6], "MMM d, yyyy")}` : format(selectedDay, "EEEE, MMMM d")}</h2></div><Tabs active={view} onChange={setView} tabs={[{ value: "month", label: "Month" }, { value: "week", label: "Week" }, { value: "day", label: "Day" }]} /></div>
+    <div className="calendar-layout"><main>{view === "month" ? <div className="month-calendar"><div className="weekday-row">{["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => <span key={day}>{day}</span>)}</div><div className="month-grid">{visibleDays.map((day) => { const dayMeetings = meetings.filter((item) => isSameDay(new Date(item.starts_at), day)); return <button className={`${!isSameMonth(day, cursor) ? "outside" : ""} ${isSameDay(day, new Date()) ? "today" : ""}`} key={day.toISOString()} onClick={() => { setSelectedDay(day); if (dayMeetings.length === 0) dayCreate(day); }}><span>{format(day, "d")}</span><div>{dayMeetings.slice(0, 3).map((meeting) => <i key={meeting.id} onClick={(event) => event.stopPropagation()}><b>{timeLabel(meeting.starts_at)}</b>{meeting.title}</i>)}{dayMeetings.length > 3 && <em>+{dayMeetings.length - 3} more</em>}</div></button>; })}</div></div> : <AgendaView days={visibleDays} meetings={meetings} onCreate={dayCreate} />}</main>
+      <aside className="upcoming-panel"><div><span>Next up</span><h2>Upcoming</h2></div>{upcoming.length ? <div className="upcoming-list">{upcoming.map((meeting) => <article key={meeting.id}><div className="upcoming-date"><strong>{format(new Date(meeting.starts_at), "d")}</strong><span>{format(new Date(meeting.starts_at), "MMM")}</span></div><div><strong>{meeting.title}</strong><span><Clock3 /> {timeLabel(meeting.starts_at)} - {timeLabel(meeting.ends_at)}</span>{meeting.related_type && <span><Link2 /> {entityName(meeting.related_type, meeting.related_id)}</span>}</div></article>)}</div> : <EmptyState title="Nothing scheduled" text="Add a meeting or follow-up to start your agenda." />}<button className="notification-permission" onClick={async () => { if (!("Notification" in window)) return toast("Browser notifications are unavailable", "error"); const result = await Notification.requestPermission(); toast(result === "granted" ? "Browser reminders enabled" : "Notification permission was not granted", result === "granted" ? "success" : "info"); }}><Bell /><span><strong>Browser reminders</strong><small>{"Notification" in window ? Notification.permission : "Unavailable"}</small></span><ArrowRight /></button></aside>
     </div>
-  )
+    <Modal open={open} onClose={close} title="Schedule meeting" description="Link it to a relationship so the context is never lost." wide><form className="meeting-form" onSubmit={create}><Input label="Meeting title" value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} required autoFocus placeholder="Creative review, intro call, contract sync..." /><div className="form-grid"><Input label="Starts" type="datetime-local" value={draft.starts_at} onChange={(event) => setDraft({ ...draft, starts_at: event.target.value })} required /><Input label="Ends" type="datetime-local" value={draft.ends_at} onChange={(event) => setDraft({ ...draft, ends_at: event.target.value })} required /></div><div className="duration-row"><span>Quick duration</span>{[15, 30, 45, 60].map((value) => <button type="button" key={value} onClick={() => setDuration(value)}>{value} min</button>)}</div><div className="form-grid"><Select label="Link to" value={draft.related_type} onChange={(event) => setDraft({ ...draft, related_type: event.target.value as MeetingDraft["related_type"], related_id: "" })}><option value="">No linked record</option><option value="creator">Influencer</option><option value="brand">Brand</option><option value="campaign">Campaign</option></Select><Select label="Choose record" value={draft.related_id} onChange={(event) => setDraft({ ...draft, related_id: event.target.value })} disabled={!draft.related_type}><option value="">Search or choose...</option>{linkedOptions.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</Select></div><Input label="Remind at" type="datetime-local" value={draft.remind_at} onChange={(event) => setDraft({ ...draft, remind_at: event.target.value })} hint="Browser alerts work while InfluenceFlow is open." /><Textarea label="Notes" rows={4} value={draft.notes} onChange={(event) => setDraft({ ...draft, notes: event.target.value })} placeholder="Agenda, links, or talking points..." /><div className="modal-actions"><Button type="button" variant="ghost" onClick={close}>Cancel</Button><Button type="submit">Add to calendar</Button></div></form></Modal>
+  </div>;
+}
+
+function AgendaView({ days, meetings, onCreate }: { days: Date[]; meetings: ReturnType<typeof useData>["meetings"]; onCreate: (date: Date) => void }) {
+  return <div className="agenda-view">{days.map((day) => { const items = meetings.filter((item) => isSameDay(new Date(item.starts_at), day)); return <section key={day.toISOString()}><header><div><span>{format(day, "EEE")}</span><strong>{format(day, "d")}</strong></div><p>{isSameDay(day, new Date()) ? "Today" : format(day, "MMMM d")}</p><button onClick={() => onCreate(day)}><Plus size={14} /> Add</button></header><div>{items.map((meeting) => <article key={meeting.id}><i /><span><strong>{timeLabel(meeting.starts_at)}</strong><small>{Math.round((new Date(meeting.ends_at).getTime() - new Date(meeting.starts_at).getTime()) / 60000)} min</small></span><div><strong>{meeting.title}</strong><p>{meeting.notes || "No notes"}</p></div><Video /></article>)}{!items.length && <p className="agenda-no-events">No meetings scheduled.</p>}</div></section>; })}</div>;
 }
