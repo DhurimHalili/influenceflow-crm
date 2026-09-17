@@ -22,10 +22,32 @@ export default function DashboardPage() {
   const today = new Date().toDateString();
   const todayMeetings = data.meetings.filter((item) => new Date(item.starts_at).toDateString() === today).sort((a, b) => a.starts_at.localeCompare(b.starts_at));
   const funnel = ENTITY_STATUSES.map((status, index) => ({ name: STATUS_LABELS[status], value: creators.filter((item) => item.pipeline_status === status).length, fill: funnelColors[index] }));
-  const velocity = [
-    { month: "Oct", deals: 3, value: 24 }, { month: "Nov", deals: 5, value: 42 }, { month: "Dec", deals: 4, value: 38 },
-    { month: "Jan", deals: 7, value: 61 }, { month: "Feb", deals: 6, value: 54 }, { month: "Mar", deals: Math.max(active.length + completed.length, 2), value: Math.round((activeValue + completed.reduce((sum, item) => sum + item.agreed_payment, 0)) / 1000) },
-  ];
+  // Real pipeline velocity: last 6 calendar months bucketed from the user's
+  // own campaigns by creation month. No placeholders — a workspace without
+  // campaigns honestly renders a flat $0k line.
+  const velocity = (() => {
+    const buckets: { key: string; month: string; deals: number; total: number }[] = [];
+    const now = new Date();
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      buckets.push({
+        key: `${d.getFullYear()}-${d.getMonth()}`,
+        month: d.toLocaleDateString("en-US", { month: "short" }),
+        deals: 0,
+        total: 0,
+      });
+    }
+    campaigns.forEach((item) => {
+      const d = new Date(item.created_at);
+      if (Number.isNaN(d.getTime())) return;
+      const bucket = buckets.find((b) => b.key === `${d.getFullYear()}-${d.getMonth()}`);
+      if (bucket) {
+        bucket.deals += 1;
+        bucket.total += item.agreed_payment || 0;
+      }
+    });
+    return buckets.map(({ month, deals, total }) => ({ month, deals, value: Math.round(total / 1000) }));
+  })();
   const attention = [
     ...campaigns.filter((item) => item.status === "active" && isOverdue(item.due_date)).map((item) => ({ id: item.id, type: "Campaign", title: item.name, detail: `Overdue since ${dateLabel(item.due_date)}`, to: `/app/campaigns?id=${item.id}`, urgent: true })),
     ...creators.filter((item) => item.next_action && Date.now() - new Date(item.status_updated_at).getTime() > 7 * 86400000).map((item) => ({ id: item.id, type: "Follow-up", title: item.name, detail: item.next_action!, to: `/app/influencers/${item.id}`, urgent: false })),
