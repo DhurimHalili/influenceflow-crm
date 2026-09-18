@@ -1,8 +1,9 @@
 import { motion } from "framer-motion";
 import { ArrowRight, CalendarDays, Check, ChevronRight, Code2, Contact, Database, HeartHandshake, KeyRound, LockKeyhole, Menu, MessageCircle, Plus, ShieldCheck, Sparkles, Users, X } from "lucide-react";
-import { useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
+import { supabase } from "../lib/supabase";
 import { useToast } from "../contexts/ToastContext";
 import { Button, Input, Logo } from "../components/ui";
 
@@ -62,7 +63,67 @@ function AuthPage({ mode }: { mode: "login" | "signup" }) {
     setLoading(false);
     if (message) setError(message); else navigate("/app");
   };
-  return <div className="auth-page"><div className="auth-brand"><Link to="/"><Logo inverse /></Link><div><span>{mode === "login" ? "Welcome back" : "Your agency, in flow"}</span><h1>{mode === "login" ? "Pick up where the relationship left off." : "Build a calmer way to run partnerships."}</h1><p>Private, focused, and designed around the work that moves creator businesses forward.</p></div><small>InfluenceFlow / Open source under MIT</small></div><main className="auth-main"><div className="auth-form"><span className="auth-kicker">{mode === "login" ? "Sign in" : "Create your workspace"}</span><h2>{mode === "login" ? "Welcome back" : "Start free"}</h2><p>{mode === "login" ? "Enter your workspace credentials." : "No credit card. Your data stays portable."}</p><form onSubmit={submit}><Input label="Email address" type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@agency.com" required /><Input label="Password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="At least 6 characters" minLength={6} required />{error && <div className="form-error">{error}</div>}<Button type="submit" size="lg" loading={loading}>{mode === "login" ? "Open workspace" : "Create private workspace"}<ArrowRight size={17} /></Button></form><p className="auth-switch">{mode === "login" ? "New to InfluenceFlow?" : "Already have a workspace?"} <Link to={mode === "login" ? "/signup" : "/login"}>{mode === "login" ? "Create one" : "Log in"}</Link></p><small>By continuing you agree to our <Link to="/terms">Terms</Link> and <Link to="/privacy">Privacy Policy</Link>.</small></div></main></div>;
+  return <div className="auth-page"><div className="auth-brand"><Link to="/"><Logo inverse /></Link><div><span>{mode === "login" ? "Welcome back" : "Your agency, in flow"}</span><h1>{mode === "login" ? "Pick up where the relationship left off." : "Build a calmer way to run partnerships."}</h1><p>Private, focused, and designed around the work that moves creator businesses forward.</p></div><small>InfluenceFlow / Open source under MIT</small></div><main className="auth-main"><div className="auth-form"><span className="auth-kicker">{mode === "login" ? "Sign in" : "Create your workspace"}</span><h2>{mode === "login" ? "Welcome back" : "Start free"}</h2><p>{mode === "login" ? "Enter your workspace credentials." : "No credit card. Your data stays portable."}</p><form onSubmit={submit}><Input label="Email address" type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@agency.com" required /><Input label="Password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="At least 6 characters" minLength={6} required />{error && <div className="form-error">{error}</div>}<Button type="submit" size="lg" loading={loading}>{mode === "login" ? "Open workspace" : "Create private workspace"}<ArrowRight size={17} /></Button></form>{mode === "login" && <p className="auth-switch"><Link to="/forgot-password">Forgot your password?</Link></p>}<p className="auth-switch">{mode === "login" ? "New to InfluenceFlow?" : "Already have a workspace?"} <Link to={mode === "login" ? "/signup" : "/login"}>{mode === "login" ? "Create one" : "Log in"}</Link></p><small>By continuing you agree to our <Link to="/terms">Terms</Link> and <Link to="/privacy">Privacy Policy</Link>.</small></div></main></div>;
+}
+
+export function ForgotPasswordPage() {
+  const { sendPasswordReset } = useAuth();
+  const [email, setEmail] = useState("");
+  const [error, setError] = useState("");
+  const [sent, setSent] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const submit = async (event: FormEvent) => {
+    event.preventDefault(); setError(""); setLoading(true);
+    const message = await sendPasswordReset(email);
+    setLoading(false);
+    if (message) setError(message); else setSent(true);
+  };
+  return <div className="auth-page"><div className="auth-brand"><Link to="/"><Logo inverse /></Link><div><span>Account recovery</span><h1>Get back into your workspace.</h1><p>We will email you a secure sign-in link to set a new password.</p></div><small>InfluenceFlow / Open source under MIT</small></div><main className="auth-main"><div className="auth-form"><span className="auth-kicker">Reset password</span><h2>Forgot password</h2>{sent ? <><p>Check your inbox. If an account exists for {email.trim()}, a reset link is on its way. Use it promptly — links expire automatically.</p><p className="auth-switch"><Link to="/login">Back to log in</Link></p></> : <><p>Enter your account email and we will send you a reset link.</p><form onSubmit={submit}><Input label="Email address" type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@agency.com" required />{error && <div className="form-error">{error}</div>}<Button type="submit" size="lg" loading={loading}>Send reset link<ArrowRight size={17} /></Button></form><p className="auth-switch"><Link to="/login">Back to log in</Link></p></>}<small>By continuing you agree to our <Link to="/terms">Terms</Link> and <Link to="/privacy">Privacy Policy</Link>.</small></div></main></div>;
+}
+
+export function UpdatePasswordPage() {
+  const { user, updatePassword } = useAuth();
+  const navigate = useNavigate();
+  const [status, setStatus] = useState<"verifying" | "ready" | "invalid" | "done">("verifying");
+  const [detail, setDetail] = useState("");
+  const [pw1, setPw1] = useState("");
+  const [pw2, setPw2] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const verified = useRef(false);
+  useEffect(() => {
+    if (verified.current) return;
+    verified.current = true;
+    let cancelled = false;
+    const run = async () => {
+      const hash = window.location.hash || "";
+      const query = hash.includes("?") ? hash.slice(hash.indexOf("?") + 1) : "";
+      const code = new URLSearchParams(query).get("code");
+      if (!code) {
+        const { data } = await supabase.auth.getSession();
+        if (cancelled) return;
+        if (data.session || user) setStatus("ready");
+        else { setStatus("invalid"); setDetail("This reset link is invalid or has already been used. Request a new one below."); }
+        return;
+      }
+      const { error } = await supabase.auth.exchangeCodeForSession(code);
+      if (cancelled) return;
+      if (error) { setStatus("invalid"); setDetail(error.message); }
+      else setStatus("ready");
+    };
+    void run();
+    return () => { cancelled = true; };
+  }, []);
+  const submit = async (event: FormEvent) => {
+    event.preventDefault(); setError("");
+    if (pw1.length < 8) { setError("New password needs at least 8 characters."); return; }
+    if (pw1 !== pw2) { setError("Passwords do not match."); return; }
+    setLoading(true);
+    const message = await updatePassword(pw1);
+    setLoading(false);
+    if (message) setError(message); else setStatus("done");
+  };
+  return <div className="auth-page"><div className="auth-brand"><Link to="/"><Logo inverse /></Link><div><span>Account recovery</span><h1>Choose a new password.</h1><p>Pick something strong and unique — at least 8 characters.</p></div><small>InfluenceFlow / Open source under MIT</small></div><main className="auth-main"><div className="auth-form"><span className="auth-kicker">Reset password</span><h2>New password</h2>{status === "verifying" && <p>Verifying your reset link…</p>}{status === "invalid" && <><div className="form-error">{detail}</div><p className="auth-switch"><Link to="/forgot-password">Request a new link</Link></p></>}{status === "ready" && <form onSubmit={submit}><Input label="New password" type="password" value={pw1} onChange={(event) => setPw1(event.target.value)} placeholder="At least 8 characters" minLength={8} required /><Input label="Confirm password" type="password" value={pw2} onChange={(event) => setPw2(event.target.value)} placeholder="Repeat it" minLength={8} required />{error && <div className="form-error">{error}</div>}<Button type="submit" size="lg" loading={loading}>Set new password<ArrowRight size={17} /></Button></form>}{status === "done" && <><p>Your password is set. You are back in.</p><Button size="lg" onClick={() => navigate("/app")}>Open my workspace<ArrowRight size={17} /></Button></>}</div></main></div>;
 }
 
 export const LoginPage = () => <AuthPage mode="login" />;

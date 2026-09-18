@@ -9,6 +9,8 @@ const AppShell = lazy(() => import("./components/AppShell"));
 const LandingPage = lazy(() => import("./pages/PublicPages").then((module) => ({ default: module.LandingPage })));
 const LoginPage = lazy(() => import("./pages/PublicPages").then((module) => ({ default: module.LoginPage })));
 const SignupPage = lazy(() => import("./pages/PublicPages").then((module) => ({ default: module.SignupPage })));
+const ForgotPasswordPage = lazy(() => import("./pages/PublicPages").then((module) => ({ default: module.ForgotPasswordPage })));
+const UpdatePasswordPage = lazy(() => import("./pages/PublicPages").then((module) => ({ default: module.UpdatePasswordPage })));
 const LegalPage = lazy(() => import("./pages/PublicPages").then((module) => ({ default: module.LegalPage })));
 const HelpPage = lazy(() => import("./pages/PublicPages").then((module) => ({ default: module.HelpPage })));
 const HirePage = lazy(() => import("./pages/PublicPages").then((module) => ({ default: module.HirePage })));
@@ -50,6 +52,8 @@ export default function App() {
                 <Route path="/" element={<LandingPage />} />
                 <Route path="/login" element={<LoginPage />} />
                 <Route path="/signup" element={<SignupPage />} />
+                <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+                <Route path="/update-password" element={<UpdatePasswordPage />} />
                 <Route path="/privacy" element={<LegalPage type="privacy" />} />
                 <Route path="/terms" element={<LegalPage type="terms" />} />
                 <Route path="/help" element={<HelpPage />} />
