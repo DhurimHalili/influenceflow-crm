@@ -18,7 +18,7 @@ export function LandingPage() {
   return <div className="public-page landing-page">
     <section className="landing-hero">
       <PublicNav dark />
-      <div className="hero-image" role="img" aria-label="Creative agency team planning a campaign" />
+      <div className="hero-image" role="img" aria-label="Abstract violet aurora artwork" />
       <div className="hero-shade" />
       <div className="hero-grain" />
       <motion.div className="hero-copy" initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.7 }}>
