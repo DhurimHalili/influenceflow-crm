@@ -3,10 +3,10 @@ import { blankWorkspace } from "../lib/seed";
 import { normalize, sanitize, uid } from "../lib/utils";
 import { hasSupabase } from "../lib/supabase";
 import { loadCloudWorkspace, persistCloudWorkspace } from "../services/supabaseWorkspace";
-import type { Activity, Brand, BrandContact, Campaign, Creator, Meeting, Profile, WorkspaceData } from "../types";
+import type { Activity, Brand, BrandContact, Campaign, Creator, Followup, Meeting, Profile, WorkspaceData } from "../types";
 import { useAuth } from "./AuthContext";
 
-type NewCreator = Omit<Creator, "id" | "user_id" | "created_at" | "status_updated_at" | "archived_at" | "on_roster">;
+type NewCreator = Omit<Creator, "id" | "user_id" | "created_at" | "status_updated_at" | "archived_at" | "on_roster" | "followup_count" | "last_followup_at">;
 type NewBrand = Omit<Brand, "id" | "user_id" | "created_at" | "archived_at">;
 type NewContact = Omit<BrandContact, "id" | "user_id" | "created_at">;
 type NewCampaign = Omit<Campaign, "id" | "user_id" | "created_at" | "archived_at" | "creator_payout">;
@@ -35,6 +35,7 @@ type DataContextValue = WorkspaceData & {
   archive: (type: "creator" | "brand" | "campaign", ids: string[], restore?: boolean) => void;
   permanentlyDelete: (type: "creator" | "brand" | "campaign", ids: string[]) => void;
   updateProfile: (value: Partial<Profile>) => void;
+  logFollowup: (creatorId: string, note?: string) => void;
   importBackup: (value: WorkspaceData) => void;
   log: (text: string, entity_type?: Activity["entity_type"], entity_id?: string) => void;
 };
@@ -151,6 +152,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
       status_updated_at: new Date().toISOString(),
       created_at: new Date().toISOString(),
       archived_at: null,
+      followup_count: 0,
+      last_followup_at: null,
     };
     setData((current) => addActivity({ ...current, creators: [creator, ...current.creators] }, `${creator.name} added to influencers`, "creator", creator.id));
     return creator;
@@ -168,6 +171,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
       status_updated_at: stamp,
       created_at: stamp,
       archived_at: null,
+      followup_count: 0,
+      last_followup_at: null,
     }));
     setData((current) => addActivity({ ...current, creators: [...additions, ...current.creators] }, `${additions.length} influencers imported`, "system"));
     return additions.length;
@@ -251,12 +256,18 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const updateBrand = (id: string, value: Partial<Brand>) =>
     setData((current) => {
       const before = current.brands.find((item) => item.id === id);
+      const statusChanged = value.pipeline_status && before?.pipeline_status !== value.pipeline_status;
       const brands = current.brands.map((item) =>
         item.id === id
           ? { ...item, ...value, name: value.name ? sanitize(value.name) : item.name, notes: value.notes !== undefined ? sanitize(value.notes) : item.notes }
           : item,
       );
-      return addActivity({ ...current, brands }, `${before?.name || "Brand"} updated`, "brand", id);
+      return addActivity(
+        { ...current, brands },
+        `${before?.name || "Brand"} updated${statusChanged ? ` to ${value.pipeline_status}` : ""}`,
+        "brand",
+        id,
+      );
     });
 
   const mergeBrands = (keepId: string, removeId: string, merged: Partial<Brand>) =>
@@ -290,9 +301,10 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const updateContact = (id: string, value: Partial<BrandContact>) =>
     setData((current) => {
       const contact = current.contacts.find((item) => item.id === id);
+      const statusChanged = value.pipeline_status && contact?.pipeline_status !== value.pipeline_status;
       return addActivity(
         { ...current, contacts: current.contacts.map((item) => (item.id === id ? { ...item, ...value } : item)) },
-        `${contact?.first_name || "Brand contact"} updated`,
+        `${contact?.first_name || "Brand contact"} updated${statusChanged ? ` to ${value.pipeline_status}` : ""}`,
         "brand",
         contact?.brand_id,
       );
@@ -388,8 +400,26 @@ export function DataProvider({ children }: { children: ReactNode }) {
     });
 
   const updateProfile = (value: Partial<Profile>) => setData((current) => ({ ...current, profile: { ...current.profile, ...value } }));
+  const logFollowup = (creatorId: string, note = "") => {
+    const stamp = new Date().toISOString();
+    setData((current) => {
+      const target = current.creators.find((item) => item.id === creatorId);
+      if (!target) return current;
+      const followup: Followup = { id: uid(), user_id: userId, creator_id: creatorId, note: sanitize(note), at: stamp };
+      const creators = current.creators.map((item) =>
+        item.id === creatorId ? { ...item, followup_count: (item.followup_count || 0) + 1, last_followup_at: stamp } : item,
+      );
+      return addActivity(
+        { ...current, creators, followups: [followup, ...current.followups].slice(0, 2000) },
+        `Logged a follow-up with ${target.name}`,
+        "creator",
+        creatorId,
+      );
+    });
+  };
+
   const importBackup = (value: WorkspaceData) => {
-    setData({ ...value, profile: { ...value.profile, id: userId }, demoSeeded: false });
+    setData({ ...value, profile: { ...value.profile, id: userId }, followups: value.followups || [], demoSeeded: false });
     hydratedRef.current = true;
     setHydrated(true);
   };
@@ -419,6 +449,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       permanentlyDelete,
       updateProfile,
       importBackup,
+      logFollowup,
       log,
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps

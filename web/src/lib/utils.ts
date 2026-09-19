@@ -59,3 +59,6 @@ export const toCSV = (rows: Record<string, string | number | boolean | null | un
 
 export const isValidEmail = (value: string) => !value || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 export const isValidUrl = (value: string) => !value || /^(https?:\/\/)?[\w.-]+\.[a-z]{2,}/i.test(value);
+
+export const followupWords = (count: number) =>
+  count <= 0 ? "No follow-ups yet" : count === 1 ? "Followed up once" : count === 2 ? "Followed up twice" : `Followed up ${count} times`;

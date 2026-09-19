@@ -1,8 +1,9 @@
+import { useState } from "react";
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { AlertCircle, ArrowRight, ArrowUpRight, BarChart3, Building2, CalendarDays, CheckCircle2, Clock3, DollarSign, Plus, Sparkles, TrendingUp, Users, Zap } from "lucide-react";
+import { AlertCircle, ArrowRight, ArrowUpRight, BarChart3, Building2, CalendarDays, CheckCircle2, Clock3, DollarSign, Handshake, Mail, Plus, Reply, Send, Sparkles, TrendingUp, Trophy, UserPlus, Users, XCircle, Zap } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { useData } from "../contexts/DataContext";
-import { Button, EmptyState, Metric, PageHeader } from "../components/ui";
+import { Button, EmptyState, Metric, PageHeader, Tabs } from "../components/ui";
 import { dateLabel, isOverdue, money, relativeTime, timeLabel } from "../lib/utils";
 import { ENTITY_STATUSES, STATUS_LABELS } from "../types";
 
@@ -48,6 +49,71 @@ export default function DashboardPage() {
     });
     return buckets.map(({ month, deals, total }) => ({ month, deals, value: Math.round(total / 1000) }));
   })();
+  // Outreach momentum: real events bucketed into a selectable time range.
+  // Emails = first contacts dated in range; follow-ups = logged follow-up
+  // events; replies/negotiations/closed/lost = status-change events the app
+  // writes to the activity log. Nothing is estimated or placeholder.
+  const [momentumRange, setMomentumRange] = useState("week");
+  const momentum = (() => {
+    const now = Date.now();
+    const day = 86400000;
+    const d = new Date(now);
+    const monday = new Date(d.getFullYear(), d.getMonth(), d.getDate() - ((d.getDay() + 6) % 7)).getTime();
+    const dayLabel = (t: number) => new Date(t).toLocaleDateString("en-US", { day: "numeric", month: "short" });
+    let start = monday;
+    let end = now;
+    let label = `Week of ${dayLabel(start)}`;
+    if (momentumRange === "lastweek") {
+      end = monday;
+      start = monday - 7 * day;
+      label = `Week of ${dayLabel(start)}`;
+    } else if (momentumRange === "30" || momentumRange === "90") {
+      const days = momentumRange === "30" ? 30 : 90;
+      start = now - days * day;
+      label = `Last ${days} days`;
+    }
+    const pEnd = start;
+    const pStart = start - (end - start);
+    const inR = (iso: string | null, s = start, e = end) => {
+      if (!iso) return false;
+      const t = new Date(iso).getTime();
+      return !Number.isNaN(t) && t >= s && t < e;
+    };
+    const statusIn = (status: string, s = start, e = end) =>
+      data.activities.filter((a) => a.text.endsWith(` updated to ${status}`) && inR(a.at, s, e)).length;
+    const createdCampaigns = (s = start, e = end) =>
+      data.activities.filter((a) => a.text.endsWith("campaign created") && inR(a.at, s, e)).length;
+    const emails = (s = start, e = end) =>
+      creators.filter((c) => inR(c.date_contacted, s, e)).length + data.contacts.filter((c) => inR(c.date_contacted, s, e)).length;
+    const count = {
+      emails: emails(),
+      followups: data.followups.filter((f) => inR(f.at)).length,
+      replies: statusIn("replied"),
+      negotiating: statusIn("negotiating") + createdCampaigns(),
+      closed: statusIn("completed"),
+      lost: statusIn("denied") + statusIn("cancelled"),
+      added: creators.filter((c) => inR(c.created_at)).length,
+    };
+    const prev = {
+      emails: emails(pStart, pEnd),
+      followups: data.followups.filter((f) => inR(f.at, pStart, pEnd)).length,
+      replies: statusIn("replied", pStart, pEnd),
+      negotiating: statusIn("negotiating", pStart, pEnd) + createdCampaigns(pStart, pEnd),
+      closed: statusIn("completed", pStart, pEnd),
+      lost: statusIn("denied", pStart, pEnd) + statusIn("cancelled", pStart, pEnd),
+      added: creators.filter((c) => inR(c.created_at, pStart, pEnd)).length,
+    };
+    return { label, count, prev };
+  })();
+  const momentumTiles = [
+    { key: "emails", label: "Emails sent", icon: Mail, invert: false },
+    { key: "followups", label: "Follow-ups sent", icon: Send, invert: false },
+    { key: "replies", label: "Replies received", icon: Reply, invert: false },
+    { key: "negotiating", label: "Negotiations started", icon: Handshake, invert: false },
+    { key: "closed", label: "Deals closed", icon: Trophy, invert: false },
+    { key: "lost", label: "Deals lost", icon: XCircle, invert: true },
+    { key: "added", label: "New creators added", icon: UserPlus, invert: false },
+  ] as const;
   const attention = [
     ...campaigns.filter((item) => item.status === "active" && isOverdue(item.due_date)).map((item) => ({ id: item.id, type: "Campaign", title: item.name, detail: `Overdue since ${dateLabel(item.due_date)}`, to: `/app/campaigns?id=${item.id}`, urgent: true })),
     ...creators.filter((item) => item.next_action && Date.now() - new Date(item.status_updated_at).getTime() > 7 * 86400000).map((item) => ({ id: item.id, type: "Follow-up", title: item.name, detail: item.next_action!, to: `/app/influencers/${item.id}`, urgent: false })),
@@ -65,6 +131,17 @@ export default function DashboardPage() {
         <Metric label="Agency revenue" value={money(agencyRevenue)} detail={`${activeValue ? Math.round(agencyRevenue / activeValue * 100) : 0}% retained`} icon={<Sparkles size={15} />} />
         <Metric label="Creator payouts" value={money(creatorPayout)} detail="Across active campaigns" icon={<Users size={15} />} />
         <Metric label="Avg. deal value" value={money(campaigns.reduce((sum, item) => sum + item.agreed_payment, 0) / Math.max(campaigns.length, 1))} detail={`${campaigns.length} total campaigns`} icon={<BarChart3 size={15} />} />
+      </section>
+
+      <section className="dash-panel momentum-panel">
+        <div className="panel-heading"><div><span>Outreach momentum</span><h2>{momentum.label}</h2></div><Tabs active={momentumRange} onChange={setMomentumRange} tabs={[{ value: "week", label: "This week" }, { value: "lastweek", label: "Last week" }, { value: "30", label: "30 days" }, { value: "90", label: "90 days" }]} /></div>
+        <div className="momentum-grid">{momentumTiles.map((tile) => {
+          const curr = momentum.count[tile.key];
+          const prev = momentum.prev[tile.key];
+          const diff = curr - prev;
+          const good = tile.invert ? diff < 0 : diff > 0;
+          return <div className="momentum-tile" key={tile.key}><span className="momentum-icon"><tile.icon size={15} /></span><strong>{curr}</strong><small>{tile.label}</small><em className={diff === 0 ? "delta-flat" : good ? "delta-up" : "delta-down"}>{diff === 0 ? "— vs prior" : `${diff > 0 ? "+" : ""}${diff} vs prior`}</em></div>;
+        })}</div>
       </section>
 
       <section className="dashboard-primary-grid">

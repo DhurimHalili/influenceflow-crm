@@ -8,6 +8,7 @@ export const blankWorkspace = (id = "local-user"): WorkspaceData => ({
   brands: [],
   contacts: [],
   campaigns: [],
+  followups: [],
   meetings: [],
   activities: [],
   demoSeeded: false,

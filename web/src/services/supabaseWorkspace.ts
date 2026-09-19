@@ -1,6 +1,6 @@
 import { supabase } from "../lib/supabase";
 import { blankWorkspace } from "../lib/seed";
-import type { Activity, Brand, BrandContact, Campaign, Creator, Meeting, Profile, WorkspaceData } from "../types";
+import type { Activity, Brand, BrandContact, Campaign, Creator, Followup, Meeting, Profile, WorkspaceData } from "../types";
 
 type JoinRow = { campaign_id: string; creator_id: string };
 
@@ -64,8 +64,18 @@ const normalizeCreator = (row: Record<string, unknown>, userId: string): Creator
   status_updated_at: typeof row.status_updated_at === "string" && row.status_updated_at ? row.status_updated_at : new Date().toISOString(),
   notes: text(row.notes),
   next_action: text(row.next_action),
+  followup_count: num(row.followup_count),
+  last_followup_at: dateOrNull(row.last_followup_at),
   archived_at: dateOrNull(row.archived_at),
   created_at: typeof row.created_at === "string" && row.created_at ? row.created_at : new Date().toISOString(),
+});
+
+const normalizeFollowup = (row: Record<string, unknown>, userId: string): Followup => ({
+  id: String(row.id ?? ""),
+  user_id: typeof row.user_id === "string" ? row.user_id : userId,
+  creator_id: typeof row.creator_id === "string" ? row.creator_id : "",
+  note: text(row.note),
+  at: typeof row.at === "string" && row.at ? row.at : new Date().toISOString(),
 });
 
 const normalizeBrand = (row: Record<string, unknown>, userId: string): Brand => ({
@@ -186,6 +196,15 @@ export async function loadCloudWorkspace(userId: string): Promise<WorkspaceData 
     links = [];
   }
   const storedProfile = (profile.data as Record<string, unknown> | null) || null;
+  // Follow-up history is auxiliary: a missing table (pre-migration deploy)
+  // degrades to empty instead of failing the whole workspace load.
+  let followupRows: Record<string, unknown>[] = [];
+  try {
+    const res = await supabase.from("followups").select("*").eq("user_id", userId).order("at", { ascending: false }).limit(2000);
+    if (!res.error) followupRows = (res.data || []) as Record<string, unknown>[];
+  } catch {
+    followupRows = [];
+  }
   return {
     profile: storedProfile
       ? {
@@ -206,6 +225,7 @@ export async function loadCloudWorkspace(userId: string): Promise<WorkspaceData 
     brands: ((brands.data || []) as Record<string, unknown>[]).map((r) => normalizeBrand(r, userId)),
     contacts: ((contacts.data || []) as Record<string, unknown>[]).map((r) => normalizeContact(r, userId)),
     campaigns: campaignRows.map((r) => normalizeCampaign(r, userId, links)),
+    followups: followupRows.map((r) => normalizeFollowup(r, userId)),
     meetings: ((meetings.data || []) as Record<string, unknown>[]).map((r) => normalizeMeeting(r, userId)),
     activities: ((activities.data || []) as Record<string, unknown>[]).map((r) => ({
       id: String(r.id ?? ""),
@@ -224,7 +244,7 @@ export async function loadCloudWorkspace(userId: string): Promise<WorkspaceData 
 // Columns that only exist after the parity migration. If a deploy hasn't run
 // it yet, PostgREST rejects the upsert with an unknown-column error: strip
 // those keys once and retry instead of dropping the whole save.
-const NEW_COLUMNS = ["engagement_rate", "next_action", "deliverables_items", "entity_type", "entity_id", "updated_at", "user_id"];
+const NEW_COLUMNS = ["engagement_rate", "next_action", "deliverables_items", "entity_type", "entity_id", "updated_at", "user_id", "followup_count", "last_followup_at"];
 
 async function upsertResilient(table: string, rows: Record<string, unknown>[], opts?: { ignoreDuplicates?: boolean }) {
   if (!rows.length) return;
@@ -306,6 +326,16 @@ export async function persistCloudWorkspace(workspace: WorkspaceData, userId: st
   await upsertResilient("activities", owned(workspace.activities) as unknown as Record<string, unknown>[], {
     ignoreDuplicates: true,
   });
+  // Follow-up history is append-only; a missing table (pre-migration deploy)
+  // skips silently while local state keeps working.
+  if (workspace.followups.length) {
+    try {
+      await upsertResilient("followups", owned(workspace.followups) as unknown as Record<string, unknown>[]);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (!/does not exist|42P01|PGRST205/i.test(msg)) throw e;
+    }
+  }
 
   await Promise.all([
     removeMissing("brand_contacts", userId, workspace.contacts.map((item) => item.id)),

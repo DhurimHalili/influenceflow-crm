@@ -36,6 +36,8 @@ export interface Creator {
   status_updated_at: string;
   notes: string;
   next_action?: string;
+  followup_count: number;
+  last_followup_at: string | null;
   archived_at: string | null;
   created_at: string;
 }
@@ -119,12 +121,21 @@ export interface Activity {
   entity_id?: string;
 }
 
+export interface Followup {
+  id: string;
+  user_id: string;
+  creator_id: string;
+  note: string;
+  at: string;
+}
+
 export interface WorkspaceData {
   profile: Profile;
   creators: Creator[];
   brands: Brand[];
   contacts: BrandContact[];
   campaigns: Campaign[];
+  followups: Followup[];
   meetings: Meeting[];
   activities: Activity[];
   demoSeeded: boolean;

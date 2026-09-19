@@ -197,3 +197,22 @@ span.avatar { border-radius: 50%; display: inline-grid; place-items: center; fle
   .table-mobile-fallback { display: block; }
   .field-merge-head { padding-left: 75px; }.field-merge-row { grid-template-columns: 68px 1fr 1fr; }
 }
+
+/* Sponsor discovery tip (dismissible, contextual) */
+.tip-banner { min-height: 52px; padding: 9px 14px 9px 18px; margin-bottom: 13px; display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; background: linear-gradient(90deg,var(--accent-soft),color-mix(in srgb,var(--accent-soft) 45%,var(--surface-solid))); border: 1px solid color-mix(in srgb,var(--accent) 22%,var(--line)); border-radius: 12px; box-shadow: var(--shadow-sm); }.tip-banner > div { display: flex; align-items: center; gap: 10px; }.tip-banner svg { color: var(--accent); flex: 0 0 auto; }.tip-banner span { color: var(--text-soft); font-size: 13px; line-height: 1.5; }.tip-banner a { display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 14px; border-radius: 9px; color: white; background: var(--accent); font-size: 12px; font-weight: 650; box-shadow: 0 5px 14px rgba(var(--accent-rgb), .18); }.tip-banner a:hover { background: var(--accent-dark); }.tip-banner > div > button { border: 0; background: transparent; color: var(--muted); cursor: pointer; padding: 6px; border-radius: 7px; }.tip-banner > div > button:hover { color: var(--text); background: var(--surface-alt); }
+
+/* Outreach momentum panel */
+.momentum-panel { margin-bottom: 17px; }.momentum-panel .panel-heading { flex-wrap: wrap; gap: 12px; }
+.momentum-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 10px; margin-top: 16px; }
+.momentum-tile { border: 1px solid var(--line); border-radius: 11px; background: var(--surface-alt); padding: 13px 12px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.momentum-icon { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; color: var(--accent); background: var(--accent-soft); margin-bottom: 6px; }
+.momentum-tile strong { font: 750 22px "Manrope"; letter-spacing: -.5px; }
+.momentum-tile small { color: var(--muted); font-size: 10px; }
+.momentum-tile em { font-style: normal; font-size: 10px; font-weight: 700; margin-top: 3px; }
+.delta-up { color: var(--success); }.delta-down { color: var(--danger); }.delta-flat { color: var(--muted); font-weight: 500; }
+@media (max-width: 1180px) { .momentum-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+@media (max-width: 680px) { .momentum-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* Follow-up status block */
+.followup-count-pill { padding: 5px 10px; border-radius: 12px; color: var(--accent); background: var(--accent-soft); font-size: 10px; font-weight: 700; white-space: nowrap; }
+.followup-block { display: flex; align-items: center; justify-content: space-between; gap: 18px; flex-wrap: wrap; padding: 15px; border: 1px solid var(--line); border-radius: 11px; background: var(--surface-alt); }.followup-block strong { display: block; font: 700 16px "Manrope"; }.followup-block p { margin: 5px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; max-width: 460px; }
