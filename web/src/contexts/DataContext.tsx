@@ -40,10 +40,12 @@ type DataContextValue = WorkspaceData & {
   mergeBrands: (keepId: string, removeId: string, merged: Partial<Brand>) => void;
   addContact: (value: NewContact) => BrandContact;
   updateContact: (id: string, value: Partial<BrandContact>) => void;
+  deleteContact: (id: string) => void;
   addCampaign: (value: NewCampaign) => Campaign;
   updateCampaign: (id: string, value: Partial<Campaign>) => void;
   addMeeting: (value: NewMeeting) => Meeting;
   updateMeeting: (id: string, value: Partial<Meeting>) => void;
+  deleteMeeting: (id: string) => void;
   archive: (type: "creator" | "brand" | "campaign", ids: string[], restore?: boolean) => void;
   permanentlyDelete: (type: "creator" | "brand" | "campaign", ids: string[]) => void;
   updateProfile: (value: Partial<Profile>) => void;
@@ -411,6 +413,17 @@ export function DataProvider({ children }: { children: ReactNode }) {
     });
     if (toDenied && lostStamp && contact) queueLoss({ kind: "contact", id, name: label });
   };
+  const deleteContact = (id: string) =>
+    setData((current) => {
+      const contact = current.contacts.find((item) => item.id === id);
+      const label = contact ? `${contact.first_name} ${contact.last_name}`.trim() || "Brand contact" : "Brand contact";
+      return addActivity(
+        { ...current, contacts: current.contacts.filter((item) => item.id !== id) },
+        `${label} removed`,
+        "brand",
+        contact?.brand_id,
+      );
+    });
 
   const addCampaign = (value: NewCampaign) => {
     const campaign: Campaign = {
@@ -470,6 +483,15 @@ export function DataProvider({ children }: { children: ReactNode }) {
       return Object.keys(value).length === 1 && value.reminder_sent !== undefined
         ? next
         : addActivity(next, `${meeting?.title || "Meeting"} updated`, "meeting", id);
+    });
+  const deleteMeeting = (id: string) =>
+    setData((current) => {
+      const meeting = current.meetings.find((item) => item.id === id);
+      return addActivity(
+        { ...current, meetings: current.meetings.filter((item) => item.id !== id) },
+        `${meeting?.title || "Meeting"} deleted`,
+        "meeting",
+      );
     });
 
   const archive = (type: "creator" | "brand" | "campaign", ids: string[], restore = false) =>
@@ -555,10 +577,12 @@ export function DataProvider({ children }: { children: ReactNode }) {
       mergeBrands,
       addContact,
       updateContact,
+      deleteContact,
       addCampaign,
       updateCampaign,
       addMeeting,
       updateMeeting,
+      deleteMeeting,
       archive,
       permanentlyDelete,
       updateProfile,

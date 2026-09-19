@@ -97,8 +97,12 @@ export function Metric({ label, value, detail, icon }: { label: string; value: R
   return <div className="metric"><div className="metric-label">{label}{icon && <span>{icon}</span>}</div><strong>{value}</strong>{detail && <div className="metric-detail">{detail}</div>}</div>;
 }
 
-export function SearchInput({ className, ...props }: InputHTMLAttributes<HTMLInputElement>) {
-  return <div className={cn("search-input", className)}><Search size={16} /><input {...props} />{props.value && <X size={13} />}</div>;
+export function SearchInput({ className, onChange, ...props }: InputHTMLAttributes<HTMLInputElement>) {
+  const clear = (e: { preventDefault: () => void }) => {
+    e.preventDefault();
+    (onChange as unknown as ((ev: { target: { value: string } }) => void) | undefined)?.({ target: { value: "" } });
+  };
+  return <div className={cn("search-input", className)}><Search size={16} /><input onChange={onChange} {...props} />{props.value ? <button type="button" className="search-clear" onClick={clear} aria-label="Clear search"><X size={13} /></button> : null}</div>;
 }
 
 export function FieldMergeReview({ keep, remove, fields, onConfirm }: { keep: Record<string, unknown>; remove: Record<string, unknown>; fields: { key: string; label: string }[]; onConfirm: (merged: Record<string, unknown>) => void }) {

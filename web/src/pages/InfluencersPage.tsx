@@ -21,18 +21,38 @@ const draftToCreator = (draft: CreatorDraft) => ({
   pipeline_status: draft.pipeline_status, date_contacted: draft.date_contacted || null, notes: draft.notes, next_action: draft.next_action,
 });
 
+const SAVED_FLAG = "if.creator-saved";
+const SAVED_FILTERS = "if.creator-filters";
+const readSavedFlag = () => {
+  try {
+    return localStorage.getItem(SAVED_FLAG) === "1";
+  } catch {
+    return false;
+  }
+};
+const readSavedFilters = (): Record<string, string> => {
+  try {
+    if (!readSavedFlag()) return {};
+    const raw = localStorage.getItem(SAVED_FILTERS);
+    const parsed = raw ? (JSON.parse(raw) as Record<string, string>) : {};
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+};
+
 export default function InfluencersPage() {
   const data = useData();
   const { toast } = useToast();
   const [params, setParams] = useSearchParams();
   const [view, setView] = useState(localStorage.getItem("if.creator-view") || "table");
-  const [query, setQuery] = useState("");
-  const [status, setStatus] = useState(params.get("status") || "all");
-  const [platform, setPlatform] = useState("all");
-  const [niche, setNiche] = useState("all");
-  const [engagement, setEngagement] = useState("all");
-  const [minViews, setMinViews] = useState("");
-  const [sort, setSort] = useState("newest");
+  const [query, setQuery] = useState(() => readSavedFilters().query ?? "");
+  const [status, setStatus] = useState(() => params.get("status") || readSavedFilters().status || "all");
+  const [platform, setPlatform] = useState(() => readSavedFilters().platform || "all");
+  const [niche, setNiche] = useState(() => readSavedFilters().niche || "all");
+  const [engagement, setEngagement] = useState(() => readSavedFilters().engagement || "all");
+  const [minViews, setMinViews] = useState(() => readSavedFilters().minViews ?? "");
+  const [sort, setSort] = useState(() => readSavedFilters().sort || "newest");
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
@@ -40,7 +60,27 @@ export default function InfluencersPage() {
   const [duplicateIds, setDuplicateIds] = useState<string[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
   const [density, setDensity] = useState(localStorage.getItem("if.creator-density") || "comfortable");
-  const [saved, setSaved] = useState(false);
+  const [saved, setSaved] = useState(() => readSavedFlag());
+  const toggleSaved = () => {
+    if (saved) {
+      try {
+        localStorage.removeItem(SAVED_FLAG);
+      } catch {
+        // private mode: flag simply returns next visit
+      }
+      setSaved(false);
+      toast("Saved view cleared");
+      return;
+    }
+    try {
+      localStorage.setItem(SAVED_FLAG, "1");
+      localStorage.setItem(SAVED_FILTERS, JSON.stringify({ query, status, platform, niche, engagement, minViews, sort }));
+    } catch {
+      // private mode: view stays for this session only
+    }
+    setSaved(true);
+    toast("View saved — restored on your next visit");
+  };
   const [tipHidden, setTipHidden] = useState(() => {
     try {
       return localStorage.getItem("if-sponsor-tip-hidden") === "1";
@@ -110,7 +150,7 @@ export default function InfluencersPage() {
   return <div className="entity-page">
     <PageHeader eyebrow="Relationship CRM" title="Influencers" description="Find the right fit, remember every conversation, and turn outreach into a trusted roster." actions={<><Button variant="secondary" onClick={() => setImportOpen(true)}><Upload size={15} /> Import</Button><Button onClick={() => setCreateOpen(true)}><Plus size={16} /> Add influencer</Button></>} />
     {!tipHidden && <div className="tip-banner"><div><Sparkles size={15} /><span><strong>Scouting brands to pitch?</strong> Meet Sponsors Platform reveals which brands are already paying YouTubers — build your shortlist from live sponsor deals.</span></div><div><a href="https://share.google/JcqLNlnJ6iR3Jj1Tu" target="_blank" rel="noreferrer">Explore sponsors <ExternalLink size={13} /></a><button onClick={dismissTip} aria-label="Dismiss"><X size={15} /></button></div></div>}
-    <div className="entity-toolbar"><SearchInput value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search name, email, niche, channel..." /><div className="toolbar-filters"><button className={filtersOpen ? "active" : ""} onClick={() => setFiltersOpen(!filtersOpen)}><Filter size={15} /> Filters{[status !== "all", platform !== "all", niche !== "all", engagement !== "all", !!minViews].filter(Boolean).length > 0 && <b>{[status !== "all", platform !== "all", niche !== "all", engagement !== "all", !!minViews].filter(Boolean).length}</b>}</button><label className="inline-select"><ArrowDownAZ size={15} /><select value={sort} onChange={(event) => setSort(event.target.value)}><option value="newest">Newest first</option><option value="oldest">Oldest first</option><option value="name">Name A-Z</option><option value="views">Avg. views</option><option value="engagement">Engagement rate</option><option value="status">Pipeline status</option><option value="contacted">Date contacted</option></select></label><button onClick={() => setSaved(!saved)} className={saved ? "active" : ""}><Star size={15} fill={saved ? "currentColor" : "none"} /> {saved ? "View saved" : "Save view"}</button><button onClick={toggleDensity} title="Toggle density"><SlidersHorizontal size={15} /></button><div className="view-toggle"><button className={view === "table" ? "active" : ""} onClick={() => toggleView("table")}><List size={15} /></button><button className={view === "kanban" ? "active" : ""} onClick={() => toggleView("kanban")}><Columns3 size={15} /></button><button className={view === "cards" ? "active" : ""} onClick={() => toggleView("cards")}><LayoutGrid size={15} /></button></div></div></div>
+    <div className="entity-toolbar"><SearchInput value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search name, email, niche, channel..." /><div className="toolbar-filters"><button className={filtersOpen ? "active" : ""} onClick={() => setFiltersOpen(!filtersOpen)}><Filter size={15} /> Filters{[status !== "all", platform !== "all", niche !== "all", engagement !== "all", !!minViews].filter(Boolean).length > 0 && <b>{[status !== "all", platform !== "all", niche !== "all", engagement !== "all", !!minViews].filter(Boolean).length}</b>}</button><label className="inline-select"><ArrowDownAZ size={15} /><select value={sort} onChange={(event) => setSort(event.target.value)}><option value="newest">Newest first</option><option value="oldest">Oldest first</option><option value="name">Name A-Z</option><option value="views">Avg. views</option><option value="engagement">Engagement rate</option><option value="status">Pipeline status</option><option value="contacted">Date contacted</option></select></label><button onClick={toggleSaved} className={saved ? "active" : ""}><Star size={15} fill={saved ? "currentColor" : "none"} /> {saved ? "View saved" : "Save view"}</button><button onClick={toggleDensity} title="Toggle density"><SlidersHorizontal size={15} /></button><div className="view-toggle"><button className={view === "table" ? "active" : ""} onClick={() => toggleView("table")}><List size={15} /></button><button className={view === "kanban" ? "active" : ""} onClick={() => toggleView("kanban")}><Columns3 size={15} /></button><button className={view === "cards" ? "active" : ""} onClick={() => toggleView("cards")}><LayoutGrid size={15} /></button></div></div></div>
     {filtersOpen && <div className="filter-drawer"><Select label="Pipeline status" value={status} onChange={(event) => setStatus(event.target.value)}><option value="all">All statuses</option>{ENTITY_STATUSES.map((item) => <option key={item} value={item}>{STATUS_LABELS[item]}</option>)}</Select><Select label="Platform" value={platform} onChange={(event) => setPlatform(event.target.value)}><option value="all">All platforms</option>{PLATFORMS.map((item) => <option key={item}>{item}</option>)}</Select><Select label="Niche" value={niche} onChange={(event) => setNiche(event.target.value)}><option value="all">All niches</option>{niches.map((item) => <option key={item}>{item}</option>)}</Select><Select label="Engagement rate" value={engagement} onChange={(event) => setEngagement(event.target.value)}><option value="all">Any engagement</option><option value="high">High (8%+)</option><option value="mid">Medium (4-8%)</option><option value="low">Under 4%</option></Select><Input label="Minimum avg. views" type="number" value={minViews} onChange={(event) => setMinViews(event.target.value)} placeholder="0" /><Button variant="ghost" onClick={() => { setStatus("all"); setPlatform("all"); setNiche("all"); setEngagement("all"); setMinViews(""); }}>Clear filters</Button></div>}
     <div className="results-meta"><span><strong>{filtered.length}</strong> influencers {filtered.length !== data.creators.filter((item) => !item.archived_at).length && "in this view"}</span></div>
     {selected.length > 0 && <div className="bulk-bar"><span><b>{selected.length}</b> selected</span><label>Status <select defaultValue="" onChange={(event) => setBulkStatus(event.target.value as EntityStatus)}><option value="" disabled>Change to...</option>{ENTITY_STATUSES.map((item) => <option key={item} value={item}>{STATUS_LABELS[item]}</option>)}</select></label><button onClick={() => exportRows(data.creators.filter((item) => selected.includes(item.id)))}><Download size={15} /> Export</button><button onClick={bulkArchive}><Archive size={15} /> Archive</button><button onClick={() => setSelected([])}><X size={15} /></button></div>}

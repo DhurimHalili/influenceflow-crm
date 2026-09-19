@@ -220,3 +220,11 @@ span.avatar { border-radius: 50%; display: inline-grid; place-items: center; fle
 /* Lost-deal context + reason picker */
 .lost-inline { border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent); background: color-mix(in srgb, var(--danger) 9%, var(--surface-solid)); color: var(--danger); border-radius: 999px; padding: 4px 11px; font-size: 10px; font-weight: 700; cursor: pointer; white-space: nowrap; }.lost-inline:hover { filter: brightness(.96); }
 .loss-pick { grid-template-columns: repeat(2, minmax(0, 1fr)); }.loss-pick button { display: flex; align-items: center; gap: 9px; }.loss-pick button svg:first-child { color: var(--accent); flex: 0 0 auto; }.loss-pick button span { flex: 1; }
+
+/* Working clear button inside search fields */
+.search-clear { border: 0; background: transparent; color: var(--muted); cursor: pointer; display: grid; place-items: center; padding: 5px; border-radius: 6px; flex: 0 0 auto; }.search-clear:hover { color: var(--text); background: var(--surface-alt); }
+
+/* Clickable calendar entries (edit on click) */
+.agenda-view article.clickable, .upcoming-list article.clickable { cursor: pointer; border-radius: 9px; transition: background .15s ease; }
+.agenda-view article.clickable:hover, .upcoming-list article.clickable:hover { background: var(--surface-alt); }
+.month-grid > button i { cursor: pointer; }
