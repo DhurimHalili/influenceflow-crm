@@ -46,7 +46,14 @@ export const download = (name: string, value: string, type = "application/json")
 export const toCSV = (rows: Record<string, string | number | boolean | null | undefined>[]) => {
   if (!rows.length) return "";
   const keys = Object.keys(rows[0]);
-  const escape = (value: unknown) => `"${String(value ?? "").replace(/"/g, '""')}"`;
+  // Neutralize spreadsheet formula injection: attacker-controlled cells
+  // (names, notes, domains) starting with = + - @ tab CR are prefixed so
+  // Excel/Sheets treat them as plain text, never as executable formulas.
+  const escape = (value: unknown) => {
+    let text = String(value ?? "");
+    if (/^[=+\-@\t\r]/.test(text)) text = `'${text}`;
+    return `"${text.replace(/"/g, '""')}"`;
+  };
   return [keys.map(escape).join(","), ...rows.map((row) => keys.map((key) => escape(row[key])).join(","))].join("\n");
 };
 
