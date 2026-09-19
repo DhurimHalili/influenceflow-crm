@@ -216,3 +216,7 @@ span.avatar { border-radius: 50%; display: inline-grid; place-items: center; fle
 /* Follow-up status block */
 .followup-count-pill { padding: 5px 10px; border-radius: 12px; color: var(--accent); background: var(--accent-soft); font-size: 10px; font-weight: 700; white-space: nowrap; }
 .followup-block { display: flex; align-items: center; justify-content: space-between; gap: 18px; flex-wrap: wrap; padding: 15px; border: 1px solid var(--line); border-radius: 11px; background: var(--surface-alt); }.followup-block strong { display: block; font: 700 16px "Manrope"; }.followup-block p { margin: 5px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; max-width: 460px; }
+
+/* Lost-deal context + reason picker */
+.lost-inline { border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent); background: color-mix(in srgb, var(--danger) 9%, var(--surface-solid)); color: var(--danger); border-radius: 999px; padding: 4px 11px; font-size: 10px; font-weight: 700; cursor: pointer; white-space: nowrap; }.lost-inline:hover { filter: brightness(.96); }
+.loss-pick { grid-template-columns: repeat(2, minmax(0, 1fr)); }.loss-pick button { display: flex; align-items: center; gap: 9px; }.loss-pick button svg:first-child { color: var(--accent); flex: 0 0 auto; }.loss-pick button span { flex: 1; }

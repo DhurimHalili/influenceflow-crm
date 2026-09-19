@@ -36,6 +36,8 @@ export interface Creator {
   status_updated_at: string;
   notes: string;
   next_action?: string;
+  lost_reason: string;
+  lost_at: string | null;
   followup_count: number;
   last_followup_at: string | null;
   archived_at: string | null;
@@ -53,6 +55,8 @@ export interface Brand {
   date_contacted: string | null;
   notes: string;
   next_action?: string;
+  lost_reason: string;
+  lost_at: string | null;
   archived_at: string | null;
   created_at: string;
 }
@@ -69,6 +73,8 @@ export interface BrandContact {
   pipeline_status: EntityStatus;
   date_contacted: string | null;
   notes: string;
+  lost_reason: string;
+  lost_at: string | null;
   created_at: string;
 }
 
@@ -93,6 +99,8 @@ export interface Campaign {
   due_date: string;
   notes: string;
   next_action?: string;
+  lost_reason: string;
+  lost_at: string | null;
   creator_ids: string[];
   archived_at: string | null;
   created_at: string;

@@ -62,3 +62,15 @@ export const isValidUrl = (value: string) => !value || /^(https?:\/\/)?[\w.-]+\.
 
 export const followupWords = (count: number) =>
   count <= 0 ? "No follow-ups yet" : count === 1 ? "Followed up once" : count === 2 ? "Followed up twice" : `Followed up ${count} times`;
+
+export const LOSS_REASONS = [
+  { value: "pricing", label: "Pricing didn't work" },
+  { value: "rejected_creators", label: "Rejected the creators" },
+  { value: "no_match", label: "No matching creators" },
+  { value: "too_slow", label: "Too slow" },
+  { value: "low_pay", label: "Offer too low" },
+  { value: "competitor", label: "Chose someone else" },
+] as const;
+
+export const lossReasonLabel = (value: string) =>
+  LOSS_REASONS.find((r) => r.value === value)?.label || "No reason given";

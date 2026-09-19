@@ -83,6 +83,11 @@ export default function DashboardPage() {
       data.activities.filter((a) => a.text.endsWith(` updated to ${status}`) && inR(a.at, s, e)).length;
     const createdCampaigns = (s = start, e = end) =>
       data.activities.filter((a) => a.text.endsWith("campaign created") && inR(a.at, s, e)).length;
+    // A lost deal is stamped exactly when a replied-or-beyond record moves to
+    // denied (campaigns: cancelled). Early rejections carry no stamp and never
+    // inflate this number.
+    const lostIn = (s = start, e = end) =>
+      [...creators, ...brands, ...data.contacts, ...campaigns].filter((item) => item.lost_at && inR(item.lost_at, s, e)).length;
     const emails = (s = start, e = end) =>
       creators.filter((c) => inR(c.date_contacted, s, e)).length + data.contacts.filter((c) => inR(c.date_contacted, s, e)).length;
     const count = {
@@ -91,7 +96,7 @@ export default function DashboardPage() {
       replies: statusIn("replied"),
       negotiating: statusIn("negotiating") + createdCampaigns(),
       closed: statusIn("completed"),
-      lost: statusIn("denied") + statusIn("cancelled"),
+      lost: lostIn(),
       added: creators.filter((c) => inR(c.created_at)).length,
     };
     const prev = {
@@ -100,7 +105,7 @@ export default function DashboardPage() {
       replies: statusIn("replied", pStart, pEnd),
       negotiating: statusIn("negotiating", pStart, pEnd) + createdCampaigns(pStart, pEnd),
       closed: statusIn("completed", pStart, pEnd),
-      lost: statusIn("denied", pStart, pEnd) + statusIn("cancelled", pStart, pEnd),
+      lost: lostIn(pStart, pEnd),
       added: creators.filter((c) => inR(c.created_at, pStart, pEnd)).length,
     };
     return { label, count, prev };

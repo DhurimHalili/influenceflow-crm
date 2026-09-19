@@ -6,13 +6,25 @@ import { loadCloudWorkspace, persistCloudWorkspace } from "../services/supabaseW
 import type { Activity, Brand, BrandContact, Campaign, Creator, Followup, Meeting, Profile, WorkspaceData } from "../types";
 import { useAuth } from "./AuthContext";
 
-type NewCreator = Omit<Creator, "id" | "user_id" | "created_at" | "status_updated_at" | "archived_at" | "on_roster" | "followup_count" | "last_followup_at">;
-type NewBrand = Omit<Brand, "id" | "user_id" | "created_at" | "archived_at">;
-type NewContact = Omit<BrandContact, "id" | "user_id" | "created_at">;
-type NewCampaign = Omit<Campaign, "id" | "user_id" | "created_at" | "archived_at" | "creator_payout">;
+type NewCreator = Omit<Creator, "id" | "user_id" | "created_at" | "status_updated_at" | "archived_at" | "on_roster" | "followup_count" | "last_followup_at" | "lost_reason" | "lost_at">;
+type NewBrand = Omit<Brand, "id" | "user_id" | "created_at" | "archived_at" | "lost_reason" | "lost_at">;
+type NewContact = Omit<BrandContact, "id" | "user_id" | "created_at" | "lost_reason" | "lost_at">;
+type NewCampaign = Omit<Campaign, "id" | "user_id" | "created_at" | "archived_at" | "creator_payout" | "lost_reason" | "lost_at">;
 type NewMeeting = Omit<Meeting, "id" | "user_id" | "created_at" | "reminder_sent">;
 
 type DuplicateMatch = { type: "name" | "link" | "domain"; id: string; label: string };
+
+// A "deal" exists only once two-way engagement happened. Rejecting an
+// untouched lead (new/contacted) or a cold thread (no_reply) is NOT a loss —
+// only replied-or-beyond moving to denied counts. Campaigns count when
+// cancelled out of negotiating/active.
+const DEAL_STAGES = ["replied", "negotiating", "roster", "signed"];
+
+export interface LossItem {
+  kind: "creator" | "brand" | "contact" | "campaign";
+  id: string;
+  name: string;
+}
 
 type DataContextValue = WorkspaceData & {
   ready: boolean;
@@ -36,6 +48,9 @@ type DataContextValue = WorkspaceData & {
   permanentlyDelete: (type: "creator" | "brand" | "campaign", ids: string[]) => void;
   updateProfile: (value: Partial<Profile>) => void;
   logFollowup: (creatorId: string, note?: string) => void;
+  pendingLoss: LossItem[];
+  resolveLoss: (reason: string | null) => void;
+  reviewLoss: (kind: LossItem["kind"], id: string) => void;
   importBackup: (value: WorkspaceData) => void;
   log: (text: string, entity_type?: Activity["entity_type"], entity_id?: string) => void;
 };
@@ -48,6 +63,9 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const storageKey = `influenceflow.workspace.v2.${userId}`;
   const [data, setData] = useState<WorkspaceData>(() => blankWorkspace(userId));
   const [ready, setReady] = useState(false);
+  // Deals that just died and still need an (optional, skippable) loss reason.
+  // In-memory only: never persisted, never synced, gone on reload.
+  const [pendingLoss, setPendingLoss] = useState<LossItem[]>([]);
   // Hydrated flips true ONLY after a confirmed successful cloud load for this
   // user. Cloud writes stay disabled until then, so a failed load can never
   // push a blank slate over real rows (the multi-user wipe scenario).
@@ -154,6 +172,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
       archived_at: null,
       followup_count: 0,
       last_followup_at: null,
+      lost_reason: "",
+      lost_at: null,
     };
     setData((current) => addActivity({ ...current, creators: [creator, ...current.creators] }, `${creator.name} added to influencers`, "creator", creator.id));
     return creator;
@@ -173,15 +193,58 @@ export function DataProvider({ children }: { children: ReactNode }) {
       archived_at: null,
       followup_count: 0,
       last_followup_at: null,
+      lost_reason: "",
+      lost_at: null,
     }));
     setData((current) => addActivity({ ...current, creators: [...additions, ...current.creators] }, `${additions.length} influencers imported`, "system"));
     return additions.length;
   };
 
-  const updateCreator = (id: string, value: Partial<Creator>) =>
+  const queueLoss = (item: LossItem) =>
+    setPendingLoss((prev) => (prev.some((p) => p.kind === item.kind && p.id === item.id) ? prev : [...prev, item]));
+
+  const resolveLoss = (reason: string | null) => {
+    const items = pendingLoss;
+    if (!items.length) return;
+    // Quiet update: the status change itself was already logged, so no new
+    // activity entry — only the reason stamp.
     setData((current) => {
-      const before = current.creators.find((item) => item.id === id);
-      const statusChanged = value.pipeline_status && before?.pipeline_status !== value.pipeline_status;
+      let next = current;
+      for (const item of items) {
+        if (item.kind === "creator")
+          next = { ...next, creators: next.creators.map((c) => (c.id === item.id ? { ...c, lost_reason: reason || "" } : c)) };
+        else if (item.kind === "brand")
+          next = { ...next, brands: next.brands.map((b) => (b.id === item.id ? { ...b, lost_reason: reason || "" } : b)) };
+        else if (item.kind === "contact")
+          next = { ...next, contacts: next.contacts.map((c) => (c.id === item.id ? { ...c, lost_reason: reason || "" } : c)) };
+        else next = { ...next, campaigns: next.campaigns.map((c) => (c.id === item.id ? { ...c, lost_reason: reason || "" } : c)) };
+      }
+      return next;
+    });
+    setPendingLoss([]);
+  };
+
+  const reviewLoss = (kind: LossItem["kind"], id: string) => {
+    const found =
+      kind === "creator"
+        ? data.creators.filter((c) => c.id === id && c.pipeline_status === "denied" && c.lost_at).map((c) => c.name)
+        : kind === "brand"
+          ? data.brands.filter((b) => b.id === id && b.pipeline_status === "denied" && b.lost_at).map((b) => b.name)
+          : kind === "contact"
+            ? data.contacts
+                .filter((c) => c.id === id && c.pipeline_status === "denied" && c.lost_at)
+                .map((c) => `${c.first_name} ${c.last_name}`.trim() || "Brand contact")
+            : data.campaigns.filter((c) => c.id === id && c.status === "cancelled" && c.lost_at).map((c) => c.name);
+    if (found.length) queueLoss({ kind, id, name: found[0] });
+  };
+
+  const updateCreator = (id: string, value: Partial<Creator>) => {
+    const before = data.creators.find((item) => item.id === id);
+    const toDenied = value.pipeline_status === "denied" && before?.pipeline_status !== "denied";
+    const lostStamp = toDenied && before && DEAL_STAGES.includes(before.pipeline_status) ? new Date().toISOString() : null;
+    const clearLoss = !!value.pipeline_status && value.pipeline_status !== "denied" && before?.pipeline_status === "denied";
+    setData((current) => {
+      const statusChanged = value.pipeline_status && current.creators.find((item) => item.id === id)?.pipeline_status !== value.pipeline_status;
       const creators = current.creators.map((item) =>
         item.id === id
           ? {
@@ -191,16 +254,21 @@ export function DataProvider({ children }: { children: ReactNode }) {
               notes: value.notes !== undefined ? sanitize(value.notes) : item.notes,
               on_roster: value.pipeline_status ? ["roster", "signed"].includes(value.pipeline_status) : item.on_roster,
               status_updated_at: statusChanged ? new Date().toISOString() : item.status_updated_at,
+              ...(toDenied ? { lost_reason: "", lost_at: lostStamp } : {}),
+              ...(clearLoss ? { lost_reason: "", lost_at: null } : {}),
             }
           : item,
       );
-      return addActivity(
+      const next = addActivity(
         { ...current, creators },
         `${before?.name || "Influencer"} updated${statusChanged ? ` to ${value.pipeline_status}` : ""}`,
         "creator",
         id,
       );
+      return next;
     });
+    if (toDenied && lostStamp && before) queueLoss({ kind: "creator", id, name: before.name });
+  };
 
   const mergeCreators = (keepId: string, removeId: string, merged: Partial<Creator>) =>
     setData((current) => {
@@ -248,18 +316,30 @@ export function DataProvider({ children }: { children: ReactNode }) {
       notes: sanitize(value.notes),
       created_at: new Date().toISOString(),
       archived_at: null,
+      lost_reason: "",
+      lost_at: null,
     };
     setData((current) => addActivity({ ...current, brands: [brand, ...current.brands] }, `${brand.name} added to brands`, "brand", brand.id));
     return brand;
   };
 
-  const updateBrand = (id: string, value: Partial<Brand>) =>
+  const updateBrand = (id: string, value: Partial<Brand>) => {
+    const before = data.brands.find((item) => item.id === id);
+    const toDenied = value.pipeline_status === "denied" && before?.pipeline_status !== "denied";
+    const lostStamp = toDenied && before && DEAL_STAGES.includes(before.pipeline_status) ? new Date().toISOString() : null;
+    const clearLoss = !!value.pipeline_status && value.pipeline_status !== "denied" && before?.pipeline_status === "denied";
     setData((current) => {
-      const before = current.brands.find((item) => item.id === id);
-      const statusChanged = value.pipeline_status && before?.pipeline_status !== value.pipeline_status;
+      const statusChanged = value.pipeline_status && current.brands.find((item) => item.id === id)?.pipeline_status !== value.pipeline_status;
       const brands = current.brands.map((item) =>
         item.id === id
-          ? { ...item, ...value, name: value.name ? sanitize(value.name) : item.name, notes: value.notes !== undefined ? sanitize(value.notes) : item.notes }
+          ? {
+              ...item,
+              ...value,
+              name: value.name ? sanitize(value.name) : item.name,
+              notes: value.notes !== undefined ? sanitize(value.notes) : item.notes,
+              ...(toDenied ? { lost_reason: "", lost_at: lostStamp } : {}),
+              ...(clearLoss ? { lost_reason: "", lost_at: null } : {}),
+            }
           : item,
       );
       return addActivity(
@@ -269,6 +349,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
         id,
       );
     });
+    if (toDenied && lostStamp && before) queueLoss({ kind: "brand", id, name: before.name });
+  };
 
   const mergeBrands = (keepId: string, removeId: string, merged: Partial<Brand>) =>
     setData((current) => {
@@ -292,23 +374,43 @@ export function DataProvider({ children }: { children: ReactNode }) {
       last_name: sanitize(value.last_name),
       notes: sanitize(value.notes),
       created_at: new Date().toISOString(),
+      lost_reason: "",
+      lost_at: null,
     };
     setData((current) =>
       addActivity({ ...current, contacts: [contact, ...current.contacts] }, `${contact.first_name} ${contact.last_name} added as brand contact`, "brand", contact.brand_id),
     );
     return contact;
   };
-  const updateContact = (id: string, value: Partial<BrandContact>) =>
+  const updateContact = (id: string, value: Partial<BrandContact>) => {
+    const contact = data.contacts.find((item) => item.id === id);
+    const toDenied = value.pipeline_status === "denied" && contact?.pipeline_status !== "denied";
+    const lostStamp = toDenied && contact && DEAL_STAGES.includes(contact.pipeline_status) ? new Date().toISOString() : null;
+    const clearLoss = !!value.pipeline_status && value.pipeline_status !== "denied" && contact?.pipeline_status === "denied";
+    const label = contact ? `${contact.first_name} ${contact.last_name}`.trim() || "Brand contact" : "Brand contact";
     setData((current) => {
-      const contact = current.contacts.find((item) => item.id === id);
-      const statusChanged = value.pipeline_status && contact?.pipeline_status !== value.pipeline_status;
+      const statusChanged = value.pipeline_status && current.contacts.find((item) => item.id === id)?.pipeline_status !== value.pipeline_status;
       return addActivity(
-        { ...current, contacts: current.contacts.map((item) => (item.id === id ? { ...item, ...value } : item)) },
-        `${contact?.first_name || "Brand contact"} updated${statusChanged ? ` to ${value.pipeline_status}` : ""}`,
+        {
+          ...current,
+          contacts: current.contacts.map((item) =>
+            item.id === id
+              ? {
+                  ...item,
+                  ...value,
+                  ...(toDenied ? { lost_reason: "", lost_at: lostStamp } : {}),
+                  ...(clearLoss ? { lost_reason: "", lost_at: null } : {}),
+                }
+              : item,
+          ),
+        },
+        `${label} updated${statusChanged ? ` to ${value.pipeline_status}` : ""}`,
         "brand",
         contact?.brand_id,
       );
     });
+    if (toDenied && lostStamp && contact) queueLoss({ kind: "contact", id, name: label });
+  };
 
   const addCampaign = (value: NewCampaign) => {
     const campaign: Campaign = {
@@ -320,21 +422,33 @@ export function DataProvider({ children }: { children: ReactNode }) {
       creator_payout: (value.agreed_payment * value.agency_percent) / 100,
       created_at: new Date().toISOString(),
       archived_at: null,
+      lost_reason: "",
+      lost_at: null,
     };
     setData((current) => addActivity({ ...current, campaigns: [campaign, ...current.campaigns] }, `${campaign.name} campaign created`, "campaign", campaign.id));
     return campaign;
   };
 
-  const updateCampaign = (id: string, value: Partial<Campaign>) =>
+  const updateCampaign = (id: string, value: Partial<Campaign>) => {
+    const before = data.campaigns.find((item) => item.id === id);
+    const toCancelled = value.status === "cancelled" && before?.status !== "cancelled";
+    const lostStamp = toCancelled && before && ["negotiating", "active"].includes(before.status) ? new Date().toISOString() : null;
+    const clearLoss = !!value.status && value.status !== "cancelled" && before?.status === "cancelled";
     setData((current) => {
-      const before = current.campaigns.find((item) => item.id === id);
       const campaigns = current.campaigns.map((item) => {
         if (item.id !== id) return item;
-        const next = { ...item, ...value };
+        const next = {
+          ...item,
+          ...value,
+          ...(toCancelled ? { lost_reason: "", lost_at: lostStamp } : {}),
+          ...(clearLoss ? { lost_reason: "", lost_at: null } : {}),
+        };
         return { ...next, creator_payout: (next.agreed_payment * next.agency_percent) / 100 };
       });
       return addActivity({ ...current, campaigns }, `${before?.name || "Campaign"} updated${value.status ? ` to ${value.status}` : ""}`, "campaign", id);
     });
+    if (toCancelled && lostStamp && before) queueLoss({ kind: "campaign", id, name: before.name });
+  };
 
   const addMeeting = (value: NewMeeting) => {
     const meeting: Meeting = {
@@ -450,10 +564,13 @@ export function DataProvider({ children }: { children: ReactNode }) {
       updateProfile,
       importBackup,
       logFollowup,
+      pendingLoss,
+      resolveLoss,
+      reviewLoss,
       log,
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [data, ready, hydrated, findCreatorDuplicates, findBrandDuplicates, log],
+    [data, ready, hydrated, pendingLoss, findCreatorDuplicates, findBrandDuplicates, log],
   );
   return <DataContext.Provider value={contextValue}>{children}</DataContext.Provider>;
 }

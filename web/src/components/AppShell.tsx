@@ -1,8 +1,8 @@
 import { AnimatePresence, motion } from "framer-motion";
 import {
-  Archive, BarChart3, Building2, CalendarDays, Check, ChevronRight, Command, Crown, HelpCircle,
-  LayoutDashboard, LifeBuoy, LogOut, Menu, MessageCircle, Palette, Plus, Search, Settings,
-  Sparkles, Users, X,
+  Archive, BarChart3, Building2, CalendarDays, Check, ChevronRight, CircleDollarSign, Clock3, Command, Crown, HelpCircle,
+  LayoutDashboard, LifeBuoy, LogOut, Menu, MessageCircle, Palette, Plus, Search, SearchX, Settings,
+  Sparkles, UserX, Users, Wallet, X,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
@@ -10,7 +10,17 @@ import { useAuth } from "../contexts/AuthContext";
 import { useData } from "../contexts/DataContext";
 import { useToast } from "../contexts/ToastContext";
 import { Avatar, Button, Logo, Modal } from "./ui";
+import { LOSS_REASONS } from "../lib/utils";
 import type { SearchResult, ThemeName } from "../types";
+
+const lossIcons: Record<string, typeof CircleDollarSign> = {
+  pricing: CircleDollarSign,
+  rejected_creators: UserX,
+  no_match: SearchX,
+  too_slow: Clock3,
+  low_pay: Wallet,
+  competitor: Building2,
+};
 
 const navSections = [
   { label: "Overview", items: [{ to: "/app", label: "Dashboard", icon: LayoutDashboard, end: true }] },
@@ -48,6 +58,12 @@ export default function AppShell() {
   const [onboardingStep, setOnboardingStep] = useState(1);
   const [displayName, setDisplayName] = useState(data.profile.display_name);
   const [theme, setTheme] = useState<ThemeName>(data.profile.theme);
+  // Loss-reason picker: opens automatically only when a live deal just died.
+  const lossIds = data.pendingLoss.map((l) => `${l.kind}:${l.id}`).join(",");
+  const [lossReason, setLossReason] = useState("");
+  useEffect(() => {
+    setLossReason("");
+  }, [lossIds]);
   const searchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -163,6 +179,22 @@ export default function AppShell() {
         <div className="command-list">
           {[{ label: "Add influencer", to: "/app/influencers?new=1", icon: Users }, { label: "Add brand", to: "/app/brands?new=1", icon: Building2 }, { label: "Create campaign", to: "/app/campaigns?new=1", icon: BarChart3 }, { label: "Schedule meeting", to: "/app/calendar?new=1", icon: CalendarDays }, { label: "Search workspace", action: () => setSearchOpen(true), icon: Search }].map((command) => <button key={command.label} onClick={() => { setCommandOpen(false); if (command.to) navigate(command.to); else command.action?.(); }}><command.icon size={17} /><span>{command.label}</span><ChevronRight size={15} /></button>)}
         </div>
+      </Modal>
+
+      <Modal open={data.pendingLoss.length > 0} onClose={() => data.resolveLoss(null)} title="Deal lost" description={data.pendingLoss.length === 1 ? `${data.pendingLoss[0].name} — what happened? One tap, optional.` : `${data.pendingLoss.length} lost deals — one shared reason? One tap, optional.`}>
+        <div className="reminder-options loss-pick">
+          {LOSS_REASONS.map((reason) => {
+            const Icon = lossIcons[reason.value] || MessageCircle;
+            return (
+              <button key={reason.value} className={lossReason === reason.value ? "selected" : ""} onClick={() => setLossReason(reason.value)}>
+                <Icon size={15} />
+                <span>{reason.label}</span>
+                {lossReason === reason.value && <Check size={14} />}
+              </button>
+            );
+          })}
+        </div>
+        <div className="modal-actions"><Button variant="ghost" onClick={() => data.resolveLoss(null)}>Skip</Button><Button onClick={() => data.resolveLoss(lossReason || null)}>Save reason</Button></div>
       </Modal>
 
       <Modal open={onboardingOpen} onClose={() => setOnboardingOpen(false)} title="Set up your workspace" description={`Step ${onboardingStep} of 2 / About 30 seconds`}>

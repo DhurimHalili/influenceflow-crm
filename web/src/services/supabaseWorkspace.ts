@@ -66,6 +66,8 @@ const normalizeCreator = (row: Record<string, unknown>, userId: string): Creator
   next_action: text(row.next_action),
   followup_count: num(row.followup_count),
   last_followup_at: dateOrNull(row.last_followup_at),
+  lost_reason: text(row.lost_reason),
+  lost_at: dateOrNull(row.lost_at),
   archived_at: dateOrNull(row.archived_at),
   created_at: typeof row.created_at === "string" && row.created_at ? row.created_at : new Date().toISOString(),
 });
@@ -89,6 +91,8 @@ const normalizeBrand = (row: Record<string, unknown>, userId: string): Brand => 
   date_contacted: dateOrNull(row.date_contacted),
   notes: text(row.notes),
   next_action: text(row.next_action),
+  lost_reason: text(row.lost_reason),
+  lost_at: dateOrNull(row.lost_at),
   archived_at: dateOrNull(row.archived_at),
   created_at: typeof row.created_at === "string" && row.created_at ? row.created_at : new Date().toISOString(),
 });
@@ -105,6 +109,8 @@ const normalizeContact = (row: Record<string, unknown>, userId: string): BrandCo
   pipeline_status: (mapStatus(row.pipeline_status) as BrandContact["pipeline_status"]) || "new",
   date_contacted: dateOrNull(row.date_contacted),
   notes: text(row.notes),
+  lost_reason: text(row.lost_reason),
+  lost_at: dateOrNull(row.lost_at),
   created_at: typeof row.created_at === "string" && row.created_at ? row.created_at : new Date().toISOString(),
 });
 
@@ -130,6 +136,8 @@ const normalizeCampaign = (row: Record<string, unknown>, userId: string, links: 
     due_date: typeof row.due_date === "string" && row.due_date ? row.due_date : new Date().toISOString().slice(0, 10),
     notes: text(row.notes),
     next_action: text(row.next_action),
+    lost_reason: text(row.lost_reason),
+    lost_at: dateOrNull(row.lost_at),
     creator_ids: links.filter((l) => l.campaign_id === String(row.id ?? "")).map((l) => l.creator_id),
     archived_at: dateOrNull(row.archived_at),
     created_at: typeof row.created_at === "string" && row.created_at ? row.created_at : new Date().toISOString(),
@@ -244,7 +252,7 @@ export async function loadCloudWorkspace(userId: string): Promise<WorkspaceData 
 // Columns that only exist after the parity migration. If a deploy hasn't run
 // it yet, PostgREST rejects the upsert with an unknown-column error: strip
 // those keys once and retry instead of dropping the whole save.
-const NEW_COLUMNS = ["engagement_rate", "next_action", "deliverables_items", "entity_type", "entity_id", "updated_at", "user_id", "followup_count", "last_followup_at"];
+const NEW_COLUMNS = ["engagement_rate", "next_action", "deliverables_items", "entity_type", "entity_id", "updated_at", "user_id", "followup_count", "last_followup_at", "lost_reason", "lost_at"];
 
 async function upsertResilient(table: string, rows: Record<string, unknown>[], opts?: { ignoreDuplicates?: boolean }) {
   if (!rows.length) return;
