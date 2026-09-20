@@ -4,7 +4,7 @@ import { AlertCircle, ArrowRight, ArrowUpRight, BarChart3, Building2, CalendarDa
 import { Link, useNavigate } from "react-router-dom";
 import { useData } from "../contexts/DataContext";
 import { Button, EmptyState, Metric, PageHeader, Tabs } from "../components/ui";
-import { dateLabel, isOverdue, money, relativeTime, timeLabel } from "../lib/utils";
+import { dateLabel, isOverdue, isPastDay, isTodayDay, money, relativeTime, timeLabel } from "../lib/utils";
 import { ENTITY_STATUSES, STATUS_LABELS } from "../types";
 
 const funnelColors = ["#7c6bf0", "#4d88e8", "#24a6a1", "#d59b48", "#69a969", "#895ee2", "#ce6475", "#8c95a7"];
@@ -123,7 +123,9 @@ export default function DashboardPage() {
     ...campaigns.filter((item) => item.status === "active" && isOverdue(item.due_date)).map((item) => ({ id: item.id, type: "Campaign", title: item.name, detail: `Overdue since ${dateLabel(item.due_date)}`, to: `/app/campaigns?id=${item.id}`, urgent: true })),
     ...creators.filter((item) => item.next_action && Date.now() - new Date(item.status_updated_at).getTime() > 7 * 86400000).map((item) => ({ id: item.id, type: "Follow-up", title: item.name, detail: item.next_action!, to: `/app/influencers/${item.id}`, urgent: false })),
     ...brands.filter((item) => item.next_action && item.pipeline_status !== "signed").map((item) => ({ id: item.id, type: "Brand", title: item.name, detail: item.next_action!, to: `/app/brands/${item.id}`, urgent: false })),
-  ].slice(0, 6);
+    ...creators.filter((item) => item.next_action_date && isPastDay(item.next_action_date)).map((item) => ({ id: item.id, type: "Overdue", title: item.name, detail: `${item.next_action || "Action"} — due ${dateLabel(item.next_action_date)}`, to: `/app/influencers/${item.id}`, urgent: true })),
+    ...creators.filter((item) => item.next_action_date && isTodayDay(item.next_action_date)).map((item) => ({ id: item.id, type: "Due today", title: item.name, detail: item.next_action || "Action due today", to: `/app/influencers/${item.id}`, urgent: false })),
+  ].slice(0, 8);
 
   if (!data.ready) return <div className="dashboard-skeleton"><i /><i /><i /><i /></div>;
 

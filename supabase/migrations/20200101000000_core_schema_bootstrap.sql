@@ -55,6 +55,8 @@ create table if not exists public.creators (
   engagement_rate numeric(7,3) not null default 0,
   next_action text not null default '',
   stars integer not null default 0 check (stars between 0 and 5),
+  priority text not null default 'none' check (priority in ('none', 'soon', 'urgent')),
+  next_action_date date,
   followup_count integer not null default 0,
   last_followup_at timestamptz,
   lost_reason text not null default '',
@@ -151,6 +153,7 @@ create table if not exists public.meetings (
   notes text default ''::text,
   remind_at timestamptz,
   reminder_sent boolean not null default false,
+  kind text not null default 'meeting' check (kind in ('meeting', 'task', 'reminder')),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );

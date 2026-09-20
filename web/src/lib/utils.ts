@@ -68,6 +68,26 @@ export const isValidUrl = (value: string) => !value || /^(https?:\/\/)?[\w.-]+\.
 export const followupWords = (count: number) =>
   count <= 0 ? "No follow-ups yet" : count === 1 ? "Followed up once" : count === 2 ? "Followed up twice" : `Followed up ${count} times`;
 
+export const PRIORITY_LABELS: Record<string, string> = { none: "No priority", soon: "Follow up soon", urgent: "Urgent" };
+export const MEETING_KIND_LABELS: Record<string, string> = { meeting: "Meeting", task: "Task", reminder: "Reminder" };
+
+export const isPastDay = (value?: string | null) => {
+  if (!value) return false;
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return false;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return d < today;
+};
+
+export const isTodayDay = (value?: string | null) => {
+  if (!value) return false;
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return false;
+  const now = new Date();
+  return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+};
+
 export const LOSS_REASONS = [
   { value: "pricing", label: "Pricing didn't work" },
   { value: "rejected_creators", label: "Rejected the creators" },

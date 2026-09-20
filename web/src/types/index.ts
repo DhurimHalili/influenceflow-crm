@@ -11,6 +11,8 @@ export type EntityStatus =
 export type CampaignStatus = "negotiating" | "active" | "completed" | "cancelled";
 export type ThemeName = "agency" | "light" | "dark" | "honey" | "ocean";
 export type Platform = "YouTube" | "Instagram" | "TikTok" | "Twitch" | "LinkedIn" | "Other";
+export type Priority = "none" | "soon" | "urgent";
+export type MeetingKind = "meeting" | "task" | "reminder";
 
 export interface Profile {
   id: string;
@@ -41,6 +43,8 @@ export interface Creator {
   lost_at: string | null;
   followup_count: number;
   last_followup_at: string | null;
+  priority: Priority;
+  next_action_date: string | null;
   archived_at: string | null;
   created_at: string;
 }
@@ -118,6 +122,7 @@ export interface Meeting {
   notes: string;
   remind_at: string | null;
   reminder_sent: boolean;
+  kind: MeetingKind;
   created_at: string;
 }
 

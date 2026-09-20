@@ -67,6 +67,8 @@ const normalizeCreator = (row: Record<string, unknown>, userId: string): Creator
   next_action: text(row.next_action),
   followup_count: num(row.followup_count),
   last_followup_at: dateOrNull(row.last_followup_at),
+  priority: (["none", "soon", "urgent"] as const).includes(row.priority as Creator["priority"]) ? (row.priority as Creator["priority"]) : "none",
+  next_action_date: dateOrNull(row.next_action_date),
   lost_reason: text(row.lost_reason),
   lost_at: dateOrNull(row.lost_at),
   archived_at: dateOrNull(row.archived_at),
@@ -161,6 +163,7 @@ const normalizeMeeting = (row: Record<string, unknown>, userId: string): Meeting
     notes: text(row.notes),
     remind_at: dateOrNull(row.remind_at),
     reminder_sent: row.reminder_sent === true,
+    kind: (["meeting", "task", "reminder"] as const).includes(row.kind as Meeting["kind"]) ? (row.kind as Meeting["kind"]) : "meeting",
     created_at: typeof row.created_at === "string" && row.created_at ? row.created_at : new Date().toISOString(),
   };
 };
@@ -253,7 +256,7 @@ export async function loadCloudWorkspace(userId: string): Promise<WorkspaceData 
 // Columns that only exist after the parity migration. If a deploy hasn't run
 // it yet, PostgREST rejects the upsert with an unknown-column error: strip
 // those keys once and retry instead of dropping the whole save.
-const NEW_COLUMNS = ["engagement_rate", "next_action", "deliverables_items", "entity_type", "entity_id", "updated_at", "user_id", "followup_count", "last_followup_at", "lost_reason", "lost_at", "stars"];
+const NEW_COLUMNS = ["engagement_rate", "next_action", "deliverables_items", "entity_type", "entity_id", "updated_at", "user_id", "followup_count", "last_followup_at", "lost_reason", "lost_at", "stars", "priority", "next_action_date", "kind"];
 
 async function upsertResilient(table: string, rows: Record<string, unknown>[], opts?: { ignoreDuplicates?: boolean }) {
   if (!rows.length) return;
