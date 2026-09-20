@@ -43,7 +43,7 @@ export const download = (name: string, value: string, type = "application/json")
   URL.revokeObjectURL(url);
 };
 
-export const toCSV = (rows: Record<string, string | number | boolean | null | undefined>[]) => {
+export const toCSV = (rows: Record<string, string | number | boolean | null | undefined>[], headers?: Record<string, string>) => {
   if (!rows.length) return "";
   const keys = Object.keys(rows[0]);
   // Neutralize spreadsheet formula injection: attacker-controlled cells
@@ -54,8 +54,13 @@ export const toCSV = (rows: Record<string, string | number | boolean | null | un
     if (/^[=+\-@\t\r]/.test(text)) text = `'${text}`;
     return `"${text.replace(/"/g, '""')}"`;
   };
-  return [keys.map(escape).join(","), ...rows.map((row) => keys.map((key) => escape(row[key])).join(","))].join("\n");
+  // BOM first: without it Excel mangles non-ASCII characters. Friendly
+  // headers second: raw keys (contact_email) become readable columns (Email).
+  const head = keys.map((key) => escape(headers?.[key] ?? key)).join(",");
+  return CSV_BOM + [head, ...rows.map((row) => keys.map((key) => escape(row[key])).join(","))].join("\n");
 };
+
+export const CSV_BOM = "\ufeff";
 
 export const isValidEmail = (value: string) => !value || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 export const isValidUrl = (value: string) => !value || /^(https?:\/\/)?[\w.-]+\.[a-z]{2,}/i.test(value);

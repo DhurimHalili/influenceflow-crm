@@ -36,6 +36,7 @@ type DataContextValue = WorkspaceData & {
   mergeCreators: (keepId: string, removeId: string, merged: Partial<Creator>) => void;
   addBrand: (value: NewBrand) => Brand;
   updateBrand: (id: string, value: Partial<Brand>) => void;
+  addBrands: (values: NewBrand[]) => number;
   findBrandDuplicates: (name: string, domain: string, ignoreId?: string) => DuplicateMatch[];
   mergeBrands: (keepId: string, removeId: string, merged: Partial<Brand>) => void;
   addContact: (value: NewContact) => BrandContact;
@@ -68,6 +69,9 @@ export function DataProvider({ children }: { children: ReactNode }) {
   // Deals that just died and still need an (optional, skippable) loss reason.
   // In-memory only: never persisted, never synced, gone on reload.
   const [pendingLoss, setPendingLoss] = useState<LossItem[]>([]);
+  // Activity rows removed alongside permanently deleted entities. Flushed to
+  // the cloud on the next persist (activities are otherwise insert-only).
+  const [activityTombstones, setActivityTombstones] = useState<string[]>([]);
   // Hydrated flips true ONLY after a confirmed successful cloud load for this
   // user. Cloud writes stay disabled until then, so a failed load can never
   // push a blank slate over real rows (the multi-user wipe scenario).
@@ -123,14 +127,19 @@ export function DataProvider({ children }: { children: ReactNode }) {
     if (!hasSupabase || !hydrated || !ready || !user) return;
     const owner = userId;
     const snapshot = data;
+    const doomed = activityTombstones;
     const timer = window.setTimeout(() => {
       if (!hydratedRef.current || userRef.current !== owner) return;
-      void persistCloudWorkspace({ ...snapshot, demoSeeded: false }, owner).catch(() => {
-        // Optimistic local changes are kept and retried after the next mutation.
-      });
+      void persistCloudWorkspace({ ...snapshot, demoSeeded: false }, owner, doomed)
+        .then(() => {
+          if (doomed.length) setActivityTombstones((prev) => prev.filter((id) => !doomed.includes(id)));
+        })
+        .catch(() => {
+          // Optimistic local changes are kept and retried after the next mutation.
+        });
     }, 650);
     return () => window.clearTimeout(timer);
-  }, [data, hydrated, ready, user, userId]);
+  }, [data, hydrated, ready, user, userId, activityTombstones]);
 
   const addActivity = (workspace: WorkspaceData, text: string, entity_type?: Activity["entity_type"], entity_id?: string) => {
     const activity: Activity = { id: uid(), user_id: userId, text: sanitize(text), at: new Date().toISOString(), entity_type, entity_id };
@@ -325,6 +334,23 @@ export function DataProvider({ children }: { children: ReactNode }) {
     return brand;
   };
 
+  const addBrands = (values: NewBrand[]) => {
+    const stamp = new Date().toISOString();
+    const additions = values.map((value) => ({
+      ...value,
+      id: uid(),
+      user_id: userId,
+      name: sanitize(value.name),
+      notes: sanitize(value.notes),
+      created_at: stamp,
+      archived_at: null,
+      lost_reason: "",
+      lost_at: null,
+    }));
+    setData((current) => addActivity({ ...current, brands: [...additions, ...current.brands] }, `${additions.length} brands imported`, "system"));
+    return additions.length;
+  };
+
   const updateBrand = (id: string, value: Partial<Brand>) => {
     const before = data.brands.find((item) => item.id === id);
     const toDenied = value.pipeline_status === "denied" && before?.pipeline_status !== "denied";
@@ -505,12 +531,25 @@ export function DataProvider({ children }: { children: ReactNode }) {
       );
     });
 
-  const permanentlyDelete = (type: "creator" | "brand" | "campaign", ids: string[]) =>
+  const permanentlyDelete = (type: "creator" | "brand" | "campaign", ids: string[]) => {
+    // Purge the deleted entities' own audit entries as well: otherwise ghost
+    // events (e.g. "X campaign created" for a deleted test campaign) would
+    // keep counting in stats forever. Cloud rows are removed via tombstones
+    // in persist; local state drops them immediately.
+    const doomed = new Set<string>(ids);
+    if (type === "brand") {
+      for (const c of data.campaigns) if (ids.includes(c.brand_id)) doomed.add(c.id);
+    }
+    const deadActivities = data.activities.filter((a) => a.entity_id && doomed.has(a.entity_id)).map((a) => a.id);
+    if (deadActivities.length)
+      setActivityTombstones((prev) => [...prev, ...deadActivities.filter((id) => !prev.includes(id))]);
     setData((current) => {
+      const activities = current.activities.filter((a) => !(a.entity_id && doomed.has(a.entity_id)));
       if (type === "creator")
         return addActivity(
           {
             ...current,
+            activities,
             creators: current.creators.filter((item) => !ids.includes(item.id)),
             campaigns: current.campaigns.map((item) => ({ ...item, creator_ids: item.creator_ids.filter((cid) => !ids.includes(cid)) })),
           },
@@ -521,6 +560,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
         return addActivity(
           {
             ...current,
+            activities,
             brands: current.brands.filter((item) => !ids.includes(item.id)),
             contacts: current.contacts.filter((item) => !ids.includes(item.brand_id)),
             campaigns: current.campaigns.filter((item) => !ids.includes(item.brand_id)),
@@ -529,11 +569,12 @@ export function DataProvider({ children }: { children: ReactNode }) {
           "system",
         );
       return addActivity(
-        { ...current, campaigns: current.campaigns.filter((item) => !ids.includes(item.id)) },
+        { ...current, activities, campaigns: current.campaigns.filter((item) => !ids.includes(item.id)) },
         `${ids.length} campaign record permanently deleted`,
         "system",
       );
     });
+  };
 
   const updateProfile = (value: Partial<Profile>) => setData((current) => ({ ...current, profile: { ...current.profile, ...value } }));
   const logFollowup = (creatorId: string, note = "") => {
@@ -573,6 +614,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       mergeCreators,
       addBrand,
       updateBrand,
+      addBrands,
       findBrandDuplicates,
       mergeBrands,
       addContact,
