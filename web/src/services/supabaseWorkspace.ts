@@ -295,7 +295,7 @@ const removeMissing = async (table: string, userId: string, ids: string[]) => {
   if (error) throw error;
 };
 
-export async function persistCloudWorkspace(workspace: WorkspaceData, userId: string, activityTombstones: string[] = []) {
+export async function persistCloudWorkspace(workspace: WorkspaceData, userId: string, activityTombstones: string[] = [], followupTombstones: string[] = []) {
   if (workspace.demoSeeded) return;
   const owned = <T extends { user_id: string }>(rows: T[]) => rows.map((row) => ({ ...row, user_id: userId }));
   const { error: profileError } = await supabase.from("profiles").upsert({ ...workspace.profile, id: userId } as never);
@@ -340,6 +340,10 @@ export async function persistCloudWorkspace(workspace: WorkspaceData, userId: st
   if (activityTombstones.length) {
     const { error: tombstoneError } = await supabase.from("activities").delete().eq("user_id", userId).in("id", activityTombstones);
     if (tombstoneError) throw tombstoneError;
+  }
+  if (followupTombstones.length) {
+    const { error: followupTombstoneError } = await supabase.from("followups").delete().eq("user_id", userId).in("id", followupTombstones);
+    if (followupTombstoneError) throw followupTombstoneError;
   }
   // Follow-up history is append-only; a missing table (pre-migration deploy)
   // skips silently while local state keeps working.

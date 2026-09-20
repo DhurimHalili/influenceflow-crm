@@ -51,6 +51,7 @@ type DataContextValue = WorkspaceData & {
   permanentlyDelete: (type: "creator" | "brand" | "campaign", ids: string[]) => void;
   updateProfile: (value: Partial<Profile>) => void;
   logFollowup: (creatorId: string, note?: string) => void;
+  clearFollowups: (creatorId: string) => void;
   pendingLoss: LossItem[];
   resolveLoss: (reason: string | null) => void;
   reviewLoss: (kind: LossItem["kind"], id: string) => void;
@@ -72,6 +73,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
   // Activity rows removed alongside permanently deleted entities. Flushed to
   // the cloud on the next persist (activities are otherwise insert-only).
   const [activityTombstones, setActivityTombstones] = useState<string[]>([]);
+  // Same idea for follow-up rows removed via "clear history".
+  const [followupTombstones, setFollowupTombstones] = useState<string[]>([]);
   // Hydrated flips true ONLY after a confirmed successful cloud load for this
   // user. Cloud writes stay disabled until then, so a failed load can never
   // push a blank slate over real rows (the multi-user wipe scenario).
@@ -128,18 +131,20 @@ export function DataProvider({ children }: { children: ReactNode }) {
     const owner = userId;
     const snapshot = data;
     const doomed = activityTombstones;
+    const doomedFollowups = followupTombstones;
     const timer = window.setTimeout(() => {
       if (!hydratedRef.current || userRef.current !== owner) return;
-      void persistCloudWorkspace({ ...snapshot, demoSeeded: false }, owner, doomed)
+      void persistCloudWorkspace({ ...snapshot, demoSeeded: false }, owner, doomed, doomedFollowups)
         .then(() => {
           if (doomed.length) setActivityTombstones((prev) => prev.filter((id) => !doomed.includes(id)));
+          if (doomedFollowups.length) setFollowupTombstones((prev) => prev.filter((id) => !doomedFollowups.includes(id)));
         })
         .catch(() => {
           // Optimistic local changes are kept and retried after the next mutation.
         });
     }, 650);
     return () => window.clearTimeout(timer);
-  }, [data, hydrated, ready, user, userId, activityTombstones]);
+  }, [data, hydrated, ready, user, userId, activityTombstones, followupTombstones]);
 
   const addActivity = (workspace: WorkspaceData, text: string, entity_type?: Activity["entity_type"], entity_id?: string) => {
     const activity: Activity = { id: uid(), user_id: userId, text: sanitize(text), at: new Date().toISOString(), entity_type, entity_id };
@@ -596,9 +601,49 @@ export function DataProvider({ children }: { children: ReactNode }) {
   };
 
   const importBackup = (value: WorkspaceData) => {
-    setData({ ...value, profile: { ...value.profile, id: userId }, followups: value.followups || [], demoSeeded: false });
+    // Deduplicate by id: re-importing the same backup twice must never
+    // double-count stats or duplicate rows.
+    const dedupe = <T extends { id: string }>(rows: T[] | undefined) => {
+      const seen = new Set<string>();
+      return (rows || []).filter((r) => (seen.has(r.id) ? false : (seen.add(r.id), true)));
+    };
+    setData({
+      ...value,
+      profile: { ...value.profile, id: userId },
+      creators: dedupe(value.creators),
+      brands: dedupe(value.brands),
+      contacts: dedupe(value.contacts),
+      campaigns: dedupe(value.campaigns),
+      followups: dedupe(value.followups),
+      meetings: dedupe(value.meetings),
+      activities: dedupe(value.activities),
+      demoSeeded: false,
+    });
     hydratedRef.current = true;
     setHydrated(true);
+  };
+
+  const clearFollowups = (creatorId: string) => {
+    const target = data.creators.find((item) => item.id === creatorId);
+    if (!target) return;
+    const deadFollowups = data.followups.filter((f) => f.creator_id === creatorId).map((f) => f.id);
+    if (deadFollowups.length)
+      setFollowupTombstones((prev) => [...prev, ...deadFollowups.filter((id) => !prev.includes(id))]);
+    const deadActivities = data.activities
+      .filter((a) => a.entity_id === creatorId && a.text.startsWith("Logged a follow-up with "))
+      .map((a) => a.id);
+    if (deadActivities.length)
+      setActivityTombstones((prev) => [...prev, ...deadActivities.filter((id) => !prev.includes(id))]);
+    setData((current) => {
+      const creators = current.creators.map((item) =>
+        item.id === creatorId ? { ...item, followup_count: 0, last_followup_at: null } : item,
+      );
+      const followups = current.followups.filter((f) => f.creator_id !== creatorId);
+      const activities = current.activities.filter(
+        (a) => !(a.entity_id === creatorId && a.text.startsWith("Logged a follow-up with ")),
+      );
+      return addActivity({ ...current, creators, followups, activities }, `Follow-up history cleared for ${target.name}`, "creator", creatorId);
+    });
   };
 
   const contextValue = useMemo<DataContextValue>(
@@ -630,6 +675,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       updateProfile,
       importBackup,
       logFollowup,
+      clearFollowups,
       pendingLoss,
       resolveLoss,
       reviewLoss,
