@@ -55,6 +55,7 @@ const normalizeCreator = (row: Record<string, unknown>, userId: string): Creator
   niche: text(row.niche),
   avg_views: num(row.avg_views),
   engagement_rate: num(row.engagement_rate),
+  stars: Math.min(5, Math.max(0, num(row.stars))),
   platform: (["YouTube", "Instagram", "TikTok", "Twitch", "LinkedIn", "Other"] as const).includes(row.platform as Creator["platform"])
     ? (row.platform as Creator["platform"])
     : "Other",
@@ -252,7 +253,7 @@ export async function loadCloudWorkspace(userId: string): Promise<WorkspaceData 
 // Columns that only exist after the parity migration. If a deploy hasn't run
 // it yet, PostgREST rejects the upsert with an unknown-column error: strip
 // those keys once and retry instead of dropping the whole save.
-const NEW_COLUMNS = ["engagement_rate", "next_action", "deliverables_items", "entity_type", "entity_id", "updated_at", "user_id", "followup_count", "last_followup_at", "lost_reason", "lost_at"];
+const NEW_COLUMNS = ["engagement_rate", "next_action", "deliverables_items", "entity_type", "entity_id", "updated_at", "user_id", "followup_count", "last_followup_at", "lost_reason", "lost_at", "stars"];
 
 async function upsertResilient(table: string, rows: Record<string, unknown>[], opts?: { ignoreDuplicates?: boolean }) {
   if (!rows.length) return;

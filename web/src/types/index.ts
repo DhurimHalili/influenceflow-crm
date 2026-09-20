@@ -29,6 +29,7 @@ export interface Creator {
   niche: string;
   avg_views: number;
   engagement_rate: number;
+  stars: number;
   platform: Platform;
   pipeline_status: EntityStatus;
   on_roster: boolean;

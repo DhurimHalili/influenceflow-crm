@@ -54,6 +54,7 @@ create table if not exists public.creators (
   status_updated_at timestamptz,
   engagement_rate numeric(7,3) not null default 0,
   next_action text not null default '',
+  stars integer not null default 0 check (stars between 0 and 5),
   followup_count integer not null default 0,
   last_followup_at timestamptz,
   lost_reason text not null default '',

@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from "framer-motion";
-import { Archive, Check, ChevronDown, Inbox, LoaderCircle, Merge, Search, X } from "lucide-react";
+import { Archive, Check, ChevronDown, Inbox, LoaderCircle, Merge, Search, Star, X } from "lucide-react";
 import { forwardRef, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from "react";
 import { cn } from "../utils/cn";
 import { initials } from "../lib/utils";
@@ -109,4 +109,29 @@ export function FieldMergeReview({ keep, remove, fields, onConfirm }: { keep: Re
   const [source, setSource] = useState<Record<string, "keep" | "remove">>(() => Object.fromEntries(fields.map((field) => [field.key, "keep"])));
   const display = (value: unknown) => value === null || value === undefined || value === "" ? "Not set" : typeof value === "number" ? value.toLocaleString() : String(value);
   return <div className="field-merge-review"><div className="field-merge-head"><span>Keep record</span><span>Duplicate record</span></div>{fields.map((field) => <div className="field-merge-row" key={field.key}><label>{field.label}</label><button className={source[field.key] === "keep" ? "selected" : ""} onClick={() => setSource({ ...source, [field.key]: "keep" })}>{source[field.key] === "keep" && <Check />}{display(keep[field.key])}</button><button className={source[field.key] === "remove" ? "selected" : ""} onClick={() => setSource({ ...source, [field.key]: "remove" })}>{source[field.key] === "remove" && <Check />}{display(remove[field.key])}</button></div>)}<p><Merge size={14} /> Pick the winning value for each field. Relationship links are combined automatically.</p><Button onClick={() => onConfirm(Object.fromEntries(fields.map((field) => [field.key, source[field.key] === "remove" ? remove[field.key] : keep[field.key]])))}>Merge with selected fields</Button></div>;
+}
+
+export function Stars({ value, size = 13 }: { value: number; size?: number }) {
+  const rounded = Math.min(5, Math.max(0, Math.round(value || 0)));
+  return (
+    <span className="stars" role="img" aria-label={`${rounded} out of 5 stars`}>
+      {[1, 2, 3, 4, 5].map((s) => (
+        <Star key={s} size={size} className={s <= rounded ? "filled" : ""} />
+      ))}
+    </span>
+  );
+}
+
+export function StarInput({ value, onChange, size = 22 }: { value: number; onChange: (stars: number) => void; size?: number }) {
+  const [hover, setHover] = useState(0);
+  const shown = hover || Math.min(5, Math.max(0, Math.round(value || 0)));
+  return (
+    <span className="star-input" onMouseLeave={() => setHover(0)} role="radiogroup" aria-label="Rate this influencer">
+      {[1, 2, 3, 4, 5].map((s) => (
+        <button key={s} type="button" className={s <= shown ? "lit" : ""} onMouseEnter={() => setHover(s)} onFocus={() => setHover(s)} onClick={() => onChange(s === Math.round(value || 0) ? 0 : s)} aria-label={`${s} star${s === 1 ? "" : "s"}`}>
+          <Star size={size} />
+        </button>
+      ))}
+    </span>
+  );
 }
