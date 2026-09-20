@@ -125,6 +125,8 @@ export default function DashboardPage() {
     ...brands.filter((item) => item.next_action && item.pipeline_status !== "signed").map((item) => ({ id: item.id, type: "Brand", title: item.name, detail: item.next_action!, to: `/app/brands/${item.id}`, urgent: false })),
     ...creators.filter((item) => item.next_action_date && isPastDay(item.next_action_date)).map((item) => ({ id: item.id, type: "Overdue", title: item.name, detail: `${item.next_action || "Action"} — due ${dateLabel(item.next_action_date)}`, to: `/app/influencers/${item.id}`, urgent: true })),
     ...creators.filter((item) => item.next_action_date && isTodayDay(item.next_action_date)).map((item) => ({ id: item.id, type: "Due today", title: item.name, detail: item.next_action || "Action due today", to: `/app/influencers/${item.id}`, urgent: false })),
+    ...brands.filter((item) => item.next_action_date && isPastDay(item.next_action_date)).map((item) => ({ id: item.id, type: "Overdue", title: item.name, detail: `${item.next_action || "Action"} — due ${dateLabel(item.next_action_date)}`, to: `/app/brands/${item.id}`, urgent: true })),
+    ...brands.filter((item) => item.next_action_date && isTodayDay(item.next_action_date)).map((item) => ({ id: item.id, type: "Due today", title: item.name, detail: item.next_action || "Action due today", to: `/app/brands/${item.id}`, urgent: false })),
   ].slice(0, 8);
 
   if (!data.ready) return <div className="dashboard-skeleton"><i /><i /><i /><i /></div>;

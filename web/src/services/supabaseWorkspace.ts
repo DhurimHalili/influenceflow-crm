@@ -94,6 +94,8 @@ const normalizeBrand = (row: Record<string, unknown>, userId: string): Brand => 
   date_contacted: dateOrNull(row.date_contacted),
   notes: text(row.notes),
   next_action: text(row.next_action),
+  priority: (["none", "soon", "urgent"] as const).includes(row.priority as Brand["priority"]) ? (row.priority as Brand["priority"]) : "none",
+  next_action_date: dateOrNull(row.next_action_date),
   lost_reason: text(row.lost_reason),
   lost_at: dateOrNull(row.lost_at),
   archived_at: dateOrNull(row.archived_at),

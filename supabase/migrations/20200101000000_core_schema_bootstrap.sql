@@ -79,6 +79,8 @@ create table if not exists public.brands (
   updated_at timestamptz not null default now(),
   brand_type text,
   next_action text not null default '',
+  priority text not null default 'none' check (priority in ('none', 'soon', 'urgent')),
+  next_action_date date,
   lost_reason text not null default '',
   lost_at timestamptz
 );

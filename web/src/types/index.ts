@@ -60,6 +60,8 @@ export interface Brand {
   date_contacted: string | null;
   notes: string;
   next_action?: string;
+  priority: Priority;
+  next_action_date: string | null;
   lost_reason: string;
   lost_at: string | null;
   archived_at: string | null;
