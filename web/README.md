@@ -22,7 +22,7 @@ npm run dev
 | `npm run build` | Production build → `dist/` |
 | `npm run preview` | Preview production build |
 | `npm run lint` | Oxlint |
-| `npm run deploy:pages` | Build + publish to GitHub Pages |
+| `npm run deploy:pages` | Legacy manual publish to a `gh-pages` branch (the live site deploys via the push-to-`main` workflow instead) |
 
 ## Env
 

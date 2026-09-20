@@ -30,7 +30,7 @@
 
 1. Go to **[Sign up free](https://dhurimhalili.github.io/influenceflow-crm/#/signup)** → create account
 2. Add influencers manually, or **Bulk import** (`Name, channelUrl` paste or CSV file)
-3. Track them: `New → Contacted → Negotiating → Roster` (table or drag-and-drop board)
+3. Track them: `New → Contacted → Replied → Negotiating → Roster → Signed` (plus `Denied` / `No reply`), table, Kanban board or cards
 4. Create campaigns and schedule meetings in Calendar
 
 That's it. Your data is private to your account — other users can't see it. Export anytime (CSV / JSON).
@@ -59,9 +59,9 @@ That's it. Your data is private to your account — other users can't see it. Ex
 | **Campaigns** | Name, brand, platform, deliverables, payment + agency % → auto payout, status (negotiating/active/completed/cancelled), start/due dates, assign influencers, conflict warning |
 | **Calendar** | Meetings with start/end, linked to influencer/brand/campaign, `remind_at` → browser notification |
 | **Data & privacy** | Per-user Supabase Auth + RLS (no one sees your data), global search, CSV export, JSON backup export/import (v2 + legacy), Deleted list, activity log |
-| **Polish** | Dark (default) / light, fully responsive, PWA, Obsidian Flow premium UI |
+| **Polish** | Agency (default), Light, Dark, Honey, Ocean themes, fully responsive, larger readable type scale |
 
-> Note: additional modules exist in code but are hidden/off in UI. Flip `FEATURES` in `web/src/lib/features.ts` to re-enable.
+> Note: legacy discovery/outreach edge functions remain under `supabase/functions/` but are not wired to the UI.
 
 ---
 
@@ -98,21 +98,15 @@ npm run dev
 <summary><strong>Your Supabase project — one-time setup</strong></summary>
 
 1. Create a project at [supabase.com](https://supabase.com) (free tier is fine).
-2. In **SQL Editor**, run the files in `supabase/migrations/` in order. They create core CRM tables, RLS policies, and auto-seed for new users.
-3. In **Auth → Configuration** set site URL / redirect for `/#/login` if needed.
+2. In **SQL Editor**, run the files in `supabase/migrations/` in timestamp order (starting with the `20200101` bootstrap — it creates the core tables, RLS and policies). They create core CRM tables, RLS policies, and auto-seed for new users.
+3. In **Auth → Configuration**, set the site URL and add your app URL + `/#/update-password` to **Redirect URLs** (password recovery links must be allowlisted).
 
 </details>
 
 <details>
 <summary><strong>Deploy to GitHub Pages</strong></summary>
 
-From `web/`:
-
-```powershell
-npm run deploy:pages
-```
-
-The workflow in `.github/workflows/deploy-pages.yml` builds `web/` with `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` baked in and publishes `dist` to `gh-pages`.
+Push to `main` — the workflow in `.github/workflows/deploy-pages.yml` builds `web/` and deploys automatically. It reads `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` from **repo Settings → Secrets and variables → Actions** (never commit keys — set them as secrets in your fork too).
 
 </details>
 
@@ -124,7 +118,11 @@ The workflow in `.github/workflows/deploy-pages.yml` builds `web/` with `VITE_SU
 influenceflow-crm/
 ├── web/                 ← Vite + React 19 + TypeScript app (source of truth)
 │   ├── src/pages/       ← Influencers, Brands, Campaigns, Calendar, Settings ...
-│   ├── src/lib/         ← supabase client, types, utils, features (visibility flags)
+│   ├── src/components/  ← AppShell, ui kit
+│   ├── src/contexts/    ← Auth, workspace data, toasts
+│   ├── src/services/    ← Supabase sync (lossless load/persist)
+│   ├── src/types/       ← workspace data model
+│   ├── src/lib/         ← supabase client, utils, seed
 │   └── public/          ← home.html copy etc.
 ├── supabase/
 │   ├── migrations/      ← Postgres + RLS tables (for self-host)
@@ -141,7 +139,7 @@ influenceflow-crm/
 
 ## Roadmap
 
-- **Done:** Influencers (table/kanban), Brands + people, Campaigns + calendar, bulk import, notes, backup
+- **Done:** Influencers (table/kanban/cards), Brands + people, Campaigns + calendar, bulk import/export, follow-up tracking, true deal-loss tracking, outreach momentum stats, password recovery, notes, backup
 - **Next:** Tighter calendar reminders, better analytics, team workspaces (optional)
 - Track in [Issues](https://github.com/DhurimHalili/influenceflow-crm/issues) · ideas and PRs welcome
 
