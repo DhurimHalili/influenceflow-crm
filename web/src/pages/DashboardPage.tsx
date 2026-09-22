@@ -88,8 +88,13 @@ export default function DashboardPage() {
     // inflate this number.
     const lostIn = (s = start, e = end) =>
       [...creators, ...brands, ...data.contacts, ...campaigns].filter((item) => item.lost_at && inR(item.lost_at, s, e)).length;
+    // Emails sent counts dated first contacts that are still live outreach.
+    // Moving someone back to New revokes theirs (explicit undo); closing the
+    // lead keeps history on the record but drops it from this tile.
+    const LIVE_OUTREACH = ["contacted", "replied", "negotiating", "roster", "signed"];
     const emails = (s = start, e = end) =>
-      creators.filter((c) => inR(c.date_contacted, s, e)).length + data.contacts.filter((c) => inR(c.date_contacted, s, e)).length;
+      creators.filter((c) => inR(c.date_contacted, s, e) && LIVE_OUTREACH.includes(c.pipeline_status)).length +
+      data.contacts.filter((c) => inR(c.date_contacted, s, e) && LIVE_OUTREACH.includes(c.pipeline_status)).length;
     const count = {
       emails: emails(),
       followups: data.followups.filter((f) => inR(f.at)).length,

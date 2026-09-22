@@ -259,6 +259,9 @@ export function DataProvider({ children }: { children: ReactNode }) {
     const toDenied = value.pipeline_status === "denied" && before?.pipeline_status !== "denied";
     const lostStamp = toDenied && before && DEAL_STAGES.includes(before.pipeline_status) ? new Date().toISOString() : null;
     const clearLoss = !!value.pipeline_status && value.pipeline_status !== "denied" && before?.pipeline_status === "denied";
+    // Explicit undo: moving back to New erases the contact date, so the
+    // Emails-sent tile drops it. Moving anywhere else keeps history.
+    const resetContact = value.pipeline_status === "new" && before?.pipeline_status !== "new";
     setData((current) => {
       const statusChanged = value.pipeline_status && current.creators.find((item) => item.id === id)?.pipeline_status !== value.pipeline_status;
       const creators = current.creators.map((item) =>
@@ -271,6 +274,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
               on_roster: value.pipeline_status ? ["roster", "signed"].includes(value.pipeline_status) : item.on_roster,
               status_updated_at: statusChanged ? new Date().toISOString() : item.status_updated_at,
               ...(toDenied ? { lost_reason: "", lost_at: lostStamp } : {}),
+              ...(resetContact ? { date_contacted: null } : {}),
               ...(clearLoss ? { lost_reason: "", lost_at: null } : {}),
             }
           : item,
@@ -361,6 +365,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     const toDenied = value.pipeline_status === "denied" && before?.pipeline_status !== "denied";
     const lostStamp = toDenied && before && DEAL_STAGES.includes(before.pipeline_status) ? new Date().toISOString() : null;
     const clearLoss = !!value.pipeline_status && value.pipeline_status !== "denied" && before?.pipeline_status === "denied";
+    const resetContact = value.pipeline_status === "new" && before?.pipeline_status !== "new";
     setData((current) => {
       const statusChanged = value.pipeline_status && current.brands.find((item) => item.id === id)?.pipeline_status !== value.pipeline_status;
       const brands = current.brands.map((item) =>
@@ -371,6 +376,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
               name: value.name ? sanitize(value.name) : item.name,
               notes: value.notes !== undefined ? sanitize(value.notes) : item.notes,
               ...(toDenied ? { lost_reason: "", lost_at: lostStamp } : {}),
+              ...(resetContact ? { date_contacted: null } : {}),
               ...(clearLoss ? { lost_reason: "", lost_at: null } : {}),
             }
           : item,
@@ -420,6 +426,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     const toDenied = value.pipeline_status === "denied" && contact?.pipeline_status !== "denied";
     const lostStamp = toDenied && contact && DEAL_STAGES.includes(contact.pipeline_status) ? new Date().toISOString() : null;
     const clearLoss = !!value.pipeline_status && value.pipeline_status !== "denied" && contact?.pipeline_status === "denied";
+    const resetContact = !!value.pipeline_status && value.pipeline_status === "new" && contact?.pipeline_status !== "new";
     const label = contact ? `${contact.first_name} ${contact.last_name}`.trim() || "Brand contact" : "Brand contact";
     setData((current) => {
       const statusChanged = value.pipeline_status && current.contacts.find((item) => item.id === id)?.pipeline_status !== value.pipeline_status;
@@ -432,6 +439,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
                   ...item,
                   ...value,
                   ...(toDenied ? { lost_reason: "", lost_at: lostStamp } : {}),
+                  ...(resetContact ? { date_contacted: null } : {}),
                   ...(clearLoss ? { lost_reason: "", lost_at: null } : {}),
                 }
               : item,
