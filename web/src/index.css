@@ -169,6 +169,9 @@ span.avatar { border-radius: 50%; display: inline-grid; place-items: center; fle
 .rating-rows { display: grid; gap: 4px; }
 .rating-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 11px 0; border-bottom: 1px solid var(--line); }
 .rating-row:last-child { border-bottom: 0; }
+.rating-row.rating-derived { background: var(--surface-alt); border: 1px solid var(--line); border-radius: 10px; padding: 11px 13px; margin-top: 6px; }
+.derived-stars { display: inline-flex; align-items: center; gap: 8px; }
+.derived-stars b { font: 750 15px "Manrope"; }
 .rating-row strong, .rating-row small { display: block; }
 .rating-row strong { font-size: 13px; }
 .rating-row small { color: var(--muted); font-size: 11px; margin-top: 2px; }

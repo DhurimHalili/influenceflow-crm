@@ -87,6 +87,19 @@ export const overallStars = (dims: { stars_consistency?: number | null; stars_de
   return Math.min(5, Math.max(0, Math.round(rated.reduce((a, b) => a + b, 0) / rated.length)));
 };
 
+// Engagement score: measured performance mapped to stars, kept separate
+// from the user's own ratings. Bands match the labels used across the app:
+// under 4% needs review (1-2), 4-8% healthy (3-4), 8%+ high performer (5).
+export const engagementStars = (rate: number) => {
+  const v = Number(rate) || 0;
+  if (v <= 0) return 0;
+  if (v < 2) return 1;
+  if (v < 4) return 2;
+  if (v < 6) return 3;
+  if (v < 8) return 4;
+  return 5;
+};
+
 export const isPastDay = (value?: string | null) => {
   if (!value) return false;
   const d = new Date(value);
