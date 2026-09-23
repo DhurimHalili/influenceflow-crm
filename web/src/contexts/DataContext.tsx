@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { blankWorkspace } from "../lib/seed";
-import { normalize, sanitize, uid } from "../lib/utils";
+import { normalize, overallStars, sanitize, uid } from "../lib/utils";
 import { hasSupabase } from "../lib/supabase";
 import { loadCloudWorkspace, persistCloudWorkspace } from "../services/supabaseWorkspace";
 import type { Activity, Brand, BrandContact, Campaign, Creator, Followup, Meeting, Profile, WorkspaceData } from "../types";
@@ -262,6 +262,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
     // Explicit undo: moving back to New erases the contact date, so the
     // Emails-sent tile drops it. Moving anywhere else keeps history.
     const resetContact = value.pipeline_status === "new" && before?.pipeline_status !== "new";
+    // Overall rating always follows the three dimensions.
+    const touchesDims = value.stars_consistency !== undefined || value.stars_demographics !== undefined || value.stars_niche !== undefined;
     setData((current) => {
       const statusChanged = value.pipeline_status && current.creators.find((item) => item.id === id)?.pipeline_status !== value.pipeline_status;
       const creators = current.creators.map((item) =>
@@ -273,6 +275,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
               notes: value.notes !== undefined ? sanitize(value.notes) : item.notes,
               on_roster: value.pipeline_status ? ["roster", "signed"].includes(value.pipeline_status) : item.on_roster,
               status_updated_at: statusChanged ? new Date().toISOString() : item.status_updated_at,
+              ...(touchesDims ? { stars: overallStars({ ...item, ...value }) } : {}),
               ...(toDenied ? { lost_reason: "", lost_at: lostStamp } : {}),
               ...(resetContact ? { date_contacted: null } : {}),
               ...(clearLoss ? { lost_reason: "", lost_at: null } : {}),
@@ -294,7 +297,11 @@ export function DataProvider({ children }: { children: ReactNode }) {
     setData((current) => {
       const removed = current.creators.find((item) => item.id === removeId);
       const kept = current.creators.find((item) => item.id === keepId);
-      const creators = current.creators.filter((item) => item.id !== removeId).map((item) => (item.id === keepId ? { ...item, ...merged } : item));
+      const creators = current.creators.filter((item) => item.id !== removeId).map((item) => {
+        if (item.id !== keepId) return item;
+        const next = { ...item, ...merged };
+        return { ...next, stars: overallStars(next) };
+      });
       const campaigns = current.campaigns.map((campaign) => ({
         ...campaign,
         creator_ids: Array.from(new Set(campaign.creator_ids.map((cid) => (cid === removeId ? keepId : cid)))),
@@ -618,7 +625,15 @@ export function DataProvider({ children }: { children: ReactNode }) {
     setData({
       ...value,
       profile: { ...value.profile, id: userId },
-      creators: dedupe(value.creators),
+      creators: dedupe(value.creators).map((c) => {
+        const withDims = {
+          ...c,
+          stars_consistency: typeof c.stars_consistency === "number" ? c.stars_consistency : 0,
+          stars_demographics: typeof c.stars_demographics === "number" ? c.stars_demographics : 0,
+          stars_niche: typeof c.stars_niche === "number" ? c.stars_niche : 0,
+        };
+        return { ...withDims, stars: overallStars(withDims) };
+      }),
       brands: dedupe(value.brands),
       contacts: dedupe(value.contacts),
       campaigns: dedupe(value.campaigns),

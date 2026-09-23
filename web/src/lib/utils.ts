@@ -71,6 +71,22 @@ export const followupWords = (count: number) =>
 export const PRIORITY_LABELS: Record<string, string> = { none: "No priority", soon: "Follow up soon", urgent: "Urgent" };
 export const MEETING_KIND_LABELS: Record<string, string> = { meeting: "Meeting", task: "Task", reminder: "Reminder" };
 
+export type RatingDimKey = "stars_consistency" | "stars_demographics" | "stars_niche";
+
+export const RATING_DIMS: { key: RatingDimKey; label: string; hint: string }[] = [
+  { key: "stars_consistency", label: "Posting consistency", hint: "How reliably they publish" },
+  { key: "stars_demographics", label: "Audience demographics", hint: "Who actually watches them" },
+  { key: "stars_niche", label: "Niche alignment", hint: "How well they fit your brands" },
+];
+
+// Overall rating = average of the dimensions the user actually rated.
+// Unrated dimensions never drag the score; nothing rated = 0 (unrated).
+export const overallStars = (dims: { stars_consistency?: number | null; stars_demographics?: number | null; stars_niche?: number | null }) => {
+  const rated = [dims.stars_consistency || 0, dims.stars_demographics || 0, dims.stars_niche || 0].filter((v) => v > 0);
+  if (!rated.length) return 0;
+  return Math.min(5, Math.max(0, Math.round(rated.reduce((a, b) => a + b, 0) / rated.length)));
+};
+
 export const isPastDay = (value?: string | null) => {
   if (!value) return false;
   const d = new Date(value);

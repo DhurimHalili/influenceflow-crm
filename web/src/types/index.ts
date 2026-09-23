@@ -32,6 +32,9 @@ export interface Creator {
   avg_views: number;
   engagement_rate: number;
   stars: number;
+  stars_consistency: number;
+  stars_demographics: number;
+  stars_niche: number;
   platform: Platform;
   pipeline_status: EntityStatus;
   on_roster: boolean;
