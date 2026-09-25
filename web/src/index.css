@@ -275,6 +275,10 @@ span.avatar { border-radius: 50%; display: inline-grid; place-items: center; fle
 .agenda-view article.clickable:hover, .upcoming-list article.clickable:hover { background: var(--surface-alt); }
 .month-grid > button i { cursor: pointer; }
 
+/* Inline status switch on cards */
+.inline-status { max-width: 132px; height: 28px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface-alt); color: var(--text-soft); font-size: 10px; font-weight: 650; padding: 0 6px; cursor: pointer; }
+.inline-status:hover { border-color: var(--accent); color: var(--accent); }
+
 /* Star ratings */
 .stars { display: inline-flex; align-items: center; gap: 2px; color: var(--line-strong); }
 .stars svg.filled { color: #d99a2b; fill: #d99a2b; }
