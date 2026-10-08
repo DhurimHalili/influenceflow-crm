@@ -111,13 +111,26 @@ export function FieldMergeReview({ keep, remove, fields, onConfirm }: { keep: Re
   return <div className="field-merge-review"><div className="field-merge-head"><span>Keep record</span><span>Duplicate record</span></div>{fields.map((field) => <div className="field-merge-row" key={field.key}><label>{field.label}</label><button className={source[field.key] === "keep" ? "selected" : ""} onClick={() => setSource({ ...source, [field.key]: "keep" })}>{source[field.key] === "keep" && <Check />}{display(keep[field.key])}</button><button className={source[field.key] === "remove" ? "selected" : ""} onClick={() => setSource({ ...source, [field.key]: "remove" })}>{source[field.key] === "remove" && <Check />}{display(remove[field.key])}</button></div>)}<p><Merge size={14} /> Pick the winning value for each field. Relationship links are combined automatically.</p><Button onClick={() => onConfirm(Object.fromEntries(fields.map((field) => [field.key, source[field.key] === "remove" ? remove[field.key] : keep[field.key]])))}>Merge with selected fields</Button></div>;
 }
 
-export function Stars({ value, size = 13 }: { value: number; size?: number }) {
-  const rounded = Math.min(5, Math.max(0, Math.round(value || 0)));
+// Fractional stars: 4.3 renders four full stars and a 30% fifth star.
+export function Stars({ value, size = 13, showValue = false }: { value: number; size?: number; showValue?: boolean }) {
+  const v = Math.min(5, Math.max(0, Number(value) || 0));
+  const label = v > 0 ? `${v.toFixed(1)} out of 5 stars` : "Not rated yet";
   return (
-    <span className="stars" role="img" aria-label={`${rounded} out of 5 stars`}>
-      {[1, 2, 3, 4, 5].map((s) => (
-        <Star key={s} size={size} className={s <= rounded ? "filled" : ""} />
-      ))}
+    <span className={cn("stars", v <= 0 && "stars-empty")} role="img" aria-label={label} title={label}>
+      {[1, 2, 3, 4, 5].map((s) => {
+        const fill = Math.min(1, Math.max(0, v - (s - 1)));
+        return (
+          <span className="star-cell" key={s} style={{ width: size, height: size }}>
+            <Star size={size} />
+            {fill > 0 && (
+              <span className="star-fill" style={{ width: `${fill * 100}%` }}>
+                <Star size={size} className="filled" />
+              </span>
+            )}
+          </span>
+        );
+      })}
+      {showValue && <b className="stars-value">{v > 0 ? v.toFixed(1) : "—"}</b>}
     </span>
   );
 }

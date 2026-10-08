@@ -57,7 +57,10 @@ That's it. Your data is private to your account — other users can't see it. Ex
 | **Brands & contacts** | Each brand has its own people (first/last name, title, email, LinkedIn). Same pipeline statuses |
 | **Bulk import** | Paste `Rory Alexander, https://youtube.com/channel/UC...` or `Name, email, niche` — or **Attach CSV**. Auto-dedupes by name + link |
 | **Campaigns** | Name, brand, platform, deliverables, payment + agency % → auto payout, status (negotiating/active/completed/cancelled), start/due dates, assign influencers, conflict warning |
-| **Calendar** | Meetings with start/end, linked to influencer/brand/campaign, `remind_at` → browser notification |
+| **Calendar** | Month / week / day / agenda views. Meetings, tasks (check off), reminders, every influencer & brand **action due date** and campaign start/due dates on one timeline. Drag to reschedule, overdue panel, reminder presets, browser alerts, `.ics` export |
+| **Email drafts** | Per-influencer and per-brand subject + body that autosave, reusable templates with `{first_name}` / `{niche}` / `{company}` tokens, open in Gmail or your mail app, "mark as sent" moves the lead to Contacted |
+| **Creator scorecard** | Four manual star ratings — audience quality, niche & brand fit, engagement quality, posting consistency — combined with agency-scorecard weights (35 / 30 / 20 / 15, adjustable in Settings). Engagement rate is shown as a benchmark, never sets the stars |
+| **Pipeline hygiene** | Contact date stamps itself the moment a lead leaves New (table, kanban, cards, bulk or profile); offline-safe sync that never lets an older cloud copy overwrite your edits |
 | **Data & privacy** | Per-user Supabase Auth + RLS (no one sees your data), global search, CSV export, JSON backup export/import (v2 + legacy), Deleted list, activity log |
 | **Polish** | Agency (default), Light, Dark, Honey, Ocean themes, fully responsive, larger readable type scale |
 
@@ -139,7 +142,7 @@ influenceflow-crm/
 
 ## Roadmap
 
-- **Done:** Influencers (table/kanban/cards), Brands + people, Campaigns + calendar, bulk import/export, follow-up tracking, true deal-loss tracking, outreach momentum stats, password recovery, notes, backup
+- **Done:** Influencers (table/kanban/cards), Brands + people, Campaigns + calendar, bulk import/export, follow-up tracking, true deal-loss tracking, outreach momentum stats (daily → 90 days), email drafts + templates, weighted creator scorecard, action due dates on the calendar, password recovery, notes, backup
 - **Next:** Tighter calendar reminders, better analytics, team workspaces (optional)
 - Track in [Issues](https://github.com/DhurimHalili/influenceflow-crm/issues) · ideas and PRs welcome
 

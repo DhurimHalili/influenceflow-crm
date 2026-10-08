@@ -1,6 +1,5 @@
 import { supabase } from "../lib/supabase";
 import { blankWorkspace } from "../lib/seed";
-import { overallStars } from "../lib/utils";
 import type { Activity, Brand, BrandContact, Campaign, Creator, Followup, Meeting, Profile, WorkspaceData } from "../types";
 
 type JoinRow = { campaign_id: string; creator_id: string };
@@ -59,11 +58,10 @@ const normalizeCreator = (row: Record<string, unknown>, userId: string): Creator
   stars_consistency: num(row.stars_consistency),
   stars_demographics: num(row.stars_demographics),
   stars_niche: num(row.stars_niche),
-  stars: overallStars({
-    stars_consistency: num(row.stars_consistency) || num(row.stars),
-    stars_demographics: num(row.stars_demographics) || num(row.stars),
-    stars_niche: num(row.stars_niche) || num(row.stars),
-  }),
+  stars_engagement: num(row.stars_engagement),
+  stars: num(row.stars),
+  draft_subject: text(row.draft_subject),
+  draft_body: text(row.draft_body),
   platform: (["YouTube", "Instagram", "TikTok", "Twitch", "LinkedIn", "Other"] as const).includes(row.platform as Creator["platform"])
     ? (row.platform as Creator["platform"])
     : "Other",
@@ -83,6 +81,20 @@ const normalizeCreator = (row: Record<string, unknown>, userId: string): Creator
   created_at: typeof row.created_at === "string" && row.created_at ? row.created_at : new Date().toISOString(),
 });
 
+const normalizeTemplates = (value: unknown): Profile["email_templates"] =>
+  Array.isArray(value)
+    ? value
+        .filter((t): t is Record<string, unknown> => typeof t === "object" && t !== null)
+        .map((t, i) => ({ id: text(t.id) || `tpl-${i}`, name: text(t.name) || "Untitled template", subject: text(t.subject), body: text(t.body) }))
+    : [];
+
+const normalizeWeights = (value: unknown): Profile["rating_weights"] => {
+  if (!value || typeof value !== "object") return null;
+  const v = value as Record<string, unknown>;
+  const pick = (key: string) => Math.max(0, Math.min(100, num(v[key])));
+  return { audience: pick("audience"), niche: pick("niche"), engagement: pick("engagement"), consistency: pick("consistency") };
+};
+
 const normalizeFollowup = (row: Record<string, unknown>, userId: string): Followup => ({
   id: String(row.id ?? ""),
   user_id: typeof row.user_id === "string" ? row.user_id : userId,
@@ -100,6 +112,14 @@ const normalizeBrand = (row: Record<string, unknown>, userId: string): Brand => 
   contact_email: text(row.contact_email),
   pipeline_status: (mapStatus(row.pipeline_status) as Brand["pipeline_status"]) || "new",
   date_contacted: dateOrNull(row.date_contacted),
+  status_updated_at:
+    typeof row.status_updated_at === "string" && row.status_updated_at
+      ? row.status_updated_at
+      : typeof row.updated_at === "string" && row.updated_at
+        ? row.updated_at
+        : new Date().toISOString(),
+  draft_subject: text(row.draft_subject),
+  draft_body: text(row.draft_body),
   notes: text(row.notes),
   next_action: text(row.next_action),
   priority: (["none", "soon", "urgent"] as const).includes(row.priority as Brand["priority"]) ? (row.priority as Brand["priority"]) : "none",
@@ -173,6 +193,7 @@ const normalizeMeeting = (row: Record<string, unknown>, userId: string): Meeting
     notes: text(row.notes),
     remind_at: dateOrNull(row.remind_at),
     reminder_sent: row.reminder_sent === true,
+    done: row.done === true,
     kind: (["meeting", "task", "reminder"] as const).includes(row.kind as Meeting["kind"]) ? (row.kind as Meeting["kind"]) : "meeting",
     created_at: typeof row.created_at === "string" && row.created_at ? row.created_at : new Date().toISOString(),
   };
@@ -241,6 +262,8 @@ export async function loadCloudWorkspace(userId: string): Promise<WorkspaceData 
             ? (storedProfile.reminder_prefs as Profile["reminder_prefs"])
             : "browser",
           onboarding_done: storedProfile.onboarding_done === true,
+          email_templates: normalizeTemplates(storedProfile.email_templates),
+          rating_weights: normalizeWeights(storedProfile.rating_weights),
         }
       : base.profile,
     creators: ((creators.data || []) as Record<string, unknown>[]).map((r) => normalizeCreator(r, userId)),
@@ -263,35 +286,39 @@ export async function loadCloudWorkspace(userId: string): Promise<WorkspaceData 
   };
 }
 
-// Columns that only exist after the parity migration. If a deploy hasn't run
-// it yet, PostgREST rejects the upsert with an unknown-column error: strip
-// those keys once and retry instead of dropping the whole save.
-const NEW_COLUMNS = ["engagement_rate", "next_action", "deliverables_items", "entity_type", "entity_id", "updated_at", "user_id", "followup_count", "last_followup_at", "lost_reason", "lost_at", "stars", "stars_consistency", "stars_demographics", "stars_niche", "priority", "next_action_date", "kind"];
+// Columns added by later migrations. If a deploy hasn't run one yet,
+// PostgREST rejects the upsert with an unknown-column error: strip exactly
+// the column it names and retry, so one missing column never blocks the
+// whole save (and never drops the columns that do exist).
+const OPTIONAL_COLUMNS = ["engagement_rate", "next_action", "deliverables_items", "entity_type", "entity_id", "updated_at", "followup_count", "last_followup_at", "lost_reason", "lost_at", "stars", "stars_consistency", "stars_demographics", "stars_niche", "stars_engagement", "priority", "next_action_date", "kind", "done", "draft_subject", "draft_body", "status_updated_at", "email_templates", "rating_weights"];
+
+const missingColumn = (error: { message?: string; details?: string; hint?: string; code?: string }) => {
+  const msg = `${error.message || ""} ${error.details || ""} ${error.hint || ""}`;
+  const named = /column "?'?([a-z_]+)'?"? of|'([a-z_]+)' column|column "?([a-z_]+)"? does not exist/i.exec(msg);
+  const name = named ? named[1] || named[2] || named[3] : "";
+  if (name && OPTIONAL_COLUMNS.includes(name)) return name;
+  return OPTIONAL_COLUMNS.find((c) => new RegExp(`\\b${c}\\b`).test(msg)) || "";
+};
 
 async function upsertResilient(table: string, rows: Record<string, unknown>[], opts?: { ignoreDuplicates?: boolean }) {
   if (!rows.length) return;
-  const attempt = async (payload: Record<string, unknown>[]) => {
-    const q = supabase.from(table).upsert(payload as never[], opts?.ignoreDuplicates ? { ignoreDuplicates: true } : undefined);
-    return await q;
-  };
-  const { error } = await attempt(rows);
-  if (!error) return;
-  const msg = `${error.message || ""} ${error.details || ""} ${error.hint || ""}`;
-  const mentionsNewColumn = NEW_COLUMNS.some((c) => msg.includes(c)) || (error as { code?: string }).code === "42703";
-  if (!mentionsNewColumn) throw error;
-  const stripped = rows.map((row) => {
-    const next = { ...row };
-    // campaign_creators.user_id is structural (RLS scoping): only strip when
-    // the server proves it is unknown (pre-migration deploys).
-    for (const col of NEW_COLUMNS) {
-      if (table === "campaign_creators" && col === "user_id") continue;
-      delete next[col];
-    }
-    if (table === "campaign_creators" && msg.includes("user_id")) delete next.user_id;
-    return next;
-  });
-  const retry = await attempt(stripped);
-  if (retry.error) throw retry.error;
+  let payload = rows;
+  const stripped = new Set<string>();
+  for (let attempt = 0; attempt <= OPTIONAL_COLUMNS.length; attempt++) {
+    const { error } = await supabase.from(table).upsert(payload as never[], opts?.ignoreDuplicates ? { ignoreDuplicates: true } : undefined);
+    if (!error) return;
+    const column = missingColumn(error);
+    // campaign_creators.user_id is structural (RLS scoping) and is handled by
+    // the caller; never strip it here.
+    if (!column || stripped.has(column) || (table === "campaign_creators" && column === "user_id")) throw error;
+    stripped.add(column);
+    console.warn(`[sync] ${table}.${column} is missing in the database — run the latest migrations. Saving without it.`);
+    payload = payload.map((row) => {
+      const next = { ...row };
+      delete next[column];
+      return next;
+    });
+  }
 }
 
 const removeMissing = async (table: string, userId: string, ids: string[]) => {
@@ -312,8 +339,7 @@ const removeMissing = async (table: string, userId: string, ids: string[]) => {
 export async function persistCloudWorkspace(workspace: WorkspaceData, userId: string, activityTombstones: string[] = [], followupTombstones: string[] = []) {
   if (workspace.demoSeeded) return;
   const owned = <T extends { user_id: string }>(rows: T[]) => rows.map((row) => ({ ...row, user_id: userId }));
-  const { error: profileError } = await supabase.from("profiles").upsert({ ...workspace.profile, id: userId } as never);
-  if (profileError) throw profileError;
+  await upsertResilient("profiles", [{ ...workspace.profile, id: userId } as unknown as Record<string, unknown>]);
 
   await upsertResilient(
     "creators",

@@ -1,6 +1,6 @@
 import { AnimatePresence, motion } from "framer-motion";
 import {
-  Archive, BarChart3, Building2, CalendarDays, Check, ChevronRight, CircleDollarSign, Clock3, Command, Crown, HelpCircle,
+  Archive, BarChart3, Building2, CalendarDays, Check, ChevronRight, CircleDollarSign, Clock3, Cloud, CloudOff, Command, Crown, HelpCircle, LoaderCircle,
   LayoutDashboard, LifeBuoy, LogOut, Menu, MessageCircle, Palette, Plus, Search, SearchX, Settings,
   Sparkles, UserX, Users, Wallet, X,
 } from "lucide-react";
@@ -10,7 +10,7 @@ import { useAuth } from "../contexts/AuthContext";
 import { useData } from "../contexts/DataContext";
 import { useToast } from "../contexts/ToastContext";
 import { Avatar, Button, Logo, Modal } from "./ui";
-import { LOSS_REASONS } from "../lib/utils";
+import { isPastDay, isTodayDay, LOSS_REASONS } from "../lib/utils";
 import type { SearchResult, ThemeName } from "../types";
 
 const lossIcons: Record<string, typeof CircleDollarSign> = {
@@ -96,19 +96,48 @@ export default function AppShell() {
     return () => window.removeEventListener("keydown", keyboard);
   }, []);
 
+  // Browser reminders: meeting/task alerts at their reminder time, plus one
+  // morning summary per day for action due dates (today + overdue).
+  const { meetings, creators, brands, updateMeeting } = data;
+  const reminderPrefs = data.profile.reminder_prefs;
   useEffect(() => {
-    if (!("Notification" in window) || data.profile.reminder_prefs === "off") return;
+    if (!("Notification" in window) || reminderPrefs === "off" || reminderPrefs === "email") return;
     const check = () => {
       const now = Date.now();
-      data.meetings.filter((meeting) => !meeting.reminder_sent && meeting.remind_at && new Date(meeting.remind_at).getTime() <= now && new Date(meeting.starts_at).getTime() > now).forEach((meeting) => {
-        if (Notification.permission === "granted") new Notification("InfluenceFlow reminder", { body: meeting.title, icon: "./favicon.svg" });
-        data.updateMeeting(meeting.id, { reminder_sent: true });
-      });
+      meetings
+        .filter((meeting) => !meeting.reminder_sent && !meeting.done && meeting.remind_at && new Date(meeting.remind_at).getTime() <= now && new Date(meeting.ends_at).getTime() > now)
+        .forEach((meeting) => {
+          if (Notification.permission === "granted") new Notification(`InfluenceFlow · ${meeting.kind === "task" ? "Task" : meeting.kind === "reminder" ? "Reminder" : "Meeting"}`, { body: `${meeting.title} — ${new Date(meeting.starts_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`, icon: "./favicon.svg", tag: meeting.id });
+          updateMeeting(meeting.id, { reminder_sent: true });
+        });
+      const todayKey = new Date().toDateString();
+      const due = [...creators, ...brands].filter((item) => !item.archived_at && item.next_action_date && (isTodayDay(item.next_action_date) || isPastDay(item.next_action_date)));
+      let lastDigest = "";
+      try {
+        lastDigest = localStorage.getItem("if.action-digest") || "";
+      } catch {
+        lastDigest = todayKey;
+      }
+      if (due.length && lastDigest !== todayKey && new Date().getHours() >= 8 && Notification.permission === "granted") {
+        const overdueCount = due.filter((item) => isPastDay(item.next_action_date)).length;
+        new Notification("InfluenceFlow · Today's actions", { body: `${due.length} action${due.length === 1 ? "" : "s"} due${overdueCount ? ` (${overdueCount} overdue)` : ""}: ${due.slice(0, 3).map((item) => item.name).join(", ")}${due.length > 3 ? "…" : ""}`, icon: "./favicon.svg", tag: "action-digest" });
+        try {
+          localStorage.setItem("if.action-digest", todayKey);
+        } catch {
+          // ignore
+        }
+      }
     };
     check();
     const timer = window.setInterval(check, 30000);
     return () => window.clearInterval(timer);
-  }, [data.meetings, data.profile.reminder_prefs]);
+    // updateMeeting is recreated each render; meetings/creators/brands cover real changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [meetings, creators, brands, reminderPrefs]);
+
+  const dueToday = [...data.creators, ...data.brands].filter((item) => !item.archived_at && item.next_action_date && (isTodayDay(item.next_action_date) || isPastDay(item.next_action_date))).length +
+    data.meetings.filter((m) => m.kind !== "meeting" && !m.done && (isTodayDay(m.starts_at) || new Date(m.ends_at).getTime() < Date.now())).length;
+  const sync = data.syncState;
 
   const results = useMemo<SearchResult[]>(() => {
     const term = debounced.trim().toLowerCase();
@@ -131,7 +160,7 @@ export default function AppShell() {
       <div className="sidebar-top"><Logo /><button className="mobile-close" onClick={() => setMobileOpen(false)}><X size={19} /></button></div>
       <nav className="side-nav">
         {navSections.map((section) => (
-          <div className="nav-section" key={section.label}><span className="nav-label">{section.label}</span>{section.items.map((item) => <NavLink key={item.to} to={item.to} end={"end" in item ? item.end : false} className={({ isActive }) => isActive ? "active" : ""}><item.icon size={17} strokeWidth={1.8} /><span>{item.label}</span>{item.label === "Archive" && <b>{data.creators.filter((x) => x.archived_at).length + data.brands.filter((x) => x.archived_at).length + data.campaigns.filter((x) => x.archived_at).length || ""}</b>}</NavLink>)}</div>
+          <div className="nav-section" key={section.label}><span className="nav-label">{section.label}</span>{section.items.map((item) => <NavLink key={item.to} to={item.to} end={"end" in item ? item.end : false} className={({ isActive }) => isActive ? "active" : ""}><item.icon size={17} strokeWidth={1.8} /><span>{item.label}</span>{item.label === "Calendar" && dueToday > 0 && <b className="nav-due" title={`${dueToday} due today or overdue`}>{dueToday}</b>}{item.label === "Archive" && <b>{data.creators.filter((x) => x.archived_at).length + data.brands.filter((x) => x.archived_at).length + data.campaigns.filter((x) => x.archived_at).length || ""}</b>}</NavLink>)}</div>
         ))}
       </nav>
       <div className="hire-card">
@@ -157,6 +186,7 @@ export default function AppShell() {
           <button className="menu-btn" onClick={() => setMobileOpen(true)} aria-label="Open menu"><Menu size={20} /></button>
           <button className="global-search" onClick={() => { setSearchOpen(true); requestAnimationFrame(() => searchRef.current?.focus()); }}><Search size={16} /><span>Search your workspace</span><kbd>/</kbd></button>
           <div className="topbar-actions">
+            <button className={`sync-pill sync-${sync}`} onClick={() => data.syncNow()} title={sync === "synced" ? "All changes saved to the cloud" : sync === "saving" ? "Saving your latest changes…" : sync === "offline" ? "Can't reach the cloud right now — changes are kept on this device and retried automatically. Click to retry now." : sync === "loading" ? "Loading your workspace…" : "Local workspace"}>{sync === "offline" ? <CloudOff size={14} /> : sync === "saving" || sync === "loading" ? <LoaderCircle size={14} className="spin" /> : <Cloud size={14} />}<span>{sync === "synced" ? "Saved" : sync === "saving" ? "Saving…" : sync === "offline" ? "Offline · retrying" : sync === "loading" ? "Syncing…" : "Local"}</span></button>
             <button className="command-trigger" onClick={() => setCommandOpen(true)}><Command size={15} /><span>Quick actions</span><kbd>Ctrl K</kbd></button>
             <button className="top-add" onClick={() => navigate("/app/influencers?new=1")}><Plus size={17} /><span>Add new</span></button>
           </div>
