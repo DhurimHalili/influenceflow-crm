@@ -1,16 +1,19 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { blankWorkspace } from "../lib/seed";
-import { normalize, overallStars, sanitize, uid } from "../lib/utils";
+import { normalize, OUTREACH_STAGES, overallStars, RATING_DIMS, ratedCount, sanitize, today, uid } from "../lib/utils";
 import { hasSupabase } from "../lib/supabase";
 import { loadCloudWorkspace, persistCloudWorkspace } from "../services/supabaseWorkspace";
 import type { Activity, Brand, BrandContact, Campaign, Creator, Followup, Meeting, Profile, WorkspaceData } from "../types";
 import { useAuth } from "./AuthContext";
 
-type NewCreator = Omit<Creator, "id" | "user_id" | "created_at" | "status_updated_at" | "archived_at" | "on_roster" | "followup_count" | "last_followup_at" | "lost_reason" | "lost_at">;
-type NewBrand = Omit<Brand, "id" | "user_id" | "created_at" | "archived_at" | "lost_reason" | "lost_at">;
+type NewCreator = Omit<Creator, "id" | "user_id" | "created_at" | "status_updated_at" | "archived_at" | "on_roster" | "followup_count" | "last_followup_at" | "lost_reason" | "lost_at" | "draft_subject" | "draft_body" | "stars_engagement"> &
+  Partial<Pick<Creator, "draft_subject" | "draft_body" | "stars_engagement">>;
+type NewBrand = Omit<Brand, "id" | "user_id" | "created_at" | "archived_at" | "lost_reason" | "lost_at" | "status_updated_at" | "draft_subject" | "draft_body"> &
+  Partial<Pick<Brand, "draft_subject" | "draft_body">>;
+type UpdateOpts = { quiet?: boolean; activity?: string };
 type NewContact = Omit<BrandContact, "id" | "user_id" | "created_at" | "lost_reason" | "lost_at">;
 type NewCampaign = Omit<Campaign, "id" | "user_id" | "created_at" | "archived_at" | "creator_payout" | "lost_reason" | "lost_at">;
-type NewMeeting = Omit<Meeting, "id" | "user_id" | "created_at" | "reminder_sent">;
+type NewMeeting = Omit<Meeting, "id" | "user_id" | "created_at" | "reminder_sent" | "done"> & { done?: boolean };
 
 type DuplicateMatch = { type: "name" | "link" | "domain"; id: string; label: string };
 
@@ -29,13 +32,16 @@ export interface LossItem {
 type DataContextValue = WorkspaceData & {
   ready: boolean;
   cloudLive: boolean;
+  syncState: SyncState;
+  syncNow: () => void;
   addCreator: (value: NewCreator) => Creator;
-  updateCreator: (id: string, value: Partial<Creator>) => void;
+  updateCreator: (id: string, value: Partial<Creator>, opts?: UpdateOpts) => void;
   addCreators: (values: NewCreator[]) => number;
   findCreatorDuplicates: (name: string, link: string, ignoreId?: string) => DuplicateMatch[];
   mergeCreators: (keepId: string, removeId: string, merged: Partial<Creator>) => void;
   addBrand: (value: NewBrand) => Brand;
-  updateBrand: (id: string, value: Partial<Brand>) => void;
+  updateBrand: (id: string, value: Partial<Brand>, opts?: UpdateOpts) => void;
+  completeAction: (kind: "creator" | "brand", id: string) => void;
   addBrands: (values: NewBrand[]) => number;
   findBrandDuplicates: (name: string, domain: string, ignoreId?: string) => DuplicateMatch[];
   mergeBrands: (keepId: string, removeId: string, merged: Partial<Brand>) => void;
@@ -45,7 +51,7 @@ type DataContextValue = WorkspaceData & {
   addCampaign: (value: NewCampaign) => Campaign;
   updateCampaign: (id: string, value: Partial<Campaign>) => void;
   addMeeting: (value: NewMeeting) => Meeting;
-  updateMeeting: (id: string, value: Partial<Meeting>) => void;
+  updateMeeting: (id: string, value: Partial<Meeting>, opts?: UpdateOpts) => void;
   deleteMeeting: (id: string) => void;
   archive: (type: "creator" | "brand" | "campaign", ids: string[], restore?: boolean) => void;
   permanentlyDelete: (type: "creator" | "brand" | "campaign", ids: string[]) => void;
@@ -61,59 +67,172 @@ type DataContextValue = WorkspaceData & {
 
 const DataContext = createContext<DataContextValue | null>(null);
 
+// Fills fields added in later releases so older local snapshots, backups and
+// cloud rows all share one shape.
+const upgradeWorkspace = (value: WorkspaceData, userId: string): WorkspaceData => ({
+  ...value,
+  profile: {
+    ...blankWorkspace(userId).profile,
+    ...value.profile,
+    email_templates: Array.isArray(value.profile?.email_templates) ? value.profile.email_templates : [],
+    rating_weights: value.profile?.rating_weights || null,
+  },
+  creators: (value.creators || []).map((c) => ({
+    ...c,
+    stars_consistency: Number(c.stars_consistency) || 0,
+    stars_demographics: Number(c.stars_demographics) || 0,
+    stars_niche: Number(c.stars_niche) || 0,
+    stars_engagement: Number(c.stars_engagement) || 0,
+    stars: Number(c.stars) || 0,
+    draft_subject: c.draft_subject || "",
+    draft_body: c.draft_body || "",
+    priority: c.priority || "none",
+    next_action_date: c.next_action_date || null,
+  })),
+  brands: (value.brands || []).map((b) => ({
+    ...b,
+    draft_subject: b.draft_subject || "",
+    draft_body: b.draft_body || "",
+    status_updated_at: b.status_updated_at || b.created_at || new Date().toISOString(),
+    priority: b.priority || "none",
+    next_action_date: b.next_action_date || null,
+  })),
+  contacts: value.contacts || [],
+  campaigns: value.campaigns || [],
+  followups: value.followups || [],
+  meetings: (value.meetings || []).map((m) => ({ ...m, kind: m.kind || "meeting", done: m.done === true })),
+  activities: value.activities || [],
+});
+
+export type SyncState = "local" | "loading" | "saving" | "synced" | "offline";
+
+// Backoff for cloud reads/writes that fail (expired token, flaky network).
+const RETRY_DELAYS = [2000, 5000, 15000, 30000, 60000];
+
 export function DataProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const userId = user?.id || "guest";
   const storageKey = `influenceflow.workspace.v2.${userId}`;
-  const [data, setData] = useState<WorkspaceData>(() => blankWorkspace(userId));
+  // Set while this browser holds edits the cloud has not confirmed yet. It
+  // survives reloads, so unsynced work is pushed instead of being replaced by
+  // an older cloud copy (the "status jumps back to New" bug).
+  const pendingKey = `influenceflow.pending-sync.${userId}`;
+  const [data, setRawData] = useState<WorkspaceData>(() => blankWorkspace(userId));
   const [ready, setReady] = useState(false);
+  const [syncState, setSyncState] = useState<SyncState>("loading");
   // Deals that just died and still need an (optional, skippable) loss reason.
   // In-memory only: never persisted, never synced, gone on reload.
   const [pendingLoss, setPendingLoss] = useState<LossItem[]>([]);
-  // Activity rows removed alongside permanently deleted entities. Flushed to
-  // the cloud on the next persist (activities are otherwise insert-only).
-  const [activityTombstones, setActivityTombstones] = useState<string[]>([]);
-  // Same idea for follow-up rows removed via "clear history".
-  const [followupTombstones, setFollowupTombstones] = useState<string[]>([]);
+  // Activity rows removed alongside permanently deleted entities, and
+  // follow-up rows removed via "clear history". Flushed on the next persist
+  // (both tables are otherwise insert-only).
+  const activityTombstones = useRef<string[]>([]);
+  const followupTombstones = useRef<string[]>([]);
   // Hydrated flips true ONLY after a confirmed successful cloud load for this
   // user. Cloud writes stay disabled until then, so a failed load can never
   // push a blank slate over real rows (the multi-user wipe scenario).
   const [hydrated, setHydrated] = useState(false);
   const hydratedRef = useRef(false);
   const userRef = useRef(userId);
+  const dataRef = useRef(data);
+  dataRef.current = data;
+  // Monotonic edit counter: a save only clears the pending flag if no newer
+  // edit happened while it was in flight.
+  const editVersion = useRef(0);
+  const inFlight = useRef(false);
+  const queued = useRef(false);
+  const retryTimer = useRef<number | undefined>(undefined);
+  const retryCount = useRef(0);
 
+  const readPending = useCallback(() => {
+    try {
+      return localStorage.getItem(pendingKey) === "1";
+    } catch {
+      return false;
+    }
+  }, [pendingKey]);
+  const writePending = useCallback(
+    (value: boolean) => {
+      try {
+        if (value) localStorage.setItem(pendingKey, "1");
+        else localStorage.removeItem(pendingKey);
+      } catch {
+        // storage unavailable: in-memory editVersion still protects this tab
+      }
+    },
+    [pendingKey],
+  );
+
+  // Every user-driven mutation goes through here so it is marked unsynced.
+  const setData: typeof setRawData = useCallback(
+    (update) => {
+      editVersion.current += 1;
+      writePending(true);
+      if (hasSupabase) setSyncState((prev) => (prev === "offline" ? prev : "saving"));
+      setRawData(update);
+    },
+    [writePending],
+  );
+
+  // Load: keyed on the user ID only. Supabase re-emits SIGNED_IN /
+  // TOKEN_REFRESHED with a fresh user object on tab focus and every hour;
+  // keying on the object re-ran this load mid-session and replaced fresh
+  // local edits with the older cloud copy.
   useEffect(() => {
     userRef.current = userId;
     hydratedRef.current = false;
     setHydrated(false);
     setReady(false);
+    retryCount.current = 0;
     try {
       const stored = localStorage.getItem(storageKey);
       if (stored) {
         const parsed = JSON.parse(stored) as WorkspaceData;
-        setData({ ...parsed, demoSeeded: false });
+        setRawData(upgradeWorkspace({ ...parsed, demoSeeded: false }, userId));
       } else {
-        setData(blankWorkspace(userId));
+        setRawData(blankWorkspace(userId));
       }
     } catch {
-      setData(blankWorkspace(userId));
+      setRawData(blankWorkspace(userId));
     }
     setReady(true);
-    if (hasSupabase && user) {
-      const owner = userId;
+    if (!hasSupabase || userId === "guest") {
+      setSyncState("local");
+      return;
+    }
+    setSyncState("loading");
+    const owner = userId;
+    let cancelled = false;
+    let timer: number | undefined;
+    const attempt = (n: number) => {
       void loadCloudWorkspace(owner)
         .then((cloud) => {
-          if (!cloud || userRef.current !== owner) return;
-          setData({ ...cloud, demoSeeded: false });
+          if (cancelled || !cloud || userRef.current !== owner) return;
+          if (readPending()) {
+            // This browser has edits the cloud never confirmed: keep them and
+            // push them up instead of letting the stale copy win.
+            setRawData((current) => upgradeWorkspace({ ...current, demoSeeded: false }, owner));
+          } else {
+            setRawData(upgradeWorkspace({ ...cloud, demoSeeded: false }, owner));
+          }
           hydratedRef.current = true;
           setHydrated(true);
+          setSyncState(readPending() ? "saving" : "synced");
         })
         .catch(() => {
-          // Offline or schema hiccup: keep the local snapshot usable and
-          // STAY read-only against the cloud (hydrated remains false).
+          // Offline, expired token or schema hiccup: keep the local snapshot
+          // usable, stay read-only against the cloud and try again shortly.
+          if (cancelled) return;
+          setSyncState("offline");
+          timer = window.setTimeout(() => attempt(n + 1), RETRY_DELAYS[Math.min(n, RETRY_DELAYS.length - 1)]);
         });
-    }
-  }, [storageKey, userId, user]);
+    };
+    attempt(0);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [storageKey, userId, readPending]);
 
   useEffect(() => {
     if (ready) {
@@ -126,25 +245,79 @@ export function DataProvider({ children }: { children: ReactNode }) {
     document.documentElement.dataset.theme = data.profile.theme;
   }, [data, ready, storageKey]);
 
+  // Save: one write in flight at a time (an older snapshot can never land
+  // after a newer one), the newest state queued behind it, automatic retry
+  // with backoff, and a flush when the tab is hidden or closed.
+  const flush = useCallback(() => {
+    if (!hasSupabase || !hydratedRef.current || userRef.current === "guest") return;
+    if (inFlight.current) {
+      queued.current = true;
+      return;
+    }
+    window.clearTimeout(retryTimer.current);
+    const owner = userRef.current;
+    const version = editVersion.current;
+    const snapshot = dataRef.current;
+    const doomed = [...activityTombstones.current];
+    const doomedFollowups = [...followupTombstones.current];
+    inFlight.current = true;
+    setSyncState("saving");
+    void persistCloudWorkspace({ ...snapshot, demoSeeded: false }, owner, doomed, doomedFollowups)
+      .then(() => {
+        if (userRef.current !== owner) return;
+        retryCount.current = 0;
+        activityTombstones.current = activityTombstones.current.filter((id) => !doomed.includes(id));
+        followupTombstones.current = followupTombstones.current.filter((id) => !doomedFollowups.includes(id));
+        if (editVersion.current === version && !queued.current) {
+          writePending(false);
+          setSyncState("synced");
+        }
+      })
+      .catch(() => {
+        if (userRef.current !== owner) return;
+        setSyncState("offline");
+        const delay = RETRY_DELAYS[Math.min(retryCount.current, RETRY_DELAYS.length - 1)];
+        retryCount.current += 1;
+        retryTimer.current = window.setTimeout(() => flush(), delay);
+      })
+      .finally(() => {
+        inFlight.current = false;
+        if (queued.current) {
+          queued.current = false;
+          flush();
+        }
+      });
+  }, [writePending]);
+
   useEffect(() => {
     if (!hasSupabase || !hydrated || !ready || !user) return;
-    const owner = userId;
-    const snapshot = data;
-    const doomed = activityTombstones;
-    const doomedFollowups = followupTombstones;
-    const timer = window.setTimeout(() => {
-      if (!hydratedRef.current || userRef.current !== owner) return;
-      void persistCloudWorkspace({ ...snapshot, demoSeeded: false }, owner, doomed, doomedFollowups)
-        .then(() => {
-          if (doomed.length) setActivityTombstones((prev) => prev.filter((id) => !doomed.includes(id)));
-          if (doomedFollowups.length) setFollowupTombstones((prev) => prev.filter((id) => !doomedFollowups.includes(id)));
-        })
-        .catch(() => {
-          // Optimistic local changes are kept and retried after the next mutation.
-        });
-    }, 650);
+    if (!readPending()) return;
+    const timer = window.setTimeout(flush, 600);
     return () => window.clearTimeout(timer);
-  }, [data, hydrated, ready, user, userId, activityTombstones, followupTombstones]);
+  }, [data, hydrated, ready, user, flush, readPending]);
+
+  useEffect(() => {
+    const onHide = () => {
+      if (document.visibilityState === "hidden" && readPending()) flush();
+    };
+    const onLeave = () => {
+      if (readPending()) flush();
+    };
+    document.addEventListener("visibilitychange", onHide);
+    window.addEventListener("pagehide", onLeave);
+    window.addEventListener("online", onLeave);
+    return () => {
+      document.removeEventListener("visibilitychange", onHide);
+      window.removeEventListener("pagehide", onLeave);
+      window.removeEventListener("online", onLeave);
+      window.clearTimeout(retryTimer.current);
+    };
+  }, [flush, readPending]);
+
+  // First contact date for a record entering the pipeline. Status "new"
+  // never carries one; any later stage defaults to today unless given.
+  const contactDateFor = (status: string, given: string | null | undefined) =>
+    OUTREACH_STAGES.includes(status) ? given || today() : null;
 
   const addActivity = (workspace: WorkspaceData, text: string, entity_type?: Activity["entity_type"], entity_id?: string) => {
     const activity: Activity = { id: uid(), user_id: userId, text: sanitize(text), at: new Date().toISOString(), entity_type, entity_id };
@@ -182,6 +355,11 @@ export function DataProvider({ children }: { children: ReactNode }) {
       user_id: userId,
       name: sanitize(value.name),
       notes: sanitize(value.notes),
+      draft_subject: value.draft_subject || "",
+      draft_body: value.draft_body || "",
+      stars_engagement: value.stars_engagement || 0,
+      date_contacted: contactDateFor(value.pipeline_status, value.date_contacted),
+      stars: overallStars(value, data.profile.rating_weights),
       on_roster: ["roster", "signed"].includes(value.pipeline_status),
       status_updated_at: new Date().toISOString(),
       created_at: new Date().toISOString(),
@@ -203,6 +381,11 @@ export function DataProvider({ children }: { children: ReactNode }) {
       user_id: userId,
       name: sanitize(value.name),
       notes: sanitize(value.notes),
+      draft_subject: value.draft_subject || "",
+      draft_body: value.draft_body || "",
+      stars_engagement: value.stars_engagement || 0,
+      date_contacted: contactDateFor(value.pipeline_status, value.date_contacted),
+      stars: overallStars(value, data.profile.rating_weights),
       on_roster: ["roster", "signed"].includes(value.pipeline_status),
       status_updated_at: stamp,
       created_at: stamp,
@@ -254,7 +437,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     if (found.length) queueLoss({ kind, id, name: found[0] });
   };
 
-  const updateCreator = (id: string, value: Partial<Creator>) => {
+  const updateCreator = (id: string, value: Partial<Creator>, opts?: { quiet?: boolean; activity?: string }) => {
     const before = data.creators.find((item) => item.id === id);
     const toDenied = value.pipeline_status === "denied" && before?.pipeline_status !== "denied";
     const lostStamp = toDenied && before && DEAL_STAGES.includes(before.pipeline_status) ? new Date().toISOString() : null;
@@ -262,10 +445,16 @@ export function DataProvider({ children }: { children: ReactNode }) {
     // Explicit undo: moving back to New erases the contact date, so the
     // Emails-sent tile drops it. Moving anywhere else keeps history.
     const resetContact = value.pipeline_status === "new" && before?.pipeline_status !== "new";
-    // Overall rating always follows the three dimensions.
-    const touchesDims = value.stars_consistency !== undefined || value.stars_demographics !== undefined || value.stars_niche !== undefined;
+    // Overall rating always follows the four dimensions and current weights.
+    const touchesDims = RATING_DIMS.some((dim) => value[dim.key] !== undefined);
     setData((current) => {
-      const statusChanged = value.pipeline_status && current.creators.find((item) => item.id === id)?.pipeline_status !== value.pipeline_status;
+      const existing = current.creators.find((item) => item.id === id);
+      const statusChanged = !!value.pipeline_status && existing?.pipeline_status !== value.pipeline_status;
+      // Moving into any outreach stage stamps the first-contact date the
+      // moment it happens — wherever the move is made (profile, table,
+      // kanban, cards, bulk). An existing date is never overwritten.
+      const stampContact =
+        statusChanged && !!value.pipeline_status && OUTREACH_STAGES.includes(value.pipeline_status) && !(value.date_contacted ?? existing?.date_contacted);
       const creators = current.creators.map((item) =>
         item.id === id
           ? {
@@ -275,20 +464,22 @@ export function DataProvider({ children }: { children: ReactNode }) {
               notes: value.notes !== undefined ? sanitize(value.notes) : item.notes,
               on_roster: value.pipeline_status ? ["roster", "signed"].includes(value.pipeline_status) : item.on_roster,
               status_updated_at: statusChanged ? new Date().toISOString() : item.status_updated_at,
-              ...(touchesDims ? { stars: overallStars({ ...item, ...value }) } : {}),
+              ...(touchesDims ? { stars: overallStars({ ...item, ...value }, current.profile.rating_weights) } : {}),
               ...(toDenied ? { lost_reason: "", lost_at: lostStamp } : {}),
+              ...(stampContact ? { date_contacted: today() } : {}),
               ...(resetContact ? { date_contacted: null } : {}),
               ...(clearLoss ? { lost_reason: "", lost_at: null } : {}),
             }
           : item,
       );
-      const next = addActivity(
-        { ...current, creators },
-        `${before?.name || "Influencer"} updated${statusChanged ? ` to ${value.pipeline_status}` : ""}`,
+      const next = { ...current, creators };
+      if (opts?.quiet && !statusChanged) return next;
+      return addActivity(
+        next,
+        opts?.activity || `${before?.name || "Influencer"} updated${statusChanged ? ` to ${value.pipeline_status}` : ""}`,
         "creator",
         id,
       );
-      return next;
     });
     if (toDenied && lostStamp && before) queueLoss({ kind: "creator", id, name: before.name });
   };
@@ -300,7 +491,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       const creators = current.creators.filter((item) => item.id !== removeId).map((item) => {
         if (item.id !== keepId) return item;
         const next = { ...item, ...merged };
-        return { ...next, stars: overallStars(next) };
+        return { ...next, stars: overallStars(next, current.profile.rating_weights) };
       });
       const campaigns = current.campaigns.map((campaign) => ({
         ...campaign,
@@ -341,6 +532,10 @@ export function DataProvider({ children }: { children: ReactNode }) {
       user_id: userId,
       name: sanitize(value.name),
       notes: sanitize(value.notes),
+      draft_subject: value.draft_subject || "",
+      draft_body: value.draft_body || "",
+      date_contacted: contactDateFor(value.pipeline_status, value.date_contacted),
+      status_updated_at: new Date().toISOString(),
       created_at: new Date().toISOString(),
       archived_at: null,
       lost_reason: "",
@@ -358,6 +553,10 @@ export function DataProvider({ children }: { children: ReactNode }) {
       user_id: userId,
       name: sanitize(value.name),
       notes: sanitize(value.notes),
+      draft_subject: value.draft_subject || "",
+      draft_body: value.draft_body || "",
+      date_contacted: contactDateFor(value.pipeline_status, value.date_contacted),
+      status_updated_at: stamp,
       created_at: stamp,
       archived_at: null,
       lost_reason: "",
@@ -367,14 +566,17 @@ export function DataProvider({ children }: { children: ReactNode }) {
     return additions.length;
   };
 
-  const updateBrand = (id: string, value: Partial<Brand>) => {
+  const updateBrand = (id: string, value: Partial<Brand>, opts?: { quiet?: boolean; activity?: string }) => {
     const before = data.brands.find((item) => item.id === id);
     const toDenied = value.pipeline_status === "denied" && before?.pipeline_status !== "denied";
     const lostStamp = toDenied && before && DEAL_STAGES.includes(before.pipeline_status) ? new Date().toISOString() : null;
     const clearLoss = !!value.pipeline_status && value.pipeline_status !== "denied" && before?.pipeline_status === "denied";
     const resetContact = value.pipeline_status === "new" && before?.pipeline_status !== "new";
     setData((current) => {
-      const statusChanged = value.pipeline_status && current.brands.find((item) => item.id === id)?.pipeline_status !== value.pipeline_status;
+      const existing = current.brands.find((item) => item.id === id);
+      const statusChanged = !!value.pipeline_status && existing?.pipeline_status !== value.pipeline_status;
+      const stampContact =
+        statusChanged && !!value.pipeline_status && OUTREACH_STAGES.includes(value.pipeline_status) && !(value.date_contacted ?? existing?.date_contacted);
       const brands = current.brands.map((item) =>
         item.id === id
           ? {
@@ -382,15 +584,19 @@ export function DataProvider({ children }: { children: ReactNode }) {
               ...value,
               name: value.name ? sanitize(value.name) : item.name,
               notes: value.notes !== undefined ? sanitize(value.notes) : item.notes,
+              status_updated_at: statusChanged ? new Date().toISOString() : item.status_updated_at,
               ...(toDenied ? { lost_reason: "", lost_at: lostStamp } : {}),
+              ...(stampContact ? { date_contacted: today() } : {}),
               ...(resetContact ? { date_contacted: null } : {}),
               ...(clearLoss ? { lost_reason: "", lost_at: null } : {}),
             }
           : item,
       );
+      const next = { ...current, brands };
+      if (opts?.quiet && !statusChanged) return next;
       return addActivity(
-        { ...current, brands },
-        `${before?.name || "Brand"} updated${statusChanged ? ` to ${value.pipeline_status}` : ""}`,
+        next,
+        opts?.activity || `${before?.name || "Brand"} updated${statusChanged ? ` to ${value.pipeline_status}` : ""}`,
         "brand",
         id,
       );
@@ -419,6 +625,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       first_name: sanitize(value.first_name),
       last_name: sanitize(value.last_name),
       notes: sanitize(value.notes),
+      date_contacted: contactDateFor(value.pipeline_status, value.date_contacted),
       created_at: new Date().toISOString(),
       lost_reason: "",
       lost_at: null,
@@ -436,7 +643,10 @@ export function DataProvider({ children }: { children: ReactNode }) {
     const resetContact = !!value.pipeline_status && value.pipeline_status === "new" && contact?.pipeline_status !== "new";
     const label = contact ? `${contact.first_name} ${contact.last_name}`.trim() || "Brand contact" : "Brand contact";
     setData((current) => {
-      const statusChanged = value.pipeline_status && current.contacts.find((item) => item.id === id)?.pipeline_status !== value.pipeline_status;
+      const existing = current.contacts.find((item) => item.id === id);
+      const statusChanged = !!value.pipeline_status && existing?.pipeline_status !== value.pipeline_status;
+      const stampContact =
+        statusChanged && !!value.pipeline_status && OUTREACH_STAGES.includes(value.pipeline_status) && !(value.date_contacted ?? existing?.date_contacted);
       return addActivity(
         {
           ...current,
@@ -446,6 +656,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
                   ...item,
                   ...value,
                   ...(toDenied ? { lost_reason: "", lost_at: lostStamp } : {}),
+                  ...(stampContact ? { date_contacted: today() } : {}),
                   ...(resetContact ? { date_contacted: null } : {}),
                   ...(clearLoss ? { lost_reason: "", lost_at: null } : {}),
                 }
@@ -516,19 +727,26 @@ export function DataProvider({ children }: { children: ReactNode }) {
       user_id: userId,
       title: sanitize(value.title),
       notes: sanitize(value.notes),
+      done: value.done ?? false,
       reminder_sent: false,
       created_at: new Date().toISOString(),
     };
     setData((current) => addActivity({ ...current, meetings: [...current.meetings, meeting] }, `${meeting.title} added to calendar`, "meeting", meeting.id));
     return meeting;
   };
-  const updateMeeting = (id: string, value: Partial<Meeting>) =>
+  const updateMeeting = (id: string, value: Partial<Meeting>, opts?: UpdateOpts) =>
     setData((current) => {
       const meeting = current.meetings.find((item) => item.id === id);
-      const next = { ...current, meetings: current.meetings.map((item) => (item.id === id ? { ...item, ...value } : item)) };
-      return Object.keys(value).length === 1 && value.reminder_sent !== undefined
-        ? next
-        : addActivity(next, `${meeting?.title || "Meeting"} updated`, "meeting", id);
+      // A new reminder time re-arms the browser alert.
+      const rearm = value.remind_at !== undefined && value.remind_at !== meeting?.remind_at && value.reminder_sent === undefined;
+      const next = {
+        ...current,
+        meetings: current.meetings.map((item) =>
+          item.id === id ? { ...item, ...value, ...(value.title !== undefined ? { title: sanitize(value.title) } : {}), ...(rearm ? { reminder_sent: false } : {}) } : item,
+        ),
+      };
+      if (opts?.quiet || (Object.keys(value).length === 1 && value.reminder_sent !== undefined)) return next;
+      return addActivity(next, opts?.activity || `${meeting?.title || "Meeting"} updated`, "meeting", id);
     });
   const deleteMeeting = (id: string) =>
     setData((current) => {
@@ -562,7 +780,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     }
     const deadActivities = data.activities.filter((a) => a.entity_id && doomed.has(a.entity_id)).map((a) => a.id);
     if (deadActivities.length)
-      setActivityTombstones((prev) => [...prev, ...deadActivities.filter((id) => !prev.includes(id))]);
+      activityTombstones.current = [...activityTombstones.current, ...deadActivities.filter((id) => !activityTombstones.current.includes(id))];
     setData((current) => {
       const activities = current.activities.filter((a) => !(a.entity_id && doomed.has(a.entity_id)));
       if (type === "creator")
@@ -596,7 +814,17 @@ export function DataProvider({ children }: { children: ReactNode }) {
     });
   };
 
-  const updateProfile = (value: Partial<Profile>) => setData((current) => ({ ...current, profile: { ...current.profile, ...value } }));
+  const updateProfile = (value: Partial<Profile>) =>
+    setData((current) => {
+      const profile = { ...current.profile, ...value };
+      // New weights re-score every influencer so stored stars, sorting and
+      // filters stay consistent with what the profile pages show.
+      const creators =
+        value.rating_weights !== undefined
+          ? current.creators.map((c) => (ratedCount(c) ? { ...c, stars: overallStars(c, profile.rating_weights) } : c))
+          : current.creators;
+      return { ...current, profile, creators };
+    });
   const logFollowup = (creatorId: string, note = "") => {
     const stamp = new Date().toISOString();
     setData((current) => {
@@ -615,6 +843,17 @@ export function DataProvider({ children }: { children: ReactNode }) {
     });
   };
 
+  // Marks a next action as done: logs it to the record's audit trail and
+  // clears the action + due date (which also removes it from the calendar).
+  const completeAction = (kind: "creator" | "brand", id: string) => {
+    const target = kind === "creator" ? data.creators.find((c) => c.id === id) : data.brands.find((b) => b.id === id);
+    if (!target) return;
+    const label = target.next_action?.trim() || "Next action";
+    const activity = `Completed for ${target.name}: ${label}`;
+    if (kind === "creator") updateCreator(id, { next_action: "", next_action_date: null }, { activity });
+    else updateBrand(id, { next_action: "", next_action_date: null }, { activity });
+  };
+
   const importBackup = (value: WorkspaceData) => {
     // Deduplicate by id: re-importing the same backup twice must never
     // double-count stats or duplicate rows.
@@ -622,24 +861,17 @@ export function DataProvider({ children }: { children: ReactNode }) {
       const seen = new Set<string>();
       return (rows || []).filter((r) => (seen.has(r.id) ? false : (seen.add(r.id), true)));
     };
+    const upgraded = upgradeWorkspace(value, userId);
     setData({
-      ...value,
-      profile: { ...value.profile, id: userId },
-      creators: dedupe(value.creators).map((c) => {
-        const withDims = {
-          ...c,
-          stars_consistency: typeof c.stars_consistency === "number" ? c.stars_consistency : 0,
-          stars_demographics: typeof c.stars_demographics === "number" ? c.stars_demographics : 0,
-          stars_niche: typeof c.stars_niche === "number" ? c.stars_niche : 0,
-        };
-        return { ...withDims, stars: overallStars(withDims) };
-      }),
-      brands: dedupe(value.brands),
-      contacts: dedupe(value.contacts),
-      campaigns: dedupe(value.campaigns),
-      followups: dedupe(value.followups),
-      meetings: dedupe(value.meetings),
-      activities: dedupe(value.activities),
+      ...upgraded,
+      profile: { ...upgraded.profile, id: userId },
+      creators: dedupe(upgraded.creators).map((c) => (ratedCount(c) ? { ...c, stars: overallStars(c, upgraded.profile.rating_weights) } : c)),
+      brands: dedupe(upgraded.brands),
+      contacts: dedupe(upgraded.contacts),
+      campaigns: dedupe(upgraded.campaigns),
+      followups: dedupe(upgraded.followups),
+      meetings: dedupe(upgraded.meetings),
+      activities: dedupe(upgraded.activities),
       demoSeeded: false,
     });
     hydratedRef.current = true;
@@ -651,12 +883,12 @@ export function DataProvider({ children }: { children: ReactNode }) {
     if (!target) return;
     const deadFollowups = data.followups.filter((f) => f.creator_id === creatorId).map((f) => f.id);
     if (deadFollowups.length)
-      setFollowupTombstones((prev) => [...prev, ...deadFollowups.filter((id) => !prev.includes(id))]);
+      followupTombstones.current = [...followupTombstones.current, ...deadFollowups.filter((id) => !followupTombstones.current.includes(id))];
     const deadActivities = data.activities
       .filter((a) => a.entity_id === creatorId && a.text.startsWith("Logged a follow-up with "))
       .map((a) => a.id);
     if (deadActivities.length)
-      setActivityTombstones((prev) => [...prev, ...deadActivities.filter((id) => !prev.includes(id))]);
+      activityTombstones.current = [...activityTombstones.current, ...deadActivities.filter((id) => !activityTombstones.current.includes(id))];
     setData((current) => {
       const creators = current.creators.map((item) =>
         item.id === creatorId ? { ...item, followup_count: 0, last_followup_at: null } : item,
@@ -675,6 +907,9 @@ export function DataProvider({ children }: { children: ReactNode }) {
       demoSeeded: false,
       ready,
       cloudLive: hydrated,
+      syncState,
+      syncNow: flush,
+      completeAction,
       addCreator,
       updateCreator,
       addCreators,
@@ -705,7 +940,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       log,
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [data, ready, hydrated, pendingLoss, findCreatorDuplicates, findBrandDuplicates, log],
+    [data, ready, hydrated, syncState, flush, pendingLoss, findCreatorDuplicates, findBrandDuplicates, log],
   );
   return <DataContext.Provider value={contextValue}>{children}</DataContext.Provider>;
 }

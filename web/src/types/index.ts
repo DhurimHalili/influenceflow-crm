@@ -20,6 +20,22 @@ export interface Profile {
   theme: ThemeName;
   reminder_prefs: "browser" | "email" | "both" | "off";
   onboarding_done: boolean;
+  email_templates: EmailTemplate[];
+  rating_weights: RatingWeights | null;
+}
+
+export interface EmailTemplate {
+  id: string;
+  name: string;
+  subject: string;
+  body: string;
+}
+
+export interface RatingWeights {
+  audience: number;
+  niche: number;
+  engagement: number;
+  consistency: number;
 }
 
 export interface Creator {
@@ -35,6 +51,9 @@ export interface Creator {
   stars_consistency: number;
   stars_demographics: number;
   stars_niche: number;
+  stars_engagement: number;
+  draft_subject: string;
+  draft_body: string;
   platform: Platform;
   pipeline_status: EntityStatus;
   on_roster: boolean;
@@ -61,6 +80,9 @@ export interface Brand {
   contact_email: string;
   pipeline_status: EntityStatus;
   date_contacted: string | null;
+  status_updated_at: string;
+  draft_subject: string;
+  draft_body: string;
   notes: string;
   next_action?: string;
   priority: Priority;
@@ -128,6 +150,7 @@ export interface Meeting {
   remind_at: string | null;
   reminder_sent: boolean;
   kind: MeetingKind;
+  done: boolean;
   created_at: string;
 }
 

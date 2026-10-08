@@ -1,8 +1,10 @@
-import { formatDistanceToNow, isBefore, parseISO } from "date-fns";
+import { formatDistanceToNow, isBefore } from "date-fns";
 
 export const uid = () => crypto.randomUUID();
 
-export const today = () => new Date().toISOString().slice(0, 10);
+// Local calendar date (YYYY-MM-DD). toISOString() is UTC and returns
+// yesterday's date after midnight for anyone east of Greenwich.
+export const today = () => dayKey(new Date());
 
 export const sanitize = (value: string) => value.replace(/<[^>]*>/g, "").trim();
 
@@ -13,8 +15,30 @@ export const compact = (value: number) =>
   new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(value || 0);
 
 export const dateLabel = (value?: string | null) => {
-  if (!value) return "Not set";
-  return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(new Date(value));
+  const d = parseDay(value);
+  if (!d) return "Not set";
+  return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(d);
+};
+
+export const shortDate = (value?: string | null) => {
+  const d = parseDay(value);
+  if (!d) return "";
+  const sameYear = d.getFullYear() === new Date().getFullYear();
+  return new Intl.DateTimeFormat("en-US", sameYear ? { month: "short", day: "numeric" } : { month: "short", day: "numeric", year: "numeric" }).format(d);
+};
+
+// "Due today", "Due tomorrow", "Overdue · 3 days", "Due Friday", "Due Oct 12".
+export const dueLabel = (value?: string | null) => {
+  const d = parseDay(value);
+  if (!d) return "";
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  const diff = Math.round((d.getTime() - start.getTime()) / 86400000);
+  if (diff === 0) return "Due today";
+  if (diff === 1) return "Due tomorrow";
+  if (diff < 0) return `Overdue · ${-diff} day${diff === -1 ? "" : "s"}`;
+  if (diff < 7) return `Due ${new Intl.DateTimeFormat("en-US", { weekday: "long" }).format(d)}`;
+  return `Due ${shortDate(value)}`;
 };
 
 export const timeLabel = (value: string) =>
@@ -32,7 +56,12 @@ export const initials = (name: string) =>
 
 export const normalize = (value: string) => value.trim().toLocaleLowerCase().replace(/\/+$/, "");
 
-export const isOverdue = (value: string) => isBefore(parseISO(value), new Date());
+// A due DATE is overdue only once that whole day has passed.
+export const isOverdue = (value: string) => {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return isPastDay(value);
+  const d = parseDay(value);
+  return d ? isBefore(d, new Date()) : false;
+};
 
 export const download = (name: string, value: string, type = "application/json") => {
   const url = URL.createObjectURL(new Blob([value], { type }));
@@ -71,48 +100,113 @@ export const followupWords = (count: number) =>
 export const PRIORITY_LABELS: Record<string, string> = { none: "No priority", soon: "Follow up soon", urgent: "Urgent" };
 export const MEETING_KIND_LABELS: Record<string, string> = { meeting: "Meeting", task: "Task", reminder: "Reminder" };
 
-export type RatingDimKey = "stars_consistency" | "stars_demographics" | "stars_niche";
+export type RatingDimKey = "stars_demographics" | "stars_niche" | "stars_engagement" | "stars_consistency";
+export type WeightKey = "audience" | "niche" | "engagement" | "consistency";
 
-export const RATING_DIMS: { key: RatingDimKey; label: string; hint: string }[] = [
-  { key: "stars_consistency", label: "Posting consistency", hint: "How reliably they publish" },
-  { key: "stars_demographics", label: "Audience demographics", hint: "Who actually watches them" },
-  { key: "stars_niche", label: "Niche alignment", hint: "How well they fit your brands" },
+// Ordered by how much each factor moves campaign results in influencer
+// marketing: who the audience is decides whether a brand buys at all, niche
+// fit decides whether the message lands, engagement is the quality-of-
+// attention signal (and the best fake-follower tell), consistency is
+// reliability — important, but the easiest gap to manage with a brief.
+export const RATING_DIMS: { key: RatingDimKey; weight: WeightKey; label: string; short: string; hint: string }[] = [
+  { key: "stars_demographics", weight: "audience", label: "Audience quality & demographics", short: "Audience", hint: "Right age, geo and gender for your brands — and real followers" },
+  { key: "stars_niche", weight: "niche", label: "Niche & brand fit", short: "Brand fit", hint: "Content, tone and values match the brands you pitch" },
+  { key: "stars_engagement", weight: "engagement", label: "Engagement quality", short: "Engagement", hint: "Your call — comments, saves and community, not just the ER number" },
+  { key: "stars_consistency", weight: "consistency", label: "Posting consistency", short: "Consistency", hint: "Publishes reliably and delivers on time" },
 ];
 
-// Overall rating = average of the dimensions the user actually rated.
-// Unrated dimensions never drag the score; nothing rated = 0 (unrated).
-export const overallStars = (dims: { stars_consistency?: number | null; stars_demographics?: number | null; stars_niche?: number | null }) => {
-  const rated = [dims.stars_consistency || 0, dims.stars_demographics || 0, dims.stars_niche || 0].filter((v) => v > 0);
-  if (!rated.length) return 0;
-  return Math.min(5, Math.max(0, Math.round(rated.reduce((a, b) => a + b, 0) / rated.length)));
+export type RatingWeightsValue = Record<WeightKey, number>;
+
+// Market-standard agency scorecard weights (percent, sums to 100).
+export const DEFAULT_RATING_WEIGHTS: RatingWeightsValue = { audience: 35, niche: 30, engagement: 20, consistency: 15 };
+
+export const resolveWeights = (weights?: Partial<RatingWeightsValue> | null): RatingWeightsValue => {
+  const merged = { ...DEFAULT_RATING_WEIGHTS, ...(weights || {}) };
+  const clean = Object.fromEntries(
+    Object.entries(merged).map(([k, v]) => [k, Math.max(0, Number.isFinite(Number(v)) ? Number(v) : 0)]),
+  ) as RatingWeightsValue;
+  return Object.values(clean).some((v) => v > 0) ? clean : DEFAULT_RATING_WEIGHTS;
 };
 
-// Engagement score: measured performance mapped to stars, kept separate
-// from the user's own ratings. Bands match the labels used across the app:
-// under 4% needs review (1-2), 4-8% healthy (3-4), 8%+ high performer (5).
-export const engagementStars = (rate: number) => {
-  const v = Number(rate) || 0;
-  if (v <= 0) return 0;
-  if (v < 2) return 1;
-  if (v < 4) return 2;
-  if (v < 6) return 3;
-  if (v < 8) return 4;
-  return 5;
+// Share of the overall score each factor carries, in percent (sums to 100).
+export const weightShares = (weights?: Partial<RatingWeightsValue> | null) => {
+  const w = resolveWeights(weights);
+  const total = Object.values(w).reduce((a, b) => a + b, 0) || 1;
+  return Object.fromEntries(Object.entries(w).map(([k, v]) => [k, Math.round((v / total) * 100)])) as RatingWeightsValue;
 };
+
+type DimValues = Partial<Record<RatingDimKey, number | null>>;
+
+// Precise weighted score (0-5, one decimal). Only rated dimensions count and
+// their weights are re-normalised, so an unrated factor never drags the
+// score down, and a factor weighted 0 never moves it.
+export const ratingScore = (dims: DimValues, weights?: Partial<RatingWeightsValue> | null) => {
+  const w = resolveWeights(weights);
+  let total = 0;
+  let weightSum = 0;
+  for (const dim of RATING_DIMS) {
+    const value = Math.min(5, Math.max(0, Math.round(Number(dims[dim.key]) || 0)));
+    if (value <= 0 || w[dim.weight] <= 0) continue;
+    total += value * w[dim.weight];
+    weightSum += w[dim.weight];
+  }
+  if (!weightSum) return 0;
+  return Math.round((total / weightSum) * 10) / 10;
+};
+
+// Whole-star value stored in the database (integer column, used by older
+// clients and exports).
+export const overallStars = (dims: DimValues, weights?: Partial<RatingWeightsValue> | null) =>
+  Math.min(5, Math.max(0, Math.round(ratingScore(dims, weights))));
+
+export const ratedCount = (dims: DimValues) => RATING_DIMS.filter((d) => (Number(dims[d.key]) || 0) > 0).length;
+
+export const scoreLabel = (score: number) =>
+  score <= 0 ? "Unrated" : score >= 4.5 ? "Top pick" : score >= 3.8 ? "Strong fit" : score >= 3 ? "Solid" : score >= 2 ? "Risky" : "Poor fit";
+
+// Engagement benchmarks per platform (typical healthy ER ranges). Shown as
+// context next to the manual engagement rating, never used to set it.
+export const ER_BENCHMARKS: Record<string, [number, number]> = {
+  YouTube: [2, 5],
+  Instagram: [1, 3.5],
+  TikTok: [4, 10],
+  Twitch: [3, 8],
+  LinkedIn: [2, 5],
+  Other: [1, 5],
+};
+
+export const erContext = (rate: number, platform: string) => {
+  const [low, high] = ER_BENCHMARKS[platform] || ER_BENCHMARKS.Other;
+  const v = Number(rate) || 0;
+  if (v <= 0) return `No engagement rate entered · typical ${platform} range ${low}-${high}%`;
+  const verdict = v < low ? "below" : v > high ? "above" : "within";
+  return `${v}% is ${verdict} the typical ${platform} range (${low}-${high}%) — reference only`;
+};
+
+// Calendar-day helpers. Date-only strings ("2026-10-08") are parsed as LOCAL
+// dates: new Date("2026-10-08") is UTC midnight and shows the previous day
+// for anyone west of Greenwich.
+export const parseDay = (value?: string | null) => {
+  if (!value) return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  const d = m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : new Date(value);
+  return Number.isNaN(d.getTime()) ? null : d;
+};
+
+export const dayKey = (date: Date) =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 
 export const isPastDay = (value?: string | null) => {
-  if (!value) return false;
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return false;
+  const d = parseDay(value);
+  if (!d) return false;
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   return d < today;
 };
 
 export const isTodayDay = (value?: string | null) => {
-  if (!value) return false;
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return false;
+  const d = parseDay(value);
+  if (!d) return false;
   const now = new Date();
   return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
 };
@@ -128,3 +222,28 @@ export const LOSS_REASONS = [
 
 export const lossReasonLabel = (value: string) =>
   LOSS_REASONS.find((r) => r.value === value)?.label || "No reason given";
+
+export const firstName = (name: string) => name.trim().split(/\s+/)[0] || name;
+
+export const TEMPLATE_TOKENS = ["{first_name}", "{name}", "{niche}", "{platform}", "{channel}", "{company}", "{my_name}"] as const;
+
+// Fills known {tokens}; unknown or empty ones stay visible so nothing is
+// silently dropped from an email.
+export const fillTemplate = (value: string, vars: Record<string, string>) =>
+  value.replace(/\{(first_name|name|niche|platform|channel|my_name|company|domain)\}/g, (match, key: string) => vars[key] || match);
+
+export const unfilledTokens = (value: string) => Array.from(new Set(value.match(/\{(first_name|name|niche|platform|channel|my_name|company|domain)\}/g) || []));
+
+export const gmailComposeUrl = (to: string, subject: string, body: string) =>
+  `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(to)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+
+export const mailtoUrl = (to: string, subject: string, body: string) =>
+  `mailto:${to}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+
+// Any status past "new" means first contact already happened.
+export const OUTREACH_STAGES = ["contacted", "replied", "negotiating", "roster", "signed", "no_reply"];
+
+// Overall score for a record: weighted from the four ratings, falling back to
+// a legacy whole-star rating for rows imported before the breakdown existed.
+export const creatorScore = (creator: DimValues & { stars?: number | null }, weights?: Partial<RatingWeightsValue> | null) =>
+  ratedCount(creator) > 0 ? ratingScore(creator, weights) : Math.min(5, Math.max(0, Number(creator.stars) || 0));
