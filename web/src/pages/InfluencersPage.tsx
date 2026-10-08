@@ -1,5 +1,5 @@
 import Papa from "papaparse";
-import { Archive, ArrowDownAZ, ArrowLeft, ArrowRight, Columns3, Download, ExternalLink, FileSpreadsheet, Filter, Flag, LayoutGrid, List, Merge, MoreHorizontal, Plus, Send, SlidersHorizontal, Sparkles, Star, Upload, X } from "lucide-react";
+import { Archive, ArrowDownAZ, CalendarClock, ArrowLeft, ArrowRight, Columns3, Download, ExternalLink, FileSpreadsheet, Filter, Flag, LayoutGrid, List, Merge, Plus, Send, SlidersHorizontal, Sparkles, Star, Upload, X } from "lucide-react";
 import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { EmailDraftPanel } from "../components/EmailDraft";
@@ -7,7 +7,7 @@ import { NextActionEditor } from "../components/NextAction";
 import { Avatar, Button, EmptyState, FieldMergeReview, Input, Modal, PageHeader, SearchInput, Select, StarInput, Stars, StatusBadge, Tabs, Textarea } from "../components/ui";
 import { useData } from "../contexts/DataContext";
 import { useToast } from "../contexts/ToastContext";
-import { CSV_BOM, compact, creatorScore, dateLabel, download, dueLabel, erContext, firstName, followupWords, isPastDay, isTodayDay, isValidEmail, isValidUrl, lossReasonLabel, money, normalize, OUTREACH_STAGES, overallStars, PRIORITY_LABELS, RATING_DIMS, ratingScore, relativeTime, scoreLabel, toCSV, today, weightShares } from "../lib/utils";
+import { CSV_BOM, compact, creatorScore, dateLabel, download, dueLabel, erContext, firstName, followupWords, isPastDay, isTodayDay, isValidEmail, isValidUrl, lossReasonLabel, money, normalize, OUTREACH_STAGES, overallStars, PRIORITY_LABELS, RATING_DIMS, ratingScore, relativeTime, scoreLabel, shortDate, toCSV, today, weightShares } from "../lib/utils";
 import { ENTITY_STATUSES, PLATFORMS, STATUS_LABELS, type Creator, type EntityStatus, type Platform, type Priority } from "../types";
 
 type CreatorDraft = {
@@ -223,9 +223,27 @@ function CreatorKanban({ creators }: { creators: Creator[] }) {
   return <div className="kanban-board">{stages.map((stage) => <section key={stage} className="kanban-column"><header><StatusBadge status={stage} /><span>{creators.filter((item) => item.pipeline_status === stage).length}</span></header><div>{creators.filter((item) => item.pipeline_status === stage).map((item) => <article className={`kanban-item ${item.priority !== "none" ? item.priority : ""}`} key={item.id}><Link to={`/app/influencers/${item.id}`}><div><Avatar name={item.name} size="sm" /><strong>{item.name}</strong></div><p>{item.niche || "No niche"} / {item.platform}</p><span><b>{compact(item.avg_views)} avg views</b><em>{item.engagement_rate}% ER</em></span></Link><select value={item.pipeline_status} onChange={(event) => data.updateCreator(item.id, { pipeline_status: event.target.value as EntityStatus })} aria-label={`Status for ${item.name}`}>{ENTITY_STATUSES.map((status) => <option key={status} value={status}>{STATUS_LABELS[status]}</option>)}</select></article>)}</div></section>)}</div>;
 }
 
+const PLATFORM_TONE: Record<string, string> = { YouTube: "#e5484d", Instagram: "#d6409f", TikTok: "#12a5a5", Twitch: "#8e4ec6", LinkedIn: "#0a66c2", Other: "#8c95a7" };
+
+// Card view: the whole card opens the profile (stretched link), while the
+// priority flag and status picker stay independently clickable on top.
 function CreatorCards({ creators, cyclePriority, setStatus }: { creators: Creator[]; cyclePriority: (creator: Creator) => void; setStatus: (id: string, status: EntityStatus) => void }) {
   const weights = useData().profile.rating_weights;
-  return <div className="mobile-card-grid">{creators.map((item) => <Link to={`/app/influencers/${item.id}`} className={`entity-mobile-card ${item.priority !== "none" ? item.priority : ""}`} key={item.id}><header><Avatar name={item.name} /><div><strong>{item.name}</strong><span>{item.platform} / {item.niche || "No niche"}</span><Stars value={creatorScore(item, weights)} size={11} showValue /></div><button className={`flag-btn ${item.priority}`} title={item.priority === "none" ? "Set priority" : `${PRIORITY_LABELS[item.priority]} — click to change`} onClick={(event) => { event.preventDefault(); cyclePriority(item); }}><Flag size={14} /></button><MoreHorizontal /></header><div><span><small>Avg. views</small><b>{compact(item.avg_views)}</b></span><span><small>Engagement</small><b>{item.engagement_rate}%</b></span></div><footer><select className="inline-status" value={item.pipeline_status} onClick={(event) => event.preventDefault()} onChange={(event) => setStatus(item.id, event.target.value as EntityStatus)} aria-label="Change status">{ENTITY_STATUSES.map((status) => <option key={status} value={status}>{STATUS_LABELS[status]}</option>)}</select><span>{item.next_action || "No next action"}</span></footer></Link>)}</div>;
+  return <div className="creator-card-grid">{creators.map((item) => {
+    const score = creatorScore(item, weights);
+    const due = item.next_action_date ? (isPastDay(item.next_action_date) ? "overdue" : isTodayDay(item.next_action_date) ? "today" : "upcoming") : "none";
+    return <article className={`creator-card prio-${item.priority}`} key={item.id}>
+      <header>
+        <Avatar name={item.name} />
+        <div className="cc-id"><Link className="cc-link" to={`/app/influencers/${item.id}`}><strong>{item.name}</strong></Link><span><i style={{ background: PLATFORM_TONE[item.platform] || PLATFORM_TONE.Other }} />{item.platform}{item.niche ? ` · ${item.niche}` : ""}</span></div>
+        <button className={`flag-btn cc-flag ${item.priority}`} title={item.priority === "none" ? "Set priority" : `${PRIORITY_LABELS[item.priority]} — click to change`} aria-label="Change priority" onClick={() => cyclePriority(item)}><Flag size={14} /></button>
+      </header>
+      <div className="cc-score">{score > 0 ? <><Stars value={score} size={14} showValue /><em className={`cc-grade grade-${Math.round(score)}`}>{scoreLabel(score)}</em></> : <span className="cc-unrated"><Star size={13} /> Not rated yet</span>}{item.priority !== "none" && <b className={`cc-prio ${item.priority}`}>{item.priority === "urgent" ? "Urgent" : "Soon"}</b>}</div>
+      <dl className="cc-stats"><div><dt>Avg. views</dt><dd>{item.avg_views ? compact(item.avg_views) : "—"}</dd></div><div><dt>Engagement</dt><dd>{item.engagement_rate ? `${item.engagement_rate}%` : "—"}</dd></div><div><dt>Contacted</dt><dd>{item.date_contacted ? shortDate(item.date_contacted) : "—"}</dd></div></dl>
+      <div className={`cc-next due-${due}`}><CalendarClock size={13} /><span>{item.next_action || (item.next_action_date ? "Action" : "No next action")}</span>{item.next_action_date && <em>{dueLabel(item.next_action_date)}</em>}</div>
+      <footer><label className={`status-select status-${item.pipeline_status}`} title="Change status"><StatusBadge status={item.pipeline_status} /><select value={item.pipeline_status} onChange={(event) => setStatus(item.id, event.target.value as EntityStatus)} aria-label={`Status for ${item.name}`}>{ENTITY_STATUSES.map((status) => <option key={status} value={status}>{STATUS_LABELS[status]}</option>)}</select></label>{item.followup_count > 0 && <span className="cc-follow"><Send size={11} /> {item.followup_count}</span>}<ArrowRight size={15} className="cc-go" /></footer>
+    </article>;
+  })}</div>;
 }
 
 type ImportRow = CreatorDraft & { row: number; errors: string[]; duplicate: boolean };
