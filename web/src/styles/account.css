@@ -125,3 +125,20 @@
 .user-footer span.avatar, .profile-card span.avatar, .account-head span.avatar { display: inline-grid; place-items: center; margin: 0; flex: none; }
 .user-footer span.avatar { width: 32px; height: 32px; font-size: 11px; color: var(--text); }
 .brand-link-block span.avatar { display: inline-grid; width: 40px; height: 40px; flex: none; padding: 0; }
+
+/* ---------- Auth screens ---------- */
+.password-input { position: relative; display: block; }
+.password-input .field { width: 100%; padding-right: 44px; }
+.password-input button { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); width: 32px; height: 32px; display: grid; place-items: center; border: 0; border-radius: 7px; background: transparent; color: #8a8494; cursor: pointer; }
+.password-input button:hover { background: rgba(124, 92, 255, .1); color: #6d4ff0; }
+.caps-hint { color: #b7791f !important; font-weight: 650; }
+.password-field .pw-meter { margin-top: 6px; }
+.email-suggest { justify-self: start; margin-top: -6px; border: 0; background: transparent; padding: 0; color: #6d4ff0; font-size: 12px; cursor: pointer; text-align: left; }
+.email-suggest:hover { text-decoration: underline; }
+.forgot-inline { justify-self: end; margin-top: -6px; font-size: 12px; font-weight: 650; color: #6d4ff0; }
+.auth-form .form-error { display: grid; gap: 6px; }
+.auth-form .form-error a { font-weight: 700; color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+.reset-sent { display: grid; gap: 12px; }
+.reset-sent p { margin: 0; }
+.reset-tips { margin: 0; padding: 12px 14px 12px 30px; border-radius: 10px; background: rgba(124, 92, 255, .07); display: grid; gap: 6px; font-size: 13px; line-height: 1.5; color: #4a4553; }
+.reset-actions { display: flex; flex-wrap: wrap; gap: 8px; }
