@@ -1,18 +1,20 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { blankWorkspace } from "../lib/seed";
-import { normalize, OUTREACH_STAGES, overallStars, RATING_DIMS, ratedCount, sanitize, today, uid } from "../lib/utils";
+import { EMPTY_RATES, normalizePreferences, normalizeRates } from "../lib/prefs";
+import { normalize, OUTREACH_STAGES, setActiveCurrency, overallStars, RATING_DIMS, ratedCount, sanitize, today, uid } from "../lib/utils";
 import { hasSupabase } from "../lib/supabase";
 import { loadCloudWorkspace, persistCloudWorkspace } from "../services/supabaseWorkspace";
 import type { Activity, Brand, BrandContact, Campaign, Creator, Followup, Meeting, Profile, WorkspaceData } from "../types";
 import { useAuth } from "./AuthContext";
 
-type NewCreator = Omit<Creator, "id" | "user_id" | "created_at" | "status_updated_at" | "archived_at" | "on_roster" | "followup_count" | "last_followup_at" | "lost_reason" | "lost_at" | "draft_subject" | "draft_body" | "stars_engagement"> &
-  Partial<Pick<Creator, "draft_subject" | "draft_body" | "stars_engagement">>;
+type NewCreator = Omit<Creator, "id" | "user_id" | "created_at" | "status_updated_at" | "archived_at" | "on_roster" | "followup_count" | "last_followup_at" | "lost_reason" | "lost_at" | "draft_subject" | "draft_body" | "stars_engagement" | "rates"> &
+  Partial<Pick<Creator, "draft_subject" | "draft_body" | "stars_engagement" | "rates">>;
 type NewBrand = Omit<Brand, "id" | "user_id" | "created_at" | "archived_at" | "lost_reason" | "lost_at" | "status_updated_at" | "draft_subject" | "draft_body"> &
   Partial<Pick<Brand, "draft_subject" | "draft_body">>;
 type UpdateOpts = { quiet?: boolean; activity?: string };
 type NewContact = Omit<BrandContact, "id" | "user_id" | "created_at" | "lost_reason" | "lost_at">;
-type NewCampaign = Omit<Campaign, "id" | "user_id" | "created_at" | "archived_at" | "creator_payout" | "lost_reason" | "lost_at">;
+type NewCampaign = Omit<Campaign, "id" | "user_id" | "created_at" | "archived_at" | "creator_payout" | "lost_reason" | "lost_at" | "payment_status" | "invoice_due" | "paid_at" | "payout_status"> &
+  Partial<Pick<Campaign, "payment_status" | "invoice_due" | "paid_at" | "payout_status">>;
 type NewMeeting = Omit<Meeting, "id" | "user_id" | "created_at" | "reminder_sent" | "done"> & { done?: boolean };
 
 type DuplicateMatch = { type: "name" | "link" | "domain"; id: string; label: string };
@@ -34,6 +36,10 @@ type DataContextValue = WorkspaceData & {
   cloudLive: boolean;
   syncState: SyncState;
   syncNow: () => void;
+  /** Pushes pending edits and resolves once the cloud confirms (or after a timeout). */
+  flushAndWait: (timeoutMs?: number) => Promise<boolean>;
+  /** Permanently empties this workspace (keeps the account and settings). */
+  resetWorkspace: () => void;
   addCreator: (value: NewCreator) => Creator;
   updateCreator: (id: string, value: Partial<Creator>, opts?: UpdateOpts) => void;
   addCreators: (values: NewCreator[]) => number;
@@ -76,6 +82,7 @@ const upgradeWorkspace = (value: WorkspaceData, userId: string): WorkspaceData =
     ...value.profile,
     email_templates: Array.isArray(value.profile?.email_templates) ? value.profile.email_templates : [],
     rating_weights: value.profile?.rating_weights || null,
+    preferences: normalizePreferences(value.profile?.preferences),
   },
   creators: (value.creators || []).map((c) => ({
     ...c,
@@ -83,6 +90,7 @@ const upgradeWorkspace = (value: WorkspaceData, userId: string): WorkspaceData =
     stars_demographics: Number(c.stars_demographics) || 0,
     stars_niche: Number(c.stars_niche) || 0,
     stars_engagement: Number(c.stars_engagement) || 0,
+    rates: normalizeRates(c.rates),
     stars: Number(c.stars) || 0,
     draft_subject: c.draft_subject || "",
     draft_body: c.draft_body || "",
@@ -98,7 +106,13 @@ const upgradeWorkspace = (value: WorkspaceData, userId: string): WorkspaceData =
     next_action_date: b.next_action_date || null,
   })),
   contacts: value.contacts || [],
-  campaigns: value.campaigns || [],
+  campaigns: (value.campaigns || []).map((c) => ({
+    ...c,
+    payment_status: c.payment_status || "unpaid",
+    invoice_due: c.invoice_due || null,
+    paid_at: c.paid_at || null,
+    payout_status: c.payout_status || "pending",
+  })),
   followups: value.followups || [],
   meetings: (value.meetings || []).map((m) => ({ ...m, kind: m.kind || "meeting", done: m.done === true })),
   activities: value.activities || [],
@@ -136,6 +150,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const userRef = useRef(userId);
   const dataRef = useRef(data);
   dataRef.current = data;
+  setActiveCurrency(data.profile.preferences?.currency || "USD");
   // Monotonic edit counter: a save only clears the pending flag if no newer
   // edit happened while it was in flight.
   const editVersion = useRef(0);
@@ -358,6 +373,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       draft_subject: value.draft_subject || "",
       draft_body: value.draft_body || "",
       stars_engagement: value.stars_engagement || 0,
+      rates: value.rates || { ...EMPTY_RATES },
       date_contacted: contactDateFor(value.pipeline_status, value.date_contacted),
       stars: overallStars(value, data.profile.rating_weights),
       on_roster: ["roster", "signed"].includes(value.pipeline_status),
@@ -384,6 +400,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       draft_subject: value.draft_subject || "",
       draft_body: value.draft_body || "",
       stars_engagement: value.stars_engagement || 0,
+      rates: value.rates || { ...EMPTY_RATES },
       date_contacted: contactDateFor(value.pipeline_status, value.date_contacted),
       stars: overallStars(value, data.profile.rating_weights),
       on_roster: ["roster", "signed"].includes(value.pipeline_status),
@@ -690,6 +707,10 @@ export function DataProvider({ children }: { children: ReactNode }) {
       name: sanitize(value.name),
       notes: sanitize(value.notes),
       creator_payout: (value.agreed_payment * value.agency_percent) / 100,
+      payment_status: value.payment_status || "unpaid",
+      invoice_due: value.invoice_due || null,
+      paid_at: value.paid_at || null,
+      payout_status: value.payout_status || "pending",
       created_at: new Date().toISOString(),
       archived_at: null,
       lost_reason: "",
@@ -707,15 +728,31 @@ export function DataProvider({ children }: { children: ReactNode }) {
     setData((current) => {
       const campaigns = current.campaigns.map((item) => {
         if (item.id !== id) return item;
+        // Paid stamps the payment date; moving back un-stamps it.
+        const paidStamp =
+          value.payment_status === "paid" && item.payment_status !== "paid"
+            ? { paid_at: value.paid_at || new Date().toISOString() }
+            : value.payment_status && value.payment_status !== "paid"
+              ? { paid_at: null }
+              : {};
         const next = {
           ...item,
           ...value,
+          ...paidStamp,
           ...(toCancelled ? { lost_reason: "", lost_at: lostStamp } : {}),
           ...(clearLoss ? { lost_reason: "", lost_at: null } : {}),
         };
         return { ...next, creator_payout: (next.agreed_payment * next.agency_percent) / 100 };
       });
-      return addActivity({ ...current, campaigns }, `${before?.name || "Campaign"} updated${value.status ? ` to ${value.status}` : ""}`, "campaign", id);
+      const label = before?.name || "Campaign";
+      const text = value.status
+        ? `${label} updated to ${value.status}`
+        : value.payment_status
+          ? `${label} invoice ${value.payment_status === "paid" ? "paid by brand" : value.payment_status === "invoiced" ? "sent to brand" : "marked unpaid"}`
+          : value.payout_status
+            ? `${label} creator payout ${value.payout_status === "paid" ? "sent" : "marked pending"}`
+            : `${label} updated`;
+      return addActivity({ ...current, campaigns }, text, "campaign", id);
     });
     if (toCancelled && lostStamp && before) queueLoss({ kind: "campaign", id, name: before.name });
   };
@@ -843,6 +880,28 @@ export function DataProvider({ children }: { children: ReactNode }) {
     });
   };
 
+  const flushAndWait = (timeoutMs = 6000) =>
+    new Promise<boolean>((resolve) => {
+      if (!hasSupabase || !readPending()) return resolve(true);
+      flush();
+      const started = Date.now();
+      const tick = window.setInterval(() => {
+        if (!readPending() && !inFlight.current) {
+          window.clearInterval(tick);
+          resolve(true);
+        } else if (Date.now() - started > timeoutMs) {
+          window.clearInterval(tick);
+          resolve(false);
+        }
+      }, 150);
+    });
+
+  const resetWorkspace = () => {
+    activityTombstones.current = [...activityTombstones.current, ...data.activities.map((a) => a.id)];
+    followupTombstones.current = [...followupTombstones.current, ...data.followups.map((f) => f.id)];
+    setData((current) => addActivity({ ...blankWorkspace(userId), profile: current.profile }, "Workspace reset — all records removed", "system"));
+  };
+
   // Marks a next action as done: logs it to the record's audit trail and
   // clears the action + due date (which also removes it from the calendar).
   const completeAction = (kind: "creator" | "brand", id: string) => {
@@ -909,6 +968,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
       cloudLive: hydrated,
       syncState,
       syncNow: flush,
+      flushAndWait,
+      resetWorkspace,
       completeAction,
       addCreator,
       updateCreator,

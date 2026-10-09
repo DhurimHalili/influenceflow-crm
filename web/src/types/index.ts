@@ -22,7 +22,33 @@ export interface Profile {
   onboarding_done: boolean;
   email_templates: EmailTemplate[];
   rating_weights: RatingWeights | null;
+  preferences: WorkspacePreferences;
 }
+
+export type Currency = "USD" | "EUR" | "GBP" | "CHF" | "CAD" | "AUD";
+
+export interface WorkspacePreferences {
+  agency_name: string;
+  currency: Currency;
+  /** Default share of the deal paid to the creator, in percent. */
+  default_creator_percent: number;
+  email_signature: string;
+  /** Daily browser summary of due actions. */
+  action_digest: boolean;
+  start_page: "dashboard" | "influencers" | "calendar";
+}
+
+/** Creator's prices per deliverable, in the workspace currency. */
+export interface RateCard {
+  video: number;
+  short: number;
+  story: number;
+  post: number;
+  stream: number;
+}
+
+export type PaymentStatus = "unpaid" | "invoiced" | "paid";
+export type PayoutStatus = "pending" | "paid";
 
 export interface EmailTemplate {
   id: string;
@@ -52,6 +78,7 @@ export interface Creator {
   stars_demographics: number;
   stars_niche: number;
   stars_engagement: number;
+  rates: RateCard;
   draft_subject: string;
   draft_body: string;
   platform: Platform;
@@ -134,6 +161,10 @@ export interface Campaign {
   lost_reason: string;
   lost_at: string | null;
   creator_ids: string[];
+  payment_status: PaymentStatus;
+  invoice_due: string | null;
+  paid_at: string | null;
+  payout_status: PayoutStatus;
   archived_at: string | null;
   created_at: string;
 }

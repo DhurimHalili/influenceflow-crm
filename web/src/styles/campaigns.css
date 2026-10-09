@@ -1,0 +1,62 @@
+/* Campaigns: billing, payment chips and the five-tile metrics row.
+   Theme tokens only, so every theme (light and dark) follows automatically. */
+
+/* Metrics: five tiles on desktop; two columns below that, the odd tile spans the row. */
+@media (min-width: 1181px) { .campaign-metrics { grid-template-columns: repeat(5, minmax(0, 1fr)); } }
+@media (max-width: 1180px) { .campaign-metrics > div:last-child:nth-child(odd) { grid-column: 1 / -1; } }
+.campaign-metrics > div { min-width: 0; }
+.campaign-metrics small { display: block; line-height: 1.35; }
+.campaigns-page .toolbar-filters { flex-wrap: wrap; }
+
+/* Payment chip + payout marker on list cards and in the billing header */
+.campaign-pay { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 6px; margin-top: 7px; }
+.pay-chip { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border-radius: 12px; border: 1px solid transparent; font-size: 10px; font-weight: 650; line-height: 1.3; letter-spacing: 0; text-transform: none; white-space: nowrap; background: var(--surface-alt); color: var(--muted); }
+.pay-chip svg { flex: none; }
+.pay-chip.pay-invoiced { background: var(--accent-soft); color: var(--accent); }
+.pay-chip.pay-paid { background: color-mix(in srgb, var(--success) 14%, transparent); color: var(--success); }
+.pay-chip.is-late { background: color-mix(in srgb, var(--danger) 13%, transparent); color: var(--danger); border-color: color-mix(in srgb, var(--danger) 28%, transparent); }
+.payout-mark { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; font-weight: 600; color: var(--muted); }
+.payout-mark::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--warning); }
+.payout-mark.paid::before { background: var(--success); }
+.detail-section-head span.pay-chip { display: inline-flex; font-size: 11px; padding: 4px 10px; font-weight: 650; color: var(--muted); text-transform: none; letter-spacing: 0; }
+.detail-section-head span.pay-chip.pay-invoiced { color: var(--accent); }
+.detail-section-head span.pay-chip.pay-paid { color: var(--success); }
+.detail-section-head span.pay-chip.is-late { color: var(--danger); }
+
+/* Billing section */
+.billing-summary { margin: -4px 0 14px; padding: 11px 13px; border-radius: 9px; background: var(--surface-alt); color: var(--text); font-size: 13px; font-weight: 600; line-height: 1.45; }
+.billing-summary b { font-weight: 700; }
+.billing-summary.late { background: color-mix(in srgb, var(--danger) 8%, var(--surface-alt)); }
+.bill-late { color: var(--danger); }
+.billing-hint { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; padding: 10px 12px; border-radius: 9px; border: 1px dashed color-mix(in srgb, var(--accent) 45%, var(--line)); background: var(--accent-soft); color: var(--text-soft); font-size: 12px; line-height: 1.4; }
+.billing-hint > svg { flex: none; color: var(--accent); }
+.billing-hint > span { flex: 1; min-width: 0; }
+.billing-hint .btn { flex: none; }
+.billing-grid { display: grid; grid-template-columns: 1.45fr 1fr 1fr; gap: 16px; align-items: start; }
+.billing-block { display: grid; gap: 7px; min-width: 0; align-content: start; }
+.billing-block .field-wrap { margin: 0; }
+.billing-paid-on, .billing-warn { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600; }
+.billing-paid-on { color: var(--success); }
+.billing-warn { color: var(--warning); }
+
+/* Segmented step control: Unpaid → Invoiced → Paid, and Pending / Sent */
+.bill-seg { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 3px; padding: 3px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-alt); }
+.bill-seg.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.bill-seg button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 34px; padding: 0 8px; border: 0; border-radius: 7px; background: transparent; color: var(--muted); font-size: 12px; font-weight: 600; font-family: inherit; cursor: pointer; transition: background .15s, color .15s, box-shadow .15s; }
+.bill-seg button:hover { color: var(--text); background: color-mix(in srgb, var(--accent-soft) 60%, transparent); }
+.bill-seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.bill-seg button i { display: grid; place-items: center; width: 17px; height: 17px; border-radius: 50%; border: 1px solid var(--line); font-style: normal; font-size: 10px; font-weight: 700; background: var(--surface); }
+.bill-seg button.passed { color: var(--text-soft); }
+.bill-seg button.passed i { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
+.bill-seg button.current { background: var(--accent); color: #fff; box-shadow: var(--shadow-sm); }
+.bill-seg button.current i { background: rgba(255, 255, 255, .22); color: #fff; border-color: transparent; }
+.bill-seg button.current.sent, .bill-seg:not(.two) button.current:last-child { background: var(--success); }
+
+@media (max-width: 960px) { .billing-grid { grid-template-columns: 1fr 1fr; } .billing-block:first-child { grid-column: 1 / -1; } }
+@media (max-width: 560px) {
+  .billing-grid { grid-template-columns: 1fr; gap: 14px; }
+  .billing-hint { flex-wrap: wrap; }
+  .billing-hint > span { flex-basis: calc(100% - 30px); }
+  .bill-seg button { min-height: 40px; }
+  .bill-seg button i { display: none; }
+}

@@ -1,5 +1,6 @@
 import { supabase } from "../lib/supabase";
 import { blankWorkspace } from "../lib/seed";
+import { normalizePreferences, normalizeRates } from "../lib/prefs";
 import type { Activity, Brand, BrandContact, Campaign, Creator, Followup, Meeting, Profile, WorkspaceData } from "../types";
 
 type JoinRow = { campaign_id: string; creator_id: string };
@@ -59,6 +60,7 @@ const normalizeCreator = (row: Record<string, unknown>, userId: string): Creator
   stars_demographics: num(row.stars_demographics),
   stars_niche: num(row.stars_niche),
   stars_engagement: num(row.stars_engagement),
+  rates: normalizeRates(row.rates),
   stars: num(row.stars),
   draft_subject: text(row.draft_subject),
   draft_body: text(row.draft_body),
@@ -172,6 +174,10 @@ const normalizeCampaign = (row: Record<string, unknown>, userId: string, links: 
     lost_reason: text(row.lost_reason),
     lost_at: dateOrNull(row.lost_at),
     creator_ids: links.filter((l) => l.campaign_id === String(row.id ?? "")).map((l) => l.creator_id),
+    payment_status: row.payment_status === "invoiced" || row.payment_status === "paid" ? row.payment_status : "unpaid",
+    invoice_due: dateOrNull(row.invoice_due),
+    paid_at: dateOrNull(row.paid_at),
+    payout_status: row.payout_status === "paid" ? "paid" : "pending",
     archived_at: dateOrNull(row.archived_at),
     created_at: typeof row.created_at === "string" && row.created_at ? row.created_at : new Date().toISOString(),
   };
@@ -264,6 +270,7 @@ export async function loadCloudWorkspace(userId: string): Promise<WorkspaceData 
           onboarding_done: storedProfile.onboarding_done === true,
           email_templates: normalizeTemplates(storedProfile.email_templates),
           rating_weights: normalizeWeights(storedProfile.rating_weights),
+          preferences: normalizePreferences(storedProfile.preferences),
         }
       : base.profile,
     creators: ((creators.data || []) as Record<string, unknown>[]).map((r) => normalizeCreator(r, userId)),
@@ -290,7 +297,7 @@ export async function loadCloudWorkspace(userId: string): Promise<WorkspaceData 
 // PostgREST rejects the upsert with an unknown-column error: strip exactly
 // the column it names and retry, so one missing column never blocks the
 // whole save (and never drops the columns that do exist).
-const OPTIONAL_COLUMNS = ["engagement_rate", "next_action", "deliverables_items", "entity_type", "entity_id", "updated_at", "followup_count", "last_followup_at", "lost_reason", "lost_at", "stars", "stars_consistency", "stars_demographics", "stars_niche", "stars_engagement", "priority", "next_action_date", "kind", "done", "draft_subject", "draft_body", "status_updated_at", "email_templates", "rating_weights"];
+const OPTIONAL_COLUMNS = ["engagement_rate", "next_action", "deliverables_items", "entity_type", "entity_id", "updated_at", "followup_count", "last_followup_at", "lost_reason", "lost_at", "stars", "stars_consistency", "stars_demographics", "stars_niche", "stars_engagement", "priority", "next_action_date", "kind", "done", "draft_subject", "draft_body", "status_updated_at", "email_templates", "rating_weights", "preferences", "rates", "payment_status", "invoice_due", "paid_at", "payout_status"];
 
 const missingColumn = (error: { message?: string; details?: string; hint?: string; code?: string }) => {
   const msg = `${error.message || ""} ${error.details || ""} ${error.hint || ""}`;

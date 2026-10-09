@@ -60,6 +60,9 @@ That's it. Your data is private to your account — other users can't see it. Ex
 | **Calendar** | Month / week / day / agenda views. Meetings, tasks (check off), reminders, every influencer & brand **action due date** and campaign start/due dates on one timeline. Drag to reschedule, overdue panel, reminder presets, browser alerts, `.ics` export |
 | **Email drafts** | Per-influencer and per-brand subject + body that autosave, reusable templates with `{first_name}` / `{niche}` / `{company}` tokens, open in Gmail or your mail app, "mark as sent" moves the lead to Contacted |
 | **Creator scorecard** | Four manual star ratings — audience quality, niche & brand fit, engagement quality, posting consistency — combined with agency-scorecard weights (35 / 30 / 20 / 15, adjustable in Settings). Engagement rate is shown as a benchmark, never sets the stars |
+| **Billing** | Per-campaign invoice tracking (Unpaid → Invoiced → Paid, invoice due date on the calendar, overdue alerts) and creator payout status; "Outstanding invoices" on the dashboard |
+| **Rate cards** | What each creator charges per video / short / post / story / stream, with CPM calculated from their average views |
+| **Account & settings** | Account menu with sign out, sign out & clear device, sign out everywhere; profile, agency name & email signature; currency (USD / EUR / GBP / CHF / CAD / AUD); default creator payout %; start page; notifications with daily action summary; keyboard shortcuts (`?`) |
 | **Pipeline hygiene** | Contact date stamps itself the moment a lead leaves New (table, kanban, cards, bulk or profile); offline-safe sync that never lets an older cloud copy overwrite your edits |
 | **Data & privacy** | Per-user Supabase Auth + RLS (no one sees your data), global search, CSV export, JSON backup export/import (v2 + legacy), Deleted list, activity log |
 | **Polish** | Agency (default), Light, Dark, Honey, Ocean themes, fully responsive, larger readable type scale |
