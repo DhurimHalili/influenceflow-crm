@@ -47,6 +47,13 @@ export default function BrandsPage() {
   const create = (event: FormEvent) => { event.preventDefault(); const found = data.findBrandDuplicates(draft.name, draft.domain); if (found.length) { setDuplicates(found.map((item) => item.id)); return; } data.addBrand(brandValue(draft)); toast(`${draft.name.trim()} added to brands`); close(); };
   const mergeDraft = (id: string) => { const value = brandValue(draft); const skip = new Set<string>([...(draft.pipeline_status === "new" ? ["pipeline_status", "date_contacted"] : []), ...(draft.priority === "none" ? ["priority"] : [])]); data.updateBrand(id, Object.fromEntries(Object.entries(value).filter(([key, field]) => !skip.has(key) && field !== "" && field !== null)) as Partial<Brand>, { activity: "Duplicate brand submission reviewed and merged" }); toast("Brand merged. Contacts and campaigns remain connected."); close(); };
   const picked = selected.filter((id) => rows.some((item) => item.id === id));
+  // Ticks on rows that a search/filter hides are dropped, not kept for later.
+  useEffect(() => {
+    setSelected((current) => {
+      const visible = current.filter((id) => rows.some((item) => item.id === id));
+      return visible.length === current.length ? current : visible;
+    });
+  }, [rows]);
   const bulkStatus = (value: EntityStatus) => { picked.forEach((id) => data.updateBrand(id, { pipeline_status: value })); toast(`${picked.length} brands moved to ${STATUS_LABELS[value]}`); setSelected([]); };
   const [exportOpen, setExportOpen] = useState(false);
   const exportRows = (records: Brand[]) => { download(`influenceflow-brands-selected-${today()}.csv`, toCSV(records.map((item) => brandRow(item, data.contacts)), BRAND_HEADERS), "text/csv;charset=utf-8"); toast(`${records.length} brands exported`); };

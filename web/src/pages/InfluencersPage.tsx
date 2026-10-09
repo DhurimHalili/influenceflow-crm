@@ -198,6 +198,13 @@ export default function InfluencersPage() {
   // Bulk actions only ever touch rows you can see: a tick on a row that a
   // search/filter later hides is ignored, never acted on blindly.
   const picked = selected.filter((id) => filtered.some((item) => item.id === id));
+  // Ticks on rows that a search/filter hides are dropped, not kept for later.
+  useEffect(() => {
+    setSelected((current) => {
+      const visible = current.filter((id) => filtered.some((item) => item.id === id));
+      return visible.length === current.length ? current : visible;
+    });
+  }, [filtered]);
   const setBulkStatus = (next: EntityStatus) => { picked.forEach((id) => data.updateCreator(id, { pipeline_status: next })); toast(`${picked.length} influencers moved to ${STATUS_LABELS[next]}`); setSelected([]); };
   const bulkArchive = () => { data.archive("creator", picked); toast(`${picked.length} influencers moved to Archive`); setSelected([]); };
   const [exportOpen, setExportOpen] = useState(false);

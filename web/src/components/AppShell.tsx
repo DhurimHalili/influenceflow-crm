@@ -208,11 +208,19 @@ export default function AppShell() {
   const results = useMemo<SearchResult[]>(() => {
     const term = query.trim().toLowerCase();
     if (!term) return [];
-    return [
-      ...data.creators.filter((item) => !item.archived_at && [item.name, item.contact_email].some((value) => value.toLowerCase().includes(term))).map((item) => ({ id: item.id, type: "Influencer" as const, title: item.name, subtitle: `${item.platform} / ${item.contact_email}`, to: `/app/influencers/${item.id}` })),
-      ...data.brands.filter((item) => !item.archived_at && [item.name, item.contact_email, item.domain].some((value) => value.toLowerCase().includes(term))).map((item) => ({ id: item.id, type: "Brand" as const, title: item.name, subtitle: item.domain, to: `/app/brands/${item.id}` })),
-      ...data.campaigns.filter((item) => !item.archived_at && item.name.toLowerCase().includes(term)).map((item) => ({ id: item.id, type: "Campaign" as const, title: item.name, subtitle: item.status, to: `/app/campaigns?id=${item.id}` })),
-    ].slice(0, 8);
+    // Rank: name starts with the term > name contains it > other fields.
+    const rank = (title: string, others: string[]) => {
+      const t = title.toLowerCase();
+      if (t.startsWith(term)) return 0;
+      if (t.split(/\s+/).some((w) => w.startsWith(term))) return 1;
+      if (t.includes(term)) return 2;
+      return others.some((v) => (v || "").toLowerCase().includes(term)) ? 3 : -1;
+    };
+    const scored: { r: number; item: SearchResult }[] = [];
+    data.creators.forEach((item) => { if (item.archived_at) return; const r = rank(item.name, [item.contact_email, item.niche, item.channel_link]); if (r >= 0) scored.push({ r, item: { id: item.id, type: "Influencer", title: item.name, subtitle: `${item.platform} / ${item.contact_email || item.niche}`, to: `/app/influencers/${item.id}` } }); });
+    data.brands.forEach((item) => { if (item.archived_at) return; const r = rank(item.name, [item.contact_email, item.domain, item.brand_type]); if (r >= 0) scored.push({ r, item: { id: item.id, type: "Brand", title: item.name, subtitle: item.domain, to: `/app/brands/${item.id}` } }); });
+    data.campaigns.forEach((item) => { if (item.archived_at) return; const r = rank(item.name, [data.brands.find((b) => b.id === item.brand_id)?.name || ""]); if (r >= 0) scored.push({ r, item: { id: item.id, type: "Campaign", title: item.name, subtitle: item.status, to: `/app/campaigns?id=${item.id}` } }); });
+    return scored.sort((a, b) => a.r - b.r).slice(0, 10).map((s) => s.item);
   }, [query, data.creators, data.brands, data.campaigns]);
 
   const completeOnboarding = () => {
