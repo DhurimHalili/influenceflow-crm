@@ -54,7 +54,6 @@ export default function AppShell() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const [debounced, setDebounced] = useState("");
   const [commandOpen, setCommandOpen] = useState(false);
   const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [bannerVisible, setBannerVisible] = useState(true);
@@ -117,11 +116,6 @@ export default function AppShell() {
   }, [data.profile.preferences?.start_page]);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => setDebounced(query), 220);
-    return () => window.clearTimeout(timer);
-  }, [query]);
-
-  useEffect(() => {
     setMobileOpen(false);
     setSearchOpen(false);
     setCommandOpen(false);
@@ -136,7 +130,7 @@ export default function AppShell() {
       }
       if (event.key === "/" && !["INPUT", "TEXTAREA", "SELECT"].includes((event.target as HTMLElement).tagName)) {
         event.preventDefault();
-        setSearchOpen(true);
+        setQuery(""); setSearchOpen(true);
         requestAnimationFrame(() => searchRef.current?.focus());
       }
       const typing = ["INPUT", "TEXTAREA", "SELECT"].includes((event.target as HTMLElement).tagName) || (event.target as HTMLElement).isContentEditable;
@@ -209,15 +203,25 @@ export default function AppShell() {
     data.meetings.filter((m) => m.kind !== "meeting" && !m.done && (isTodayDay(m.starts_at) || new Date(m.ends_at).getTime() < Date.now())).length;
   const sync = data.syncState;
 
+  // Results follow what is typed right now (Enter must open the match for
+  // the current text, not the previous one); the list is small enough.
   const results = useMemo<SearchResult[]>(() => {
-    const term = debounced.trim().toLowerCase();
+    const term = query.trim().toLowerCase();
     if (!term) return [];
-    return [
-      ...data.creators.filter((item) => !item.archived_at && [item.name, item.contact_email].some((value) => value.toLowerCase().includes(term))).map((item) => ({ id: item.id, type: "Influencer" as const, title: item.name, subtitle: `${item.platform} / ${item.contact_email}`, to: `/app/influencers/${item.id}` })),
-      ...data.brands.filter((item) => !item.archived_at && [item.name, item.contact_email, item.domain].some((value) => value.toLowerCase().includes(term))).map((item) => ({ id: item.id, type: "Brand" as const, title: item.name, subtitle: item.domain, to: `/app/brands/${item.id}` })),
-      ...data.campaigns.filter((item) => !item.archived_at && item.name.toLowerCase().includes(term)).map((item) => ({ id: item.id, type: "Campaign" as const, title: item.name, subtitle: item.status, to: `/app/campaigns?id=${item.id}` })),
-    ].slice(0, 8);
-  }, [debounced, data.creators, data.brands, data.campaigns]);
+    // Rank: name starts with the term > name contains it > other fields.
+    const rank = (title: string, others: string[]) => {
+      const t = title.toLowerCase();
+      if (t.startsWith(term)) return 0;
+      if (t.split(/\s+/).some((w) => w.startsWith(term))) return 1;
+      if (t.includes(term)) return 2;
+      return others.some((v) => (v || "").toLowerCase().includes(term)) ? 3 : -1;
+    };
+    const scored: { r: number; item: SearchResult }[] = [];
+    data.creators.forEach((item) => { if (item.archived_at) return; const r = rank(item.name, [item.contact_email, item.niche, item.channel_link]); if (r >= 0) scored.push({ r, item: { id: item.id, type: "Influencer", title: item.name, subtitle: `${item.platform} / ${item.contact_email || item.niche}`, to: `/app/influencers/${item.id}` } }); });
+    data.brands.forEach((item) => { if (item.archived_at) return; const r = rank(item.name, [item.contact_email, item.domain, item.brand_type]); if (r >= 0) scored.push({ r, item: { id: item.id, type: "Brand", title: item.name, subtitle: item.domain, to: `/app/brands/${item.id}` } }); });
+    data.campaigns.forEach((item) => { if (item.archived_at) return; const r = rank(item.name, [data.brands.find((b) => b.id === item.brand_id)?.name || ""]); if (r >= 0) scored.push({ r, item: { id: item.id, type: "Campaign", title: item.name, subtitle: item.status, to: `/app/campaigns?id=${item.id}` } }); });
+    return scored.sort((a, b) => a.r - b.r).slice(0, 10).map((s) => s.item);
+  }, [query, data.creators, data.brands, data.campaigns]);
 
   const completeOnboarding = () => {
     data.updateProfile({ display_name: displayName.trim() || "InfluenceFlow user", theme, onboarding_done: true });
@@ -254,7 +258,7 @@ export default function AppShell() {
       <div className="app-frame">
         <header className="topbar">
           <button className="menu-btn" onClick={() => setMobileOpen(true)} aria-label="Open menu"><Menu size={20} /></button>
-          <button className="global-search" onClick={() => { setSearchOpen(true); requestAnimationFrame(() => searchRef.current?.focus()); }}><Search size={16} /><span>Search your workspace</span><kbd>/</kbd></button>
+          <button className="global-search" onClick={() => { setQuery(""); setSearchOpen(true); requestAnimationFrame(() => searchRef.current?.focus()); }}><Search size={16} /><span>Search your workspace</span><kbd>/</kbd></button>
           <div className="topbar-actions">
             <button className={`sync-pill sync-${sync}`} onClick={() => data.syncNow()} title={sync === "synced" ? "All changes saved to the cloud" : sync === "saving" ? "Saving your latest changes…" : sync === "offline" ? "Can't reach the cloud right now — changes are kept on this device and retried automatically. Click to retry now." : sync === "loading" ? "Loading your workspace…" : "Local workspace"}>{sync === "offline" ? <CloudOff size={14} /> : sync === "saving" || sync === "loading" ? <LoaderCircle size={14} className="spin" /> : <Cloud size={14} />}<span>{sync === "synced" ? "Saved" : sync === "saving" ? "Saving…" : sync === "offline" ? "Offline · retrying" : sync === "loading" ? "Syncing…" : "Local"}</span></button>
             <button className="command-trigger" onClick={() => setCommandOpen(true)}><Command size={15} /><span>Quick actions</span><kbd>Ctrl K</kbd></button>
@@ -286,8 +290,8 @@ export default function AppShell() {
 
       <AnimatePresence>
         {searchOpen && <motion.div className="search-popover" initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}>
-          <div className="search-popover-input"><Search size={18} /><input ref={searchRef} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search influencers, brands, campaigns..." onKeyDown={(event) => { if (event.key === "Enter" && results[0]) navigate(results[0].to); }} /><kbd>Esc</kbd></div>
-          <div className="search-results">{results.map((result) => <button key={`${result.type}-${result.id}`} onClick={() => navigate(result.to)}><span className={`result-icon result-${result.type.toLowerCase()}`}>{result.type[0]}</span><span><strong>{result.title}</strong><small>{result.subtitle}</small></span><em>{result.type}</em></button>)}{debounced && !results.length && <div className="search-empty"><HelpCircle size={20} /><span>No matches. Try a name, email, domain, or campaign.</span></div>}{!debounced && <div className="search-hint"><span>Search is private to your workspace</span><span><kbd>Enter</kbd> open first result</span></div>}</div>
+          <div className="search-popover-input"><Search size={18} /><input ref={searchRef} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search influencers, brands, campaigns..." onKeyDown={(event) => { if (event.key === "Enter" && results[0]) { navigate(results[0].to); setSearchOpen(false); setQuery(""); } }} /><kbd>Esc</kbd></div>
+          <div className="search-results">{results.map((result) => <button key={`${result.type}-${result.id}`} onClick={() => { navigate(result.to); setSearchOpen(false); setQuery(""); }}><span className={`result-icon result-${result.type.toLowerCase()}`}>{result.type[0]}</span><span><strong>{result.title}</strong><small>{result.subtitle}</small></span><em>{result.type}</em></button>)}{query.trim() && !results.length && <div className="search-empty"><HelpCircle size={20} /><span>No matches. Try a name, email, domain, or campaign.</span></div>}{!query.trim() && <div className="search-hint"><span>Search is private to your workspace</span><span><kbd>Enter</kbd> open first result</span></div>}</div>
         </motion.div>}
       </AnimatePresence>
       {searchOpen && <button className="popover-scrim" onClick={() => setSearchOpen(false)} aria-label="Close search" />}

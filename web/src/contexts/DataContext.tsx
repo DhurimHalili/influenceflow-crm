@@ -120,6 +120,10 @@ const upgradeWorkspace = (value: WorkspaceData, userId: string): WorkspaceData =
 
 export type SyncState = "local" | "loading" | "saving" | "synced" | "offline";
 
+// Audit entries kept in memory (and loaded from the cloud). Momentum stats
+// for 30/90 days are derived from this log, so it must reach back far enough.
+export const ACTIVITY_LIMIT = 3000;
+
 // Backoff for cloud reads/writes that fail (expired token, flaky network).
 const RETRY_DELAYS = [2000, 5000, 15000, 30000, 60000];
 
@@ -158,6 +162,9 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const queued = useRef(false);
   const retryTimer = useRef<number | undefined>(undefined);
   const retryCount = useRef(0);
+  // Audit entries the cloud already has: only new ones are written on save
+  // (they are insert-only), keeping every sync small.
+  const syncedActivities = useRef<Set<string>>(new Set());
 
   const readPending = useCallback(() => {
     try {
@@ -223,6 +230,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       void loadCloudWorkspace(owner)
         .then((cloud) => {
           if (cancelled || !cloud || userRef.current !== owner) return;
+          syncedActivities.current = new Set(cloud.activities.map((a) => a.id));
           if (readPending()) {
             // This browser has edits the cloud never confirmed: keep them and
             // push them up instead of letting the stale copy win.
@@ -275,12 +283,14 @@ export function DataProvider({ children }: { children: ReactNode }) {
     const snapshot = dataRef.current;
     const doomed = [...activityTombstones.current];
     const doomedFollowups = [...followupTombstones.current];
+    const newActivities = snapshot.activities.filter((a) => !syncedActivities.current.has(a.id));
     inFlight.current = true;
     setSyncState("saving");
-    void persistCloudWorkspace({ ...snapshot, demoSeeded: false }, owner, doomed, doomedFollowups)
+    void persistCloudWorkspace({ ...snapshot, activities: newActivities, demoSeeded: false }, owner, doomed, doomedFollowups)
       .then(() => {
         if (userRef.current !== owner) return;
         retryCount.current = 0;
+        newActivities.forEach((a) => syncedActivities.current.add(a.id));
         activityTombstones.current = activityTombstones.current.filter((id) => !doomed.includes(id));
         followupTombstones.current = followupTombstones.current.filter((id) => !doomedFollowups.includes(id));
         if (editVersion.current === version && !queued.current) {
@@ -336,7 +346,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
 
   const addActivity = (workspace: WorkspaceData, text: string, entity_type?: Activity["entity_type"], entity_id?: string) => {
     const activity: Activity = { id: uid(), user_id: userId, text: sanitize(text), at: new Date().toISOString(), entity_type, entity_id };
-    return { ...workspace, activities: [activity, ...workspace.activities].slice(0, 250) };
+    return { ...workspace, activities: [activity, ...workspace.activities].slice(0, ACTIVITY_LIMIT) };
   };
 
   const log = useCallback(
@@ -517,7 +527,18 @@ export function DataProvider({ children }: { children: ReactNode }) {
       const meetings = current.meetings.map((meeting) =>
         meeting.related_type === "creator" && meeting.related_id === removeId ? { ...meeting, related_id: keepId } : meeting,
       );
-      return addActivity({ ...current, creators, campaigns, meetings }, `Merged ${removed?.name} into ${kept?.name}; links preserved`, "creator", keepId);
+      // Follow-up history and the audit trail move to the kept profile, so
+      // counts and momentum stats stay exact after a merge.
+      const followups = current.followups.map((f) => (f.creator_id === removeId ? { ...f, creator_id: keepId } : f));
+      const movedActivities = current.activities.filter((a) => a.entity_id === removeId).map((a) => a.id);
+      movedActivities.forEach((id) => syncedActivities.current.delete(id));
+      const activities = current.activities.map((a) => (a.entity_id === removeId ? { ...a, entity_id: keepId } : a));
+      const keptFollowups = followups.filter((f) => f.creator_id === keepId);
+      const lastFollowup = keptFollowups.map((f) => f.at).sort().pop() || null;
+      const creatorsWithHistory = creators.map((item) =>
+        item.id === keepId ? { ...item, followup_count: keptFollowups.length || (item.followup_count || 0) + (removed?.followup_count || 0), last_followup_at: lastFollowup || item.last_followup_at || removed?.last_followup_at || null } : item,
+      );
+      return addActivity({ ...current, creators: creatorsWithHistory, campaigns, meetings, followups, activities }, `Merged ${removed?.name} into ${kept?.name}; links and history preserved`, "creator", keepId);
     });
 
   const findBrandDuplicates = useCallback(
@@ -818,13 +839,23 @@ export function DataProvider({ children }: { children: ReactNode }) {
     const deadActivities = data.activities.filter((a) => a.entity_id && doomed.has(a.entity_id)).map((a) => a.id);
     if (deadActivities.length)
       activityTombstones.current = [...activityTombstones.current, ...deadActivities.filter((id) => !activityTombstones.current.includes(id))];
+    // Follow-up rows of deleted influencers go too (no orphans in the cloud).
+    const deadFollowups = type === "creator" ? data.followups.filter((f) => ids.includes(f.creator_id)).map((f) => f.id) : [];
+    if (deadFollowups.length)
+      followupTombstones.current = [...followupTombstones.current, ...deadFollowups.filter((id) => !followupTombstones.current.includes(id))];
     setData((current) => {
       const activities = current.activities.filter((a) => !(a.entity_id && doomed.has(a.entity_id)));
+      // Calendar entries survive (they are your schedule) but lose the link
+      // to a record that no longer exists.
+      const meetings = current.meetings.map((m) => (m.related_id && doomed.has(m.related_id) ? { ...m, related_type: null, related_id: null } : m));
+      const followups = current.followups.filter((f) => !deadFollowups.includes(f.id));
       if (type === "creator")
         return addActivity(
           {
             ...current,
             activities,
+            meetings,
+            followups,
             creators: current.creators.filter((item) => !ids.includes(item.id)),
             campaigns: current.campaigns.map((item) => ({ ...item, creator_ids: item.creator_ids.filter((cid) => !ids.includes(cid)) })),
           },
@@ -836,6 +867,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
           {
             ...current,
             activities,
+            meetings,
             brands: current.brands.filter((item) => !ids.includes(item.id)),
             contacts: current.contacts.filter((item) => !ids.includes(item.brand_id)),
             campaigns: current.campaigns.filter((item) => !ids.includes(item.brand_id)),
@@ -844,7 +876,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
           "system",
         );
       return addActivity(
-        { ...current, activities, campaigns: current.campaigns.filter((item) => !ids.includes(item.id)) },
+        { ...current, activities, meetings, campaigns: current.campaigns.filter((item) => !ids.includes(item.id)) },
         `${ids.length} campaign record permanently deleted`,
         "system",
       );
@@ -872,7 +904,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
         item.id === creatorId ? { ...item, followup_count: (item.followup_count || 0) + 1, last_followup_at: stamp } : item,
       );
       return addActivity(
-        { ...current, creators, followups: [followup, ...current.followups].slice(0, 2000) },
+        { ...current, creators, followups: [followup, ...current.followups].slice(0, 5000) },
         `Logged a follow-up with ${target.name}`,
         "creator",
         creatorId,

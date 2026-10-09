@@ -6,7 +6,9 @@ export const uid = () => crypto.randomUUID();
 // yesterday's date after midnight for anyone east of Greenwich.
 export const today = () => dayKey(new Date());
 
-export const sanitize = (value: string) => value.replace(/<[^>]*>/g, "").trim();
+// Strips real HTML tags only. Text such as "budget <5k and >3k" is kept:
+// React escapes everything it renders, so plain angle brackets are safe.
+export const sanitize = (value: string) => value.replace(/<\/?[a-z][a-z0-9-]*(\s[^<>]*)?\/?>/gi, "").trim();
 
 // Workspace currency, set once by the data layer from the user's settings,
 // so every money() call across the app follows it.
@@ -77,31 +79,42 @@ export const download = (name: string, value: string, type = "application/json")
   const anchor = document.createElement("a");
   anchor.href = url;
   anchor.download = name;
+  anchor.style.display = "none";
+  // In the DOM and revoked later: Safari/Firefox can drop a download whose
+  // object URL is revoked in the same tick as the click.
+  document.body.appendChild(anchor);
   anchor.click();
-  URL.revokeObjectURL(url);
+  window.setTimeout(() => {
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  }, 4000);
 };
 
-export const toCSV = (rows: Record<string, string | number | boolean | null | undefined>[], headers?: Record<string, string>) => {
+export const toCSV = (rows: Record<string, string | number | boolean | null | undefined>[], headers?: Record<string, string>, delimiter: "," | ";" = ",") => {
   if (!rows.length) return "";
-  const keys = Object.keys(rows[0]);
+  // Union of keys across all rows, in first-seen order, so no column is ever
+  // dropped because the first record happened to lack it.
+  const keys: string[] = [];
+  for (const row of rows) for (const key of Object.keys(row)) if (!keys.includes(key)) keys.push(key);
   // Neutralize spreadsheet formula injection: attacker-controlled cells
   // (names, notes, domains) starting with = + - @ tab CR are prefixed so
   // Excel/Sheets treat them as plain text, never as executable formulas.
+  // Plain negative numbers are left alone.
   const escape = (value: unknown) => {
     let text = String(value ?? "");
-    if (/^[=+\-@\t\r]/.test(text)) text = `'${text}`;
+    if (/^[=+\-@\t\r]/.test(text) && !/^-?\d+(\.\d+)?$/.test(text)) text = `'${text}`;
     return `"${text.replace(/"/g, '""')}"`;
   };
   // BOM first: without it Excel mangles non-ASCII characters. Friendly
   // headers second: raw keys (contact_email) become readable columns (Email).
-  const head = keys.map((key) => escape(headers?.[key] ?? key)).join(",");
-  return CSV_BOM + [head, ...rows.map((row) => keys.map((key) => escape(row[key])).join(","))].join("\n");
+  const head = keys.map((key) => escape(headers?.[key] ?? key)).join(delimiter);
+  return CSV_BOM + [head, ...rows.map((row) => keys.map((key) => escape(row[key])).join(delimiter))].join("\r\n");
 };
 
 export const CSV_BOM = "\ufeff";
 
 export const isValidEmail = (value: string) => !value || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
-export const isValidUrl = (value: string) => !value || /^(https?:\/\/)?[\w.-]+\.[a-z]{2,}/i.test(value);
+export const isValidUrl = (value: string) => !value || /^(https?:\/\/)?[\w.-]+\.[a-z]{2,}(:\d+)?([/?#]\S*)?$/i.test(value.trim());
 
 export const followupWords = (count: number) =>
   count <= 0 ? "No follow-ups yet" : count === 1 ? "Followed up once" : count === 2 ? "Followed up twice" : `Followed up ${count} times`;
@@ -256,3 +269,19 @@ export const OUTREACH_STAGES = ["contacted", "replied", "negotiating", "roster",
 // a legacy whole-star rating for rows imported before the breakdown existed.
 export const creatorScore = (creator: DimValues & { stars?: number | null }, weights?: Partial<RatingWeightsValue> | null) =>
   ratedCount(creator) > 0 ? ratingScore(creator, weights) : Math.min(5, Math.max(0, Number(creator.stars) || 0));
+
+// Spreadsheet header normalisation shared by every importer.
+export const headerKey = (cell: string) => cell.trim().toLowerCase().replace(/[ .-]+/g, "_");
+
+// A first row is a header only if it carries no data (no email / link) and at
+// least one cell is exactly a known column name. Substring tests misread real
+// rows ("Rob Stark" contains "star", "Typeform" contains "type").
+export const looksLikeHeader = (cells: string[] | undefined, known: string[]) => {
+  if (!cells?.length) return false;
+  if (cells.some((cell) => /@|:\/\//.test(cell))) return false;
+  const set = new Set(known);
+  return cells.some((cell) => set.has(headerKey(cell)));
+};
+
+// Undo the export's formula guard ('=SUM… → =SUM…) so a round trip is lossless.
+export const unguard = (cell: string) => (/^'[=+\-@\t\r]/.test(cell) ? cell.slice(1) : cell);

@@ -216,15 +216,38 @@ async function loadJoins(userId: string, campaignIds: string[]): Promise<JoinRow
   return ((unscoped.data || []) as JoinRow[]).filter((r) => allowed.has(r.campaign_id));
 }
 
+const PAGE = 1000;
+
+type PagedResult = { data: Record<string, unknown>[] | null; error: { message: string } | null };
+
+async function fetchAll(table: string, userId: string, opts?: { order?: string; max?: number }): Promise<PagedResult> {
+  const rows: Record<string, unknown>[] = [];
+  const max = opts?.max ?? Infinity;
+  for (let from = 0; from < max; from += PAGE) {
+    let query = supabase.from(table).select("*").eq("user_id", userId);
+    // A stable order is required for correct paging.
+    query = opts?.order ? query.order(opts.order, { ascending: false }).order("id") : query.order("id");
+    const to = Math.min(from + PAGE, max) - 1;
+    const { data, error } = await query.range(from, to);
+    if (error) return { data: null, error };
+    rows.push(...((data || []) as Record<string, unknown>[]));
+    if (!data || data.length < to - from + 1) break;
+  }
+  return { data: rows, error: null };
+}
+
 export async function loadCloudWorkspace(userId: string): Promise<WorkspaceData | null> {
+  // Every table is read in pages: PostgREST caps a single response (1000 rows
+  // by default), and a silently truncated load would also truncate every
+  // export and stat built from it.
   const [profile, creators, brands, contacts, campaigns, meetings, activities] = await Promise.all([
     supabase.from("profiles").select("*").eq("id", userId).maybeSingle(),
-    supabase.from("creators").select("*").eq("user_id", userId),
-    supabase.from("brands").select("*").eq("user_id", userId),
-    supabase.from("brand_contacts").select("*").eq("user_id", userId),
-    supabase.from("campaigns").select("*").eq("user_id", userId),
-    supabase.from("meetings").select("*").eq("user_id", userId),
-    supabase.from("activities").select("*").eq("user_id", userId).order("at", { ascending: false }).limit(250),
+    fetchAll("creators", userId),
+    fetchAll("brands", userId),
+    fetchAll("brand_contacts", userId),
+    fetchAll("campaigns", userId),
+    fetchAll("meetings", userId),
+    fetchAll("activities", userId, { order: "at", max: 3000 }),
   ]);
   // Core CRM tables must load; anything else degrades to empty instead of
   // blanking the whole workspace (no silent data loss on partial failure).
@@ -249,8 +272,8 @@ export async function loadCloudWorkspace(userId: string): Promise<WorkspaceData 
   // degrades to empty instead of failing the whole workspace load.
   let followupRows: Record<string, unknown>[] = [];
   try {
-    const res = await supabase.from("followups").select("*").eq("user_id", userId).order("at", { ascending: false }).limit(2000);
-    if (!res.error) followupRows = (res.data || []) as Record<string, unknown>[];
+    const res = await fetchAll("followups", userId, { order: "at", max: 5000 });
+    if (!res.error) followupRows = res.data || [];
   } catch {
     followupRows = [];
   }
@@ -378,9 +401,9 @@ export async function persistCloudWorkspace(workspace: WorkspaceData, userId: st
     "meetings",
     owned(workspace.meetings) as unknown as Record<string, unknown>[],
   );
-  await upsertResilient("activities", owned(workspace.activities) as unknown as Record<string, unknown>[], {
-    ignoreDuplicates: true,
-  });
+  // Only audit entries the cloud doesn't have yet are passed in (see
+  // DataContext); a plain upsert also applies re-pointed entries after merges.
+  await upsertResilient("activities", owned(workspace.activities) as unknown as Record<string, unknown>[]);
   // Final cleanup for permanently deleted entities: their own audit entries
   // were dropped locally at delete time; remove the cloud copies explicitly
   // (activities are otherwise never deleted, so stale rows can't resurrect).

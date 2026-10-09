@@ -6,7 +6,8 @@ import { useAuth } from "../contexts/AuthContext";
 import { useData } from "../contexts/DataContext";
 import { useToast } from "../contexts/ToastContext";
 import { CURRENCIES } from "../lib/prefs";
-import { creatorScore, money, dateLabel, DEFAULT_RATING_WEIGHTS, download, normalize, RATING_DIMS, ratingScore, resolveWeights, TEMPLATE_TOKENS, toCSV, uid, weightShares, type RatingWeightsValue } from "../lib/utils";
+import { BRAND_HEADERS, brandRow, CAMPAIGN_HEADERS, campaignRow, CONTACT_HEADERS, contactRow, CREATOR_HEADERS, creatorRow } from "../lib/exports";
+import { creatorScore, money, dateLabel, DEFAULT_RATING_WEIGHTS, today, download, normalize, RATING_DIMS, ratingScore, resolveWeights, TEMPLATE_TOKENS, toCSV, uid, weightShares, type RatingWeightsValue } from "../lib/utils";
 import { Stars, Textarea } from "../components/ui";
 import type { EmailTemplate, ThemeName, WorkspaceData } from "../types";
 
@@ -23,7 +24,8 @@ function ScoringSettings() {
   const saved = resolveWeights(data.profile.rating_weights);
   const [weights, setWeights] = useState<RatingWeightsValue>(saved);
   useEffect(() => setWeights(resolveWeights(data.profile.rating_weights)), [data.profile.rating_weights]);
-  const shares = weightShares(weights);
+  const allZero = Object.values(weights).every((v) => !v);
+  const shares = allZero ? { audience: 0, niche: 0, engagement: 0, consistency: 0 } : weightShares(weights);
   const custom = !!data.profile.rating_weights;
   const dirty = (Object.keys(weights) as (keyof RatingWeightsValue)[]).some((k) => weights[k] !== saved[k]);
   const sample = { stars_demographics: 5, stars_niche: 4, stars_engagement: 2, stars_consistency: 3 };
@@ -33,7 +35,7 @@ function ScoringSettings() {
     <div className="weight-list">{RATING_DIMS.map((dim) => <div className="weight-row" key={dim.key}><div><strong>{dim.label}</strong><small>{WEIGHT_HELP[dim.weight]}</small></div><input type="range" min={0} max={60} step={5} value={weights[dim.weight]} onChange={(event) => setWeights({ ...weights, [dim.weight]: Number(event.target.value) })} aria-label={`${dim.label} weight`} /><b>{shares[dim.weight]}%</b></div>)}</div>
     <div className="weight-example"><span>Example: Audience 5★ · Brand fit 4★ · Engagement 2★ · Consistency 3★</span><span>Overall <Stars value={ratingScore(sample, weights)} showValue /> <small>(a plain average would say {((5 + 4 + 2 + 3) / 4).toFixed(1)})</small></span></div>
     <p className="settings-note">Set a factor to 0% if it doesn't matter for your agency — it then never moves the score. Unrated factors are always left out rather than counted as zero.{dirty && rated.length ? ` Saving re-scores ${changed} of your ${rated.length} rated influencers.` : ""}</p>
-    <div className="settings-actions"><Button disabled={!dirty} onClick={() => { data.updateProfile({ rating_weights: weights }); toast("Scoring weights saved — every influencer re-scored"); }}><Save size={15} /> Save weights</Button><Button variant="ghost" disabled={!custom && !dirty} onClick={() => { setWeights(DEFAULT_RATING_WEIGHTS); data.updateProfile({ rating_weights: null }); toast("Back to market-standard weights (35 / 30 / 20 / 15)"); }}><RotateCcw size={15} /> Market defaults</Button></div>
+    <div className="settings-actions"><Button disabled={!dirty || allZero} onClick={() => { data.updateProfile({ rating_weights: weights }); toast("Scoring weights saved — every influencer re-scored"); }}><Save size={15} /> Save weights</Button>{allZero && <span className="settings-note negative">At least one factor needs a weight above 0%.</span>}<Button variant="ghost" disabled={!custom && !dirty} onClick={() => { setWeights(DEFAULT_RATING_WEIGHTS); data.updateProfile({ rating_weights: null }); toast("Back to market-standard weights (35 / 30 / 20 / 15)"); }}><RotateCcw size={15} /> Market defaults</Button></div>
   </div></section>;
 }
 
@@ -199,17 +201,65 @@ export function SettingsPage() {
   useEffect(() => { if (location.hash) requestAnimationFrame(() => document.getElementById(location.hash.slice(1))?.scrollIntoView({ behavior: "smooth" })); }, [location.hash]);
   const exportBackup = () => download(`influenceflow-backup-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify({ schema: "influenceflow-backup", version: 2, exported_at: new Date().toISOString(), data: { profile: data.profile, creators: data.creators, brands: data.brands, contacts: data.contacts, campaigns: data.campaigns, followups: data.followups, meetings: data.meetings, activities: data.activities, demoSeeded: false } }, null, 2));
   const readBackup = (event: ChangeEvent<HTMLInputElement>) => { const file = event.target.files?.[0]; if (!file) return; setImportError(""); file.text().then((raw) => { try { const parsed = JSON.parse(raw) as { schema?: string; version?: number; data?: WorkspaceData } | WorkspaceData; const workspace = "data" in parsed && parsed.data ? parsed.data : parsed as WorkspaceData; if (!workspace || !Array.isArray(workspace.creators) || !Array.isArray(workspace.brands) || !Array.isArray(workspace.campaigns)) throw new Error("Missing creator, brand, or campaign collections."); setPreview({ ...workspace, contacts: workspace.contacts || [], followups: workspace.followups || [], meetings: workspace.meetings || [], activities: workspace.activities || [], profile: workspace.profile || data.profile, demoSeeded: false }); } catch (error) { setImportError(error instanceof Error ? error.message : "Invalid JSON backup"); } }).catch(() => setImportError("Could not read this file.")); };
-  const importNow = () => { if (!preview) return; let next = preview; if (conflictMode !== "replace") { const creatorKeys = new Set(data.creators.map((item) => normalize(item.name))); const brandKeys = new Set(data.brands.map((item) => normalize(item.name))); next = { ...preview, profile: data.profile, creators: [...data.creators, ...preview.creators.filter((item) => conflictMode === "keep-both" || !creatorKeys.has(normalize(item.name)))], brands: [...data.brands, ...preview.brands.filter((item) => conflictMode === "keep-both" || !brandKeys.has(normalize(item.name)))], contacts: [...data.contacts, ...preview.contacts], campaigns: [...data.campaigns, ...preview.campaigns], followups: [...data.followups, ...(preview.followups || [])], meetings: [...data.meetings, ...preview.meetings], activities: [...preview.activities, ...data.activities] }; } data.importBackup(next); toast(`Backup imported: ${preview.creators.length} influencers, ${preview.brands.length} brands, ${preview.campaigns.length} campaigns`); setPreview(null); };
+  // Merging a backup: records that already exist (same name, or same id)
+  // are skipped and every child row that pointed at them (contacts,
+  // campaigns, assignments, meetings, follow-ups) is re-pointed to your
+  // existing record, so nothing ends up linked to a missing parent.
+  const importNow = () => {
+    if (!preview) return;
+    let next = preview;
+    if (conflictMode !== "replace") {
+      const keepBoth = conflictMode === "keep-both";
+      const creatorByName = new Map(data.creators.map((item) => [normalize(item.name), item.id]));
+      const brandByName = new Map(data.brands.map((item) => [normalize(item.name), item.id]));
+      const existingIds = new Set([...data.creators, ...data.brands, ...data.contacts, ...data.campaigns, ...data.meetings, ...data.followups].map((item) => item.id));
+      const creatorMap = new Map<string, string>();
+      const brandMap = new Map<string, string>();
+      const newCreators = preview.creators.filter((item) => {
+        if (existingIds.has(item.id)) { creatorMap.set(item.id, item.id); return false; }
+        const match = creatorByName.get(normalize(item.name));
+        if (match && !keepBoth) { creatorMap.set(item.id, match); return false; }
+        return true;
+      });
+      const newBrands = preview.brands.filter((item) => {
+        if (existingIds.has(item.id)) { brandMap.set(item.id, item.id); return false; }
+        const match = brandByName.get(normalize(item.name));
+        if (match && !keepBoth) { brandMap.set(item.id, match); return false; }
+        return true;
+      });
+      const creatorId = (id: string) => creatorMap.get(id) || id;
+      const brandId = (id: string) => brandMap.get(id) || id;
+      const fresh = <T extends { id: string }>(rows: T[]) => rows.filter((item) => !existingIds.has(item.id));
+      next = {
+        ...preview,
+        profile: data.profile,
+        creators: [...data.creators, ...newCreators],
+        brands: [...data.brands, ...newBrands],
+        contacts: [...data.contacts, ...fresh(preview.contacts).map((item) => ({ ...item, brand_id: brandId(item.brand_id) }))],
+        campaigns: [...data.campaigns, ...fresh(preview.campaigns).map((item) => ({ ...item, brand_id: brandId(item.brand_id), creator_ids: Array.from(new Set(item.creator_ids.map(creatorId))) }))],
+        followups: [...data.followups, ...fresh(preview.followups || []).map((item) => ({ ...item, creator_id: creatorId(item.creator_id) }))],
+        meetings: [...data.meetings, ...fresh(preview.meetings).map((item) => ({ ...item, related_id: item.related_type === "creator" && item.related_id ? creatorId(item.related_id) : item.related_type === "brand" && item.related_id ? brandId(item.related_id) : item.related_id }))],
+        activities: [...fresh(preview.activities), ...data.activities],
+      };
+    }
+    data.importBackup(next);
+    toast(`Backup imported: ${preview.creators.length} influencers, ${preview.brands.length} brands, ${preview.campaigns.length} campaigns checked`);
+    setPreview(null);
+  };
+  // Full exports: every record, archived included (flagged in an
+  // "Archived" column), with the same columns as the list-page exports.
   const exportCollection = (type: "influencers" | "brands" | "contacts" | "campaigns") => {
-    const built: { rows: Record<string, string | number | boolean | null | undefined>[]; headers: Record<string, string> } =
+    const built =
       type === "influencers"
-        ? { rows: data.creators.map((item) => ({ name: item.name, email: item.contact_email, channel: item.channel_link, niche: item.niche, platform: item.platform, avg_views: item.avg_views, engagement_rate: item.engagement_rate, stars: creatorScore(item, data.profile.rating_weights), demographics: item.stars_demographics || 0, niche_fit: item.stars_niche || 0, engagement_stars: item.stars_engagement || 0, consistency: item.stars_consistency || 0, priority: item.priority, status: item.pipeline_status, date_contacted: item.date_contacted || "", next_action: item.next_action || "", action_due: item.next_action_date || "", notes: item.notes || "" })), headers: { name: "Name", email: "Email", channel: "Channel", niche: "Niche", platform: "Platform", avg_views: "Avg views", engagement_rate: "Engagement %", stars: "Rating", demographics: "Audience", niche_fit: "Niche fit", engagement_stars: "Engagement stars", consistency: "Consistency", priority: "Priority", status: "Status", date_contacted: "Date contacted", next_action: "Next action", action_due: "Action due", notes: "Notes" } }
-          : type === "brands"
-            ? { rows: data.brands.map((item) => ({ company: item.name, domain: item.domain, type: item.brand_type, contact_email: item.contact_email, priority: item.priority, status: item.pipeline_status, date_contacted: item.date_contacted || "", next_action: item.next_action || "", action_due: item.next_action_date || "", notes: item.notes || "" })), headers: { company: "Company", domain: "Domain", type: "Type", contact_email: "Email", priority: "Priority", status: "Status", date_contacted: "Date contacted", next_action: "Next action", action_due: "Action due", notes: "Notes" } }
+        ? { rows: data.creators.map((item) => creatorRow(item, data.profile.rating_weights)), headers: CREATOR_HEADERS }
+        : type === "brands"
+          ? { rows: data.brands.map((item) => brandRow(item, data.contacts)), headers: BRAND_HEADERS }
           : type === "contacts"
-            ? { rows: data.contacts.map((item) => ({ brand: data.brands.find((brand) => brand.id === item.brand_id)?.name || "", first_name: item.first_name, last_name: item.last_name, title: item.title, email: item.email, linkedin_url: item.linkedin_url, status: item.pipeline_status, date_contacted: item.date_contacted || "", notes: item.notes || "" })), headers: { brand: "Brand", first_name: "First name", last_name: "Last name", title: "Title", email: "Email", linkedin_url: "LinkedIn", status: "Status", date_contacted: "Date contacted", notes: "Notes" } }
-            : { rows: data.campaigns.map((item) => ({ name: item.name, brand: data.brands.find((brand) => brand.id === item.brand_id)?.name || "", platform: item.platform, agreed_payment: item.agreed_payment, creator_payout: item.creator_payout, status: item.status, start_date: item.start_date, due_date: item.due_date, notes: item.notes || "" })), headers: { name: "Campaign", brand: "Brand", platform: "Platform", agreed_payment: "Deal value", creator_payout: "Creator payout", status: "Status", start_date: "Start", due_date: "Due", notes: "Notes" } };
-    download(`influenceflow-${type}.csv`, toCSV(built.rows, built.headers), "text/csv"); toast(`${type} CSV exported`);
+            ? { rows: data.contacts.map((item) => contactRow(item, data.brands)), headers: CONTACT_HEADERS }
+            : { rows: data.campaigns.map((item) => campaignRow(item, data.brands, data.creators)), headers: CAMPAIGN_HEADERS };
+    if (!built.rows.length) { toast(`No ${type} to export yet`, "info"); return; }
+    download(`influenceflow-${type}-${today()}.csv`, toCSV(built.rows as Record<string, string | number | boolean | null | undefined>[], built.headers), "text/csv;charset=utf-8");
+    toast(`${built.rows.length} ${type} exported (archived included)`);
   };
 
   return <div className="settings-page"><PageHeader eyebrow="Workspace control" title="Settings" description="Your profile, agency, security, notifications, scoring, templates and data — all in one place." />
@@ -246,6 +296,24 @@ type TrashType = "creator" | "brand" | "campaign";
 export function DeletedPage() {
   const data = useData(); const { toast } = useToast(); const [tab, setTab] = useState<TrashType>("creator");
   const groups = { creator: data.creators.filter((item) => item.archived_at), brand: data.brands.filter((item) => item.archived_at), campaign: data.campaigns.filter((item) => item.archived_at) }; const rows = groups[tab]; const count = groups.creator.length + groups.brand.length + groups.campaign.length;
-  const empty = () => { if (confirm(`Permanently delete all ${count} archived records? Related links may also be removed. This cannot be undone.`)) { (Object.keys(groups) as TrashType[]).forEach((type) => data.permanentlyDelete(type, groups[type].map((item) => item.id))); toast("Trash emptied"); } };
-  return <div className="deleted-page"><PageHeader eyebrow="Unified trash" title="Archive" description="Restore soft-deleted records or permanently remove them when you are certain." actions={count ? <Button variant="danger" onClick={empty}><Trash2 size={15} /> Empty trash</Button> : undefined} /><Tabs active={tab} onChange={(value) => setTab(value as TrashType)} tabs={[{ value: "creator", label: "Influencers", count: groups.creator.length }, { value: "brand", label: "Brands", count: groups.brand.length }, { value: "campaign", label: "Campaigns", count: groups.campaign.length }]} />{!rows.length ? <EmptyState icon="archive" title={`${tab === "creator" ? "Influencer" : tab === "brand" ? "Brand" : "Campaign"} trash is empty`} text="Archived records appear here and can be restored until permanently deleted." /> : <div className="trash-list">{rows.map((item) => <div key={item.id}><span className="trash-icon">{tab === "creator" ? <UserRound /> : tab === "brand" ? <Database /> : <Sparkles />}</span><div><strong>{item.name}</strong><small>Archived {dateLabel(item.archived_at)}</small></div><span className="trash-type">{tab}</span><Button variant="secondary" size="sm" onClick={() => { data.archive(tab, [item.id], true); toast(`${item.name} restored`); }}><RotateCcw size={14} /> Restore</Button><button className="icon-btn danger" onClick={() => { if (confirm(`Permanently delete ${item.name}?`)) { data.permanentlyDelete(tab, [item.id]); toast("Record permanently deleted"); } }}><X size={16} /></button></div>)}</div>}</div>;
+  // Spell out what else goes with a record, so nothing disappears silently.
+  const deleteWarning = (type: TrashType, id: string, name: string) => {
+    if (type === "brand") {
+      const linked = data.campaigns.filter((c) => c.brand_id === id);
+      const live = linked.filter((c) => !c.archived_at && ["negotiating", "active"].includes(c.status));
+      const contacts = data.contacts.filter((c) => c.brand_id === id).length;
+      const parts = [linked.length ? `${linked.length} campaign${linked.length === 1 ? "" : "s"}${live.length ? ` (${live.length} still ${live.length === 1 ? "live" : "live"}: ${live.map((c) => c.name).join(", ")})` : ""}` : "", contacts ? `${contacts} contact${contacts === 1 ? "" : "s"}` : ""].filter(Boolean);
+      return `Permanently delete ${name}?${parts.length ? `\n\nThis also deletes ${parts.join(" and ")}.` : ""}\n\nThis cannot be undone.`;
+    }
+    if (type === "creator") {
+      const campaigns = data.campaigns.filter((c) => c.creator_ids.includes(id)).length;
+      const followups = data.followups.filter((f) => f.creator_id === id).length;
+      const extra = [campaigns ? `removed from ${campaigns} campaign${campaigns === 1 ? "" : "s"}` : "", followups ? `${followups} follow-up${followups === 1 ? "" : "s"} deleted` : ""].filter(Boolean);
+      return `Permanently delete ${name}?${extra.length ? `\n\nThey will be ${extra.join(", and ")}.` : ""} Calendar entries stay, unlinked.\n\nThis cannot be undone.`;
+    }
+    return `Permanently delete ${name}? Calendar entries stay, unlinked.\n\nThis cannot be undone.`;
+  };
+  const liveCampaignsLost = groups.brand.flatMap((b) => data.campaigns.filter((c) => c.brand_id === b.id && !c.archived_at && ["negotiating", "active"].includes(c.status)));
+  const empty = () => { if (confirm(`Permanently delete all ${count} archived records?${liveCampaignsLost.length ? `\n\nArchived brands take ${liveCampaignsLost.length} live campaign${liveCampaignsLost.length === 1 ? "" : "s"} with them: ${liveCampaignsLost.map((c) => c.name).join(", ")}.` : ""}\n\nThis cannot be undone.`)) { (Object.keys(groups) as TrashType[]).forEach((type) => data.permanentlyDelete(type, groups[type].map((item) => item.id))); toast("Trash emptied"); } };
+  return <div className="deleted-page"><PageHeader eyebrow="Unified trash" title="Archive" description="Restore soft-deleted records or permanently remove them when you are certain." actions={count ? <Button variant="danger" onClick={empty}><Trash2 size={15} /> Empty trash</Button> : undefined} /><Tabs active={tab} onChange={(value) => setTab(value as TrashType)} tabs={[{ value: "creator", label: "Influencers", count: groups.creator.length }, { value: "brand", label: "Brands", count: groups.brand.length }, { value: "campaign", label: "Campaigns", count: groups.campaign.length }]} />{!rows.length ? <EmptyState icon="archive" title={`${tab === "creator" ? "Influencer" : tab === "brand" ? "Brand" : "Campaign"} trash is empty`} text="Archived records appear here and can be restored until permanently deleted." /> : <div className="trash-list">{rows.map((item) => <div key={item.id}><span className="trash-icon">{tab === "creator" ? <UserRound /> : tab === "brand" ? <Database /> : <Sparkles />}</span><div><strong>{item.name}</strong><small>Archived {dateLabel(item.archived_at)}</small></div><span className="trash-type">{tab}</span><Button variant="secondary" size="sm" onClick={() => { data.archive(tab, [item.id], true); toast(`${item.name} restored`); }}><RotateCcw size={14} /> Restore</Button><button className="icon-btn danger" onClick={() => { if (confirm(deleteWarning(tab, item.id, item.name))) { data.permanentlyDelete(tab, [item.id]); toast("Record permanently deleted"); } }}><X size={16} /></button></div>)}</div>}</div>;
 }
