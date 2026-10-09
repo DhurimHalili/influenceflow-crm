@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { Session, User } from "@supabase/supabase-js";
 import { authRedirectUrl, hasSupabase, pendingAuthRedirect, supabase } from "../lib/supabase";
+import { clearSessionState } from "../hooks/useSessionState";
 
 export type AuthResult = { error: string | null; code?: "invalid_credentials" | "locked" | "network" | "not_confirmed" | "exists" | "rate_limited" | "invalid_email" | "other"; attemptsLeft?: number };
 
@@ -199,6 +200,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // computer). clearDevice: also wipes this browser's cached workspace copy.
   const signOut = async (opts?: { everywhere?: boolean; clearDevice?: boolean }) => {
     const userId = session?.user?.id;
+    // Remembered list filters belong to this person's session only.
+    clearSessionState();
     try {
       await supabase.auth.signOut(opts?.everywhere ? { scope: "global" } : undefined);
     } catch {

@@ -4,6 +4,7 @@ import './index.css'
 import './styles/features.css'
 import './styles/campaigns.css'
 import './styles/account.css'
+import './styles/mobile.css'
 import App from './App.tsx'
 
 const seo = document.getElementById('seo-landing')
