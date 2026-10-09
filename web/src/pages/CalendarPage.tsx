@@ -5,7 +5,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Button, Input, Modal, PageHeader, Select, Tabs, Textarea } from "../components/ui";
 import { useData } from "../contexts/DataContext";
 import { useToast } from "../contexts/ToastContext";
-import { dateLabel, dayKey, download, dueLabel, MEETING_KIND_LABELS, parseDay, timeLabel } from "../lib/utils";
+import { dateLabel, dayKey, download, dueLabel, MEETING_KIND_LABELS, money, parseDay, timeLabel } from "../lib/utils";
 import type { Meeting, MeetingKind } from "../types";
 
 type RelatedType = "creator" | "brand" | "campaign" | "";
@@ -204,6 +204,9 @@ export default function CalendarPage() {
       const dueDay = parseDay(c.due_date);
       if (startDay && c.status !== "completed")
         out.push({ key: `cs-${c.id}`, source: "campaign", kind: "campaign", title: `${c.name} starts`, subtitle: brand ? `Campaign · ${brand}` : "Campaign", start: startDay, end: startDay, allDay: true, done: false, overdue: false, to: `/app/campaigns?id=${c.id}` });
+      const invoiceDay = c.payment_status !== "paid" ? parseDay(c.invoice_due) : null;
+      if (invoiceDay)
+        out.push({ key: `ci-${c.id}`, source: "campaign", kind: "campaign", title: `Invoice due: ${c.name}`, subtitle: `${brand || "Brand"} owes ${money(c.agreed_payment)}`, start: invoiceDay, end: invoiceDay, allDay: true, done: false, overdue: invoiceDay.getTime() < new Date().setHours(0, 0, 0, 0), to: `/app/campaigns?id=${c.id}` });
       if (dueDay && (!startDay || dueDay.getTime() !== startDay.getTime() || c.status === "completed"))
         out.push({ key: `cd-${c.id}`, source: "campaign", kind: "campaign", title: `${c.name} due`, subtitle: brand ? `Campaign · ${brand}` : "Campaign", start: dueDay, end: dueDay, allDay: true, done: c.status === "completed", overdue: c.status === "active" && dueDay.getTime() < new Date().setHours(0, 0, 0, 0), to: `/app/campaigns?id=${c.id}` });
     }

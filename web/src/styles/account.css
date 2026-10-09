@@ -1,0 +1,127 @@
+/* Account menu, sign-out, shortcuts, rebuilt Settings, rate cards. */
+
+/* ---------- Top-bar account menu ---------- */
+.account-menu { position: relative; }
+.account-trigger { display: inline-flex; align-items: center; gap: 4px; height: 38px; padding: 0 6px 0 3px; border: 1px solid var(--line); border-radius: 20px; background: var(--surface-solid); cursor: pointer; transition: border-color .15s ease, box-shadow .15s ease; }
+.account-trigger:hover, .account-trigger.open { border-color: rgba(var(--accent-rgb), .5); box-shadow: 0 0 0 3px rgba(var(--accent-rgb), .12); }
+.account-trigger .avatar { width: 30px; height: 30px; font-size: 11px; }
+.account-caret { color: var(--muted); transform: rotate(90deg); transition: transform .15s ease; }
+.account-trigger.open .account-caret { transform: rotate(-90deg); }
+.account-dropdown { position: absolute; right: 0; top: calc(100% + 8px); z-index: 60; width: 270px; padding: 6px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface-solid); box-shadow: 0 18px 50px -12px rgba(15, 12, 40, .35), var(--shadow-sm); transform-origin: top right; }
+.account-head { display: flex; gap: 10px; align-items: center; padding: 10px 10px 12px; }
+.account-head > div { min-width: 0; }
+.account-head strong, .account-head > div > span, .account-head em { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.account-head strong { font: 700 14px "Manrope", sans-serif; }
+.account-head > div > span { color: var(--muted); font-size: 12px; margin-top: 1px; }
+.account-head em { font-style: normal; color: var(--accent); font-size: 11px; font-weight: 700; margin-top: 3px; }
+.account-group { display: grid; gap: 1px; padding: 5px 0; border-top: 1px solid var(--line); }
+.account-group a, .account-group button { display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 10px; border: 0; border-radius: 8px; background: transparent; color: var(--text-soft); font-size: 13px; font-weight: 550; text-align: left; cursor: pointer; }
+.account-group a:hover, .account-group button:hover { background: var(--surface-alt); color: var(--text); }
+.account-group svg { flex: none; color: var(--muted); }
+.account-group kbd { margin-left: auto; }
+.account-group .danger, .account-group .danger svg { color: var(--danger); }
+.account-group .danger:hover { background: color-mix(in srgb, var(--danger) 9%, transparent); }
+@media (max-width: 720px) { .account-trigger { padding: 0 3px; } .account-caret { display: none; } .account-dropdown { position: fixed; top: 60px; right: 10px; left: 10px; width: auto; } }
+
+/* ---------- Sign-out dialog & session actions ---------- */
+.signout-options, .session-actions { display: grid; gap: 8px; }
+.signout-options button, .session-actions button { display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px 13px; border: 1px solid var(--line); border-radius: 11px; background: var(--surface-alt); color: var(--text); text-align: left; cursor: pointer; transition: border-color .15s ease, background .15s ease; }
+.signout-options button:hover, .session-actions button:hover { border-color: rgba(var(--accent-rgb), .45); background: var(--surface); }
+.signout-options button:disabled, .session-actions button:disabled { opacity: .6; cursor: wait; }
+.signout-options button > svg:first-child, .session-actions button > svg:first-child { flex: none; width: 17px; height: 17px; color: var(--accent); }
+.signout-options span, .session-actions span { flex: 1; min-width: 0; }
+.signout-options strong, .session-actions strong { display: block; font-size: 13px; }
+.signout-options small, .session-actions small { display: block; margin-top: 2px; color: var(--muted); font-size: 11px; }
+.signout-options button > svg:last-child, .session-actions button > svg:last-child { width: 14px; color: var(--muted); }
+.signout-options .danger > svg:first-child, .session-actions .danger > svg:first-child, .signout-options .danger strong, .session-actions .danger strong { color: var(--danger); }
+.signout-options .danger:hover, .session-actions .danger:hover { border-color: color-mix(in srgb, var(--danger) 45%, var(--line)); }
+
+/* ---------- Shortcuts ---------- */
+.shortcut-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 18px; }
+.shortcut-grid > div { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+.shortcut-grid > div > span:last-child { display: inline-flex; gap: 4px; }
+.shortcut-grid kbd { min-width: 22px; text-align: center; font-size: 11px; padding: 2px 6px; }
+@media (max-width: 560px) { .shortcut-grid { grid-template-columns: 1fr; } }
+
+/* ---------- Settings ---------- */
+.settings-nav a.active { background: var(--surface); color: var(--text); font-weight: 650; box-shadow: inset 2px 0 var(--accent), var(--shadow-sm); }
+.settings-nav a.active svg:first-child { color: var(--accent); }
+.settings-nav a.danger { color: color-mix(in srgb, var(--danger) 75%, var(--muted)); }
+.settings-body { display: grid; gap: 14px; }
+.settings-body > .settings-actions { margin-top: 0; }
+.profile-card { display: flex; align-items: center; gap: 14px; padding: 14px; border-radius: 12px; background: linear-gradient(110deg, var(--accent-soft), transparent 70%); border: 1px solid var(--line); }
+.profile-card strong, .profile-card > div > span, .profile-card small { display: block; }
+.profile-card strong { font: 700 16px "Manrope", sans-serif; }
+.profile-card > div > span { color: var(--accent); font-size: 12px; font-weight: 650; margin-top: 2px; }
+.profile-card small { color: var(--muted); font-size: 12px; margin-top: 2px; }
+.text-link { justify-self: start; border: 0; background: transparent; padding: 0; color: var(--accent); font-size: 12px; font-weight: 650; cursor: pointer; }
+.text-link:hover { text-decoration: underline; }
+.account-facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.account-facts > div { padding: 11px 12px; border-radius: 10px; background: var(--surface-alt); min-width: 0; }
+.account-facts small { display: block; color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .5px; font-weight: 650; }
+.account-facts strong { display: block; margin-top: 4px; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.settings-subsection { display: grid; gap: 12px; padding-top: 14px; border-top: 1px solid var(--line); }
+.settings-subsection h3 { margin: 0; font: 700 14px "Manrope", sans-serif; }
+.pw-meter { display: flex; align-items: center; gap: 10px; font-size: 12px; font-weight: 650; color: var(--muted); }
+.pw-meter i { flex: 1; height: 6px; border-radius: 4px; background: var(--surface-alt); overflow: hidden; }
+.pw-meter b { display: block; height: 100%; width: 8%; border-radius: inherit; background: var(--danger); transition: width .2s ease, background .2s ease; }
+.pw-meter.level-1 b { width: 30%; background: var(--danger); }
+.pw-meter.level-2 b { width: 55%; background: var(--warning); }
+.pw-meter.level-3 b { width: 78%; background: #4d9e6a; }
+.pw-meter.level-4 b { width: 100%; background: var(--success); }
+.pw-meter.level-4 span, .pw-meter.level-3 span { color: var(--success); }
+.inline-check { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-soft); cursor: pointer; }
+.inline-check input { accent-color: var(--accent); }
+.theme-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.theme-chips button { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface-alt); font-size: 12px; cursor: pointer; color: var(--text-soft); }
+.theme-chips button.active { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); font-weight: 700; }
+.theme-chips .theme-swatch { width: 12px; height: 12px; border-radius: 50%; }
+.permission-banner { display: flex; align-items: center; gap: 12px; padding: 12px 13px; border-radius: 11px; border: 1px solid var(--line); background: var(--surface-alt); }
+.permission-banner > svg { flex: none; color: var(--accent); }
+.permission-banner > span { flex: 1; min-width: 0; }
+.permission-banner strong, .permission-banner small { display: block; }
+.permission-banner strong { font-size: 13px; }
+.permission-banner small { color: var(--muted); font-size: 11px; margin-top: 2px; }
+.permission-banner.perm-granted > svg { color: var(--success); }
+.permission-banner.perm-denied { border-color: color-mix(in srgb, var(--warning) 40%, var(--line)); }
+.permission-banner.perm-denied > svg { color: var(--warning); }
+.reminder-options { margin-bottom: 0; }
+.toggle-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 12px 13px; border: 1px solid var(--line); border-radius: 11px; cursor: pointer; }
+.toggle-row strong, .toggle-row small { display: block; }
+.toggle-row strong { font-size: 13px; }
+.toggle-row small { color: var(--muted); font-size: 11px; margin-top: 2px; }
+.toggle-row input[role="switch"] { appearance: none; flex: none; width: 40px; height: 23px; border-radius: 12px; background: var(--line-strong); position: relative; cursor: pointer; transition: background .15s ease; }
+.toggle-row input[role="switch"]::after { content: ""; position: absolute; top: 3px; left: 3px; width: 17px; height: 17px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, .25); transition: transform .15s ease; }
+.toggle-row input[role="switch"]:checked { background: var(--accent); }
+.toggle-row input[role="switch"]:checked::after { transform: translateX(17px); }
+.danger-zone { border-color: color-mix(in srgb, var(--danger) 35%, var(--line)); }
+.danger-zone .settings-heading > span { background: color-mix(in srgb, var(--danger) 12%, transparent); color: var(--danger); }
+.danger-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.danger-row strong, .danger-row small { display: block; }
+.danger-row strong { font-size: 13px; }
+.danger-row small { color: var(--muted); font-size: 12px; margin-top: 3px; line-height: 1.5; max-width: 480px; }
+@media (max-width: 960px) {
+  .settings-layout { grid-template-columns: 1fr; }
+  .settings-nav { position: sticky; top: 56px; z-index: 5; display: flex !important; flex-direction: row !important; overflow-x: auto; gap: 4px; padding: 6px; margin: 0 -2px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-solid); scrollbar-width: none; }
+  .settings-nav a { flex: none; min-height: 34px !important; white-space: nowrap; }
+  .settings-nav a svg:last-child { display: none; }
+}
+@media (max-width: 560px) { .account-facts { grid-template-columns: 1fr; } .danger-row { flex-direction: column; align-items: flex-start; } }
+
+/* ---------- Rate card ---------- */
+.rate-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+.rate-grid > div { padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-alt); }
+.rate-grid small { display: block; color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .5px; font-weight: 650; }
+.rate-grid strong { display: block; margin-top: 4px; font: 750 18px "Manrope", sans-serif; }
+.rate-grid em { display: inline-block; margin-top: 6px; padding: 2px 7px; border-radius: 9px; font-style: normal; font-size: 10px; font-weight: 750; }
+.rate-grid em.cpm-low { color: var(--success); background: color-mix(in srgb, var(--success) 12%, transparent); }
+.rate-grid em.cpm-mid { color: var(--accent); background: var(--accent-soft); }
+.rate-grid em.cpm-high { color: var(--warning); background: color-mix(in srgb, var(--warning) 14%, transparent); }
+.rate-edit-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; }
+.rate-foot { margin: 10px 0 0; color: var(--muted); font-size: 12px; }
+.negative { color: var(--danger); font-weight: 650; }
+
+/* Avatars are spans: keep generic span rules in containers from breaking them. */
+.user-footer span.avatar, .profile-card span.avatar, .account-head span.avatar { display: inline-grid; place-items: center; margin: 0; flex: none; }
+.user-footer span.avatar { width: 32px; height: 32px; font-size: 11px; color: var(--text); }
+.brand-link-block span.avatar { display: inline-grid; width: 40px; height: 40px; flex: none; padding: 0; }

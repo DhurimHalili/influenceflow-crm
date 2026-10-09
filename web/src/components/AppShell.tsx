@@ -1,7 +1,7 @@
 import { AnimatePresence, motion } from "framer-motion";
 import {
   Archive, BarChart3, Building2, CalendarDays, Check, ChevronRight, CircleDollarSign, Clock3, Cloud, CloudOff, Command, Crown, HelpCircle, LoaderCircle,
-  LayoutDashboard, LifeBuoy, LogOut, Menu, MessageCircle, Palette, Plus, Search, SearchX, Settings,
+  Keyboard, LayoutDashboard, LifeBuoy, LogOut, Menu, MessageCircle, MonitorX, Moon, Palette, Plus, Search, SearchX, Settings, ShieldCheck, Sun,
   Sparkles, UserX, Users, Wallet, X,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -42,6 +42,9 @@ const themeOptions: { value: ThemeName; label: string }[] = [
   { value: "agency", label: "Agency" }, { value: "light", label: "Light" }, { value: "dark", label: "Dark" }, { value: "honey", label: "Honey" }, { value: "ocean", label: "Ocean" },
 ];
 
+const LockIcon = () => <ShieldCheck size={15} />;
+const ShieldIcon = () => <ShieldCheck size={17} />;
+
 export default function AppShell() {
   const { user, signOut } = useAuth();
   const data = useData();
@@ -65,6 +68,53 @@ export default function AppShell() {
     setLossReason("");
   }, [lossIds]);
   const searchRef = useRef<HTMLInputElement>(null);
+  const [accountOpen, setAccountOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [signOutOpen, setSignOutOpen] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
+  const accountRef = useRef<HTMLDivElement>(null);
+  const agencyName = data.profile.preferences?.agency_name?.trim();
+  const accountName = data.profile.display_name || user?.email?.split("@")[0] || "Your workspace";
+
+  // Sign out only after pending edits reached the cloud, so nothing typed in
+  // the last seconds is lost.
+  const logout = async (opts?: { everywhere?: boolean; clearDevice?: boolean }) => {
+    setSigningOut(true);
+    const synced = await data.flushAndWait();
+    if (!synced && !confirm("Some recent changes haven't reached the cloud yet (you look offline). Sign out anyway? They stay on this device unless you clear it.")) {
+      setSigningOut(false);
+      return;
+    }
+    await signOut(opts);
+    setSigningOut(false);
+    setSignOutOpen(false);
+    navigate("/login", { replace: true });
+    toast(opts?.everywhere ? "Signed out on every device" : "Signed out — see you soon");
+  };
+
+  // Close the account menu on outside click.
+  useEffect(() => {
+    if (!accountOpen) return;
+    const close = (event: MouseEvent) => {
+      if (accountRef.current && !accountRef.current.contains(event.target as Node)) setAccountOpen(false);
+    };
+    window.addEventListener("mousedown", close);
+    return () => window.removeEventListener("mousedown", close);
+  }, [accountOpen]);
+
+  // Optional start page (Settings → Workspace), once per browser session.
+  useEffect(() => {
+    const start = data.profile.preferences?.start_page;
+    if (!start || start === "dashboard" || location.pathname !== "/app") return;
+    try {
+      if (sessionStorage.getItem("if.start-page-used")) return;
+      sessionStorage.setItem("if.start-page-used", "1");
+    } catch {
+      return;
+    }
+    navigate(`/app/${start}`, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data.profile.preferences?.start_page]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setDebounced(query), 220);
@@ -75,6 +125,7 @@ export default function AppShell() {
     setMobileOpen(false);
     setSearchOpen(false);
     setCommandOpen(false);
+    setAccountOpen(false);
   }, [location.pathname]);
 
   useEffect(() => {
@@ -88,12 +139,31 @@ export default function AppShell() {
         setSearchOpen(true);
         requestAnimationFrame(() => searchRef.current?.focus());
       }
+      const typing = ["INPUT", "TEXTAREA", "SELECT"].includes((event.target as HTMLElement).tagName) || (event.target as HTMLElement).isContentEditable;
+      if (event.key === "?" && !typing) {
+        event.preventDefault();
+        setShortcutsOpen(true);
+      }
+      // g then i / b / c / k / d / s — jump between sections.
+      if (!typing && !event.metaKey && !event.ctrlKey && !event.altKey) {
+        const w = window as unknown as { __ifG?: number };
+        if (event.key === "g") w.__ifG = Date.now();
+        else if (w.__ifG && Date.now() - w.__ifG < 1200) {
+          const to = { d: "/app", i: "/app/influencers", b: "/app/brands", c: "/app/campaigns", k: "/app/calendar", s: "/app/settings" }[event.key];
+          w.__ifG = 0;
+          if (to) {
+            event.preventDefault();
+            navigate(to);
+          }
+        }
+      }
       if (event.key === "Escape") {
-        setQuery(""); setSearchOpen(false); setCommandOpen(false);
+        setQuery(""); setSearchOpen(false); setCommandOpen(false); setAccountOpen(false);
       }
     };
     window.addEventListener("keydown", keyboard);
     return () => window.removeEventListener("keydown", keyboard);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Browser reminders: meeting/task alerts at their reminder time, plus one
@@ -118,7 +188,7 @@ export default function AppShell() {
       } catch {
         lastDigest = todayKey;
       }
-      if (due.length && lastDigest !== todayKey && new Date().getHours() >= 8 && Notification.permission === "granted") {
+      if (data.profile.preferences?.action_digest !== false && due.length && lastDigest !== todayKey && new Date().getHours() >= 8 && Notification.permission === "granted") {
         const overdueCount = due.filter((item) => isPastDay(item.next_action_date)).length;
         new Notification("InfluenceFlow · Today's actions", { body: `${due.length} action${due.length === 1 ? "" : "s"} due${overdueCount ? ` (${overdueCount} overdue)` : ""}: ${due.slice(0, 3).map((item) => item.name).join(", ")}${due.length > 3 ? "…" : ""}`, icon: "./favicon.svg", tag: "action-digest" });
         try {
@@ -170,9 +240,9 @@ export default function AppShell() {
       </div>
       <div className="user-footer">
         <Avatar name={data.profile.display_name || user?.email || "IF"} size="sm" />
-        <div><strong>{data.profile.display_name || "Your workspace"}</strong><span><i /> Private workspace</span></div>
-        <a href="https://wa.me/38349878908" target="_blank" rel="noreferrer" aria-label="WhatsApp"><MessageCircle size={16} /></a>
-        <button onClick={() => void signOut()} aria-label="Logout"><LogOut size={16} /></button>
+        <div><strong>{accountName}</strong><span><i /> {agencyName || "Private workspace"}</span></div>
+        <NavLink to="/app/settings" aria-label="Settings" title="Settings"><Settings size={16} /></NavLink>
+        <button onClick={() => setSignOutOpen(true)} aria-label="Sign out" title="Sign out"><LogOut size={16} /></button>
       </div>
     </aside>
   );
@@ -189,6 +259,23 @@ export default function AppShell() {
             <button className={`sync-pill sync-${sync}`} onClick={() => data.syncNow()} title={sync === "synced" ? "All changes saved to the cloud" : sync === "saving" ? "Saving your latest changes…" : sync === "offline" ? "Can't reach the cloud right now — changes are kept on this device and retried automatically. Click to retry now." : sync === "loading" ? "Loading your workspace…" : "Local workspace"}>{sync === "offline" ? <CloudOff size={14} /> : sync === "saving" || sync === "loading" ? <LoaderCircle size={14} className="spin" /> : <Cloud size={14} />}<span>{sync === "synced" ? "Saved" : sync === "saving" ? "Saving…" : sync === "offline" ? "Offline · retrying" : sync === "loading" ? "Syncing…" : "Local"}</span></button>
             <button className="command-trigger" onClick={() => setCommandOpen(true)}><Command size={15} /><span>Quick actions</span><kbd>Ctrl K</kbd></button>
             <button className="top-add" onClick={() => navigate("/app/influencers?new=1")}><Plus size={17} /><span>Add new</span></button>
+            <div className="account-menu" ref={accountRef}>
+              <button className={`account-trigger${accountOpen ? " open" : ""}`} onClick={() => setAccountOpen((open) => !open)} aria-haspopup="menu" aria-expanded={accountOpen} aria-label="Account menu"><Avatar name={accountName} size="sm" /><ChevronRight size={14} className="account-caret" /></button>
+              <AnimatePresence>{accountOpen && <motion.div className="account-dropdown" role="menu" initial={{ opacity: 0, y: -6, scale: .98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -6, scale: .98 }} transition={{ duration: .14 }}>
+                <div className="account-head"><Avatar name={accountName} /><div><strong>{accountName}</strong><span>{user?.email}</span>{agencyName && <em>{agencyName}</em>}</div></div>
+                <div className="account-group">
+                  <NavLink role="menuitem" to="/app/settings"><Settings size={15} /> Settings</NavLink>
+                  <NavLink role="menuitem" to="/app/settings#security"><LockIcon /> Account & security</NavLink>
+                  <button role="menuitem" onClick={() => { const next = data.profile.theme === "dark" ? "agency" : "dark"; data.updateProfile({ theme: next }); toast(next === "dark" ? "Dark theme on" : "Agency theme on"); }}>{data.profile.theme === "dark" ? <Sun size={15} /> : <Moon size={15} />} {data.profile.theme === "dark" ? "Light mode" : "Dark mode"}</button>
+                  <NavLink role="menuitem" to="/app/themes"><Palette size={15} /> All themes</NavLink>
+                  <button role="menuitem" onClick={() => { setAccountOpen(false); setShortcutsOpen(true); }}><Keyboard size={15} /> Keyboard shortcuts <kbd>?</kbd></button>
+                  <NavLink role="menuitem" to="/app/help"><LifeBuoy size={15} /> Help center</NavLink>
+                </div>
+                <div className="account-group">
+                  <button role="menuitem" className="danger" onClick={() => { setAccountOpen(false); void logout(); }} disabled={signingOut}><LogOut size={15} /> {signingOut ? "Signing out…" : "Sign out"}</button>
+                </div>
+              </motion.div>}</AnimatePresence>
+            </div>
           </div>
         </header>
         {!data.profile.onboarding_done && bannerVisible && (
@@ -207,8 +294,24 @@ export default function AppShell() {
 
       <Modal open={commandOpen} onClose={() => setCommandOpen(false)} title="Command center" description="Jump anywhere or start a new workflow.">
         <div className="command-list">
-          {[{ label: "Add influencer", to: "/app/influencers?new=1", icon: Users }, { label: "Add brand", to: "/app/brands?new=1", icon: Building2 }, { label: "Create campaign", to: "/app/campaigns?new=1", icon: BarChart3 }, { label: "Schedule meeting", to: "/app/calendar?new=1", icon: CalendarDays }, { label: "Search workspace", action: () => setSearchOpen(true), icon: Search }].map((command) => <button key={command.label} onClick={() => { setCommandOpen(false); if (command.to) navigate(command.to); else command.action?.(); }}><command.icon size={17} /><span>{command.label}</span><ChevronRight size={15} /></button>)}
+          {[{ label: "Add influencer", to: "/app/influencers?new=1", icon: Users }, { label: "Add brand", to: "/app/brands?new=1", icon: Building2 }, { label: "Create campaign", to: "/app/campaigns?new=1", icon: BarChart3 }, { label: "Schedule meeting", to: "/app/calendar?new=1", icon: CalendarDays }, { label: "Search workspace", action: () => setSearchOpen(true), icon: Search }, { label: "Settings", to: "/app/settings", icon: Settings }, { label: "Keyboard shortcuts", action: () => setShortcutsOpen(true), icon: Keyboard }, { label: "Sign out", action: () => setSignOutOpen(true), icon: LogOut }].map((command) => <button key={command.label} onClick={() => { setCommandOpen(false); if (command.to) navigate(command.to); else command.action?.(); }}><command.icon size={17} /><span>{command.label}</span><ChevronRight size={15} /></button>)}
         </div>
+      </Modal>
+
+      <Modal open={signOutOpen} onClose={() => setSignOutOpen(false)} title="Sign out" description={`Signed in as ${user?.email || "your account"}. Your workspace stays safe in the cloud.`}>
+        <div className="signout-options">
+          <button onClick={() => void logout()} disabled={signingOut}><LogOut size={17} /><span><strong>Sign out</strong><small>Leave this device. Your local copy stays for a fast next login.</small></span><ChevronRight size={15} /></button>
+          <button onClick={() => void logout({ clearDevice: true })} disabled={signingOut}><MonitorX size={17} /><span><strong>Sign out & clear this device</strong><small>Best on a shared or borrowed computer — removes the cached workspace.</small></span><ChevronRight size={15} /></button>
+          <button className="danger" onClick={() => void logout({ everywhere: true })} disabled={signingOut}><ShieldIcon /><span><strong>Sign out everywhere</strong><small>Ends every session on every device — use it if a device was lost.</small></span><ChevronRight size={15} /></button>
+        </div>
+        <div className="modal-actions"><Button variant="ghost" onClick={() => setSignOutOpen(false)}>Cancel</Button></div>
+      </Modal>
+
+      <Modal open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} title="Keyboard shortcuts" description="Move through your workspace without the mouse.">
+        <div className="shortcut-grid">{[
+          ["Search workspace", ["/"]], ["Quick actions", ["Ctrl", "K"]], ["Show shortcuts", ["?"]], ["Save notes / draft", ["Ctrl", "S"]], ["Close dialogs", ["Esc"]],
+          ["Go to dashboard", ["g", "d"]], ["Go to influencers", ["g", "i"]], ["Go to brands", ["g", "b"]], ["Go to campaigns", ["g", "c"]], ["Go to calendar", ["g", "k"]], ["Go to settings", ["g", "s"]],
+        ].map(([label, keys]) => <div key={label as string}><span>{label as string}</span><span>{(keys as string[]).map((k) => <kbd key={k}>{k}</kbd>)}</span></div>)}</div>
       </Modal>
 
       <Modal open={data.pendingLoss.length > 0} onClose={() => data.resolveLoss(null)} title="Deal lost" description={data.pendingLoss.length === 1 ? `${data.pendingLoss[0].name} — what happened? One tap, optional.` : `${data.pendingLoss.length} lost deals — one shared reason? One tap, optional.`}>

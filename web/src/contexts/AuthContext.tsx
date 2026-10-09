@@ -9,7 +9,7 @@ type AuthContextValue = {
   configured: boolean;
   signIn: (email: string, password: string) => Promise<string | null>;
   signUp: (email: string, password: string) => Promise<string | null>;
-  signOut: () => Promise<void>;
+  signOut: (opts?: { everywhere?: boolean; clearDevice?: boolean }) => Promise<void>;
   sendPasswordReset: (email: string) => Promise<string | null>;
   updatePassword: (password: string) => Promise<string | null>;
 };
@@ -117,8 +117,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return error?.message || null;
   };
 
-  const signOut = async () => {
-    await supabase.auth.signOut();
+  // everywhere: revokes every session on every device (stolen laptop, shared
+  // computer). clearDevice: also wipes this browser's cached workspace copy.
+  const signOut = async (opts?: { everywhere?: boolean; clearDevice?: boolean }) => {
+    const userId = session?.user?.id;
+    try {
+      await supabase.auth.signOut(opts?.everywhere ? { scope: "global" } : undefined);
+    } catch {
+      // Network failure: the local session is still cleared below.
+    }
+    if (opts?.clearDevice) {
+      try {
+        Object.keys(localStorage)
+          .filter((key) => key.startsWith("influenceflow.") || key.startsWith("if.") || key.startsWith("if-") || (userId && key.includes(userId)))
+          .forEach((key) => localStorage.removeItem(key));
+      } catch {
+        // storage unavailable
+      }
+    }
     setSession(null);
   };
 

@@ -22,8 +22,11 @@ type Props = {
 
 const AUTOSAVE_MS = 1200;
 
-export function EmailDraftPanel({ recordId, recipient, recipientName, subject, body, vars, onSave, onSent, sentLabel }: Props) {
+export function EmailDraftPanel({ recordId, recipient, recipientName, subject, body, vars: recordVars, onSave, onSent, sentLabel }: Props) {
   const data = useData();
+  // Profile-level tokens ({agency}, {signature}, {my_name}) apply everywhere.
+  const prefs = data.profile.preferences;
+  const vars: Record<string, string> = { agency: prefs?.agency_name || "", signature: prefs?.email_signature || "", ...recordVars, my_name: recordVars.my_name || data.profile.display_name };
   const { toast } = useToast();
   const [draftSubject, setDraftSubject] = useState(subject);
   const [draftBody, setDraftBody] = useState(body);

@@ -8,8 +8,17 @@ export const today = () => dayKey(new Date());
 
 export const sanitize = (value: string) => value.replace(/<[^>]*>/g, "").trim();
 
+// Workspace currency, set once by the data layer from the user's settings,
+// so every money() call across the app follows it.
+let activeCurrency = "USD";
+export const setActiveCurrency = (currency: string) => {
+  activeCurrency = currency || "USD";
+};
+export const currencySymbol = () =>
+  new Intl.NumberFormat("en-US", { style: "currency", currency: activeCurrency }).formatToParts(0).find((p) => p.type === "currency")?.value || "$";
+
 export const money = (value: number) =>
-  new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(value || 0);
+  new Intl.NumberFormat("en-US", { style: "currency", currency: activeCurrency, maximumFractionDigits: 0 }).format(value || 0);
 
 export const compact = (value: number) =>
   new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(value || 0);
@@ -225,14 +234,14 @@ export const lossReasonLabel = (value: string) =>
 
 export const firstName = (name: string) => name.trim().split(/\s+/)[0] || name;
 
-export const TEMPLATE_TOKENS = ["{first_name}", "{name}", "{niche}", "{platform}", "{channel}", "{company}", "{my_name}"] as const;
+export const TEMPLATE_TOKENS = ["{first_name}", "{name}", "{niche}", "{platform}", "{channel}", "{company}", "{my_name}", "{agency}", "{signature}"] as const;
 
 // Fills known {tokens}; unknown or empty ones stay visible so nothing is
 // silently dropped from an email.
 export const fillTemplate = (value: string, vars: Record<string, string>) =>
-  value.replace(/\{(first_name|name|niche|platform|channel|my_name|company|domain)\}/g, (match, key: string) => vars[key] || match);
+  value.replace(/\{(first_name|name|niche|platform|channel|my_name|company|domain|agency|signature)\}/g, (match, key: string) => vars[key] || match);
 
-export const unfilledTokens = (value: string) => Array.from(new Set(value.match(/\{(first_name|name|niche|platform|channel|my_name|company|domain)\}/g) || []));
+export const unfilledTokens = (value: string) => Array.from(new Set(value.match(/\{(first_name|name|niche|platform|channel|my_name|company|domain|agency|signature)\}/g) || []));
 
 export const gmailComposeUrl = (to: string, subject: string, body: string) =>
   `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(to)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;

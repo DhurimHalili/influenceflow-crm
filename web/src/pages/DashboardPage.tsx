@@ -190,6 +190,7 @@ export default function DashboardPage() {
       seen.add(item.to);
       out.push(item);
     };
+    campaigns.filter((item) => item.status !== "cancelled" && item.payment_status !== "paid" && item.invoice_due && isPastDay(item.invoice_due)).forEach((item) => push({ id: `inv-${item.id}`, type: `Invoice · ${dueLabel(item.invoice_due)}`, title: item.name, detail: `${data.brands.find((b) => b.id === item.brand_id)?.name || "Brand"} owes ${money(item.agreed_payment)}`, to: `/app/campaigns?id=${item.id}&billing=1`, urgent: true, rank: 0 }));
     campaigns.filter((item) => item.status === "active" && isOverdue(item.due_date)).forEach((item) => push({ id: item.id, type: "Campaign overdue", title: item.name, detail: `Was due ${dateLabel(item.due_date)}`, to: `/app/campaigns?id=${item.id}`, urgent: true, rank: 0 }));
     const actionables = [
       ...creators.map((c) => ({ ...c, kind: "Influencer", to: `/app/influencers/${c.id}` })),
@@ -212,7 +213,7 @@ export default function DashboardPage() {
         <Metric label="Active deal value" value={money(activeValue)} detail={<><span className="positive"><TrendingUp size={13} /> {active.length} live deals</span></>} icon={<DollarSign size={15} />} />
         <Metric label="Agency revenue" value={money(agencyRevenue)} detail={`${activeValue ? Math.round(agencyRevenue / activeValue * 100) : 0}% retained`} icon={<Sparkles size={15} />} />
         <Metric label="Creator payouts" value={money(creatorPayout)} detail="Across active campaigns" icon={<Users size={15} />} />
-        <Metric label="Avg. deal value" value={money(campaigns.reduce((sum, item) => sum + item.agreed_payment, 0) / Math.max(campaigns.length, 1))} detail={`${campaigns.length} total campaigns`} icon={<BarChart3 size={15} />} />
+        <Metric label="Outstanding invoices" value={money(campaigns.filter((item) => item.status !== "cancelled" && item.payment_status !== "paid").reduce((sum, item) => sum + item.agreed_payment, 0))} detail={(() => { const late = campaigns.filter((item) => item.status !== "cancelled" && item.payment_status !== "paid" && item.invoice_due && isPastDay(item.invoice_due)).length; return late ? <span className="negative">{late} overdue</span> : `${campaigns.filter((item) => item.payment_status === "paid").length} paid campaigns`; })()} icon={<BarChart3 size={15} />} />
       </section>
 
       <section className="dash-panel momentum-panel">
