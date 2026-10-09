@@ -1,9 +1,8 @@
 import { motion } from "framer-motion";
-import { ArrowRight, CalendarDays, Check, ChevronRight, Code2, Contact, Database, HeartHandshake, KeyRound, LockKeyhole, Menu, MessageCircle, Plus, ShieldCheck, Sparkles, Users, X } from "lucide-react";
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { ArrowRight, CalendarDays, Check, ChevronRight, Code2, Contact, Database, Eye, EyeOff, HeartHandshake, KeyRound, LockKeyhole, Menu, MessageCircle, Plus, ShieldCheck, Sparkles, Users, X } from "lucide-react";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
-import { supabase } from "../lib/supabase";
 import { useToast } from "../contexts/ToastContext";
 import { Button, Input, Logo } from "../components/ui";
 
@@ -49,71 +48,119 @@ export function LandingPage() {
   </div>;
 }
 
+const LAST_EMAIL = "if.last-email";
+const readLastEmail = () => { try { return localStorage.getItem(LAST_EMAIL) || ""; } catch { return ""; } };
+
+// Common domain typos → suggestion ("gmial.com" → "gmail.com").
+const DOMAIN_FIXES: Record<string, string> = { "gmial.com": "gmail.com", "gmai.com": "gmail.com", "gmal.com": "gmail.com", "gmail.co": "gmail.com", "gmail.con": "gmail.com", "gamil.com": "gmail.com", "hotmial.com": "hotmail.com", "hotmail.co": "hotmail.com", "outlok.com": "outlook.com", "outlook.co": "outlook.com", "yahooo.com": "yahoo.com", "yaho.com": "yahoo.com", "icloud.co": "icloud.com" };
+const emailSuggestion = (email: string) => {
+  const value = email.trim().toLowerCase();
+  const at = value.lastIndexOf("@");
+  if (at < 1) return "";
+  const fix = DOMAIN_FIXES[value.slice(at + 1)];
+  return fix ? `${value.slice(0, at + 1)}${fix}` : "";
+};
+
+const strengthOf = (value: string) => {
+  let score = 0;
+  if (value.length >= 8) score++;
+  if (value.length >= 12) score++;
+  if (/[A-Z]/.test(value) && /[a-z]/.test(value)) score++;
+  if (/\d/.test(value)) score++;
+  if (/[^A-Za-z0-9]/.test(value)) score++;
+  const level = value.length < 8 ? 0 : Math.min(4, score);
+  return { level, label: ["Too short", "Weak", "Fair", "Good", "Strong"][level] };
+};
+
+function PasswordField({ label, value, onChange, autoComplete, placeholder, meter = false, autoFocus = false }: { label: string; value: string; onChange: (value: string) => void; autoComplete: string; placeholder?: string; meter?: boolean; autoFocus?: boolean }) {
+  const [show, setShow] = useState(false);
+  const [caps, setCaps] = useState(false);
+  const strength = strengthOf(value);
+  return <label className="field-wrap password-field"><span className="field-label">{label}</span><span className="password-input"><input className="field" type={show ? "text" : "password"} value={value} onChange={(event) => onChange(event.target.value)} onKeyUp={(event) => setCaps(event.getModifierState?.("CapsLock") ?? false)} autoComplete={autoComplete} placeholder={placeholder} autoFocus={autoFocus} required /><button type="button" onClick={() => setShow(!show)} aria-label={show ? "Hide password" : "Show password"} title={show ? "Hide password" : "Show password"}>{show ? <EyeOff size={16} /> : <Eye size={16} />}</button></span>{caps && <span className="field-hint caps-hint">Caps Lock is on</span>}{meter && value && <span className={`pw-meter level-${strength.level}`}><i><b /></i><span>{strength.label}</span></span>}</label>;
+}
+
+function AuthShell({ kicker, title, lead, children }: { kicker: string; title: string; lead: string; children: ReactNode }) {
+  return <div className="auth-page"><div className="auth-brand"><Link to="/"><Logo inverse /></Link><div><span>{kicker}</span><h1>{title}</h1><p>{lead}</p></div><small>InfluenceFlow / Open source under MIT</small></div><main className="auth-main"><div className="auth-form">{children}<small>By continuing you agree to our <Link to="/terms">Terms</Link> and <Link to="/privacy">Privacy Policy</Link>.</small></div></main></div>;
+}
+
 function AuthPage({ mode }: { mode: "login" | "signup" }) {
-  const { user, signIn, signUp } = useAuth();
+  const { user, loading: authLoading, recovery, signIn, signUp } = useAuth();
   const navigate = useNavigate();
-  const [email, setEmail] = useState("");
+  const location = useLocation();
+  const presetEmail = new URLSearchParams(location.search).get("email") || "";
+  const [email, setEmail] = useState(() => presetEmail || (mode === "login" ? readLastEmail() : ""));
   const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
+  const [error, setError] = useState<{ message: string; code?: string; attemptsLeft?: number } | null>(null);
   const [loading, setLoading] = useState(false);
-  if (user) return <Navigate to="/app" replace />;
+  if (!authLoading && user) return <Navigate to={recovery ? "/update-password" : ((location.state as { from?: { pathname?: string } } | null)?.from?.pathname || "/app")} replace />;
+  const suggestion = emailSuggestion(email);
   const submit = async (event: FormEvent) => {
-    event.preventDefault(); setError(""); setLoading(true);
-    const message = await (mode === "login" ? signIn(email, password) : signUp(email, password));
+    event.preventDefault(); setError(null); setLoading(true);
+    const result = await (mode === "login" ? signIn(email, password) : signUp(email, password));
     setLoading(false);
-    if (message) setError(message); else navigate("/app");
+    if (result.error) { setError({ message: result.error, code: result.code, attemptsLeft: result.attemptsLeft }); return; }
+    try { localStorage.setItem(LAST_EMAIL, email.trim().toLowerCase()); } catch { /* ignore */ }
+    navigate((location.state as { from?: { pathname?: string } } | null)?.from?.pathname || "/app", { replace: true });
   };
-  return <div className="auth-page"><div className="auth-brand"><Link to="/"><Logo inverse /></Link><div><span>{mode === "login" ? "Welcome back" : "Your agency, in flow"}</span><h1>{mode === "login" ? "Pick up where the relationship left off." : "Build a calmer way to run partnerships."}</h1><p>Private, focused, and designed around the work that moves creator businesses forward.</p></div><small>InfluenceFlow / Open source under MIT</small></div><main className="auth-main"><div className="auth-form"><span className="auth-kicker">{mode === "login" ? "Sign in" : "Create your workspace"}</span><h2>{mode === "login" ? "Welcome back" : "Start free"}</h2><p>{mode === "login" ? "Enter your workspace credentials." : "No credit card. Your data stays portable."}</p><form onSubmit={submit}><Input label="Email address" type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@agency.com" required /><Input label="Password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="At least 6 characters" minLength={6} required />{error && <div className="form-error">{error}</div>}<Button type="submit" size="lg" loading={loading}>{mode === "login" ? "Open workspace" : "Create private workspace"}<ArrowRight size={17} /></Button></form>{mode === "login" && <p className="auth-switch"><Link to="/forgot-password">Forgot your password?</Link></p>}<p className="auth-switch">{mode === "login" ? "New to InfluenceFlow?" : "Already have a workspace?"} <Link to={mode === "login" ? "/signup" : "/login"}>{mode === "login" ? "Create one" : "Log in"}</Link></p><small>By continuing you agree to our <Link to="/terms">Terms</Link> and <Link to="/privacy">Privacy Policy</Link>.</small></div></main></div>;
+  const resetLink = `/forgot-password?email=${encodeURIComponent(email.trim())}`;
+  return <AuthShell kicker={mode === "login" ? "Welcome back" : "Your agency, in flow"} title={mode === "login" ? "Pick up where the relationship left off." : "Build a calmer way to run partnerships."} lead="Private, focused, and designed around the work that moves creator businesses forward.">
+    <span className="auth-kicker">{mode === "login" ? "Sign in" : "Create your workspace"}</span><h2>{mode === "login" ? "Welcome back" : "Start free"}</h2><p>{mode === "login" ? "Enter the email and password you signed up with." : "No credit card. Your data stays private and portable."}</p>
+    <form onSubmit={submit} noValidate>
+      <Input label="Email address" type="email" inputMode="email" autoComplete="email" autoCapitalize="none" spellCheck={false} value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@agency.com" required autoFocus={!email} />
+      {suggestion && <button type="button" className="email-suggest" onClick={() => setEmail(suggestion)}>Did you mean <b>{suggestion}</b>?</button>}
+      <PasswordField label="Password" value={password} onChange={setPassword} autoComplete={mode === "login" ? "current-password" : "new-password"} placeholder={mode === "login" ? "Your password" : "At least 8 characters"} meter={mode === "signup"} autoFocus={!!email} />
+      {mode === "login" && <Link className="forgot-inline" to={resetLink}>Forgot password?</Link>}
+      {error && <div className="form-error" role="alert"><span>{error.message}{error.attemptsLeft !== undefined && error.attemptsLeft <= 3 ? ` ${error.attemptsLeft} attempt${error.attemptsLeft === 1 ? "" : "s"} left before a short lock.` : ""}</span>{(error.code === "invalid_credentials" || error.code === "locked") && <Link to={resetLink}>Reset password for {email.trim() || "this email"} →</Link>}{error.code === "exists" && <Link to={`/login?email=${encodeURIComponent(email.trim())}`}>Sign in instead →</Link>}</div>}
+      <Button type="submit" size="lg" loading={loading} disabled={!email.trim() || !password}>{mode === "login" ? "Open workspace" : "Create private workspace"}<ArrowRight size={17} /></Button>
+    </form>
+    <p className="auth-switch">{mode === "login" ? "New to InfluenceFlow?" : "Already have a workspace?"} <Link to={mode === "login" ? "/signup" : "/login"}>{mode === "login" ? "Create one" : "Log in"}</Link></p>
+  </AuthShell>;
 }
 
 export function ForgotPasswordPage() {
-  const { sendPasswordReset } = useAuth();
-  const [email, setEmail] = useState("");
+  const { sendPasswordReset, linkError } = useAuth();
+  const location = useLocation();
+  const [email, setEmail] = useState(() => new URLSearchParams(location.search).get("email") || readLastEmail());
   const [error, setError] = useState("");
-  const [sent, setSent] = useState(false);
+  const [sentTo, setSentTo] = useState("");
   const [loading, setLoading] = useState(false);
-  const submit = async (event: FormEvent) => {
-    event.preventDefault(); setError(""); setLoading(true);
+  const [cooldown, setCooldown] = useState(0);
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const timer = window.setTimeout(() => setCooldown((c) => c - 1), 1000);
+    return () => window.clearTimeout(timer);
+  }, [cooldown]);
+  const suggestion = emailSuggestion(email);
+  const send = async () => {
+    setError(""); setLoading(true);
     const message = await sendPasswordReset(email);
     setLoading(false);
-    if (message) setError(message); else setSent(true);
+    if (message) { setError(message); return; }
+    setSentTo(email.trim().toLowerCase());
+    setCooldown(60);
   };
-  return <div className="auth-page"><div className="auth-brand"><Link to="/"><Logo inverse /></Link><div><span>Account recovery</span><h1>Get back into your workspace.</h1><p>We will email you a secure sign-in link to set a new password.</p></div><small>InfluenceFlow / Open source under MIT</small></div><main className="auth-main"><div className="auth-form"><span className="auth-kicker">Reset password</span><h2>Forgot password</h2>{sent ? <><p>Check your inbox. If an account exists for {email.trim()}, a reset link is on its way. Use it promptly — links expire automatically.</p><p className="auth-switch"><Link to="/login">Back to log in</Link></p></> : <><p>Enter your account email and we will send you a reset link.</p><form onSubmit={submit}><Input label="Email address" type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@agency.com" required />{error && <div className="form-error">{error}</div>}<Button type="submit" size="lg" loading={loading}>Send reset link<ArrowRight size={17} /></Button></form><p className="auth-switch"><Link to="/login">Back to log in</Link></p></>}<small>By continuing you agree to our <Link to="/terms">Terms</Link> and <Link to="/privacy">Privacy Policy</Link>.</small></div></main></div>;
+  const submit = (event: FormEvent) => { event.preventDefault(); void send(); };
+  return <AuthShell kicker="Account recovery" title="Get back into your workspace." lead="We'll email you a secure link to choose a new password. Your workspace and data stay exactly as they are.">
+    <span className="auth-kicker">Reset password</span><h2>{sentTo ? "Check your inbox" : "Forgot password"}</h2>
+    {linkError && !sentTo && <div className="form-error" role="alert"><span>{linkError}</span></div>}
+    {sentTo ? <div className="reset-sent">
+      <p>If <b>{sentTo}</b> has an InfluenceFlow account, a reset link is on its way. It works once and expires after a short time.</p>
+      <ul className="reset-tips"><li>Give it a minute, then check <b>Spam</b> / <b>Promotions</b>.</li><li>No email? Make sure this is the exact address you <b>signed up</b> with — we can't send links to addresses without an account.</li><li>Open the link in this browser if you can.</li></ul>
+      <div className="reset-actions"><Button type="button" variant="secondary" onClick={() => void send()} disabled={cooldown > 0 || loading} loading={loading}>{cooldown > 0 ? `Resend in ${cooldown}s` : "Resend link"}</Button><Button type="button" variant="ghost" onClick={() => { setSentTo(""); setError(""); }}>Use a different email</Button></div>
+      {error && <div className="form-error" role="alert"><span>{error}</span></div>}
+      <p className="auth-switch"><Link to={`/login?email=${encodeURIComponent(sentTo)}`}>Back to log in</Link></p>
+    </div> : <><p>Enter the email you signed up with and we'll send you a reset link.</p><form onSubmit={submit} noValidate><Input label="Email address" type="email" inputMode="email" autoComplete="email" autoCapitalize="none" spellCheck={false} value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@agency.com" required autoFocus />{suggestion && <button type="button" className="email-suggest" onClick={() => setEmail(suggestion)}>Did you mean <b>{suggestion}</b>?</button>}{error && <div className="form-error" role="alert"><span>{error}</span></div>}<Button type="submit" size="lg" loading={loading} disabled={!email.trim()}>Send reset link<ArrowRight size={17} /></Button></form><p className="auth-switch"><Link to={`/login${email.trim() ? `?email=${encodeURIComponent(email.trim())}` : ""}`}>Back to log in</Link></p></>}
+  </AuthShell>;
 }
 
 export function UpdatePasswordPage() {
-  const { user, updatePassword } = useAuth();
+  const { user, loading: authLoading, linkError, updatePassword } = useAuth();
   const navigate = useNavigate();
-  const [status, setStatus] = useState<"verifying" | "ready" | "invalid" | "done">("verifying");
-  const [detail, setDetail] = useState("");
   const [pw1, setPw1] = useState("");
   const [pw2, setPw2] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const verified = useRef(false);
-  useEffect(() => {
-    if (verified.current) return;
-    verified.current = true;
-    let cancelled = false;
-    const run = async () => {
-      const hash = window.location.hash || "";
-      const query = hash.includes("?") ? hash.slice(hash.indexOf("?") + 1) : "";
-      const code = new URLSearchParams(query).get("code");
-      if (!code) {
-        const { data } = await supabase.auth.getSession();
-        if (cancelled) return;
-        if (data.session || user) setStatus("ready");
-        else { setStatus("invalid"); setDetail("This reset link is invalid or has already been used. Request a new one below."); }
-        return;
-      }
-      const { error } = await supabase.auth.exchangeCodeForSession(code);
-      if (cancelled) return;
-      if (error) { setStatus("invalid"); setDetail(error.message); }
-      else setStatus("ready");
-    };
-    void run();
-    return () => { cancelled = true; };
-  }, []);
+  const [done, setDone] = useState(false);
   const submit = async (event: FormEvent) => {
     event.preventDefault(); setError("");
     if (pw1.length < 8) { setError("New password needs at least 8 characters."); return; }
@@ -121,9 +168,15 @@ export function UpdatePasswordPage() {
     setLoading(true);
     const message = await updatePassword(pw1);
     setLoading(false);
-    if (message) setError(message); else setStatus("done");
+    if (message) setError(message); else setDone(true);
   };
-  return <div className="auth-page"><div className="auth-brand"><Link to="/"><Logo inverse /></Link><div><span>Account recovery</span><h1>Choose a new password.</h1><p>Pick something strong and unique — at least 8 characters.</p></div><small>InfluenceFlow / Open source under MIT</small></div><main className="auth-main"><div className="auth-form"><span className="auth-kicker">Reset password</span><h2>New password</h2>{status === "verifying" && <p>Verifying your reset link…</p>}{status === "invalid" && <><div className="form-error">{detail}</div><p className="auth-switch"><Link to="/forgot-password">Request a new link</Link></p></>}{status === "ready" && <form onSubmit={submit}><Input label="New password" type="password" value={pw1} onChange={(event) => setPw1(event.target.value)} placeholder="At least 8 characters" minLength={8} required /><Input label="Confirm password" type="password" value={pw2} onChange={(event) => setPw2(event.target.value)} placeholder="Repeat it" minLength={8} required />{error && <div className="form-error">{error}</div>}<Button type="submit" size="lg" loading={loading}>Set new password<ArrowRight size={17} /></Button></form>}{status === "done" && <><p>Your password is set. You are back in.</p><Button size="lg" onClick={() => navigate("/app")}>Open my workspace<ArrowRight size={17} /></Button></>}</div></main></div>;
+  return <AuthShell kicker="Account recovery" title="Choose a new password." lead="Pick something strong and unique — at least 8 characters. Your workspace data is untouched.">
+    <span className="auth-kicker">Reset password</span><h2>{done ? "Password updated" : "New password"}</h2>
+    {authLoading ? <p>Verifying your reset link…</p>
+      : done ? <><p>Your new password is set and you're signed in on this device.</p><Button size="lg" onClick={() => navigate("/app", { replace: true })}>Open my workspace<ArrowRight size={17} /></Button></>
+      : user ? <form onSubmit={submit} noValidate><p>Signed in as <b>{user.email}</b>.</p><PasswordField label="New password" value={pw1} onChange={setPw1} autoComplete="new-password" placeholder="At least 8 characters" meter autoFocus /><PasswordField label="Confirm password" value={pw2} onChange={setPw2} autoComplete="new-password" placeholder="Repeat it" />{pw2 && pw1 !== pw2 && <span className="field-hint error-text">Passwords don't match yet.</span>}{error && <div className="form-error" role="alert"><span>{error}</span></div>}<Button type="submit" size="lg" loading={loading} disabled={pw1.length < 8 || pw1 !== pw2}>Set new password<ArrowRight size={17} /></Button></form>
+      : <><div className="form-error" role="alert"><span>{linkError || "This reset link is invalid, expired or was already used. Request a fresh one — it only takes a moment."}</span></div><p className="auth-switch"><Link to="/forgot-password">Request a new link</Link> · <Link to="/login">Back to log in</Link></p></>}
+  </AuthShell>;
 }
 
 export const LoginPage = () => <AuthPage mode="login" />;

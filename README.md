@@ -105,7 +105,8 @@ npm run dev
 
 1. Create a project at [supabase.com](https://supabase.com) (free tier is fine).
 2. In **SQL Editor**, run the files in `supabase/migrations/` in timestamp order (starting with the `20200101` bootstrap — it creates the core tables, RLS and policies). They create core CRM tables, RLS policies, and auto-seed for new users.
-3. In **Auth → Configuration**, set the site URL and add your app URL + `/#/update-password` to **Redirect URLs** (password recovery links must be allowlisted).
+3. In **Auth → URL Configuration**, set the Site URL to your app URL and add your app URL + `#/update-password` to **Redirect URLs** (password recovery links must be allow-listed).
+4. In **Auth → Emails → SMTP Settings**, connect your own SMTP provider (Resend, Postmark, Brevo, Gmail app password…). Supabase's built-in sender only delivers to your own team's addresses and ~2 emails per hour, so password-reset emails to your users silently never arrive without it.
 
 </details>
 
