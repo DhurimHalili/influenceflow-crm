@@ -251,6 +251,9 @@ export default function AppShell() {
     </aside>
   );
 
+  // New page opens at the top; list pages restore their own position after.
+  useEffect(() => { window.scrollTo(0, 0); }, [location.pathname]);
+
   return (
     <div className="app-shell">
       {sidebar}

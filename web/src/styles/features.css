@@ -336,3 +336,8 @@ kbd { font: 600 10px ui-monospace, SFMono-Regular, Menlo, monospace; padding: 1p
 .cc-go { margin-left: auto; color: var(--muted); transition: transform .16s ease, color .16s ease; }
 .creator-card:hover .cc-go { color: var(--accent); transform: translateX(3px); }
 @media (max-width: 560px) { .creator-card-grid { grid-template-columns: 1fr; } }
+
+/* Reset chip next to the result count — shown whenever search, filters or
+   sort differ from the default (they persist while you move around). */
+.results-meta .reset-view { display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 10px; border: 1px solid rgba(var(--accent-rgb), .35); border-radius: 13px; background: var(--accent-soft); color: var(--accent); font-size: 12px; font-weight: 600; cursor: pointer; }
+.results-meta .reset-view:hover { background: rgba(var(--accent-rgb), .18); }

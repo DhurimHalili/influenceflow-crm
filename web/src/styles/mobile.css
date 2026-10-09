@@ -1,0 +1,83 @@
+/* Responsive polish for tablets and phones. Loaded last so it can refine the
+   base layout without touching desktop. Found with an automated overflow /
+   tap-target sweep of every page at 360, 390 and 768px. */
+
+/* Never let a stray wide element push the page sideways. */
+html, body { overflow-x: clip; }
+img, svg, video { max-width: 100%; }
+
+@media (max-width: 1180px) {
+  .entity-toolbar { flex-wrap: wrap; }
+  .toolbar-filters { flex-wrap: wrap; }
+  .app-main .embedded-hire .hire-services { margin: 0; border-radius: 14px; }
+}
+
+@media (max-width: 960px) {
+  /* Tablet: the toolbar gets its own row under the search so view switches
+     are never pushed off-screen. */
+  .entity-toolbar .search-input { flex: 1 1 260px; }
+  .tabs { max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tabs > button { flex: 0 0 auto; white-space: nowrap; }
+}
+
+@media (max-width: 720px) {
+  /* Top bar: one-line search label. */
+  .global-search { min-width: 0; }
+  .global-search span { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+
+  /* Page header buttons share the row evenly and never clip their label. */
+  .page-header .page-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+  .page-header .page-actions .btn { flex: 1 1 0; min-width: 0; padding-inline: 10px; white-space: nowrap; }
+
+  /* Profile headers: actions drop under the name as labelled buttons
+     (icon-only squares were unreadable, and blank where there was no icon). */
+  .detail-header { flex-direction: column; align-items: stretch; gap: 14px; }
+  .detail-header > .page-actions { width: 100%; display: flex; flex-wrap: wrap; justify-content: flex-start; gap: 8px; margin: 0; }
+  .detail-header > .page-actions .btn { flex: 1 1 auto; width: auto; font-size: 13px; padding: 0 12px; }
+  .detail-header > .page-actions .btn svg { margin: 0 2px 0 0; }
+  .detail-header > .page-actions select { flex: 1 1 140px; }
+
+  /* List toolbar: wrap instead of hiding controls in a sideways scroller. */
+  .toolbar-filters { overflow: visible; flex-wrap: wrap; padding-bottom: 0; }
+  .toolbar-filters > button, .inline-select { height: 40px; }
+  .inline-select select { max-width: 150px; }
+
+  /* Panel headings with tabs (dashboard momentum, etc.). */
+  .panel-heading { flex-wrap: wrap; gap: 10px; }
+  .panel-heading .tabs { margin-bottom: 0; }
+
+  /* Bulk bar stays reachable and scrolls on narrow phones. */
+  .bulk-bar { gap: 10px; }
+  .bulk-bar > * { flex: 0 0 auto; }
+
+  /* Modals: full-width sheets with room to scroll and safe-area padding. */
+  .modal { padding-bottom: calc(18px + env(safe-area-inset-bottom)); }
+  .modal-actions { flex-wrap: wrap; }
+  .modal-actions .btn { flex: 1 1 auto; }
+
+  /* Inputs at 16px stop iOS Safari zooming into the page on focus. */
+  input.field, select.field, textarea.field, .field input, .field select, .field textarea, .search-input input { font-size: 16px; }
+}
+
+@media (max-width: 430px) {
+  .page-header .page-actions .btn { font-size: 13px; gap: 5px; }
+  .detail-identity h1 { font-size: 22px; word-break: break-word; }
+}
+
+/* Touch screens: small icon controls get a finger-sized hit area without
+   changing how they look. */
+@media (pointer: coarse) {
+  .flag-btn { padding: 10px; margin: -4px; }
+  .star-input button { padding: 7px 5px; }
+  .cal-check, .cal-row-link { position: relative; }
+  .cal-check::after, .cal-row-link::after { content: ""; position: absolute; inset: -10px; }
+  .data-table input[type="checkbox"], .mobile-card-grid input[type="checkbox"] { width: 20px; height: 20px; }
+  .icon-btn { min-width: 40px; min-height: 40px; }
+}
+
+@media (max-width: 720px) {
+  /* Short tab rows inside panels fill the width instead of clipping. */
+  .panel-heading .tabs { display: grid; grid-template-columns: repeat(3, 1fr); width: 100%; overflow: visible; }
+  .panel-heading .tabs > button { min-width: 0; padding-inline: 4px; font-size: 12px; }
+}
