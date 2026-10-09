@@ -103,7 +103,12 @@ export function EmailDraftPanel({ recordId, recipient, recipientName, subject, b
         [vars.first_name, "{first_name}"],
         [vars.company, "{company}"],
       ];
-      for (const [real, token] of pairs) if (real && real.length > 2) next = next.split(real).join(token);
+      // Whole words only: "Dev" must not turn "Developer" into "{first_name}eloper".
+      for (const [real, token] of pairs) {
+        if (!real || real.length < 2) continue;
+        const escaped = real.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        next = next.replace(new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, "gu"), token);
+      }
       return next;
     };
     data.updateProfile({ email_templates: [...templates, { id: uid(), name: name.trim(), subject: tokenize(draftSubject), body: tokenize(draftBody) }] });

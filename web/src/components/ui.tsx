@@ -165,3 +165,8 @@ export function StarInput({ value, onChange, size = 22 }: { value: number; onCha
     </span>
   );
 }
+// Shown on a profile opened by link after it was archived: makes the state
+// obvious and offers a one-click restore.
+export function ArchivedBanner({ noun, archivedAt, onRestore }: { noun: string; archivedAt: string; onRestore: () => void }) {
+  return <div className="archived-banner" role="status"><Archive size={18} /><span><strong>This {noun} is archived</strong><small>Archived {new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(new Date(archivedAt))}. It's hidden from lists, stats and exports until restored.</small></span><Button size="sm" variant="secondary" onClick={onRestore}>Restore</Button></div>;
+}

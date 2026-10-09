@@ -6,7 +6,9 @@ export const uid = () => crypto.randomUUID();
 // yesterday's date after midnight for anyone east of Greenwich.
 export const today = () => dayKey(new Date());
 
-export const sanitize = (value: string) => value.replace(/<[^>]*>/g, "").trim();
+// Strips real HTML tags only. Text such as "budget <5k and >3k" is kept:
+// React escapes everything it renders, so plain angle brackets are safe.
+export const sanitize = (value: string) => value.replace(/<\/?[a-z][a-z0-9-]*(\s[^<>]*)?\/?>/gi, "").trim();
 
 // Workspace currency, set once by the data layer from the user's settings,
 // so every money() call across the app follows it.
@@ -112,7 +114,7 @@ export const toCSV = (rows: Record<string, string | number | boolean | null | un
 export const CSV_BOM = "\ufeff";
 
 export const isValidEmail = (value: string) => !value || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
-export const isValidUrl = (value: string) => !value || /^(https?:\/\/)?[\w.-]+\.[a-z]{2,}/i.test(value);
+export const isValidUrl = (value: string) => !value || /^(https?:\/\/)?[\w.-]+\.[a-z]{2,}(:\d+)?([/?#]\S*)?$/i.test(value.trim());
 
 export const followupWords = (count: number) =>
   count <= 0 ? "No follow-ups yet" : count === 1 ? "Followed up once" : count === 2 ? "Followed up twice" : `Followed up ${count} times`;
@@ -267,3 +269,19 @@ export const OUTREACH_STAGES = ["contacted", "replied", "negotiating", "roster",
 // a legacy whole-star rating for rows imported before the breakdown existed.
 export const creatorScore = (creator: DimValues & { stars?: number | null }, weights?: Partial<RatingWeightsValue> | null) =>
   ratedCount(creator) > 0 ? ratingScore(creator, weights) : Math.min(5, Math.max(0, Number(creator.stars) || 0));
+
+// Spreadsheet header normalisation shared by every importer.
+export const headerKey = (cell: string) => cell.trim().toLowerCase().replace(/[ .-]+/g, "_");
+
+// A first row is a header only if it carries no data (no email / link) and at
+// least one cell is exactly a known column name. Substring tests misread real
+// rows ("Rob Stark" contains "star", "Typeform" contains "type").
+export const looksLikeHeader = (cells: string[] | undefined, known: string[]) => {
+  if (!cells?.length) return false;
+  if (cells.some((cell) => /@|:\/\//.test(cell))) return false;
+  const set = new Set(known);
+  return cells.some((cell) => set.has(headerKey(cell)));
+};
+
+// Undo the export's formula guard ('=SUM… → =SUM…) so a round trip is lossless.
+export const unguard = (cell: string) => (/^'[=+\-@\t\r]/.test(cell) ? cell.slice(1) : cell);

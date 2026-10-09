@@ -166,3 +166,21 @@
 .export-formats button small { color: var(--muted); font-size: 11px; }
 .export-formats button.selected { border-color: var(--accent); background: var(--accent-soft); }
 .export-formats button.selected > svg { color: var(--accent); }
+
+/* ---------- Mobile overflow guards ---------- */
+@media (max-width: 960px) {
+  /* minmax(0,1fr): a wide table inside a column scrolls instead of widening the page */
+  .detail-grid { grid-template-columns: minmax(0, 1fr); }
+  .detail-grid main, .detail-grid aside, .detail-section, .detail-side-section { min-width: 0; }
+  .detail-section table, .people-table { display: block; max-width: 100%; overflow-x: auto; }
+}
+.momentum-panel .panel-heading .tabs, .calendar-toolbar .tabs { max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+.momentum-panel .panel-heading .tabs button { flex: none; }
+.momentum-panel .panel-heading > div:first-child { min-width: 0; }
+
+/* ---------- Archived record banner ---------- */
+.archived-banner { display: flex; align-items: center; gap: 12px; margin: 0 0 16px; padding: 12px 14px; border: 1px solid color-mix(in srgb, var(--warning) 40%, var(--line)); border-radius: 12px; background: color-mix(in srgb, var(--warning) 9%, var(--surface)); }
+.archived-banner > svg { flex: none; color: var(--warning); }
+.archived-banner span { flex: 1; font-size: 13px; }
+.archived-banner strong { display: block; }
+.archived-banner small { color: var(--muted); font-size: 12px; }

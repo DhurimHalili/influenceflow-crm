@@ -33,7 +33,11 @@ function RequireAuth({ children }: { children: ReactNode }) {
   const { user, loading } = useAuth();
   const location = useLocation();
   if (loading) return <LoadingScreen />;
-  if (!user) return <Navigate to="/login" state={{ from: location }} replace />;
+  // Signed out on a protected page: redirect to /login, and render the login
+  // form right here too — if the redirect ever races another navigation
+  // (e.g. a URL opened the instant sign-out finishes) the page is never blank.
+  if (!user)
+    return <><Navigate to="/login" state={{ from: location }} replace /><LoginPage returnTo={location.pathname} /></>;
   return children;
 }
 

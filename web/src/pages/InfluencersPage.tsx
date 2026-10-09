@@ -7,10 +7,11 @@ import { ExportDialog } from "../components/ExportDialog";
 import { CREATOR_HEADERS, creatorRow } from "../lib/exports";
 import { cpm, EMPTY_RATES, RATE_FIELDS } from "../lib/prefs";
 import { NextActionEditor } from "../components/NextAction";
-import { Avatar, Button, EmptyState, FieldMergeReview, Input, Modal, PageHeader, SearchInput, Select, StarInput, Stars, StatusBadge, Tabs, Textarea } from "../components/ui";
+import { ArchivedBanner, Avatar, Button, EmptyState, FieldMergeReview, Input, Modal, PageHeader, SearchInput, Select, StarInput, Stars, StatusBadge, Tabs, Textarea } from "../components/ui";
+import { useSaveOnLeave } from "../hooks/useSaveOnLeave";
 import { useData } from "../contexts/DataContext";
 import { useToast } from "../contexts/ToastContext";
-import { CSV_BOM, compact, creatorScore, currencySymbol, dateLabel, download, dueLabel, erContext, firstName, followupWords, isPastDay, isTodayDay, isValidEmail, isValidUrl, lossReasonLabel, money, normalize, OUTREACH_STAGES, overallStars, PRIORITY_LABELS, RATING_DIMS, ratingScore, relativeTime, scoreLabel, shortDate, toCSV, today, weightShares } from "../lib/utils";
+import { CSV_BOM, compact, creatorScore, currencySymbol, dateLabel, download, dueLabel, erContext, firstName, followupWords, isPastDay, isTodayDay, isValidEmail, isValidUrl, lossReasonLabel, money, normalize, OUTREACH_STAGES, overallStars, PRIORITY_LABELS, RATING_DIMS, ratingScore, relativeTime, scoreLabel, shortDate, toCSV, headerKey, looksLikeHeader, unguard, today, weightShares } from "../lib/utils";
 import { ENTITY_STATUSES, PLATFORMS, STATUS_LABELS, type Creator, type EntityStatus, type Platform, type Priority } from "../types";
 
 type CreatorDraft = {
@@ -78,7 +79,7 @@ export default function InfluencersPage() {
   const [niche, setNiche] = useState(() => readSavedFilters().niche || "all");
   const [engagement, setEngagement] = useState(() => readSavedFilters().engagement || "all");
   const [rating, setRating] = useState(() => readSavedFilters().rating || "all");
-  const [priorityFilter, setPriorityFilter] = useState("all");
+  const [priorityFilter, setPriorityFilter] = useState(() => readSavedFilters().priority || "all");
   const [minViews, setMinViews] = useState(() => readSavedFilters().minViews ?? "");
   const [sort, setSort] = useState(() => readSavedFilters().sort || "newest");
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -102,7 +103,7 @@ export default function InfluencersPage() {
     }
     try {
       localStorage.setItem(SAVED_FLAG, "1");
-      localStorage.setItem(SAVED_FILTERS, JSON.stringify({ query, status, platform, niche, engagement, rating, minViews, sort }));
+      localStorage.setItem(SAVED_FILTERS, JSON.stringify({ query, status, platform, niche, engagement, rating, priority: priorityFilter, minViews, sort }));
     } catch {
       // private mode: view stays for this session only
     }
@@ -181,15 +182,26 @@ export default function InfluencersPage() {
     const value = draftToCreator(draft);
     const existing = data.creators.find((item) => item.id === id);
     if (!existing) return;
-    data.updateCreator(id, Object.fromEntries(Object.entries(value).filter(([, field]) => field !== "" && field !== 0 && field !== null)) as Partial<Creator>);
+    // Only what was actually typed wins: untouched form defaults (platform,
+    // status New, no priority, empty ratings) never overwrite the record.
+    const untouched = new Set<string>([
+      ...(draft.platform === emptyDraft.platform ? ["platform"] : []),
+      ...(draft.pipeline_status === "new" ? ["pipeline_status", "date_contacted"] : []),
+      ...(draft.priority === "none" ? ["priority"] : []),
+      ...(RATING_DIMS.every((dim) => !draft[dim.key]) ? ["stars", ...RATING_DIMS.map((dim) => dim.key)] : []),
+    ]);
+    data.updateCreator(id, Object.fromEntries(Object.entries(value).filter(([key, field]) => !untouched.has(key) && field !== "" && field !== 0 && field !== null)) as Partial<Creator>);
     data.log(`Duplicate submission reviewed and merged into ${existing.name}`, "creator", id);
     toast("Duplicate merged. Campaign and meeting links preserved."); closeCreate();
   };
 
-  const setBulkStatus = (next: EntityStatus) => { selected.forEach((id) => data.updateCreator(id, { pipeline_status: next })); toast(`${selected.length} influencers moved to ${STATUS_LABELS[next]}`); setSelected([]); };
-  const bulkArchive = () => { data.archive("creator", selected); toast(`${selected.length} influencers moved to Archive`); setSelected([]); };
+  // Bulk actions only ever touch rows you can see: a tick on a row that a
+  // search/filter later hides is ignored, never acted on blindly.
+  const picked = selected.filter((id) => filtered.some((item) => item.id === id));
+  const setBulkStatus = (next: EntityStatus) => { picked.forEach((id) => data.updateCreator(id, { pipeline_status: next })); toast(`${picked.length} influencers moved to ${STATUS_LABELS[next]}`); setSelected([]); };
+  const bulkArchive = () => { data.archive("creator", picked); toast(`${picked.length} influencers moved to Archive`); setSelected([]); };
   const [exportOpen, setExportOpen] = useState(false);
-  const exportSelected = () => { download(`influenceflow-influencers-selected-${today()}.csv`, toCSV(data.creators.filter((item) => selected.includes(item.id)).map((item) => creatorRow(item, weights)), CREATOR_HEADERS), "text/csv;charset=utf-8"); toast(`${selected.length} influencers exported`); };
+  const exportSelected = () => { download(`influenceflow-influencers-selected-${today()}.csv`, toCSV(data.creators.filter((item) => picked.includes(item.id)).map((item) => creatorRow(item, weights)), CREATOR_HEADERS), "text/csv;charset=utf-8"); toast(`${picked.length} influencers exported`); };
 
 
   const toggleView = (next: string) => { setView(next); localStorage.setItem("if.creator-view", next); };
@@ -201,7 +213,7 @@ export default function InfluencersPage() {
     <div className="entity-toolbar"><SearchInput value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search name, email, niche, channel..." /><div className="toolbar-filters"><button className={filtersOpen ? "active" : ""} onClick={() => setFiltersOpen(!filtersOpen)}><Filter size={15} /> Filters{[status !== "all", platform !== "all", niche !== "all", engagement !== "all", rating !== "all", priorityFilter !== "all", !!minViews].filter(Boolean).length > 0 && <b>{[status !== "all", platform !== "all", niche !== "all", engagement !== "all", rating !== "all", priorityFilter !== "all", !!minViews].filter(Boolean).length}</b>}</button><label className="inline-select"><ArrowDownAZ size={15} /><select value={sort} onChange={(event) => setSort(event.target.value)}><option value="newest">Newest first</option><option value="oldest">Oldest first</option><option value="name">Name A-Z</option><option value="views">Avg. views</option><option value="rating">Top rated</option><option value="engagement">Engagement rate</option><option value="status">Pipeline status</option><option value="contacted">Date contacted</option></select></label><button onClick={toggleSaved} className={saved ? "active" : ""}><Star size={15} fill={saved ? "currentColor" : "none"} /> {saved ? "View saved" : "Save view"}</button><button onClick={toggleDensity} title="Toggle density"><SlidersHorizontal size={15} /></button><div className="view-toggle"><button className={view === "table" ? "active" : ""} onClick={() => toggleView("table")}><List size={15} /></button><button className={view === "kanban" ? "active" : ""} onClick={() => toggleView("kanban")}><Columns3 size={15} /></button><button className={view === "cards" ? "active" : ""} onClick={() => toggleView("cards")}><LayoutGrid size={15} /></button></div></div></div>
     {filtersOpen && <div className="filter-drawer"><Select label="Pipeline status" value={status} onChange={(event) => setStatus(event.target.value)}><option value="all">All statuses</option>{ENTITY_STATUSES.map((item) => <option key={item} value={item}>{STATUS_LABELS[item]}</option>)}</Select><Select label="Platform" value={platform} onChange={(event) => setPlatform(event.target.value)}><option value="all">All platforms</option>{PLATFORMS.map((item) => <option key={item}>{item}</option>)}</Select><Select label="Niche" value={niche} onChange={(event) => setNiche(event.target.value)}><option value="all">All niches</option>{niches.map((item) => <option key={item}>{item}</option>)}</Select><Select label="Engagement rate" value={engagement} onChange={(event) => setEngagement(event.target.value)}><option value="all">Any engagement</option><option value="high">High (8%+)</option><option value="mid">Medium (4-8%)</option><option value="low">Under 4%</option></Select><Select label="Rating" value={rating} onChange={(event) => setRating(event.target.value)}><option value="all">Any rating</option><option value="5">5 stars</option><option value="4plus">4+ stars</option><option value="3plus">3+ stars</option><option value="unrated">Unrated</option></Select><Select label="Priority" value={priorityFilter} onChange={(event) => setPriorityFilter(event.target.value)}><option value="all">Any priority</option><option value="urgent">Urgent</option><option value="soon">Follow up soon</option><option value="none">No priority</option></Select><Input label="Minimum avg. views" type="number" value={minViews} onChange={(event) => setMinViews(event.target.value)} placeholder="0" /><Button variant="ghost" onClick={() => { setStatus("all"); setPlatform("all"); setNiche("all"); setEngagement("all"); setRating("all"); setPriorityFilter("all"); setMinViews(""); }}>Clear filters</Button></div>}
     <div className="results-meta"><span><strong>{filtered.length}</strong> influencers {filtered.length !== data.creators.filter((item) => !item.archived_at).length && "in this view"}</span></div>
-    {selected.length > 0 && <div className="bulk-bar"><span><b>{selected.length}</b> selected</span><label>Status <select defaultValue="" onChange={(event) => setBulkStatus(event.target.value as EntityStatus)}><option value="" disabled>Change to...</option>{ENTITY_STATUSES.map((item) => <option key={item} value={item}>{STATUS_LABELS[item]}</option>)}</select></label><button onClick={exportSelected}><Download size={15} /> Export</button><button onClick={bulkArchive}><Archive size={15} /> Archive</button><button onClick={() => setSelected([])}><X size={15} /></button></div>}
+    {picked.length > 0 && <div className="bulk-bar"><span><b>{picked.length}</b> selected</span><label>Status <select defaultValue="" onChange={(event) => setBulkStatus(event.target.value as EntityStatus)}><option value="" disabled>Change to...</option>{ENTITY_STATUSES.map((item) => <option key={item} value={item}>{STATUS_LABELS[item]}</option>)}</select></label><button onClick={exportSelected}><Download size={15} /> Export</button><button onClick={bulkArchive}><Archive size={15} /> Archive</button><button onClick={() => setSelected([])}><X size={15} /></button></div>}
     {!filtered.length ? <EmptyState icon="search" title={query || status !== "all" ? "No influencers match this view" : "Build your creator pipeline"} text={query || status !== "all" ? "Clear a filter or try another search." : "Add creators manually or import a clean CSV with duplicate protection."} action={<Button onClick={() => setCreateOpen(true)}><Plus size={15} /> Add influencer</Button>} /> : view === "kanban" ? <CreatorKanban creators={filtered} /> : view === "cards" ? <CreatorCards creators={filtered} cyclePriority={cyclePriority} setStatus={setCardStatus} /> : <CreatorTable creators={filtered} selected={selected} setSelected={setSelected} density={density} cyclePriority={cyclePriority} setStatus={setCardStatus} />}
 
     <Modal open={createOpen} onClose={closeCreate} title="Add influencer" description="Start with the essentials. You can enrich the record anytime." wide>
@@ -210,7 +222,7 @@ export default function InfluencersPage() {
       <div className="modal-actions"><Button type="button" variant="ghost" onClick={closeCreate}>Cancel</Button><Button type="submit" disabled={!draft.name.trim() || !isValidEmail(draft.contact_email) || !isValidUrl(draft.channel_link)}>Check & add influencer</Button></div></form>
     </Modal>
     <ImportCreators open={importOpen} onClose={() => setImportOpen(false)} />
-    <ExportDialog open={exportOpen} onClose={() => setExportOpen(false)} noun="influencers" fileBase="influenceflow-influencers" all={data.creators.filter((item) => !item.archived_at)} view={filtered} selected={data.creators.filter((item) => selected.includes(item.id))} archived={data.creators.filter((item) => item.archived_at)} toRow={(item) => creatorRow(item, weights)} headers={CREATOR_HEADERS} />
+    <ExportDialog open={exportOpen} onClose={() => setExportOpen(false)} noun="influencers" fileBase="influenceflow-influencers" all={data.creators.filter((item) => !item.archived_at)} view={filtered} selected={data.creators.filter((item) => picked.includes(item.id))} archived={data.creators.filter((item) => item.archived_at)} toRow={(item) => creatorRow(item, weights)} headers={CREATOR_HEADERS} />
   </div>;
 }
 
@@ -251,16 +263,20 @@ function CreatorCards({ creators, cyclePriority, setStatus }: { creators: Creato
 
 type ImportRow = CreatorDraft & { row: number; errors: string[]; duplicate: boolean };
 
-function ImportCreators({ open, onClose }: { open: boolean; onClose: () => void }) {
+const CREATOR_IMPORT_HEADERS = ["name", "full_name", "influencer", "creator", "email", "contact_email", "channel", "channel_link", "link", "url", "profile_link", "niche", "category", "platform", "avg_views", "average_views", "views", "engagement_rate", "engagement", "er", "engagement_%", "stars", "rating", "star", "consistency", "posting_consistency", "demographics", "audience_demographics", "audience", "niche_fit", "niche_alignment", "alignment", "brand_fit", "engagement_stars", "engagement_quality", "engagement_rating", "status", "pipeline_status", "priority", "action_due", "due", "due_date", "date_contacted", "contacted", "date", "next_action", "notes", "follow_ups", "added_on", "archived"];
+
+function ImportCreators({ open, onClose: close }: { open: boolean; onClose: () => void }) {
   const data = useData();
   const { toast } = useToast();
   const [mode, setMode] = useState("paste");
   const [text, setText] = useState("");
   const [rows, setRows] = useState<ImportRow[]>([]);
+  // Closing always discards an unconfirmed preview, so reopening starts fresh.
+  const onClose = () => { setRows([]); setText(""); close(); };
   const preview = (raw: string) => {
     const parsed = Papa.parse<string[]>(raw.trim(), { skipEmptyLines: true }).data;
-    const hasHeader = parsed[0]?.some((cell) => /name|email|niche|channel|platform|status|company|domain|date|notes|rating|star|consistency|demographics|alignment|audience|engagement/i.test(cell));
-    const headers = (hasHeader ? parsed[0] : []).map((cell) => cell.trim().toLowerCase().replace(/[ .-]+/g, "_"));
+    const hasHeader = looksLikeHeader(parsed[0], CREATOR_IMPORT_HEADERS);
+    const headers = (hasHeader ? parsed[0] : []).map(headerKey);
     const column = (cells: string[], names: string[]) => {
       const index = headers.findIndex((header) => names.includes(header));
       return index >= 0 ? cells[index]?.trim() || "" : "";
@@ -269,7 +285,7 @@ function ImportCreators({ open, onClose }: { open: boolean; onClose: () => void 
     const seen = new Set<string>();
     const seenLinks = new Set<string>();
     const next = values.map((cells, index) => {
-      const trimmed = cells.map((cell) => cell?.trim() || "");
+      const trimmed = cells.map((cell) => unguard(cell?.trim() || ""));
       const linkIndex = trimmed.findIndex((cell) => /^https?:\/\//.test(cell));
       const emailIndex = trimmed.findIndex((cell) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cell));
       const name = hasHeader ? column(trimmed, ["name", "full_name", "influencer", "creator"]) : trimmed[0] || "";
@@ -358,6 +374,7 @@ function CreatorProfile({ creator }: { creator: Creator }) {
     toast(stamped ? `Moved to ${STATUS_LABELS[stage]} · contacted ${dateLabel(today())}` : `Moved to ${STATUS_LABELS[stage]}`);
   };
   const saveNotes = () => { data.updateCreator(creator.id, { notes }, { activity: `Notes updated for ${creator.name}` }); setNotesBase(notes); toast("Notes saved"); };
+  useSaveOnLeave(notesDirty, () => data.updateCreator(creator.id, { notes }, { activity: `Notes updated for ${creator.name}` }));
   const markSent = () => {
     if (creator.pipeline_status === "new") {
       data.updateCreator(creator.id, { pipeline_status: "contacted" });
@@ -371,7 +388,7 @@ function CreatorProfile({ creator }: { creator: Creator }) {
   const stageIndex = ENTITY_STATUSES.indexOf(creator.pipeline_status);
   const closed = creator.pipeline_status === "denied" || creator.pipeline_status === "no_reply";
 
-  return <div className="detail-page"><Link to="/app/influencers" className="back-link"><ArrowLeft size={15} /> Influencers</Link><header className="detail-header"><div className="detail-identity"><Avatar name={creator.name} size="lg" /><div><span className="eyebrow">Influencer profile</span><h1>{creator.name}</h1><div><StatusBadge status={creator.pipeline_status} /><span>{creator.platform}</span><span>{creator.niche || "No niche"}</span><Stars value={score} showValue />{creator.pipeline_status === "denied" && creator.lost_at ? <button className="lost-inline" onClick={() => data.reviewLoss("creator", creator.id)} title="Edit loss reason"><span>Lost · {lossReasonLabel(creator.lost_reason)} · {dateLabel(creator.lost_at)}</span></button> : creator.pipeline_status === "denied" ? <span className="muted">Closed early — no active deal</span> : null}</div></div></div><div className="page-actions"><Button variant="secondary" onClick={() => setMergeOpen(true)}><Merge size={15} /> Merge</Button><Button variant="secondary" onClick={() => setEditOpen(true)}>Edit profile</Button><button className="icon-btn danger" onClick={archive} aria-label="Archive influencer" title="Archive"><Archive size={17} /></button></div></header>
+  return <div className="detail-page"><Link to="/app/influencers" className="back-link"><ArrowLeft size={15} /> Influencers</Link>{creator.archived_at && <ArchivedBanner noun="influencer" archivedAt={creator.archived_at} onRestore={() => { data.archive("creator", [creator.id], true); toast("Restored"); }} />}<header className="detail-header"><div className="detail-identity"><Avatar name={creator.name} size="lg" /><div><span className="eyebrow">Influencer profile</span><h1>{creator.name}</h1><div><StatusBadge status={creator.pipeline_status} /><span>{creator.platform}</span><span>{creator.niche || "No niche"}</span><Stars value={score} showValue />{creator.pipeline_status === "denied" && creator.lost_at ? <button className="lost-inline" onClick={() => data.reviewLoss("creator", creator.id)} title="Edit loss reason"><span>Lost · {lossReasonLabel(creator.lost_reason)} · {dateLabel(creator.lost_at)}</span></button> : creator.pipeline_status === "denied" ? <span className="muted">Closed early — no active deal</span> : null}</div></div></div><div className="page-actions"><Button variant="secondary" onClick={() => setMergeOpen(true)}><Merge size={15} /> Merge</Button><Button variant="secondary" onClick={() => setEditOpen(true)}>Edit profile</Button><button className="icon-btn danger" onClick={archive} aria-label="Archive influencer" title="Archive"><Archive size={17} /></button></div></header>
     <section className="detail-stats"><div><span>Average views</span><strong>{compact(creator.avg_views)}</strong><small>per post</small></div><div><span>Engagement rate</span><strong>{creator.engagement_rate}%</strong><small>{erContext(creator.engagement_rate, creator.platform).replace(" — reference only", "").replace(/^\S+% is /, "")}</small></div><div><span>Campaign value</span><strong>{money(linkedCampaigns.reduce((sum, item) => sum + item.agreed_payment, 0))}</strong><small>{linkedCampaigns.length} linked campaign{linkedCampaigns.length === 1 ? "" : "s"}</small></div><div><span>Last status change</span><strong className="date-stat">{relativeTime(creator.status_updated_at)}</strong><small>{STATUS_LABELS[creator.pipeline_status]}{creator.date_contacted ? ` · first contact ${dateLabel(creator.date_contacted)}` : ""}</small></div></section>
     <div className="detail-grid"><main>
       <section className="detail-section"><div className="detail-section-head"><div><span>Contact</span><h2>Reach {firstName(creator.name)}</h2></div></div><div className="contact-block"><div><small>Email</small><strong>{creator.contact_email || "Not added"}</strong>{creator.contact_email && <a href={`mailto:${creator.contact_email}`}>Send email <ExternalLink size={13} /></a>}</div><div><small>Channel</small><strong>{creator.channel_link || "Not added"}</strong>{creator.channel_link && <a href={/^https?:\/\//.test(creator.channel_link) ? creator.channel_link : `https://${creator.channel_link}`} target="_blank" rel="noreferrer">Open profile <ExternalLink size={13} /></a>}</div><div><small>Date contacted</small><strong>{creator.date_contacted ? dateLabel(creator.date_contacted) : "Not contacted yet"}</strong><span className="contact-sub">{creator.followup_count > 0 ? `${followupWords(creator.followup_count)}${creator.last_followup_at ? ` · last ${dateLabel(creator.last_followup_at)}` : ""}` : "No follow-ups yet"}</span></div></div></section>

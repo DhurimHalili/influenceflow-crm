@@ -24,7 +24,8 @@ function ScoringSettings() {
   const saved = resolveWeights(data.profile.rating_weights);
   const [weights, setWeights] = useState<RatingWeightsValue>(saved);
   useEffect(() => setWeights(resolveWeights(data.profile.rating_weights)), [data.profile.rating_weights]);
-  const shares = weightShares(weights);
+  const allZero = Object.values(weights).every((v) => !v);
+  const shares = allZero ? { audience: 0, niche: 0, engagement: 0, consistency: 0 } : weightShares(weights);
   const custom = !!data.profile.rating_weights;
   const dirty = (Object.keys(weights) as (keyof RatingWeightsValue)[]).some((k) => weights[k] !== saved[k]);
   const sample = { stars_demographics: 5, stars_niche: 4, stars_engagement: 2, stars_consistency: 3 };
@@ -34,7 +35,7 @@ function ScoringSettings() {
     <div className="weight-list">{RATING_DIMS.map((dim) => <div className="weight-row" key={dim.key}><div><strong>{dim.label}</strong><small>{WEIGHT_HELP[dim.weight]}</small></div><input type="range" min={0} max={60} step={5} value={weights[dim.weight]} onChange={(event) => setWeights({ ...weights, [dim.weight]: Number(event.target.value) })} aria-label={`${dim.label} weight`} /><b>{shares[dim.weight]}%</b></div>)}</div>
     <div className="weight-example"><span>Example: Audience 5★ · Brand fit 4★ · Engagement 2★ · Consistency 3★</span><span>Overall <Stars value={ratingScore(sample, weights)} showValue /> <small>(a plain average would say {((5 + 4 + 2 + 3) / 4).toFixed(1)})</small></span></div>
     <p className="settings-note">Set a factor to 0% if it doesn't matter for your agency — it then never moves the score. Unrated factors are always left out rather than counted as zero.{dirty && rated.length ? ` Saving re-scores ${changed} of your ${rated.length} rated influencers.` : ""}</p>
-    <div className="settings-actions"><Button disabled={!dirty} onClick={() => { data.updateProfile({ rating_weights: weights }); toast("Scoring weights saved — every influencer re-scored"); }}><Save size={15} /> Save weights</Button><Button variant="ghost" disabled={!custom && !dirty} onClick={() => { setWeights(DEFAULT_RATING_WEIGHTS); data.updateProfile({ rating_weights: null }); toast("Back to market-standard weights (35 / 30 / 20 / 15)"); }}><RotateCcw size={15} /> Market defaults</Button></div>
+    <div className="settings-actions"><Button disabled={!dirty || allZero} onClick={() => { data.updateProfile({ rating_weights: weights }); toast("Scoring weights saved — every influencer re-scored"); }}><Save size={15} /> Save weights</Button>{allZero && <span className="settings-note negative">At least one factor needs a weight above 0%.</span>}<Button variant="ghost" disabled={!custom && !dirty} onClick={() => { setWeights(DEFAULT_RATING_WEIGHTS); data.updateProfile({ rating_weights: null }); toast("Back to market-standard weights (35 / 30 / 20 / 15)"); }}><RotateCcw size={15} /> Market defaults</Button></div>
   </div></section>;
 }
 
@@ -200,7 +201,51 @@ export function SettingsPage() {
   useEffect(() => { if (location.hash) requestAnimationFrame(() => document.getElementById(location.hash.slice(1))?.scrollIntoView({ behavior: "smooth" })); }, [location.hash]);
   const exportBackup = () => download(`influenceflow-backup-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify({ schema: "influenceflow-backup", version: 2, exported_at: new Date().toISOString(), data: { profile: data.profile, creators: data.creators, brands: data.brands, contacts: data.contacts, campaigns: data.campaigns, followups: data.followups, meetings: data.meetings, activities: data.activities, demoSeeded: false } }, null, 2));
   const readBackup = (event: ChangeEvent<HTMLInputElement>) => { const file = event.target.files?.[0]; if (!file) return; setImportError(""); file.text().then((raw) => { try { const parsed = JSON.parse(raw) as { schema?: string; version?: number; data?: WorkspaceData } | WorkspaceData; const workspace = "data" in parsed && parsed.data ? parsed.data : parsed as WorkspaceData; if (!workspace || !Array.isArray(workspace.creators) || !Array.isArray(workspace.brands) || !Array.isArray(workspace.campaigns)) throw new Error("Missing creator, brand, or campaign collections."); setPreview({ ...workspace, contacts: workspace.contacts || [], followups: workspace.followups || [], meetings: workspace.meetings || [], activities: workspace.activities || [], profile: workspace.profile || data.profile, demoSeeded: false }); } catch (error) { setImportError(error instanceof Error ? error.message : "Invalid JSON backup"); } }).catch(() => setImportError("Could not read this file.")); };
-  const importNow = () => { if (!preview) return; let next = preview; if (conflictMode !== "replace") { const creatorKeys = new Set(data.creators.map((item) => normalize(item.name))); const brandKeys = new Set(data.brands.map((item) => normalize(item.name))); next = { ...preview, profile: data.profile, creators: [...data.creators, ...preview.creators.filter((item) => conflictMode === "keep-both" || !creatorKeys.has(normalize(item.name)))], brands: [...data.brands, ...preview.brands.filter((item) => conflictMode === "keep-both" || !brandKeys.has(normalize(item.name)))], contacts: [...data.contacts, ...preview.contacts], campaigns: [...data.campaigns, ...preview.campaigns], followups: [...data.followups, ...(preview.followups || [])], meetings: [...data.meetings, ...preview.meetings], activities: [...preview.activities, ...data.activities] }; } data.importBackup(next); toast(`Backup imported: ${preview.creators.length} influencers, ${preview.brands.length} brands, ${preview.campaigns.length} campaigns`); setPreview(null); };
+  // Merging a backup: records that already exist (same name, or same id)
+  // are skipped and every child row that pointed at them (contacts,
+  // campaigns, assignments, meetings, follow-ups) is re-pointed to your
+  // existing record, so nothing ends up linked to a missing parent.
+  const importNow = () => {
+    if (!preview) return;
+    let next = preview;
+    if (conflictMode !== "replace") {
+      const keepBoth = conflictMode === "keep-both";
+      const creatorByName = new Map(data.creators.map((item) => [normalize(item.name), item.id]));
+      const brandByName = new Map(data.brands.map((item) => [normalize(item.name), item.id]));
+      const existingIds = new Set([...data.creators, ...data.brands, ...data.contacts, ...data.campaigns, ...data.meetings, ...data.followups].map((item) => item.id));
+      const creatorMap = new Map<string, string>();
+      const brandMap = new Map<string, string>();
+      const newCreators = preview.creators.filter((item) => {
+        if (existingIds.has(item.id)) { creatorMap.set(item.id, item.id); return false; }
+        const match = creatorByName.get(normalize(item.name));
+        if (match && !keepBoth) { creatorMap.set(item.id, match); return false; }
+        return true;
+      });
+      const newBrands = preview.brands.filter((item) => {
+        if (existingIds.has(item.id)) { brandMap.set(item.id, item.id); return false; }
+        const match = brandByName.get(normalize(item.name));
+        if (match && !keepBoth) { brandMap.set(item.id, match); return false; }
+        return true;
+      });
+      const creatorId = (id: string) => creatorMap.get(id) || id;
+      const brandId = (id: string) => brandMap.get(id) || id;
+      const fresh = <T extends { id: string }>(rows: T[]) => rows.filter((item) => !existingIds.has(item.id));
+      next = {
+        ...preview,
+        profile: data.profile,
+        creators: [...data.creators, ...newCreators],
+        brands: [...data.brands, ...newBrands],
+        contacts: [...data.contacts, ...fresh(preview.contacts).map((item) => ({ ...item, brand_id: brandId(item.brand_id) }))],
+        campaigns: [...data.campaigns, ...fresh(preview.campaigns).map((item) => ({ ...item, brand_id: brandId(item.brand_id), creator_ids: Array.from(new Set(item.creator_ids.map(creatorId))) }))],
+        followups: [...data.followups, ...fresh(preview.followups || []).map((item) => ({ ...item, creator_id: creatorId(item.creator_id) }))],
+        meetings: [...data.meetings, ...fresh(preview.meetings).map((item) => ({ ...item, related_id: item.related_type === "creator" && item.related_id ? creatorId(item.related_id) : item.related_type === "brand" && item.related_id ? brandId(item.related_id) : item.related_id }))],
+        activities: [...fresh(preview.activities), ...data.activities],
+      };
+    }
+    data.importBackup(next);
+    toast(`Backup imported: ${preview.creators.length} influencers, ${preview.brands.length} brands, ${preview.campaigns.length} campaigns checked`);
+    setPreview(null);
+  };
   // Full exports: every record, archived included (flagged in an
   // "Archived" column), with the same columns as the list-page exports.
   const exportCollection = (type: "influencers" | "brands" | "contacts" | "campaigns") => {

@@ -83,7 +83,7 @@ function AuthShell({ kicker, title, lead, children }: { kicker: string; title: s
   return <div className="auth-page"><div className="auth-brand"><Link to="/"><Logo inverse /></Link><div><span>{kicker}</span><h1>{title}</h1><p>{lead}</p></div><small>InfluenceFlow / Open source under MIT</small></div><main className="auth-main"><div className="auth-form">{children}<small>By continuing you agree to our <Link to="/terms">Terms</Link> and <Link to="/privacy">Privacy Policy</Link>.</small></div></main></div>;
 }
 
-function AuthPage({ mode }: { mode: "login" | "signup" }) {
+function AuthPage({ mode, returnTo }: { mode: "login" | "signup"; returnTo?: string }) {
   const { user, loading: authLoading, recovery, signIn, signUp } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
@@ -100,7 +100,7 @@ function AuthPage({ mode }: { mode: "login" | "signup" }) {
     setLoading(false);
     if (result.error) { setError({ message: result.error, code: result.code, attemptsLeft: result.attemptsLeft }); return; }
     try { localStorage.setItem(LAST_EMAIL, email.trim().toLowerCase()); } catch { /* ignore */ }
-    navigate((location.state as { from?: { pathname?: string } } | null)?.from?.pathname || "/app", { replace: true });
+    navigate(returnTo || (location.state as { from?: { pathname?: string } } | null)?.from?.pathname || "/app", { replace: true });
   };
   const resetLink = `/forgot-password?email=${encodeURIComponent(email.trim())}`;
   return <AuthShell kicker={mode === "login" ? "Welcome back" : "Your agency, in flow"} title={mode === "login" ? "Pick up where the relationship left off." : "Build a calmer way to run partnerships."} lead="Private, focused, and designed around the work that moves creator businesses forward.">
@@ -179,7 +179,7 @@ export function UpdatePasswordPage() {
   </AuthShell>;
 }
 
-export const LoginPage = () => <AuthPage mode="login" />;
+export const LoginPage = ({ returnTo }: { returnTo?: string } = {}) => <AuthPage mode="login" returnTo={returnTo} />;
 export const SignupPage = () => <AuthPage mode="signup" />;
 
 export function PublicFooter() {
