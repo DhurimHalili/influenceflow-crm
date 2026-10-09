@@ -1,6 +1,6 @@
 import { AnimatePresence, motion } from "framer-motion";
 import { Archive, Check, ChevronDown, Inbox, LoaderCircle, Merge, Search, Star, X } from "lucide-react";
-import { forwardRef, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from "react";
+import { forwardRef, useEffect, useRef, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from "react";
 import { cn } from "../utils/cn";
 import { initials } from "../lib/utils";
 import { STATUS_LABELS, type CampaignStatus, type EntityStatus } from "../types";
@@ -56,10 +56,27 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaHTMLAttributes<H
 Textarea.displayName = "Textarea";
 
 export function Modal({ open, onClose, title, description, children, wide = false }: { open: boolean; onClose: () => void; title: string; description?: string; children: ReactNode; wide?: boolean }) {
+  // Escape closes the dialog (topmost only when dialogs are stacked).
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      const dialogs = document.querySelectorAll(".modal-backdrop");
+      const mine = dialogs[dialogs.length - 1];
+      if (mine && mine.getAttribute("data-modal-id") !== idRef.current) return;
+      event.preventDefault();
+      closeRef.current();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open]);
+  const idRef = useRef(`m-${Math.random().toString(36).slice(2)}`);
   return (
     <AnimatePresence>
       {open && (
-        <motion.div className="modal-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+        <motion.div className="modal-backdrop" data-modal-id={idRef.current} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
           <motion.div className={cn("modal", wide && "modal-wide")} initial={{ opacity: 0, y: 18, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 12, scale: 0.99 }} transition={{ duration: 0.18 }} role="dialog" aria-modal="true">
             <div className="modal-head"><div><h2>{title}</h2>{description && <p>{description}</p>}</div><button className="icon-btn" onClick={onClose} aria-label="Close"><X size={18} /></button></div>
             {children}

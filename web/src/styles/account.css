@@ -142,3 +142,27 @@
 .reset-sent p { margin: 0; }
 .reset-tips { margin: 0; padding: 12px 14px 12px 30px; border-radius: 10px; background: rgba(124, 92, 255, .07); display: grid; gap: 6px; font-size: 13px; line-height: 1.5; color: #4a4553; }
 .reset-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* ---------- Export dialog ---------- */
+.export-dialog { display: grid; gap: 14px; }
+.export-group { display: grid; gap: 6px; }
+.export-option { display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px 13px; border: 1px solid var(--line); border-radius: 11px; background: var(--surface-alt); color: var(--text); text-align: left; cursor: pointer; }
+.export-option > svg { flex: none; color: var(--muted); }
+.export-option span { flex: 1; min-width: 0; }
+.export-option strong, .export-option small { display: block; }
+.export-option strong { font-size: 13px; }
+.export-option small { color: var(--muted); font-size: 11px; margin-top: 2px; }
+.export-option b { font: 750 18px "Manrope", sans-serif; color: var(--text-soft); }
+.export-option.selected { border-color: var(--accent); background: var(--accent-soft); box-shadow: 0 0 0 3px rgba(var(--accent-rgb), .12); }
+.export-option.selected > svg, .export-option.selected b { color: var(--accent); }
+.export-archived { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; color: var(--text-soft); cursor: pointer; }
+.export-archived input { accent-color: var(--accent); }
+.export-archived.disabled { opacity: .5; cursor: not-allowed; }
+.export-formats > div { display: grid; gap: 6px; margin-top: 6px; }
+.export-formats button { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border: 1px solid var(--line); border-radius: 10px; background: transparent; color: var(--text); text-align: left; cursor: pointer; }
+.export-formats button > svg { flex: none; color: var(--muted); }
+.export-formats button strong, .export-formats button small { display: block; }
+.export-formats button strong { font-size: 13px; }
+.export-formats button small { color: var(--muted); font-size: 11px; }
+.export-formats button.selected { border-color: var(--accent); background: var(--accent-soft); }
+.export-formats button.selected > svg { color: var(--accent); }

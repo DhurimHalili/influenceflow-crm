@@ -77,25 +77,36 @@ export const download = (name: string, value: string, type = "application/json")
   const anchor = document.createElement("a");
   anchor.href = url;
   anchor.download = name;
+  anchor.style.display = "none";
+  // In the DOM and revoked later: Safari/Firefox can drop a download whose
+  // object URL is revoked in the same tick as the click.
+  document.body.appendChild(anchor);
   anchor.click();
-  URL.revokeObjectURL(url);
+  window.setTimeout(() => {
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  }, 4000);
 };
 
-export const toCSV = (rows: Record<string, string | number | boolean | null | undefined>[], headers?: Record<string, string>) => {
+export const toCSV = (rows: Record<string, string | number | boolean | null | undefined>[], headers?: Record<string, string>, delimiter: "," | ";" = ",") => {
   if (!rows.length) return "";
-  const keys = Object.keys(rows[0]);
+  // Union of keys across all rows, in first-seen order, so no column is ever
+  // dropped because the first record happened to lack it.
+  const keys: string[] = [];
+  for (const row of rows) for (const key of Object.keys(row)) if (!keys.includes(key)) keys.push(key);
   // Neutralize spreadsheet formula injection: attacker-controlled cells
   // (names, notes, domains) starting with = + - @ tab CR are prefixed so
   // Excel/Sheets treat them as plain text, never as executable formulas.
+  // Plain negative numbers are left alone.
   const escape = (value: unknown) => {
     let text = String(value ?? "");
-    if (/^[=+\-@\t\r]/.test(text)) text = `'${text}`;
+    if (/^[=+\-@\t\r]/.test(text) && !/^-?\d+(\.\d+)?$/.test(text)) text = `'${text}`;
     return `"${text.replace(/"/g, '""')}"`;
   };
   // BOM first: without it Excel mangles non-ASCII characters. Friendly
   // headers second: raw keys (contact_email) become readable columns (Email).
-  const head = keys.map((key) => escape(headers?.[key] ?? key)).join(",");
-  return CSV_BOM + [head, ...rows.map((row) => keys.map((key) => escape(row[key])).join(","))].join("\n");
+  const head = keys.map((key) => escape(headers?.[key] ?? key)).join(delimiter);
+  return CSV_BOM + [head, ...rows.map((row) => keys.map((key) => escape(row[key])).join(delimiter))].join("\r\n");
 };
 
 export const CSV_BOM = "\ufeff";
