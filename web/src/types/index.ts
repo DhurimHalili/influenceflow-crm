@@ -10,7 +10,17 @@ export type EntityStatus =
 
 export type CampaignStatus = "negotiating" | "active" | "completed" | "cancelled";
 export type ThemeName = "agency" | "light" | "dark" | "honey" | "ocean";
-export type Platform = "YouTube" | "Instagram" | "TikTok" | "Twitch" | "LinkedIn" | "Other";
+export type Platform = "YouTube" | "Instagram" | "TikTok" | "Twitch" | "LinkedIn" | "X" | "Facebook" | "Kick" | "Snapchat" | "Pinterest" | "Threads" | "Other";
+/** A profile on one network; "Website" covers link-in-bio pages, blogs, shops. */
+export type SocialPlatform = Exclude<Platform, "Other"> | "Website";
+export interface SocialLink {
+  platform: SocialPlatform;
+  url: string;
+  /** Without the @ — empty for URLs that have no handle (e.g. a website). */
+  handle: string;
+  /** Optional audience size on this network; 0 = not entered. */
+  followers: number;
+}
 export type Priority = "none" | "soon" | "urgent";
 export type MeetingKind = "meeting" | "task" | "reminder";
 
@@ -70,6 +80,8 @@ export interface Creator {
   name: string;
   contact_email: string;
   channel_link: string;
+  /** Every social profile; the main one is mirrored in channel_link/platform. */
+  socials: SocialLink[];
   niche: string;
   avg_views: number;
   engagement_rate: number;
@@ -234,7 +246,7 @@ export const ENTITY_STATUSES: EntityStatus[] = [
 ];
 
 export const CAMPAIGN_STATUSES: CampaignStatus[] = ["negotiating", "active", "completed", "cancelled"];
-export const PLATFORMS: Platform[] = ["YouTube", "Instagram", "TikTok", "Twitch", "LinkedIn", "Other"];
+export const PLATFORMS: Platform[] = ["YouTube", "Instagram", "TikTok", "X", "Twitch", "Kick", "LinkedIn", "Facebook", "Snapchat", "Pinterest", "Threads", "Other"];
 
 export const STATUS_LABELS: Record<EntityStatus | CampaignStatus, string> = {
   new: "New",

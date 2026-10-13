@@ -54,6 +54,7 @@ That's it. Your data is private to your account — other users can't see it. Ex
 | Area | How you'd explain it to a teammate |
 |------|-------------------------------------|
 | **Influencers CRM** | Table + Kanban board + mobile cards. Filter, bulk-change status, bulk-delete, merge duplicates by name, personal notes per influencer |
+| **Socials** | Every influencer can have Instagram, TikTok, YouTube, X, Twitch, Kick, LinkedIn, Facebook, Snapchat, Pinterest, Threads and website links with follower counts. Paste a link-in-bio into **Quick fill** to add them all at once; ★ marks the main channel. Search by `@handle`, filter by any network, dedupe on any profile, CSV import/export columns per network |
 | **Brands & contacts** | Each brand has its own people (first/last name, title, email, LinkedIn). Same pipeline statuses |
 | **Bulk import** | Paste `Rory Alexander, https://youtube.com/channel/UC...` or `Name, email, niche` — or **Attach CSV**. Auto-dedupes by name + link |
 | **Campaigns** | Name, brand, platform, deliverables, payment + agency % → auto payout, status (negotiating/active/completed/cancelled), start/due dates, assign influencers, conflict warning |

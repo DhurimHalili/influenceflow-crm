@@ -206,7 +206,7 @@ export default function AppShell() {
   // Results follow what is typed right now (Enter must open the match for
   // the current text, not the previous one); the list is small enough.
   const results = useMemo<SearchResult[]>(() => {
-    const term = query.trim().toLowerCase();
+    const term = query.trim().toLowerCase().replace(/^@(?=\S)/, "");
     if (!term) return [];
     // Rank: name starts with the term > name contains it > other fields.
     const rank = (title: string, others: string[]) => {
@@ -217,7 +217,7 @@ export default function AppShell() {
       return others.some((v) => (v || "").toLowerCase().includes(term)) ? 3 : -1;
     };
     const scored: { r: number; item: SearchResult }[] = [];
-    data.creators.forEach((item) => { if (item.archived_at) return; const r = rank(item.name, [item.contact_email, item.niche, item.channel_link]); if (r >= 0) scored.push({ r, item: { id: item.id, type: "Influencer", title: item.name, subtitle: `${item.platform} / ${item.contact_email || item.niche}`, to: `/app/influencers/${item.id}` } }); });
+    data.creators.forEach((item) => { if (item.archived_at) return; const r = rank(item.name, [item.contact_email, item.niche, item.channel_link, ...(item.socials || []).map((social) => social.handle)]); if (r >= 0) scored.push({ r, item: { id: item.id, type: "Influencer", title: item.name, subtitle: `${item.platform} / ${item.contact_email || item.niche}`, to: `/app/influencers/${item.id}` } }); });
     data.brands.forEach((item) => { if (item.archived_at) return; const r = rank(item.name, [item.contact_email, item.domain, item.brand_type]); if (r >= 0) scored.push({ r, item: { id: item.id, type: "Brand", title: item.name, subtitle: item.domain, to: `/app/brands/${item.id}` } }); });
     data.campaigns.forEach((item) => { if (item.archived_at) return; const r = rank(item.name, [data.brands.find((b) => b.id === item.brand_id)?.name || ""]); if (r >= 0) scored.push({ r, item: { id: item.id, type: "Campaign", title: item.name, subtitle: item.status, to: `/app/campaigns?id=${item.id}` } }); });
     return scored.sort((a, b) => a.r - b.r).slice(0, 10).map((s) => s.item);
@@ -293,7 +293,7 @@ export default function AppShell() {
 
       <AnimatePresence>
         {searchOpen && <motion.div className="search-popover" initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}>
-          <div className="search-popover-input"><Search size={18} /><input ref={searchRef} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search influencers, brands, campaigns..." onKeyDown={(event) => { if (event.key === "Enter" && results[0]) { navigate(results[0].to); setSearchOpen(false); setQuery(""); } }} /><kbd>Esc</kbd></div>
+          <div className="search-popover-input"><Search size={18} /><input ref={searchRef} autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search influencers, brands, campaigns..." onKeyDown={(event) => { if (event.key === "Enter" && results[0]) { navigate(results[0].to); setSearchOpen(false); setQuery(""); } }} /><kbd>Esc</kbd></div>
           <div className="search-results">{results.map((result) => <button key={`${result.type}-${result.id}`} onClick={() => { navigate(result.to); setSearchOpen(false); setQuery(""); }}><span className={`result-icon result-${result.type.toLowerCase()}`}>{result.type[0]}</span><span><strong>{result.title}</strong><small>{result.subtitle}</small></span><em>{result.type}</em></button>)}{query.trim() && !results.length && <div className="search-empty"><HelpCircle size={20} /><span>No matches. Try a name, email, domain, or campaign.</span></div>}{!query.trim() && <div className="search-hint"><span>Search is private to your workspace</span><span><kbd>Enter</kbd> open first result</span></div>}</div>
         </motion.div>}
       </AnimatePresence>
