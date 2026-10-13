@@ -110,6 +110,36 @@ export interface Creator {
   created_at: string;
 }
 
+export type CreatorTier = "nano" | "micro" | "mid" | "macro" | "mega";
+export type BudgetPeriod = "campaign" | "month" | "quarter" | "year";
+
+/** What an agency needs to know to pitch the right creators to a brand. */
+export interface BrandBrief {
+  /** Creator niches / verticals they want ("Tech", "Gaming"...). */
+  niches: string[];
+  platforms: SocialPlatform[];
+  formats: string[];
+  tiers: CreatorTier[];
+  /** Budget in the workspace currency; 0 = unknown. */
+  budget_min: number;
+  budget_max: number;
+  budget_period: BudgetPeriod;
+  goals: string[];
+  /** Countries / regions their buyers are in. */
+  markets: string[];
+  ages: string[];
+  gender: "" | "any" | "women" | "men";
+  payment_terms: string;
+  usage_rights: string;
+  exclusivity: string;
+  /** Happy to send product (seeding / gifting). */
+  gifting: boolean;
+  /** Competitors, no-go topics, restrictions. */
+  avoid: string[];
+  /** Next launch / campaign window they mentioned. */
+  next_launch: string | null;
+}
+
 export interface Brand {
   id: string;
   user_id: string;
@@ -117,6 +147,8 @@ export interface Brand {
   domain: string;
   brand_type: string;
   contact_email: string;
+  brief: BrandBrief;
+  socials: SocialLink[];
   pipeline_status: EntityStatus;
   date_contacted: string | null;
   status_updated_at: string;

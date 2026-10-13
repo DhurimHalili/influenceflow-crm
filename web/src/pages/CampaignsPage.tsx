@@ -9,7 +9,7 @@ import { useScrollMemory, useSessionState } from "../hooks/useSessionState";
 import { useData } from "../contexts/DataContext";
 import { useToast } from "../contexts/ToastContext";
 import { compact, currencySymbol, dateLabel, dueLabel, isOverdue, isPastDay, lossReasonLabel, money, parseDay, relativeTime, uid } from "../lib/utils";
-import { CAMPAIGN_STATUSES, PLATFORMS, STATUS_LABELS, type Campaign, type CampaignStatus, type Platform } from "../types";
+import { CAMPAIGN_STATUSES, PLATFORMS, STATUS_LABELS, type Brand, type Campaign, type CampaignStatus, type Platform } from "../types";
 
 type CampaignDraft = { invoice_due: string; name: string; brand_id: string; platform: Platform; deliverables: string; agreed_payment: string; agency_percent: string; status: CampaignStatus; start_date: string; due_date: string; notes: string; next_action: string; creator_ids: string[] };
 const makeBlank = (creatorPercent: number): CampaignDraft => ({ name: "", brand_id: "", platform: "YouTube", deliverables: "", agreed_payment: "", agency_percent: String(creatorPercent), invoice_due: "", status: "negotiating", start_date: "", due_date: "", notes: "", next_action: "", creator_ids: [] });
@@ -19,11 +19,17 @@ const invoiceOverdue = (item: Campaign) => item.status !== "cancelled" && item.p
 const PAYMENT_STEPS: { value: Campaign["payment_status"]; label: string }[] = [{ value: "unpaid", label: "Unpaid" }, { value: "invoiced", label: "Invoiced" }, { value: "paid", label: "Paid" }];
 const PAYMENT_LABELS: Record<Campaign["payment_status"], string> = { unpaid: "Unpaid", invoiced: "Invoiced", paid: "Paid" };
 
+// A brand that only wants e.g. TikTok starts its campaign on TikTok.
+const briefPlatform = (brand?: Brand): Platform | undefined => {
+  const first = brand?.brief?.platforms?.find((p) => p !== "Website");
+  return first && PLATFORMS.includes(first as Platform) ? (first as Platform) : undefined;
+};
+
 export default function CampaignsPage() {
   const data = useData(); const { toast } = useToast(); const [params, setParams] = useSearchParams();
   const [query, setQuery] = useSessionState("campaigns.query", ""); const [status, setStatus] = useSessionState("campaigns.status", "all"); const [brand, setBrand] = useSessionState("campaigns.brand", "all"); const [sort, setSort] = useSessionState("campaigns.sort", "due"); const [payment, setPayment] = useSessionState("campaigns.payment", "all"); const [open, setOpen] = useState(false); const creatorPercent = data.profile.preferences.default_creator_percent; const [draft, setDraft] = useState<CampaignDraft>(() => makeBlank(creatorPercent));
   const activeCampaign = data.campaigns.find((item) => item.id === params.get("id"));
-  useEffect(() => { if (params.get("new")) { setDraft({ ...makeBlank(creatorPercent), brand_id: params.get("brand") || "", creator_ids: params.get("creator") ? [params.get("creator")!] : [] }); setOpen(true); } // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { if (params.get("new")) { setDraft({ ...makeBlank(creatorPercent), brand_id: params.get("brand") || "", platform: briefPlatform(data.brands.find((b) => b.id === params.get("brand"))) || makeBlank(creatorPercent).platform, creator_ids: params.get("creator") ? [params.get("creator")!] : [] }); setOpen(true); } // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params]);
   const openNew = () => { setDraft((current) => (current.name || current.agreed_payment || current.deliverables || current.notes || current.brand_id || current.creator_ids.length ? current : makeBlank(creatorPercent))); setOpen(true); };
   const close = () => { setOpen(false); setParams((current) => { current.delete("new"); current.delete("brand"); current.delete("creator"); return current; }, { replace: true }); };
