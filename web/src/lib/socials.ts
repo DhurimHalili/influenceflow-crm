@@ -184,3 +184,9 @@ export const socialsWithChannel = (socials: SocialLink[], channelLink: string, p
 };
 
 export const totalFollowers = (socials: SocialLink[]) => socials.reduce((sum, s) => sum + (s.followers || 0), 0);
+
+/** Union of two social lists, first list's order and main channel kept. */
+export const mergeSocialLists = (a: SocialLink[] = [], b: SocialLink[] = []) => {
+  const seen = new Set<string>();
+  return [...a, ...b].filter((social) => { const key = socialKey(social.url); if (seen.has(key)) return false; seen.add(key); return true; });
+};

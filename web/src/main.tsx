@@ -5,6 +5,7 @@ import './styles/features.css'
 import './styles/campaigns.css'
 import './styles/account.css'
 import './styles/creator-form.css'
+import './styles/brands.css'
 import './styles/mobile.css'
 import App from './App.tsx'
 

@@ -1,17 +1,19 @@
-import { Check, ChevronDown, ClipboardPaste, ExternalLink, Plus, Star, Wand2, X } from "lucide-react";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Check, ClipboardPaste, Wand2 } from "lucide-react";
+import { useState } from "react";
 import { useData } from "../contexts/DataContext";
-import { asPlatform, extractFromText, parseFollowers, QUICK_SOCIALS, resolveSocial, SOCIAL_META, SOCIAL_ORDER, socialKey, socialsWithChannel } from "../lib/socials";
-import { compact, dueLabel, erContext, OUTREACH_STAGES, overallStars, RATING_DIMS, ratingScore, scoreLabel, today, uid, weightShares } from "../lib/utils";
+import { asPlatform, extractFromText, parseFollowers, SOCIAL_META, SOCIAL_ORDER, socialsWithChannel } from "../lib/socials";
+import { compact, dueLabel, erContext, OUTREACH_STAGES, overallStars, RATING_DIMS, ratingScore, scoreLabel, today, weightShares } from "../lib/utils";
 import { ENTITY_STATUSES, STATUS_LABELS, type Creator, type EntityStatus, type Platform, type Priority, type SocialLink, type SocialPlatform } from "../types";
 import { SocialBadge } from "./SocialIcon";
+import { appendSocials, Fold, rowsToSocials, socialRow, socialRowError, SocialsEditor, socialsToRows, useFolds, type SocialDraft } from "./FormKit";
+
+export { socialRow, socialRowError, type SocialDraft };
 import { Input, Select, StarInput, Stars, Textarea } from "./ui";
 
 // ---------------------------------------------------------------------------
 // Draft model shared by Add, Edit and Import.
 // ---------------------------------------------------------------------------
 
-export type SocialDraft = { key: string; platform: SocialPlatform; text: string; followers: string };
 
 export type CreatorDraft = {
   name: string; contact_email: string; channel_link: string; niche: string; avg_views: string; engagement_rate: string; stars_consistency: number; stars_demographics: number; stars_niche: number; stars_engagement: number; priority: Priority; next_action_date: string;
@@ -25,27 +27,9 @@ export const emptyDraft: CreatorDraft = { name: "", contact_email: "", channel_l
 const dimClamp = (v: number) => Math.min(5, Math.max(0, Math.round(v) || 0));
 export const draftDims = (draft: CreatorDraft) => ({ stars_consistency: dimClamp(draft.stars_consistency), stars_demographics: dimClamp(draft.stars_demographics), stars_niche: dimClamp(draft.stars_niche), stars_engagement: dimClamp(draft.stars_engagement) });
 
-export const socialRow = (platform: SocialPlatform, text = "", followers = ""): SocialDraft => ({ key: uid(), platform, text, followers });
 
 /** Resolved social links in order (main first), skipping empty rows. */
-export const draftSocials = (draft: CreatorDraft): SocialLink[] => {
-  const out: SocialLink[] = [];
-  const seen = new Set<string>();
-  for (const row of draft.socials) {
-    const resolved = resolveSocial(row.text, row.platform);
-    if (!resolved || seen.has(socialKey(resolved.url))) continue;
-    seen.add(socialKey(resolved.url));
-    out.push({ ...resolved, followers: parseFollowers(row.followers) });
-  }
-  return out;
-};
-
-export const socialRowError = (row: SocialDraft) => {
-  if (!row.text.trim()) return "";
-  if (/\s/.test(row.text.trim())) return "Handles have no spaces";
-  if (row.followers.trim() && !parseFollowers(row.followers)) return "Followers: use 12000, 12k or 1.2m";
-  return resolveSocial(row.text, row.platform) ? "" : row.platform === "Website" ? "Enter a web address" : `Enter a ${SOCIAL_META[row.platform].label} handle or link`;
-};
+export const draftSocials = (draft: CreatorDraft): SocialLink[] => rowsToSocials(draft.socials);
 
 export const draftHasErrors = (draft: CreatorDraft) => draft.socials.some((row) => socialRowError(row));
 
@@ -68,7 +52,7 @@ export const creatorToDraft = (creator: Creator): CreatorDraft => ({
   name: creator.name, contact_email: creator.contact_email, channel_link: creator.channel_link, niche: creator.niche, avg_views: creator.avg_views ? String(creator.avg_views) : "", engagement_rate: creator.engagement_rate ? String(creator.engagement_rate) : "",
   stars_consistency: creator.stars_consistency || 0, stars_demographics: creator.stars_demographics || 0, stars_niche: creator.stars_niche || 0, stars_engagement: creator.stars_engagement || 0,
   priority: creator.priority || "none", next_action_date: creator.next_action_date || "", platform: creator.platform, pipeline_status: creator.pipeline_status, date_contacted: creator.date_contacted || "", notes: creator.notes, next_action: creator.next_action || "",
-  socials: (creator.socials || []).map((s) => socialRow(s.platform, s.handle && s.platform !== "Website" ? `@${s.handle}` : s.url, s.followers ? String(s.followers) : "")),
+  socials: socialsToRows(creator.socials),
 });
 
 // Status change inside a form: entering an outreach stage pre-fills today's
@@ -91,78 +75,12 @@ export function RatingPicker({ draft, setDraft }: { draft: CreatorDraft; setDraf
 // Form UI: paste-anything box, essentials, socials, then folded sections.
 // ---------------------------------------------------------------------------
 
-const SECTIONS_KEY = "if.creator-form-open";
-const readOpen = (): string[] => {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(SECTIONS_KEY) || "[]");
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-};
-
-function Fold({ id, title, summary, filled, open, onToggle, children }: { id: string; title: string; summary: ReactNode; filled: boolean; open: boolean; onToggle: (id: string) => void; children: ReactNode }) {
-  return <section className={`cf-fold${open ? " open" : ""}`}>
-    <button type="button" className="cf-fold-head" aria-expanded={open} aria-controls={`cf-${id}`} onClick={() => onToggle(id)}>
-      <span className={`cf-dot${filled ? " filled" : ""}`} aria-hidden="true">{filled && <Check size={10} />}</span>
-      <strong>{title}</strong>
-      <span className="cf-fold-summary">{summary}</span>
-      <ChevronDown size={16} className="cf-chev" />
-    </button>
-    {open && <div className="cf-fold-body" id={`cf-${id}`}>{children}</div>}
-  </section>;
-}
-
 type Props = { draft: CreatorDraft; setDraft: (draft: CreatorDraft) => void; mode: "add" | "edit" };
 
 export function CreatorFields({ draft, setDraft, mode }: Props) {
   const data = useData();
-  const [open, setOpen] = useState<string[]>(readOpen);
-  const [focusKey, setFocusKey] = useState("");
-  const [moreOpen, setMoreOpen] = useState(false);
-  const toggle = (id: string) => {
-    const next = open.includes(id) ? open.filter((x) => x !== id) : [...open, id];
-    setOpen(next);
-    try {
-      localStorage.setItem(SECTIONS_KEY, JSON.stringify(next));
-    } catch {
-      // private mode: sections simply start folded next time
-    }
-  };
+  const { open, toggle } = useFolds("if.creator-form-open");
   const niches = Array.from(new Set(data.creators.filter((c) => !c.archived_at).map((c) => c.niche.trim()).filter(Boolean))).sort();
-
-  // ----- socials
-  const setSocials = (socials: SocialDraft[]) => setDraft({ ...draft, socials });
-  const addSocial = (platform: SocialPlatform) => {
-    const row = socialRow(platform);
-    setSocials([...draft.socials, row]);
-    setFocusKey(row.key);
-    setMoreOpen(false);
-  };
-  const updateRow = (key: string, patch: Partial<SocialDraft>) => setSocials(draft.socials.map((row) => {
-    if (row.key !== key) return row;
-    const next = { ...row, ...patch };
-    // Pasting a link from another network switches the row to that network.
-    if (patch.text !== undefined) {
-      const resolved = resolveSocial(patch.text, next.platform);
-      if (resolved && resolved.platform !== next.platform && /[./]/.test(patch.text)) next.platform = resolved.platform;
-    }
-    return next;
-  }));
-  const tidyRow = (key: string) => setSocials(draft.socials.map((row) => {
-    if (row.key !== key) return row;
-    const resolved = resolveSocial(row.text, row.platform);
-    if (!resolved) return row;
-    return { ...row, platform: resolved.platform, text: resolved.handle && resolved.platform !== "Website" ? `@${resolved.handle}` : resolved.url };
-  }));
-  const removeRow = (key: string) => setSocials(draft.socials.filter((row) => row.key !== key));
-  const makeMain = (key: string) => {
-    const row = draft.socials.find((r) => r.key === key);
-    if (row) setSocials([row, ...draft.socials.filter((r) => r.key !== key)]);
-  };
-  const used = new Set(draft.socials.map((r) => r.platform));
-  const quick = QUICK_SOCIALS.filter((p) => !used.has(p));
-  const more = SOCIAL_ORDER.filter((p) => !QUICK_SOCIALS.includes(p));
 
   // ----- paste anything
   const [pasteText, setPasteText] = useState("");
@@ -176,9 +94,8 @@ export function CreatorFields({ draft, setDraft, mode }: Props) {
       setPasteNote({ ok: false, text: "Nothing recognisable — paste a profile link, an @handle or a bio with links." });
       return;
     }
-    const existing = new Set(draft.socials.map((r) => { const res = resolveSocial(r.text, r.platform); return res ? socialKey(res.url) : ""; }));
-    const additions = found.socials.filter((s) => !existing.has(socialKey(s.url))).map((s) => socialRow(s.platform, s.handle && s.platform !== "Website" ? `@${s.handle}` : s.url));
-    const next: CreatorDraft = { ...draft, socials: [...draft.socials.filter((r) => r.text.trim()), ...additions] };
+    const { rows, added: additions } = appendSocials(draft.socials, found.socials);
+    const next: CreatorDraft = { ...draft, socials: rows };
     const filled: string[] = additions.map((a) => SOCIAL_META[a.platform].label);
     if (found.email && !draft.contact_email.trim()) { next.contact_email = found.email; filled.push("email"); }
     if (found.nameGuess && !draft.name.trim()) { next.name = found.nameGuess; filled.push("name (check it)"); }
@@ -230,46 +147,7 @@ export function CreatorFields({ draft, setDraft, mode }: Props) {
       <label className="field-wrap cf-niche"><span className="field-label">Niche</span><input className="field" list="cf-niches" value={draft.niche} onChange={(event) => setDraft({ ...draft, niche: event.target.value })} placeholder="Tech, beauty, travel…" /><datalist id="cf-niches">{niches.map((n) => <option key={n} value={n} />)}</datalist></label>
     </div>
 
-    <div className="cf-socials">
-      <div className="cf-socials-head"><span className="field-label">Social profiles</span>{draft.socials.length > 1 && <small><Star size={11} /> marks the main channel — it sets the platform and the link on cards</small>}</div>
-      {draft.socials.map((row, index) => {
-        const resolved = resolveSocial(row.text, row.platform);
-        const error = socialRowError(row);
-        return <div className={`cf-social${error ? " has-error" : ""}`} key={row.key}>
-          <label className="cf-social-pick" style={{ ["--tone" as string]: SOCIAL_META[row.platform].color }}>
-            <SocialBadge platform={row.platform} size={24} />
-            <span className="cf-pick-label">{SOCIAL_META[row.platform].label}</span>
-            <select value={row.platform} onChange={(event) => updateRow(row.key, { platform: event.target.value as SocialPlatform })} aria-label="Network">{SOCIAL_ORDER.map((p) => <option key={p} value={p}>{SOCIAL_META[p].label}</option>)}</select>
-            <ChevronDown size={13} />
-          </label>
-          <div className="cf-social-input">
-            <input
-              className="field"
-              value={row.text}
-              autoFocus={focusKey === row.key}
-              onChange={(event) => updateRow(row.key, { text: event.target.value })}
-              onBlur={() => tidyRow(row.key)}
-              onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); tidyRow(row.key); } }}
-              placeholder={SOCIAL_META[row.platform].placeholder}
-              aria-label={`${SOCIAL_META[row.platform].label} handle or link`}
-              aria-invalid={!!error}
-            />
-            {resolved && <a href={resolved.url} target="_blank" rel="noreferrer" className="cf-open" title={`Open ${resolved.url}`} aria-label="Open profile"><ExternalLink size={13} /></a>}
-          </div>
-          <input className="field cf-followers" value={row.followers} onChange={(event) => updateRow(row.key, { followers: event.target.value })} placeholder="Followers" aria-label={`${SOCIAL_META[row.platform].label} followers`} inputMode="decimal" />
-          <button type="button" className={`cf-main${index === 0 ? " on" : ""}`} onClick={() => makeMain(row.key)} title={index === 0 ? "Main channel" : "Make this the main channel"} aria-label={index === 0 ? "Main channel" : "Make main channel"} aria-pressed={index === 0}><Star size={14} /></button>
-          <button type="button" className="cf-remove" onClick={() => removeRow(row.key)} aria-label={`Remove ${SOCIAL_META[row.platform].label}`}><X size={14} /></button>
-          {error && <small className="cf-social-error">{error}</small>}
-        </div>;
-      })}
-      <div className="cf-add-socials">
-        {quick.map((p) => <button type="button" key={p} onClick={() => addSocial(p)} style={{ ["--tone" as string]: SOCIAL_META[p].color }}><SocialBadge platform={p} size={18} /> {draft.socials.length ? "" : "Add "}{SOCIAL_META[p].label}</button>)}
-        <div className="cf-more">
-          <button type="button" onClick={() => setMoreOpen(!moreOpen)} aria-expanded={moreOpen}><Plus size={14} /> {quick.length < QUICK_SOCIALS.length ? "Another" : "More"}</button>
-          {moreOpen && <MoreMenu options={[...QUICK_SOCIALS.filter((p) => used.has(p)), ...more]} onPick={addSocial} onClose={() => setMoreOpen(false)} />}
-        </div>
-      </div>
-    </div>
+    <SocialsEditor rows={draft.socials} onChange={(socials) => setDraft({ ...draft, socials })} />
 
     <Fold id="performance" title="Audience & performance" open={open.includes("performance")} onToggle={toggle} filled={perfBits.length > 0} summary={perfBits.join(" · ") || "Views and engagement — optional"}>
       <div className="form-grid">
@@ -296,16 +174,4 @@ export function CreatorFields({ draft, setDraft, mode }: Props) {
       <Textarea label="Notes" value={draft.notes} onChange={(event) => setDraft({ ...draft, notes: event.target.value })} rows={3} />
     </Fold>}
   </div>;
-}
-
-function MoreMenu({ options, onPick, onClose }: { options: SocialPlatform[]; onPick: (p: SocialPlatform) => void; onClose: () => void }) {
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const away = (event: MouseEvent) => { if (ref.current && !ref.current.contains(event.target as Node)) onClose(); };
-    const esc = (event: KeyboardEvent) => { if (event.key === "Escape") { event.stopPropagation(); onClose(); } };
-    document.addEventListener("mousedown", away);
-    document.addEventListener("keydown", esc, true);
-    return () => { document.removeEventListener("mousedown", away); document.removeEventListener("keydown", esc, true); };
-  }, [onClose]);
-  return <div className="cf-more-menu" ref={ref} role="menu">{options.map((p) => <button type="button" role="menuitem" key={p} onClick={() => onPick(p)}><SocialBadge platform={p} size={20} /> {SOCIAL_META[p].label}</button>)}</div>;
 }

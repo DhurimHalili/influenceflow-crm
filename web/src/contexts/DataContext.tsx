@@ -7,6 +7,8 @@ import { loadCloudWorkspace, persistCloudWorkspace } from "../services/supabaseW
 import type { Activity, Brand, BrandContact, Campaign, Creator, Followup, Meeting, Profile, WorkspaceData } from "../types";
 import { useAuth } from "./AuthContext";
 import { socialKey } from "../lib/socials";
+import { mergeBriefs } from "../lib/brandBrief";
+import { mergeSocialLists } from "../lib/socials";
 
 type NewCreator = Omit<Creator, "id" | "user_id" | "created_at" | "status_updated_at" | "archived_at" | "on_roster" | "followup_count" | "last_followup_at" | "lost_reason" | "lost_at" | "draft_subject" | "draft_body" | "stars_engagement" | "rates"> &
   Partial<Pick<Creator, "draft_subject" | "draft_body" | "stars_engagement" | "rates">>;
@@ -50,7 +52,7 @@ type DataContextValue = WorkspaceData & {
   updateBrand: (id: string, value: Partial<Brand>, opts?: UpdateOpts) => void;
   completeAction: (kind: "creator" | "brand", id: string) => void;
   addBrands: (values: NewBrand[]) => number;
-  findBrandDuplicates: (name: string, domain: string, ignoreId?: string) => DuplicateMatch[];
+  findBrandDuplicates: (name: string, domain: string, ignoreId?: string, links?: string[]) => DuplicateMatch[];
   mergeBrands: (keepId: string, removeId: string, merged: Partial<Brand>) => void;
   addContact: (value: NewContact) => BrandContact;
   updateContact: (id: string, value: Partial<BrandContact>) => void;
@@ -551,11 +553,13 @@ export function DataProvider({ children }: { children: ReactNode }) {
     });
 
   const findBrandDuplicates = useCallback(
-    (name: string, domain: string, ignoreId?: string) => {
+    (name: string, domain: string, ignoreId?: string, links: string[] = []) => {
       const safeName = normalize(name);
       const safeDomain = normalize(domain)
         .replace(/^https?:\/\//, "")
-        .replace(/^www\./, "");
+        .replace(/^www\./, "")
+        .replace(/\/.*$/, "");
+      const wanted = new Set(links.map((value) => socialKey(value)).filter(Boolean));
       const matches: DuplicateMatch[] = [];
       data.brands
         .filter((item) => item.id !== ignoreId && !item.archived_at)
@@ -563,8 +567,10 @@ export function DataProvider({ children }: { children: ReactNode }) {
           if (safeName && normalize(item.name) === safeName) matches.push({ type: "name", id: item.id, label: item.name });
           else if (
             safeDomain &&
-            normalize(item.domain).replace(/^https?:\/\//, "").replace(/^www\./, "") === safeDomain
+            normalize(item.domain).replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/.*$/, "") === safeDomain
           )
+            matches.push({ type: "domain", id: item.id, label: item.name });
+          else if (wanted.size && (item.socials || []).some((social) => wanted.has(socialKey(social.url))))
             matches.push({ type: "domain", id: item.id, label: item.name });
         });
       return matches;
@@ -655,7 +661,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
     setData((current) => {
       const removed = current.brands.find((item) => item.id === removeId);
       const kept = current.brands.find((item) => item.id === keepId);
-      const brands = current.brands.filter((item) => item.id !== removeId).map((item) => (item.id === keepId ? { ...item, ...merged } : item));
+      // The brief and socials of both records are combined, never lost.
+      const brands = current.brands.filter((item) => item.id !== removeId).map((item) => (item.id === keepId ? { ...item, ...merged, brief: mergeBriefs(item.brief, removed?.brief), socials: mergeSocialLists(item.socials, removed?.socials) } : item));
       const contacts = current.contacts.map((contact) => (contact.brand_id === removeId ? { ...contact, brand_id: keepId } : contact));
       const campaigns = current.campaigns.map((campaign) => (campaign.brand_id === removeId ? { ...campaign, brand_id: keepId } : campaign));
       const meetings = current.meetings.map((meeting) =>

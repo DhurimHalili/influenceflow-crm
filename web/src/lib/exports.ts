@@ -1,4 +1,5 @@
-import type { Brand, BrandContact, Campaign, Creator, RatingWeights, SocialLink, SocialPlatform } from "../types";
+import type { Brand, BrandBrief, BrandContact, Campaign, Creator, RatingWeights, SocialLink, SocialPlatform } from "../types";
+import { normalizeBrief } from "./brandBrief";
 import { creatorScore, dayKey } from "./utils";
 
 // Single source of truth for every CSV/JSON export, so the list pages and
@@ -50,13 +51,30 @@ export const creatorRow = (item: Creator, weights?: RatingWeights | null) => ({
 });
 
 export const BRAND_HEADERS: Record<string, string> = {
-  name: "Company", domain: "Domain", brand_type: "Type", contact_email: "Email", priority: "Priority", pipeline_status: "Status",
+  name: "Company", domain: "Domain", brand_type: "Type", contact_email: "Email", socials: "Socials",
+  niches_wanted: "Creator niches", platforms_wanted: "Platforms", creator_size: "Creator size", formats: "Formats",
+  budget_min: "Budget min", budget_max: "Budget max", budget_per: "Budget per", goals: "Goals", markets: "Markets", ages: "Audience age", gender: "Audience gender",
+  payment_terms: "Payment terms", usage_rights: "Usage rights", exclusivity: "Exclusivity", gifting: "Gifting", avoid: "Avoid", next_launch: "Next launch",
+  priority: "Priority", pipeline_status: "Status",
   date_contacted: "Date contacted", contacts: "People", next_action: "Next action", action_due: "Action due", lost_reason: "Lost reason",
   notes: "Notes", added_on: "Added on", archived: "Archived",
 };
 
+// Lists are "; "-separated so a cell like "Tech; Gaming" re-imports cleanly.
+const briefColumns = (raw: BrandBrief | undefined) => {
+  const b = normalizeBrief(raw);
+  return {
+    niches_wanted: b.niches.join("; "), platforms_wanted: b.platforms.join("; "), creator_size: b.tiers.join("; "), formats: b.formats.join("; "),
+    budget_min: b.budget_min || "", budget_max: b.budget_max || "", budget_per: b.budget_min || b.budget_max ? b.budget_period : "",
+    goals: b.goals.join("; "), markets: b.markets.join("; "), ages: b.ages.join("; "), gender: b.gender,
+    payment_terms: b.payment_terms, usage_rights: b.usage_rights, exclusivity: b.exclusivity, gifting: b.gifting ? "yes" : "", avoid: b.avoid.join("; "), next_launch: b.next_launch || "",
+  };
+};
+
 export const brandRow = (item: Brand, contacts: BrandContact[] = []) => ({
-  name: item.name, domain: item.domain, brand_type: item.brand_type, contact_email: item.contact_email, priority: item.priority, pipeline_status: item.pipeline_status,
+  name: item.name, domain: item.domain, brand_type: item.brand_type, contact_email: item.contact_email, socials: (item.socials || []).map((x) => x.url).join(" "),
+  ...briefColumns(item.brief),
+  priority: item.priority, pipeline_status: item.pipeline_status,
   date_contacted: day(item.date_contacted),
   contacts: contacts.filter((c) => c.brand_id === item.id).map((c) => [`${c.first_name} ${c.last_name}`.trim(), c.title, c.email].filter(Boolean).join(" · ")).join("; "),
   next_action: item.next_action || "", action_due: day(item.next_action_date), lost_reason: item.lost_reason || "",
