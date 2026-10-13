@@ -6,6 +6,7 @@ import { hasSupabase } from "../lib/supabase";
 import { loadCloudWorkspace, persistCloudWorkspace } from "../services/supabaseWorkspace";
 import type { Activity, Brand, BrandContact, Campaign, Creator, Followup, Meeting, Profile, WorkspaceData } from "../types";
 import { useAuth } from "./AuthContext";
+import { socialKey } from "../lib/socials";
 
 type NewCreator = Omit<Creator, "id" | "user_id" | "created_at" | "status_updated_at" | "archived_at" | "on_roster" | "followup_count" | "last_followup_at" | "lost_reason" | "lost_at" | "draft_subject" | "draft_body" | "stars_engagement" | "rates"> &
   Partial<Pick<Creator, "draft_subject" | "draft_body" | "stars_engagement" | "rates">>;
@@ -43,7 +44,7 @@ type DataContextValue = WorkspaceData & {
   addCreator: (value: NewCreator) => Creator;
   updateCreator: (id: string, value: Partial<Creator>, opts?: UpdateOpts) => void;
   addCreators: (values: NewCreator[]) => number;
-  findCreatorDuplicates: (name: string, link: string, ignoreId?: string) => DuplicateMatch[];
+  findCreatorDuplicates: (name: string, link: string, ignoreId?: string, links?: string[]) => DuplicateMatch[];
   mergeCreators: (keepId: string, removeId: string, merged: Partial<Creator>) => void;
   addBrand: (value: NewBrand) => Brand;
   updateBrand: (id: string, value: Partial<Brand>, opts?: UpdateOpts) => void;
@@ -358,15 +359,17 @@ export function DataProvider({ children }: { children: ReactNode }) {
   );
 
   const findCreatorDuplicates = useCallback(
-    (name: string, link: string, ignoreId?: string) => {
+    (name: string, link: string, ignoreId?: string, links: string[] = []) => {
       const safeName = normalize(name);
-      const safeLink = normalize(link);
+      // Any of their profiles counts: the same Instagram on two records is
+      // the same person, however the link was written.
+      const wanted = new Set([link, ...links].map((value) => value && socialKey(value)).filter(Boolean));
       const matches: DuplicateMatch[] = [];
       data.creators
         .filter((item) => item.id !== ignoreId && !item.archived_at)
         .forEach((item) => {
           if (safeName && normalize(item.name) === safeName) matches.push({ type: "name", id: item.id, label: item.name });
-          else if (safeLink && normalize(item.channel_link) === safeLink) matches.push({ type: "link", id: item.id, label: item.name });
+          else if (wanted.size && [item.channel_link, ...(item.socials || []).map((social) => social.url)].some((value) => value && wanted.has(socialKey(value)))) matches.push({ type: "link", id: item.id, label: item.name });
         });
       return matches;
     },
@@ -518,7 +521,13 @@ export function DataProvider({ children }: { children: ReactNode }) {
       const creators = current.creators.filter((item) => item.id !== removeId).map((item) => {
         if (item.id !== keepId) return item;
         const next = { ...item, ...merged };
-        return { ...next, stars: overallStars(next, current.profile.rating_weights) };
+        // Socials from both records survive; the chosen channel stays main.
+        const pool = [...(next.socials || []), ...(item.socials || []), ...(removed?.socials || [])];
+        const seen = new Set<string>();
+        const socials = pool.filter((social) => { const key = socialKey(social.url); if (seen.has(key)) return false; seen.add(key); return true; });
+        const mainIndex = socials.findIndex((social) => next.channel_link && socialKey(social.url) === socialKey(next.channel_link));
+        if (mainIndex > 0) socials.unshift(...socials.splice(mainIndex, 1));
+        return { ...next, socials, stars: overallStars(next, current.profile.rating_weights) };
       });
       const campaigns = current.campaigns.map((campaign) => ({
         ...campaign,

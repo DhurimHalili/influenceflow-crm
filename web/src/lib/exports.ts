@@ -1,4 +1,4 @@
-import type { Brand, BrandContact, Campaign, Creator, RatingWeights } from "../types";
+import type { Brand, BrandContact, Campaign, Creator, RatingWeights, SocialLink, SocialPlatform } from "../types";
 import { creatorScore, dayKey } from "./utils";
 
 // Single source of truth for every CSV/JSON export, so the list pages and
@@ -13,6 +13,7 @@ const day = (value?: string | null) => {
 
 export const CREATOR_HEADERS: Record<string, string> = {
   name: "Name", contact_email: "Email", channel_link: "Channel", niche: "Niche", platform: "Platform",
+  instagram: "Instagram", tiktok: "TikTok", youtube: "YouTube", x: "X", twitch: "Twitch", other_socials: "Other socials", followers: "Total followers",
   avg_views: "Avg views", engagement_rate: "Engagement %", stars: "Rating",
   demographics: "Audience", niche_fit: "Niche fit", engagement_stars: "Engagement stars", consistency: "Consistency",
   rate_video: "Rate: video", rate_short: "Rate: short", rate_post: "Rate: post", rate_story: "Rate: story", rate_stream: "Rate: stream",
@@ -21,8 +22,25 @@ export const CREATOR_HEADERS: Record<string, string> = {
   notes: "Notes", added_on: "Added on", archived: "Archived",
 };
 
+// One column per big network (first profile on it), everything else in
+// "Other socials" as "Network url" pairs — re-importable as-is.
+const SOCIAL_COLUMN_KEYS: [string, SocialPlatform][] = [["instagram", "Instagram"], ["tiktok", "TikTok"], ["youtube", "YouTube"], ["x", "X"], ["twitch", "Twitch"]];
+const socialColumns = (socials: SocialLink[]) => {
+  const used = new Set<SocialLink>();
+  const cols: Record<string, string | number> = {};
+  for (const [key, platform] of SOCIAL_COLUMN_KEYS) {
+    const hit = socials.find((s) => s.platform === platform);
+    if (hit) used.add(hit);
+    cols[key] = hit ? hit.url : "";
+  }
+  cols.other_socials = socials.filter((s) => !used.has(s)).map((s) => s.url).join(" ");
+  cols.followers = socials.reduce((sum, s) => sum + (s.followers || 0), 0);
+  return cols;
+};
+
 export const creatorRow = (item: Creator, weights?: RatingWeights | null) => ({
   name: item.name, contact_email: item.contact_email, channel_link: item.channel_link, niche: item.niche, platform: item.platform,
+  ...socialColumns(item.socials || []),
   avg_views: item.avg_views || 0, engagement_rate: item.engagement_rate || 0, stars: creatorScore(item, weights),
   demographics: item.stars_demographics || 0, niche_fit: item.stars_niche || 0, engagement_stars: item.stars_engagement || 0, consistency: item.stars_consistency || 0,
   rate_video: item.rates?.video || 0, rate_short: item.rates?.short || 0, rate_post: item.rates?.post || 0, rate_story: item.rates?.story || 0, rate_stream: item.rates?.stream || 0,

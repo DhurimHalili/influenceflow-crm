@@ -1,7 +1,8 @@
 import { supabase } from "../lib/supabase";
 import { blankWorkspace } from "../lib/seed";
 import { normalizePreferences, normalizeRates } from "../lib/prefs";
-import type { Activity, Brand, BrandContact, Campaign, Creator, Followup, Meeting, Profile, WorkspaceData } from "../types";
+import { PLATFORMS, type Activity, type Brand, type BrandContact, type Campaign, type Creator, type Followup, type Meeting, type Platform, type Profile, type WorkspaceData } from "../types";
+import { asPlatform, detectPlatform, normalizeSocials, socialsWithChannel } from "../lib/socials";
 
 type JoinRow = { campaign_id: string; creator_id: string };
 
@@ -47,6 +48,19 @@ const toDeliverables = (row: Record<string, unknown>): Campaign["deliverables"] 
   return [];
 };
 
+// Stored platforms come in any casing ("youtube" from older clients);
+// unknown ones fall back to "Other".
+const platformOf = (value: unknown): Platform => PLATFORMS.find((p) => p.toLowerCase() === String(value ?? "").trim().toLowerCase()) || "Other";
+
+// A record without a known platform takes it from its channel link, and
+// records saved before socials existed show their channel as the first one.
+const creatorPlatformAndSocials = (row: Record<string, unknown>): Pick<Creator, "platform" | "socials"> => {
+  const link = text(row.channel_link);
+  let platform = platformOf(row.platform);
+  if (platform === "Other" && link) platform = asPlatform(detectPlatform(link) || undefined);
+  return { platform, socials: socialsWithChannel(normalizeSocials(row.socials), link, platform) };
+};
+
 const normalizeCreator = (row: Record<string, unknown>, userId: string): Creator => ({
   id: String(row.id ?? ""),
   user_id: typeof row.user_id === "string" ? row.user_id : userId,
@@ -64,9 +78,7 @@ const normalizeCreator = (row: Record<string, unknown>, userId: string): Creator
   stars: num(row.stars),
   draft_subject: text(row.draft_subject),
   draft_body: text(row.draft_body),
-  platform: (["YouTube", "Instagram", "TikTok", "Twitch", "LinkedIn", "Other"] as const).includes(row.platform as Creator["platform"])
-    ? (row.platform as Creator["platform"])
-    : "Other",
+  ...creatorPlatformAndSocials(row),
   pipeline_status: (mapStatus(row.pipeline_status) as Creator["pipeline_status"]) || "new",
   on_roster: row.on_roster === true || row.pipeline_status === "roster" || row.pipeline_status === "signed",
   date_contacted: dateOrNull(row.date_contacted),
@@ -157,9 +169,7 @@ const normalizeCampaign = (row: Record<string, unknown>, userId: string, links: 
     user_id: typeof row.user_id === "string" ? row.user_id : userId,
     name: text(row.name),
     brand_id: typeof row.brand_id === "string" ? row.brand_id : "",
-    platform: (["YouTube", "Instagram", "TikTok", "Twitch", "LinkedIn", "Other"] as const).includes(row.platform as Campaign["platform"])
-      ? (row.platform as Campaign["platform"])
-      : "Other",
+    platform: platformOf(row.platform),
     deliverables: toDeliverables(row),
     agreed_payment: agreed,
     agency_percent: percent,
@@ -320,7 +330,7 @@ export async function loadCloudWorkspace(userId: string): Promise<WorkspaceData 
 // PostgREST rejects the upsert with an unknown-column error: strip exactly
 // the column it names and retry, so one missing column never blocks the
 // whole save (and never drops the columns that do exist).
-const OPTIONAL_COLUMNS = ["engagement_rate", "next_action", "deliverables_items", "entity_type", "entity_id", "updated_at", "followup_count", "last_followup_at", "lost_reason", "lost_at", "stars", "stars_consistency", "stars_demographics", "stars_niche", "stars_engagement", "priority", "next_action_date", "kind", "done", "draft_subject", "draft_body", "status_updated_at", "email_templates", "rating_weights", "preferences", "rates", "payment_status", "invoice_due", "paid_at", "payout_status"];
+const OPTIONAL_COLUMNS = ["engagement_rate", "next_action", "deliverables_items", "entity_type", "entity_id", "updated_at", "followup_count", "last_followup_at", "lost_reason", "lost_at", "stars", "stars_consistency", "stars_demographics", "stars_niche", "stars_engagement", "priority", "next_action_date", "kind", "done", "draft_subject", "draft_body", "status_updated_at", "email_templates", "rating_weights", "preferences", "rates", "payment_status", "invoice_due", "paid_at", "payout_status", "socials"];
 
 const missingColumn = (error: { message?: string; details?: string; hint?: string; code?: string }) => {
   const msg = `${error.message || ""} ${error.details || ""} ${error.hint || ""}`;
@@ -371,9 +381,11 @@ export async function persistCloudWorkspace(workspace: WorkspaceData, userId: st
   const owned = <T extends { user_id: string }>(rows: T[]) => rows.map((row) => ({ ...row, user_id: userId }));
   await upsertResilient("profiles", [{ ...workspace.profile, id: userId } as unknown as Record<string, unknown>]);
 
+  // Records from older backups or caches may lack socials; the column is
+  // NOT NULL, so always send a list.
   await upsertResilient(
     "creators",
-    owned(workspace.creators) as unknown as Record<string, unknown>[],
+    owned(workspace.creators).map((row) => ({ ...row, socials: Array.isArray(row.socials) ? row.socials : [] })) as unknown as Record<string, unknown>[],
   );
   await upsertResilient(
     "brands",
