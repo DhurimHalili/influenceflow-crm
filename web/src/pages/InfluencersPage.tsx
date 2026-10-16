@@ -455,6 +455,12 @@ const ratingBreakdown = (creator: Creator, shares: Record<string, number>) => {
 function CreatorEdit({ creator, onClose }: { creator: Creator; onClose: () => void }) {
   const data = useData(); const { toast } = useToast();
   const [draft, setDraft] = useState<CreatorDraft>(() => creatorToDraft(creator));
+  // A status picked here saves on the spot, like everywhere else; the rest
+  // of the form still waits for "Save changes".
+  const setDraftLive = (next: CreatorDraft) => {
+    if (next.pipeline_status !== draft.pipeline_status) data.updateCreator(creator.id, { pipeline_status: next.pipeline_status });
+    setDraft(next);
+  };
   const canSave = !!draft.name.trim() && isValidEmail(draft.contact_email) && !draftHasErrors(draft);
   const save = (event: FormEvent) => {
     event.preventDefault();
@@ -466,5 +472,5 @@ function CreatorEdit({ creator, onClose }: { creator: Creator; onClose: () => vo
     const { notes: _notes, ...value } = draftToCreator(draft);
     data.updateCreator(creator.id, value); toast("Influencer updated"); onClose();
   };
-  return <form onSubmit={save} className="entity-form creator-form" onKeyDown={(event) => { if ((event.metaKey || event.ctrlKey) && event.key === "Enter") { event.preventDefault(); event.currentTarget.requestSubmit(); } }}><CreatorFields draft={draft} setDraft={setDraft} mode="edit" /><div className="modal-actions cf-actions"><small className="cf-kbd">Ctrl + Enter to save</small><Button type="button" variant="ghost" onClick={onClose}>Cancel</Button><Button disabled={!canSave}>Save changes</Button></div></form>;
+  return <form onSubmit={save} className="entity-form creator-form" onKeyDown={(event) => { if ((event.metaKey || event.ctrlKey) && event.key === "Enter") { event.preventDefault(); event.currentTarget.requestSubmit(); } }}><CreatorFields draft={draft} setDraft={setDraftLive} mode="edit" /><div className="modal-actions cf-actions"><small className="cf-kbd">Ctrl + Enter to save</small><Button type="button" variant="ghost" onClick={onClose}>Cancel</Button><Button disabled={!canSave}>Save changes</Button></div></form>;
 }

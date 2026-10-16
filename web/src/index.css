@@ -249,7 +249,7 @@ span.avatar { border-radius: 50%; display: inline-grid; place-items: center; fle
 
 /* Outreach momentum panel */
 .momentum-panel { margin-bottom: 17px; }.momentum-panel .panel-heading { flex-wrap: wrap; gap: 12px; }
-.momentum-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 10px; margin-top: 16px; }
+.momentum-grid { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 10px; margin-top: 16px; }
 .momentum-tile { border: 1px solid var(--line); border-radius: 11px; background: var(--surface-alt); padding: 13px 12px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .momentum-icon { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; color: var(--accent); background: var(--accent-soft); margin-bottom: 6px; }
 .momentum-tile strong { font: 750 22px "Manrope"; letter-spacing: -.5px; }

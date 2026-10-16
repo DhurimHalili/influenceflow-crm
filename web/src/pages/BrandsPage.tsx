@@ -275,6 +275,12 @@ function BrandProfile({ brand }: { brand: Brand }) {
 function BrandEdit({ brand, onClose, focus }: { brand: Brand; onClose: () => void; focus?: string }) {
   const data = useData(); const { toast } = useToast();
   const [draft, setDraft] = useState<BrandDraft>(() => brandToDraft(brand));
+  // A status picked here saves on the spot, like everywhere else; the rest
+  // of the form still waits for "Save changes".
+  const setDraftLive = (next: BrandDraft) => {
+    if (next.pipeline_status !== draft.pipeline_status) data.updateBrand(brand.id, { pipeline_status: next.pipeline_status });
+    setDraft(next);
+  };
   const canSave = !brandDraftErrors(draft);
   const save = (event: FormEvent) => {
     event.preventDefault();
@@ -286,5 +292,5 @@ function BrandEdit({ brand, onClose, focus }: { brand: Brand; onClose: () => voi
     data.updateBrand(brand.id, { name: value.name, domain: value.domain, brand_type: value.brand_type, contact_email: value.contact_email, pipeline_status: value.pipeline_status, date_contacted: value.date_contacted, priority: value.priority, next_action_date: value.next_action_date, socials: value.socials, brief: value.brief }, { activity: `Profile updated for ${value.name}` });
     toast("Brand updated"); onClose();
   };
-  return <form onSubmit={save} className="entity-form creator-form" onKeyDown={(event) => { if ((event.metaKey || event.ctrlKey) && event.key === "Enter") { event.preventDefault(); event.currentTarget.requestSubmit(); } }}><BrandFields draft={draft} setDraft={setDraft} mode="edit" focus={focus} /><div className="modal-actions cf-actions"><small className="cf-kbd">Ctrl + Enter to save</small><Button type="button" variant="ghost" onClick={onClose}>Cancel</Button><Button disabled={!canSave}>Save changes</Button></div></form>;
+  return <form onSubmit={save} className="entity-form creator-form" onKeyDown={(event) => { if ((event.metaKey || event.ctrlKey) && event.key === "Enter") { event.preventDefault(); event.currentTarget.requestSubmit(); } }}><BrandFields draft={draft} setDraft={setDraftLive} mode="edit" focus={focus} /><div className="modal-actions cf-actions"><small className="cf-kbd">Ctrl + Enter to save</small><Button type="button" variant="ghost" onClick={onClose}>Cancel</Button><Button disabled={!canSave}>Save changes</Button></div></form>;
 }
