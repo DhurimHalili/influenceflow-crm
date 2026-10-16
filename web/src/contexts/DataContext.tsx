@@ -158,6 +158,9 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const userRef = useRef(userId);
   const dataRef = useRef(data);
   dataRef.current = data;
+  // Status changes skip the typing debounce and go to the cloud at once, so
+  // leaving a profile right after a click can never strand the move.
+  const urgentSave = useRef(false);
   setActiveCurrency(data.profile.preferences?.currency || "USD");
   // Monotonic edit counter: a save only clears the pending flag if no newer
   // edit happened while it was in flight.
@@ -321,7 +324,10 @@ export function DataProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!hasSupabase || !hydrated || !ready || !user) return;
     if (!readPending()) return;
-    const timer = window.setTimeout(flush, 600);
+    const timer = window.setTimeout(() => {
+      urgentSave.current = false;
+      flush();
+    }, urgentSave.current ? 0 : 600);
     return () => window.clearTimeout(timer);
   }, [data, hydrated, ready, user, flush, readPending]);
 
@@ -471,6 +477,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
   };
 
   const updateCreator = (id: string, value: Partial<Creator>, opts?: { quiet?: boolean; activity?: string }) => {
+    if (value.pipeline_status) urgentSave.current = true;
     const before = data.creators.find((item) => item.id === id);
     const toDenied = value.pipeline_status === "denied" && before?.pipeline_status !== "denied";
     const lostStamp = toDenied && before && DEAL_STAGES.includes(before.pipeline_status) ? new Date().toISOString() : null;
@@ -621,6 +628,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
   };
 
   const updateBrand = (id: string, value: Partial<Brand>, opts?: { quiet?: boolean; activity?: string }) => {
+    if (value.pipeline_status) urgentSave.current = true;
     const before = data.brands.find((item) => item.id === id);
     const toDenied = value.pipeline_status === "denied" && before?.pipeline_status !== "denied";
     const lostStamp = toDenied && before && DEAL_STAGES.includes(before.pipeline_status) ? new Date().toISOString() : null;
@@ -691,6 +699,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     return contact;
   };
   const updateContact = (id: string, value: Partial<BrandContact>) => {
+    if (value.pipeline_status) urgentSave.current = true;
     const contact = data.contacts.find((item) => item.id === id);
     const toDenied = value.pipeline_status === "denied" && contact?.pipeline_status !== "denied";
     const lostStamp = toDenied && contact && DEAL_STAGES.includes(contact.pipeline_status) ? new Date().toISOString() : null;
@@ -759,6 +768,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
   };
 
   const updateCampaign = (id: string, value: Partial<Campaign>) => {
+    if (value.status) urgentSave.current = true;
     const before = data.campaigns.find((item) => item.id === id);
     const toCancelled = value.status === "cancelled" && before?.status !== "cancelled";
     const lostStamp = toCancelled && before && ["negotiating", "active"].includes(before.status) ? new Date().toISOString() : null;

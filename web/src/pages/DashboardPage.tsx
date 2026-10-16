@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { AlertCircle, ArrowRight, ArrowUpRight, BarChart3, Building2, CalendarDays, CheckCircle2, Clock3, DollarSign, Handshake, Mail, Plus, Reply, Send, Sparkles, TrendingUp, Trophy, UserPlus, Users, XCircle, Zap } from "lucide-react";
+import { AlertCircle, ArrowRight, ArrowUpRight, BarChart3, Building2, CalendarDays, CheckCircle2, Clock3, DollarSign, Handshake, Mail, Plus, Reply, Send, Sparkles, TrendingUp, Trophy, UserCheck, UserPlus, Users, XCircle, Zap } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { useData } from "../contexts/DataContext";
 import { Button, EmptyState, Metric, PageHeader, Tabs } from "../components/ui";
@@ -56,8 +56,10 @@ export default function DashboardPage() {
   })();
   // Outreach momentum: real events bucketed into a selectable time range.
   // Emails = first contacts dated in range; follow-ups = logged follow-up
-  // events; replies/negotiations/closed/lost = status-change events the app
-  // writes to the activity log. Nothing is estimated or placeholder.
+  // events; replies/negotiations/lost = status-change events the app writes
+  // to the activity log. Deals closed = campaigns signed (active) or
+  // completed; roster signings = influencers moved onto the roster. Nothing
+  // is estimated or placeholder.
   const [momentumRange, setMomentumRangeRaw] = useState(() => {
     try {
       return localStorage.getItem("if.momentum-range") || "week";
@@ -138,12 +140,34 @@ export default function DashboardPage() {
       creators.filter((c) => inDay(c.date_contacted, s, e) && LIVE_OUTREACH.includes(c.pipeline_status)).length +
       brands.filter((b) => inDay(b.date_contacted, s, e) && LIVE_OUTREACH.includes(b.pipeline_status)).length +
       data.contacts.filter((c) => inDay(c.date_contacted, s, e) && LIVE_OUTREACH.includes(c.pipeline_status)).length;
+    // The first moment each record reached a "won" status, counted once:
+    // a campaign that goes active and later completes is one closed deal.
+    // Records created straight into that status count from creation.
+    const firstWin = (type: "campaign" | "creator", statuses: string[], records: { id: string; created_at: string }[], wonNow: (id: string) => boolean) => {
+      const ids = new Set(records.map((r) => r.id));
+      const first = new Map<string, number>();
+      data.activities.forEach((a) => {
+        if (a.entity_type !== type || !a.entity_id || !ids.has(a.entity_id) || !statuses.some((st) => a.text.endsWith(` updated to ${st}`))) return;
+        const t = new Date(a.at).getTime();
+        if (!Number.isNaN(t) && t < (first.get(a.entity_id) ?? Infinity)) first.set(a.entity_id, t);
+      });
+      records.forEach((r) => {
+        if (first.has(r.id) || !wonNow(r.id)) return;
+        const t = new Date(r.created_at).getTime();
+        if (!Number.isNaN(t)) first.set(r.id, t);
+      });
+      return [...first.values()];
+    };
+    const dealWins = firstWin("campaign", ["active", "completed"], campaigns, (id) => ["active", "completed"].includes(campaigns.find((c) => c.id === id)?.status || ""));
+    const rosterWins = firstWin("creator", ["roster", "signed"], creators, (id) => ["roster", "signed"].includes(creators.find((c) => c.id === id)?.pipeline_status || ""));
+    const winsIn = (wins: number[], s = start, e = end) => wins.filter((t) => t >= s && t < e).length;
     const count = {
       emails: emails(),
       followups: data.followups.filter((f) => inR(f.at)).length,
       replies: statusIn("replied"),
       negotiating: statusIn("negotiating") + createdCampaigns(),
-      closed: statusIn("completed") + statusIn("signed"),
+      closed: winsIn(dealWins),
+      roster: winsIn(rosterWins),
       lost: lostIn(),
       added: creators.filter((c) => inR(c.created_at)).length,
     };
@@ -152,7 +176,8 @@ export default function DashboardPage() {
       followups: data.followups.filter((f) => inR(f.at, pStart, pFinish)).length,
       replies: statusIn("replied", pStart, pFinish),
       negotiating: statusIn("negotiating", pStart, pFinish) + createdCampaigns(pStart, pFinish),
-      closed: statusIn("completed", pStart, pFinish) + statusIn("signed", pStart, pFinish),
+      closed: winsIn(dealWins, pStart, pFinish),
+      roster: winsIn(rosterWins, pStart, pFinish),
       lost: lostIn(pStart, pFinish),
       added: creators.filter((c) => inR(c.created_at, pStart, pFinish)).length,
     };
@@ -178,6 +203,7 @@ export default function DashboardPage() {
     { key: "negotiating", label: "Negotiations started", icon: Handshake, invert: false },
     { key: "closed", label: "Deals closed", icon: Trophy, invert: false },
     { key: "lost", label: "Deals lost", icon: XCircle, invert: true },
+    { key: "roster", label: "Roster signings", icon: UserCheck, invert: false },
     { key: "added", label: "New creators added", icon: UserPlus, invert: false },
   ] as const;
   // One entry per record, most urgent reason first: overdue > due today >
