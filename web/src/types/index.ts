@@ -83,6 +83,8 @@ export interface Creator {
   /** Every social profile; the main one is mirrored in channel_link/platform. */
   socials: SocialLink[];
   niche: string;
+  /** Where the creator is based; a listed country name or free text. */
+  country?: string;
   avg_views: number;
   engagement_rate: number;
   stars: number;

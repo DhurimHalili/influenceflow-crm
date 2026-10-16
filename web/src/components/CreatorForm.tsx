@@ -5,6 +5,7 @@ import { asPlatform, extractFromText, parseFollowers, SOCIAL_META, SOCIAL_ORDER,
 import { compact, dueLabel, erContext, OUTREACH_STAGES, overallStars, RATING_DIMS, ratingScore, scoreLabel, today, weightShares } from "../lib/utils";
 import { ENTITY_STATUSES, STATUS_LABELS, type Creator, type EntityStatus, type Platform, type Priority, type SocialLink, type SocialPlatform } from "../types";
 import { SocialBadge } from "./SocialIcon";
+import { CountryPicker } from "./CountryPicker";
 import { appendSocials, Fold, rowsToSocials, socialRow, socialRowError, SocialsEditor, socialsToRows, useFolds, type SocialDraft } from "./FormKit";
 
 export { socialRow, socialRowError, type SocialDraft };
@@ -16,13 +17,13 @@ import { Input, Select, StarInput, Stars, Textarea } from "./ui";
 
 
 export type CreatorDraft = {
-  name: string; contact_email: string; channel_link: string; niche: string; avg_views: string; engagement_rate: string; stars_consistency: number; stars_demographics: number; stars_niche: number; stars_engagement: number; priority: Priority; next_action_date: string;
+  name: string; contact_email: string; channel_link: string; niche: string; country: string; avg_views: string; engagement_rate: string; stars_consistency: number; stars_demographics: number; stars_niche: number; stars_engagement: number; priority: Priority; next_action_date: string;
   platform: Platform; pipeline_status: EntityStatus; date_contacted: string; notes: string; next_action: string;
   /** First row is the main channel. */
   socials: SocialDraft[];
 };
 
-export const emptyDraft: CreatorDraft = { name: "", contact_email: "", channel_link: "", niche: "", avg_views: "", engagement_rate: "", stars_consistency: 0, stars_demographics: 0, stars_niche: 0, stars_engagement: 0, priority: "none", next_action_date: "", platform: "YouTube", pipeline_status: "new", date_contacted: "", notes: "", next_action: "", socials: [] };
+export const emptyDraft: CreatorDraft = { name: "", contact_email: "", channel_link: "", niche: "", country: "", avg_views: "", engagement_rate: "", stars_consistency: 0, stars_demographics: 0, stars_niche: 0, stars_engagement: 0, priority: "none", next_action_date: "", platform: "YouTube", pipeline_status: "new", date_contacted: "", notes: "", next_action: "", socials: [] };
 
 const dimClamp = (v: number) => Math.min(5, Math.max(0, Math.round(v) || 0));
 export const draftDims = (draft: CreatorDraft) => ({ stars_consistency: dimClamp(draft.stars_consistency), stars_demographics: dimClamp(draft.stars_demographics), stars_niche: dimClamp(draft.stars_niche), stars_engagement: dimClamp(draft.stars_engagement) });
@@ -40,7 +41,7 @@ export const draftToCreator = (draft: CreatorDraft) => {
   const socials = fromRows.length || draft.socials.length ? fromRows : socialsWithChannel([], draft.channel_link.trim(), draft.platform);
   const main = socials[0];
   return {
-    name: draft.name.trim(), contact_email: draft.contact_email.trim(), channel_link: main ? main.url : "", niche: draft.niche.trim(), socials,
+    name: draft.name.trim(), contact_email: draft.contact_email.trim(), channel_link: main ? main.url : "", niche: draft.niche.trim(), country: draft.country.trim(), socials,
     avg_views: Number(draft.avg_views) || 0, engagement_rate: Number(draft.engagement_rate) || 0, ...dims, stars: overallStars(dims), priority: (["none", "soon", "urgent"] as const).includes(draft.priority) ? draft.priority : "none" as Priority, next_action_date: draft.next_action_date || null,
     platform: main ? asPlatform(main.platform) : draft.platform,
     // "New" means nobody reached out yet, so it never carries a contact date.
@@ -49,7 +50,7 @@ export const draftToCreator = (draft: CreatorDraft) => {
 };
 
 export const creatorToDraft = (creator: Creator): CreatorDraft => ({
-  name: creator.name, contact_email: creator.contact_email, channel_link: creator.channel_link, niche: creator.niche, avg_views: creator.avg_views ? String(creator.avg_views) : "", engagement_rate: creator.engagement_rate ? String(creator.engagement_rate) : "",
+  name: creator.name, contact_email: creator.contact_email, channel_link: creator.channel_link, niche: creator.niche, country: creator.country || "", avg_views: creator.avg_views ? String(creator.avg_views) : "", engagement_rate: creator.engagement_rate ? String(creator.engagement_rate) : "",
   stars_consistency: creator.stars_consistency || 0, stars_demographics: creator.stars_demographics || 0, stars_niche: creator.stars_niche || 0, stars_engagement: creator.stars_engagement || 0,
   priority: creator.priority || "none", next_action_date: creator.next_action_date || "", platform: creator.platform, pipeline_status: creator.pipeline_status, date_contacted: creator.date_contacted || "", notes: creator.notes, next_action: creator.next_action || "",
   socials: socialsToRows(creator.socials),
@@ -145,6 +146,7 @@ export function CreatorFields({ draft, setDraft, mode }: Props) {
       <Input label="Full name" value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} required autoFocus={mode === "add"} placeholder="Maya Chen" />
       <Input label="Email" type="email" value={draft.contact_email} error={draft.contact_email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(draft.contact_email.trim()) ? "Enter a valid email" : ""} onChange={(event) => setDraft({ ...draft, contact_email: event.target.value })} placeholder="maya@studio.com" />
       <label className="field-wrap cf-niche"><span className="field-label">Niche</span><input className="field" list="cf-niches" value={draft.niche} onChange={(event) => setDraft({ ...draft, niche: event.target.value })} placeholder="Tech, beauty, travel…" /><datalist id="cf-niches">{niches.map((n) => <option key={n} value={n} />)}</datalist></label>
+      <CountryPicker value={draft.country} onChange={(country) => setDraft({ ...draft, country })} />
     </div>
 
     <SocialsEditor rows={draft.socials} onChange={(socials) => setDraft({ ...draft, socials })} />

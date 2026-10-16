@@ -97,6 +97,7 @@ const upgradeWorkspace = (value: WorkspaceData, userId: string): WorkspaceData =
     stars: Number(c.stars) || 0,
     draft_subject: c.draft_subject || "",
     draft_body: c.draft_body || "",
+    country: c.country || "",
     priority: c.priority || "none",
     next_action_date: c.next_action_date || null,
   })),
