@@ -417,14 +417,17 @@ export async function persistCloudWorkspace(workspace: WorkspaceData, userId: st
     owned(workspace.meetings) as unknown as Record<string, unknown>[],
   );
   // Only audit entries the cloud doesn't have yet are passed in (see
-  // DataContext); a plain upsert also applies re-pointed entries after merges.
-  await upsertResilient("activities", owned(workspace.activities) as unknown as Record<string, unknown>[]);
+  // DataContext). The audit log is append-only in the database (UPDATE and
+  // DELETE are revoked), so this must be a pure insert: a regular upsert
+  // needs UPDATE rights, was rejected with 403 and blocked every save.
+  await upsertResilient("activities", owned(workspace.activities) as unknown as Record<string, unknown>[], { ignoreDuplicates: true });
   // Final cleanup for permanently deleted entities: their own audit entries
-  // were dropped locally at delete time; remove the cloud copies explicitly
-  // (activities are otherwise never deleted, so stale rows can't resurrect).
+  // were dropped locally at delete time; try to remove the cloud copies too.
+  // Where the append-only log refuses deletes, keep the rows rather than
+  // failing (and endlessly retrying) the whole save.
   if (activityTombstones.length) {
     const { error: tombstoneError } = await supabase.from("activities").delete().eq("user_id", userId).in("id", activityTombstones);
-    if (tombstoneError) throw tombstoneError;
+    if (tombstoneError && tombstoneError.code !== "42501") throw tombstoneError;
   }
   if (followupTombstones.length) {
     const { error: followupTombstoneError } = await supabase.from("followups").delete().eq("user_id", userId).in("id", followupTombstones);
