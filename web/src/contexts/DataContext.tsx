@@ -4,6 +4,7 @@ import { EMPTY_RATES, normalizePreferences, normalizeRates } from "../lib/prefs"
 import { normalize, OUTREACH_STAGES, setActiveCurrency, overallStars, RATING_DIMS, ratedCount, sanitize, today, uid } from "../lib/utils";
 import { hasSupabase } from "../lib/supabase";
 import { loadCloudWorkspace, persistCloudWorkspace } from "../services/supabaseWorkspace";
+import { mergeWorkspace, sameRecord, toBase } from "../lib/sync";
 import type { Activity, Brand, BrandContact, Campaign, Creator, Followup, Meeting, Profile, WorkspaceData } from "../types";
 import { useAuth } from "./AuthContext";
 import { socialKey } from "../lib/socials";
@@ -139,6 +140,10 @@ export function DataProvider({ children }: { children: ReactNode }) {
   // survives reloads, so unsynced work is pushed instead of being replaced by
   // an older cloud copy (the "status jumps back to New" bug).
   const pendingKey = `influenceflow.pending-sync.${userId}`;
+  // The last copy this browser knows the cloud had (see lib/sync). Edits are
+  // measured against it, so only records really changed here are pushed.
+  const baseKey = `influenceflow.sync-base.${userId}`;
+  const baseRef = useRef<WorkspaceData | null>(null);
   const [data, setRawData] = useState<WorkspaceData>(() => blankWorkspace(userId));
   const [ready, setReady] = useState(false);
   const [syncState, setSyncState] = useState<SyncState>("loading");
@@ -172,6 +177,28 @@ export function DataProvider({ children }: { children: ReactNode }) {
   // Audit entries the cloud already has: only new ones are written on save
   // (they are insert-only), keeping every sync small.
   const syncedActivities = useRef<Set<string>>(new Set());
+
+  const saveBase = useCallback(
+    (value: WorkspaceData) => {
+      baseRef.current = toBase(value);
+      try {
+        localStorage.setItem(baseKey, JSON.stringify(baseRef.current));
+      } catch {
+        // storage full: the in-memory base still guards this session
+      }
+    },
+    [baseKey],
+  );
+
+  // Fresh cloud copy, minus rows this browser deleted but has not pushed yet.
+  const cloudCopy = (cloud: WorkspaceData, owner: string) => {
+    const fresh = upgradeWorkspace({ ...cloud, demoSeeded: false }, owner);
+    return {
+      ...fresh,
+      activities: fresh.activities.filter((a) => !activityTombstones.current.includes(a.id)),
+      followups: fresh.followups.filter((f) => !followupTombstones.current.includes(f.id)),
+    };
+  };
 
   const readPending = useCallback(() => {
     try {
@@ -213,17 +240,25 @@ export function DataProvider({ children }: { children: ReactNode }) {
     setHydrated(false);
     setReady(false);
     retryCount.current = 0;
+    let local = blankWorkspace(userId);
     try {
       const stored = localStorage.getItem(storageKey);
-      if (stored) {
-        const parsed = JSON.parse(stored) as WorkspaceData;
-        setRawData(upgradeWorkspace({ ...parsed, demoSeeded: false }, userId));
-      } else {
-        setRawData(blankWorkspace(userId));
-      }
+      if (stored) local = upgradeWorkspace({ ...(JSON.parse(stored) as WorkspaceData), demoSeeded: false }, userId);
     } catch {
-      setRawData(blankWorkspace(userId));
+      local = blankWorkspace(userId);
     }
+    setRawData(local);
+    // Base: the stored one, else — when nothing was pending — this copy
+    // (it matched the cloud last time). Pending edits with no base can't be
+    // told apart from stale data, so the cloud copy wins for those.
+    baseRef.current = null;
+    try {
+      const storedBase = localStorage.getItem(baseKey);
+      if (storedBase) baseRef.current = upgradeWorkspace(JSON.parse(storedBase) as WorkspaceData, userId);
+    } catch {
+      baseRef.current = null;
+    }
+    if (!baseRef.current && !readPending()) baseRef.current = toBase(local);
     setReady(true);
     if (!hasSupabase || userId === "guest") {
       setSyncState("local");
@@ -237,14 +272,19 @@ export function DataProvider({ children }: { children: ReactNode }) {
       void loadCloudWorkspace(owner)
         .then((cloud) => {
           if (cancelled || !cloud || userRef.current !== owner) return;
+          const fresh = cloudCopy(cloud, owner);
+          const prevBase = baseRef.current;
           syncedActivities.current = new Set(cloud.activities.map((a) => a.id));
-          if (readPending()) {
-            // This browser has edits the cloud never confirmed: keep them and
-            // push them up instead of letting the stale copy win.
-            setRawData((current) => upgradeWorkspace({ ...current, demoSeeded: false }, owner));
+          if (readPending() && prevBase) {
+            // Edits the cloud never confirmed are kept record by record;
+            // everything else (including work from other devices) comes from
+            // the cloud. They are pushed on the next save.
+            setRawData((current) => mergeWorkspace(current, prevBase, fresh, () => true, ACTIVITY_LIMIT));
           } else {
-            setRawData(upgradeWorkspace({ ...cloud, demoSeeded: false }, owner));
+            if (readPending()) writePending(false);
+            setRawData(fresh);
           }
+          saveBase(fresh);
           hydratedRef.current = true;
           setHydrated(true);
           setSyncState(readPending() ? "saving" : "synced");
@@ -262,6 +302,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       cancelled = true;
       window.clearTimeout(timer);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storageKey, userId, readPending]);
 
   useEffect(() => {
@@ -293,9 +334,10 @@ export function DataProvider({ children }: { children: ReactNode }) {
     const newActivities = snapshot.activities.filter((a) => !syncedActivities.current.has(a.id));
     inFlight.current = true;
     setSyncState("saving");
-    void persistCloudWorkspace({ ...snapshot, activities: newActivities, demoSeeded: false }, owner, doomed, doomedFollowups)
+    void persistCloudWorkspace({ ...snapshot, activities: newActivities, demoSeeded: false }, owner, baseRef.current, doomed, doomedFollowups)
       .then(() => {
         if (userRef.current !== owner) return;
+        saveBase(snapshot);
         retryCount.current = 0;
         newActivities.forEach((a) => syncedActivities.current.add(a.id));
         activityTombstones.current = activityTombstones.current.filter((id) => !doomed.includes(id));
@@ -319,7 +361,57 @@ export function DataProvider({ children }: { children: ReactNode }) {
           flush();
         }
       });
-  }, [writePending]);
+  }, [writePending, saveBase]);
+
+  // Pull: bring in changes made on other devices (phone, other tabs) when
+  // this one is opened, refocused or reconnects, and every 45 s while it is
+  // on screen. Local edits not yet pushed are kept record by record.
+  const pull = useCallback(() => {
+    if (!hasSupabase || !hydratedRef.current || userRef.current === "guest" || inFlight.current) return;
+    const owner = userRef.current;
+    inFlight.current = true;
+    void loadCloudWorkspace(owner)
+      .then((cloud) => {
+        if (!cloud || userRef.current !== owner) return;
+        const fresh = cloudCopy(cloud, owner);
+        const prevBase = baseRef.current;
+        const wasSynced = syncedActivities.current;
+        syncedActivities.current = new Set([...wasSynced, ...cloud.activities.map((a) => a.id)]);
+        setRawData((current) => {
+          const merged = mergeWorkspace(current, prevBase, fresh, (id) => !wasSynced.has(id), ACTIVITY_LIMIT);
+          return sameRecord(merged, current) ? current : merged;
+        });
+        saveBase(fresh);
+      })
+      .catch(() => {
+        // Offline or token hiccup: the next focus or tick tries again.
+      })
+      .finally(() => {
+        inFlight.current = false;
+        if (queued.current || readPending()) {
+          queued.current = false;
+          flush();
+        }
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [flush, readPending, saveBase]);
+
+  useEffect(() => {
+    if (!hasSupabase || !hydrated || !user) return;
+    const onShow = () => {
+      if (document.visibilityState === "visible") pull();
+    };
+    const tick = window.setInterval(onShow, 45000);
+    document.addEventListener("visibilitychange", onShow);
+    window.addEventListener("focus", onShow);
+    window.addEventListener("online", onShow);
+    return () => {
+      window.clearInterval(tick);
+      document.removeEventListener("visibilitychange", onShow);
+      window.removeEventListener("focus", onShow);
+      window.removeEventListener("online", onShow);
+    };
+  }, [hydrated, user, pull]);
 
   useEffect(() => {
     if (!hasSupabase || !hydrated || !ready || !user) return;
