@@ -4,6 +4,7 @@ import { normalizePreferences, normalizeRates } from "../lib/prefs";
 import { PLATFORMS, type Activity, type Brand, type BrandContact, type Campaign, type Creator, type Followup, type Meeting, type Platform, type Profile, type WorkspaceData } from "../types";
 import { asPlatform, detectPlatform, normalizeSocials, socialsWithChannel } from "../lib/socials";
 import { normalizeBrief } from "../lib/brandBrief";
+import { changedRows, removedIds, sameRecord } from "../lib/sync";
 
 type JoinRow = { campaign_id: string; creator_id: string };
 
@@ -365,25 +366,31 @@ async function upsertResilient(table: string, rows: Record<string, unknown>[], o
   }
 }
 
-const removeMissing = async (table: string, userId: string, ids: string[]) => {
-  const query = supabase.from(table).delete().eq("user_id", userId);
-  if (!ids.length) {
-    // Explicit empty state (user archived/deleted everything) still syncs,
-    // but this path only runs after a confirmed successful cloud load
-    // (see DataContext hydrated guard), never on a failed-load blank slate.
-    const { error } = await query;
-    if (error) throw error;
-    return;
-  }
-  const quoted = `(${ids.map((id) => `"${id.replace(/"/g, "")}"`).join(",")})`;
-  const { error } = await query.not("id", "in", quoted);
-  if (error) throw error;
-};
-
-export async function persistCloudWorkspace(workspace: WorkspaceData, userId: string, activityTombstones: string[] = [], followupTombstones: string[] = []) {
-  if (workspace.demoSeeded) return;
+// Only records changed on this device since `base` (the last copy it knows
+// the cloud had) are written, and only records deleted here are deleted.
+// A device holding old data therefore can't roll back or wipe work done on
+// another device.
+export async function persistCloudWorkspace(
+  full: WorkspaceData,
+  userId: string,
+  base: WorkspaceData | null,
+  activityTombstones: string[] = [],
+  followupTombstones: string[] = [],
+) {
+  if (full.demoSeeded) return;
   const owned = <T extends { user_id: string }>(rows: T[]) => rows.map((row) => ({ ...row, user_id: userId }));
-  await upsertResilient("profiles", [{ ...workspace.profile, id: userId } as unknown as Record<string, unknown>]);
+  const workspace: WorkspaceData = {
+    ...full,
+    creators: changedRows(full.creators, base?.creators ?? null),
+    brands: changedRows(full.brands, base?.brands ?? null),
+    contacts: changedRows(full.contacts, base?.contacts ?? null),
+    campaigns: changedRows(full.campaigns, base?.campaigns ?? null),
+    meetings: changedRows(full.meetings, base?.meetings ?? null),
+    followups: changedRows(full.followups, base?.followups ?? null),
+  };
+  if (!base || !sameRecord(full.profile, base.profile)) {
+    await upsertResilient("profiles", [{ ...workspace.profile, id: userId } as unknown as Record<string, unknown>]);
+  }
 
   // Records from older backups or caches may lack socials; the column is
   // NOT NULL, so always send a list.
@@ -445,13 +452,21 @@ export async function persistCloudWorkspace(workspace: WorkspaceData, userId: st
     }
   }
 
-  await Promise.all([
-    removeMissing("brand_contacts", userId, workspace.contacts.map((item) => item.id)),
-    removeMissing("meetings", userId, workspace.meetings.map((item) => item.id)),
-    removeMissing("campaigns", userId, workspace.campaigns.map((item) => item.id)),
-    removeMissing("creators", userId, workspace.creators.map((item) => item.id)),
-    removeMissing("brands", userId, workspace.brands.map((item) => item.id)),
-  ]);
+  const removals: [string, string[]][] = [
+    ["brand_contacts", removedIds(full.contacts, base?.contacts ?? null)],
+    ["meetings", removedIds(full.meetings, base?.meetings ?? null)],
+    ["campaigns", removedIds(full.campaigns, base?.campaigns ?? null)],
+    ["creators", removedIds(full.creators, base?.creators ?? null)],
+    ["brands", removedIds(full.brands, base?.brands ?? null)],
+  ];
+  await Promise.all(
+    removals
+      .filter(([, ids]) => ids.length)
+      .map(async ([table, ids]) => {
+        const { error } = await supabase.from(table).delete().eq("user_id", userId).in("id", ids);
+        if (error) throw error;
+      }),
+  );
 
   // Diff-based link sync (never wipe-then-write): deleting all links before a
   // failed insert would orphan campaign assignments with no way back.
