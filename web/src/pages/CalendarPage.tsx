@@ -1,10 +1,12 @@
 import { addDays, addMonths, eachDayOfInterval, endOfMonth, endOfWeek, format, isSameDay, isSameMonth, startOfMonth, startOfWeek, subMonths } from "date-fns";
-import { AlertCircle, ArrowRight, Bell, CalendarClock, Check, ChevronLeft, ChevronRight, CircleCheck, Clock3, Download, ExternalLink, Flag, Link2, ListTodo, Plus, Video } from "lucide-react";
+import { AlertCircle, ArrowRight, Bell, Send, CalendarClock, Check, ChevronLeft, ChevronRight, CircleCheck, Clock3, Download, ExternalLink, Flag, Link2, ListTodo, Plus, Video } from "lucide-react";
 import { useEffect, useMemo, useState, type DragEvent, type FormEvent, type ReactNode } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Button, Input, Modal, PageHeader, Select, Tabs, Textarea } from "../components/ui";
 import { useData } from "../contexts/DataContext";
 import { useToast } from "../contexts/ToastContext";
+import { useChase } from "../hooks/useChase";
+import { flagFor, nextFollowupLabel } from "../lib/followupEngine";
 import { dateLabel, dayKey, download, dueLabel, MEETING_KIND_LABELS, money, parseDay, timeLabel } from "../lib/utils";
 import type { Meeting, MeetingKind } from "../types";
 
@@ -14,8 +16,8 @@ type MeetingDraft = { title: string; kind: MeetingKind; starts_at: string; ends_
 // Everything that can appear on the calendar, normalised to one shape.
 type CalItem = {
   key: string;
-  source: "meeting" | "action" | "campaign";
-  kind: MeetingKind | "action" | "campaign";
+  source: "meeting" | "action" | "campaign" | "followup";
+  kind: MeetingKind | "action" | "campaign" | "followup";
   title: string;
   subtitle: string;
   start: Date;
@@ -28,13 +30,14 @@ type CalItem = {
   to?: string;
 };
 
-type FilterKey = "meeting" | "task" | "reminder" | "action" | "campaign";
+type FilterKey = "meeting" | "task" | "reminder" | "action" | "campaign" | "followup";
 const FILTERS: { key: FilterKey; label: string }[] = [
   { key: "meeting", label: "Meetings" },
   { key: "task", label: "Tasks" },
   { key: "reminder", label: "Reminders" },
   { key: "action", label: "Action dues" },
   { key: "campaign", label: "Campaign dates" },
+  { key: "followup", label: "Follow-ups" },
 ];
 const FILTER_STORE = "if.calendar-filters";
 const VIEW_STORE = "if.calendar-view";
@@ -89,10 +92,10 @@ const remindPreset = (meeting: Meeting) => {
 };
 
 const kindIcon = (kind: CalItem["kind"], size = 14) =>
-  kind === "task" ? <ListTodo size={size} /> : kind === "reminder" ? <Bell size={size} /> : kind === "action" ? <Flag size={size} /> : kind === "campaign" ? <CalendarClock size={size} /> : <Video size={size} />;
+  kind === "task" ? <ListTodo size={size} /> : kind === "reminder" ? <Bell size={size} /> : kind === "action" ? <Flag size={size} /> : kind === "campaign" ? <CalendarClock size={size} /> : kind === "followup" ? <Send size={size} /> : <Video size={size} />;
 
 const readFilters = (): Record<FilterKey, boolean> => {
-  const all = { meeting: true, task: true, reminder: true, action: true, campaign: true };
+  const all = { meeting: true, task: true, reminder: true, action: true, campaign: true, followup: true };
   try {
     const raw = localStorage.getItem(FILTER_STORE);
     return raw ? { ...all, ...(JSON.parse(raw) as Record<FilterKey, boolean>) } : all;
@@ -107,6 +110,7 @@ const icsText = (value: string) => value.replace(/\\/g, "\\\\").replace(/;/g, "\
 
 export default function CalendarPage() {
   const data = useData();
+  const chase = useChase();
   const { toast } = useToast();
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
@@ -210,6 +214,13 @@ export default function CalendarPage() {
       if (dueDay && (!startDay || dueDay.getTime() !== startDay.getTime() || c.status === "completed"))
         out.push({ key: `cd-${c.id}`, source: "campaign", kind: "campaign", title: `${c.name} due`, subtitle: brand ? `Campaign · ${brand}` : "Campaign", start: dueDay, end: dueDay, allDay: true, done: c.status === "completed", overdue: c.status === "active" && dueDay.getTime() < new Date().setHours(0, 0, 0, 0), to: `/app/campaigns?id=${c.id}` });
     }
+    // Follow-ups: the day each one is due (overdue ones stay on their day, flagged).
+    for (const c of chase.list) {
+      if (c.state.kind !== "due" && c.state.kind !== "waiting") continue;
+      const day = parseDay(c.state.due);
+      if (!day) continue;
+      out.push({ key: `f-${c.id}`, source: "followup", kind: "followup", title: `Follow up: ${c.name}`, subtitle: `${nextFollowupLabel(c.state.round)} · ${flagFor(c.state)?.long || ""}`, start: day, end: day, allDay: true, done: false, overdue: c.state.kind === "due" && c.state.overdueDays > 0, to: c.type === "creator" ? `/app/influencers/${c.id}` : `/app/brands/${c.id}` });
+    }
     // Chronological by day; within a day, all-day items first, then by time.
     return out.sort((a, b) => {
       const day = dayKey(a.start).localeCompare(dayKey(b.start));
@@ -218,9 +229,9 @@ export default function CalendarPage() {
       return a.start.getTime() - b.start.getTime();
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data.meetings, data.creators, data.brands, data.campaigns]);
+  }, [data.meetings, data.creators, data.brands, data.campaigns, chase]);
 
-  const visible = items.filter((item) => filters[item.kind === "action" ? "action" : item.kind === "campaign" ? "campaign" : (item.kind as FilterKey)]);
+  const visible = items.filter((item) => filters[item.kind === "action" ? "action" : item.kind === "campaign" ? "campaign" : item.kind === "followup" ? "followup" : (item.kind as FilterKey)]);
   const byDay = useMemo(() => {
     const map = new Map<string, CalItem[]>();
     for (const item of visible) {
@@ -415,7 +426,7 @@ export default function CalendarPage() {
     }
   };
   const dragProps = (item: CalItem) =>
-    item.source === "campaign"
+    item.source === "campaign" || item.source === "followup"
       ? {}
       : {
           draggable: true,

@@ -88,4 +88,4 @@ export const mergeWorkspace = (
 };
 
 /** What is kept as the base: everything but the insert-only audit log. */
-export const toBase = (value: WorkspaceData): WorkspaceData => ({ ...value, activities: [] });
+export const toBase = (value: WorkspaceData): WorkspaceData => ({ ...value, activities: [], emailEvents: [] });

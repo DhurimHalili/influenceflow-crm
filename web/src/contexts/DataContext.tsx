@@ -22,6 +22,7 @@ type NewCampaign = Omit<Campaign, "id" | "user_id" | "created_at" | "archived_at
   Partial<Pick<Campaign, "payment_status" | "invoice_due" | "paid_at" | "payout_status" | "payout_model" | "creator_fees">>;
 type NewMeeting = Omit<Meeting, "id" | "user_id" | "created_at" | "reminder_sent" | "done"> & { done?: boolean };
 
+export type TouchTarget = { type: "creator" | "brand"; id: string };
 type DuplicateMatch = { type: "name" | "link" | "domain"; id: string; label: string };
 
 // A "deal" exists only once two-way engagement happened. Rejecting an
@@ -70,6 +71,12 @@ type DataContextValue = WorkspaceData & {
   logFollowup: (creatorId: string, note?: string) => void;
   /** Removes one logged follow-up (the latest when no id is given). */
   removeFollowup: (creatorId: string, followupId?: string) => void;
+  /** Logs a touch by hand on an influencer or a brand: a follow-up you sent, or a reply you got (DM, call…). */
+  logTouch: (target: TouchTarget, touch?: { kind?: "followup" | "reply"; channel?: string; note?: string; at?: string }) => void;
+  /** Removes one hand-logged touch (the latest follow-up when no id is given). */
+  removeTouch: (target: TouchTarget, followupId?: string) => void;
+  /** Reloads from the cloud now (e.g. right after a Gmail sync). */
+  refresh: () => void;
   clearFollowups: (creatorId: string) => void;
   pendingLoss: LossItem[];
   resolveLoss: (reason: string | null) => void;
@@ -116,6 +123,8 @@ const upgradeWorkspace = (value: WorkspaceData, userId: string): WorkspaceData =
     status_updated_at: b.status_updated_at || b.created_at || new Date().toISOString(),
     priority: b.priority || "none",
     next_action_date: b.next_action_date || null,
+    followup_count: Number((b as { followup_count?: number }).followup_count) || 0,
+    last_followup_at: (b as { last_followup_at?: string | null }).last_followup_at || null,
   })),
   contacts: value.contacts || [],
   campaigns: (value.campaigns || []).map((c) =>
@@ -129,7 +138,8 @@ const upgradeWorkspace = (value: WorkspaceData, userId: string): WorkspaceData =
       payout_status: c.payout_status || "pending",
     }),
   ),
-  followups: value.followups || [],
+  followups: (value.followups || []).map((f) => ({ ...f, creator_id: f.creator_id || null, brand_id: f.brand_id || null, kind: f.kind === "reply" ? "reply" : "followup", channel: f.channel || "" })),
+  emailEvents: (value.emailEvents || []).slice(0, 6000),
   meetings: (value.meetings || []).map((m) => ({ ...m, kind: m.kind || "meeting", done: m.done === true })),
   activities: value.activities || [],
 });
@@ -611,6 +621,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
               notes: value.notes !== undefined ? sanitize(value.notes) : item.notes,
               on_roster: value.pipeline_status ? ["roster", "signed"].includes(value.pipeline_status) : item.on_roster,
               status_updated_at: statusChanged ? new Date().toISOString() : item.status_updated_at,
+              ...(statusChanged ? { status_source: value.status_source || "manual" } : {}),
               ...(touchesDims ? { stars: overallStars({ ...item, ...value }, current.profile.rating_weights) } : {}),
               ...(toDenied ? { lost_reason: "", lost_at: lostStamp } : {}),
               ...(stampContact ? { date_contacted: today() } : {}),
@@ -758,6 +769,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
               name: value.name ? sanitize(value.name) : item.name,
               notes: value.notes !== undefined ? sanitize(value.notes) : item.notes,
               status_updated_at: statusChanged ? new Date().toISOString() : item.status_updated_at,
+              ...(statusChanged ? { status_source: value.status_source || "manual" } : {}),
               ...(toDenied ? { lost_reason: "", lost_at: lostStamp } : {}),
               ...(stampContact ? { date_contacted: today() } : {}),
               ...(resetContact ? { date_contacted: null } : {}),
@@ -982,7 +994,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     if (deadActivities.length)
       activityTombstones.current = [...activityTombstones.current, ...deadActivities.filter((id) => !activityTombstones.current.includes(id))];
     // Follow-up rows of deleted influencers go too (no orphans in the cloud).
-    const deadFollowups = type === "creator" ? data.followups.filter((f) => ids.includes(f.creator_id)).map((f) => f.id) : [];
+    const deadFollowups = data.followups.filter((f) => (type === "creator" ? !!f.creator_id && ids.includes(f.creator_id) : type === "brand" ? !!f.brand_id && ids.includes(f.brand_id) : false)).map((f) => f.id);
     if (deadFollowups.length)
       followupTombstones.current = [...followupTombstones.current, ...deadFollowups.filter((id) => !followupTombstones.current.includes(id))];
     setData((current) => {
@@ -1036,12 +1048,46 @@ export function DataProvider({ children }: { children: ReactNode }) {
           : current.creators;
       return { ...current, profile, creators };
     });
+  const logTouch: DataContextValue["logTouch"] = (target, touch = {}) => {
+    const stamp = touch.at || new Date().toISOString();
+    const kind = touch.kind === "reply" ? "reply" : "followup";
+    setData((current) => {
+      const list = target.type === "creator" ? current.creators : current.brands;
+      const record = list.find((item) => item.id === target.id);
+      if (!record) return current;
+      const row: Followup = { id: uid(), user_id: userId, creator_id: target.type === "creator" ? target.id : null, brand_id: target.type === "brand" ? target.id : null, kind, channel: touch.channel || "", note: sanitize(touch.note || ""), at: stamp };
+      const bump = <T extends { id: string; followup_count?: number; last_followup_at?: string | null }>(item: T): T => (item.id === target.id && kind === "followup" ? { ...item, followup_count: (item.followup_count || 0) + 1, last_followup_at: stamp } : item);
+      const next = { ...current, followups: [row, ...current.followups].slice(0, 8000), ...(target.type === "creator" ? { creators: current.creators.map(bump) } : { brands: current.brands.map(bump) }) };
+      const how = touch.channel ? ` (${touch.channel === "dm" ? "Instagram DM" : touch.channel})` : "";
+      return addActivity(next, kind === "reply" ? `${record.name} replied${how}` : `Logged a follow-up with ${record.name}${how}`, target.type, target.id);
+    });
+  };
+
+  const removeTouch: DataContextValue["removeTouch"] = (target, followupId) => {
+    const mine = data.followups.filter((f) => (target.type === "creator" ? f.creator_id === target.id : f.brand_id === target.id)).sort((a, b) => b.at.localeCompare(a.at));
+    const doomed = followupId ? mine.find((f) => f.id === followupId) : mine.find((f) => f.kind !== "reply");
+    if (!doomed) {
+      if (target.type === "creator") removeFollowup(target.id);
+      return;
+    }
+    if (target.type === "creator" && doomed.kind !== "reply") return removeFollowup(target.id, doomed.id);
+    if (!followupTombstones.current.includes(doomed.id)) followupTombstones.current = [...followupTombstones.current, doomed.id];
+    setData((current) => {
+      const remaining = current.followups.filter((f) => f.id !== doomed.id);
+      const lastFollowup = remaining.filter((f) => f.kind !== "reply" && (target.type === "creator" ? f.creator_id === target.id : f.brand_id === target.id)).map((f) => f.at).sort().pop() || null;
+      const fix = <T extends { id: string; name: string; followup_count?: number; last_followup_at?: string | null }>(item: T): T => (item.id === target.id && doomed.kind !== "reply" ? { ...item, followup_count: Math.max(0, (item.followup_count || 0) - 1), last_followup_at: lastFollowup } : item);
+      const next = { ...current, followups: remaining, ...(target.type === "creator" ? { creators: current.creators.map(fix) } : { brands: current.brands.map(fix) }) };
+      const name = (target.type === "creator" ? current.creators : current.brands).find((item) => item.id === target.id)?.name || "record";
+      return addActivity(next, `Removed a logged ${doomed.kind === "reply" ? "reply" : "follow-up"} for ${name}`, target.type, target.id);
+    });
+  };
+
   const logFollowup = (creatorId: string, note = "") => {
     const stamp = new Date().toISOString();
     setData((current) => {
       const target = current.creators.find((item) => item.id === creatorId);
       if (!target) return current;
-      const followup: Followup = { id: uid(), user_id: userId, creator_id: creatorId, note: sanitize(note), at: stamp };
+      const followup: Followup = { id: uid(), user_id: userId, creator_id: creatorId, brand_id: null, kind: "followup", channel: "", note: sanitize(note), at: stamp };
       const creators = current.creators.map((item) =>
         item.id === creatorId ? { ...item, followup_count: (item.followup_count || 0) + 1, last_followup_at: stamp } : item,
       );
@@ -1114,7 +1160,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const removeFollowup = (creatorId: string, followupId?: string) => {
     const target = data.creators.find((item) => item.id === creatorId);
     if (!target || (target.followup_count || 0) <= 0) return;
-    const history = data.followups.filter((f) => f.creator_id === creatorId).sort((a, b) => b.at.localeCompare(a.at));
+    const history = data.followups.filter((f) => f.creator_id === creatorId && f.kind !== "reply").sort((a, b) => b.at.localeCompare(a.at));
     const doomed = followupId ? history.find((f) => f.id === followupId) : history[0];
     if (doomed && !followupTombstones.current.includes(doomed.id)) followupTombstones.current = [...followupTombstones.current, doomed.id];
     const remaining = history.filter((f) => f.id !== doomed?.id);
@@ -1193,6 +1239,9 @@ export function DataProvider({ children }: { children: ReactNode }) {
       importBackup,
       logFollowup,
       removeFollowup,
+      logTouch,
+      removeTouch,
+      refresh: pull,
       clearFollowups,
       pendingLoss,
       resolveLoss,
@@ -1200,7 +1249,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       log,
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [data, ready, hydrated, syncState, flush, pendingLoss, findCreatorDuplicates, findBrandDuplicates, log],
+    [data, ready, hydrated, syncState, flush, pull, pendingLoss, findCreatorDuplicates, findBrandDuplicates, log],
   );
   return <DataContext.Provider value={contextValue}>{children}</DataContext.Provider>;
 }

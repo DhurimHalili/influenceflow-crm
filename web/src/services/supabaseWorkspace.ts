@@ -1,7 +1,7 @@
 import { supabase } from "../lib/supabase";
 import { blankWorkspace } from "../lib/seed";
 import { normalizePreferences, normalizeRates } from "../lib/prefs";
-import { PLATFORMS, type Activity, type Brand, type BrandContact, type Campaign, type Creator, type Followup, type Meeting, type Platform, type Profile, type WorkspaceData } from "../types";
+import { PLATFORMS, type Activity, type EmailEvent, type Brand, type BrandContact, type Campaign, type Creator, type Followup, type Meeting, type Platform, type Profile, type WorkspaceData } from "../types";
 import { asPlatform, detectPlatform, normalizeSocials, socialsWithChannel } from "../lib/socials";
 import { normalizeBrief } from "../lib/brandBrief";
 import { changedRows, removedIds, sameRecord } from "../lib/sync";
@@ -95,6 +95,8 @@ const normalizeCreator = (row: Record<string, unknown>, userId: string): Creator
   last_followup_at: dateOrNull(row.last_followup_at),
   priority: (["none", "soon", "urgent"] as const).includes(row.priority as Creator["priority"]) ? (row.priority as Creator["priority"]) : "none",
   next_action_date: dateOrNull(row.next_action_date),
+  followup_snooze_until: dateOrNull(row.followup_snooze_until),
+  status_source: row.status_source === "gmail" ? "gmail" : "manual",
   lost_reason: text(row.lost_reason),
   lost_at: dateOrNull(row.lost_at),
   archived_at: dateOrNull(row.archived_at),
@@ -118,8 +120,24 @@ const normalizeWeights = (value: unknown): Profile["rating_weights"] => {
 const normalizeFollowup = (row: Record<string, unknown>, userId: string): Followup => ({
   id: String(row.id ?? ""),
   user_id: typeof row.user_id === "string" ? row.user_id : userId,
-  creator_id: typeof row.creator_id === "string" ? row.creator_id : "",
+  creator_id: typeof row.creator_id === "string" ? row.creator_id : null,
+  brand_id: typeof row.brand_id === "string" ? row.brand_id : null,
+  kind: row.kind === "reply" ? "reply" : "followup",
+  channel: text(row.channel),
   note: text(row.note),
+  at: typeof row.at === "string" && row.at ? row.at : new Date().toISOString(),
+});
+
+const normalizeEmailEvent = (row: Record<string, unknown>): EmailEvent => ({
+  id: String(row.id ?? ""),
+  gmail_id: text(row.gmail_id),
+  thread_id: text(row.thread_id),
+  direction: row.direction === "in" ? "in" : "out",
+  entity_type: row.entity_type === "brand" ? "brand" : "creator",
+  entity_id: text(row.entity_id),
+  counterpart: text(row.counterpart),
+  subject: text(row.subject),
+  snippet: text(row.snippet),
   at: typeof row.at === "string" && row.at ? row.at : new Date().toISOString(),
 });
 
@@ -148,6 +166,8 @@ const normalizeBrand = (row: Record<string, unknown>, userId: string): Brand => 
   next_action: text(row.next_action),
   priority: (["none", "soon", "urgent"] as const).includes(row.priority as Brand["priority"]) ? (row.priority as Brand["priority"]) : "none",
   next_action_date: dateOrNull(row.next_action_date),
+  followup_snooze_until: dateOrNull(row.followup_snooze_until),
+  status_source: row.status_source === "gmail" ? "gmail" : "manual",
   lost_reason: text(row.lost_reason),
   lost_at: dateOrNull(row.lost_at),
   archived_at: dateOrNull(row.archived_at),
@@ -301,7 +321,17 @@ export async function loadCloudWorkspace(userId: string): Promise<WorkspaceData 
   } catch {
     followupRows = [];
   }
+  // Gmail activity (read-only, written by the gmail-sync function). A
+  // database without the table yet simply has none.
+  let eventRows: Record<string, unknown>[] = [];
+  try {
+    const res = await fetchAll("email_events", userId, { order: "at", max: 6000 });
+    if (!res.error) eventRows = res.data || [];
+  } catch {
+    eventRows = [];
+  }
   return {
+    emailEvents: eventRows.map(normalizeEmailEvent),
     profile: storedProfile
       ? {
           id: userId,
@@ -344,7 +374,7 @@ export async function loadCloudWorkspace(userId: string): Promise<WorkspaceData 
 // PostgREST rejects the upsert with an unknown-column error: strip exactly
 // the column it names and retry, so one missing column never blocks the
 // whole save (and never drops the columns that do exist).
-const OPTIONAL_COLUMNS = ["engagement_rate", "next_action", "deliverables_items", "entity_type", "entity_id", "updated_at", "followup_count", "last_followup_at", "lost_reason", "lost_at", "stars", "stars_consistency", "stars_demographics", "stars_niche", "stars_engagement", "priority", "next_action_date", "kind", "done", "draft_subject", "draft_body", "status_updated_at", "email_templates", "rating_weights", "preferences", "rates", "payment_status", "invoice_due", "paid_at", "payout_status", "socials", "brief", "country", "secondary_email", "secondary_email_label", "payout_model", "creator_fees"];
+const OPTIONAL_COLUMNS = ["engagement_rate", "next_action", "deliverables_items", "entity_type", "entity_id", "updated_at", "followup_count", "last_followup_at", "lost_reason", "lost_at", "stars", "stars_consistency", "stars_demographics", "stars_niche", "stars_engagement", "priority", "next_action_date", "kind", "done", "draft_subject", "draft_body", "status_updated_at", "email_templates", "rating_weights", "preferences", "rates", "payment_status", "invoice_due", "paid_at", "payout_status", "socials", "brief", "country", "secondary_email", "secondary_email_label", "payout_model", "creator_fees", "followup_snooze_until", "status_source", "brand_id", "kind", "channel"];
 
 const missingColumn = (error: { message?: string; details?: string; hint?: string; code?: string }) => {
   const msg = `${error.message || ""} ${error.details || ""} ${error.hint || ""}`;
@@ -462,11 +492,22 @@ export async function persistCloudWorkspace(
   // Follow-up history is append-only; a missing table (pre-migration deploy)
   // skips silently while local state keeps working.
   if (workspace.followups.length) {
+    const forCreators = workspace.followups.filter((f) => f.creator_id);
+    const forBrands = workspace.followups.filter((f) => !f.creator_id && f.brand_id);
     try {
-      await upsertResilient("followups", owned(workspace.followups) as unknown as Record<string, unknown>[]);
+      await upsertResilient("followups", owned(forCreators) as unknown as Record<string, unknown>[]);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       if (!/does not exist|42P01|PGRST205/i.test(msg)) throw e;
+    }
+    // Brand follow-ups need the Nov 2026 migration; until it runs they stay
+    // on this device instead of blocking every other save.
+    if (forBrands.length) {
+      try {
+        await upsertResilient("followups", owned(forBrands) as unknown as Record<string, unknown>[]);
+      } catch (e) {
+        console.warn("[sync] brand follow-ups not saved to the cloud yet — run the latest migrations.", e);
+      }
     }
   }
 

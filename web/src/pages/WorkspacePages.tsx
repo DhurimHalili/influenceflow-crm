@@ -11,6 +11,8 @@ import { creatorScore, money, dateLabel, DEFAULT_RATING_WEIGHTS, today, download
 import { Stars, Textarea } from "../components/ui";
 import type { EmailTemplate, ThemeName, WorkspaceData } from "../types";
 import { columnKeys } from "../lib/exportFormats";
+import { FollowupRulesSettings, GmailSettings } from "../components/SettingsGmail";
+import { CalendarDays, Mail } from "lucide-react";
 import { APP_BUILT_AT, APP_VERSION, liveVersion, reloadInto } from "../lib/appUpdate";
 
 const WEIGHT_HELP: Record<string, string> = {
@@ -64,6 +66,8 @@ const SECTIONS = [
   { id: "profile", label: "Profile & agency", icon: UserRound },
   { id: "security", label: "Account & security", icon: LockKeyhole },
   { id: "workspace", label: "Workspace", icon: Building },
+  { id: "gmail", label: "Gmail", icon: Mail },
+  { id: "followups", label: "Follow-up rules", icon: CalendarDays },
   { id: "reminders", label: "Notifications", icon: Bell },
   { id: "scoring", label: "Creator scoring", icon: Gauge },
   { id: "templates", label: "Email templates", icon: FileText },
@@ -240,7 +244,7 @@ export function SettingsPage() {
         brands: [...data.brands, ...newBrands],
         contacts: [...data.contacts, ...fresh(preview.contacts).map((item) => ({ ...item, brand_id: brandId(item.brand_id) }))],
         campaigns: [...data.campaigns, ...fresh(preview.campaigns).map((item) => ({ ...item, brand_id: brandId(item.brand_id), creator_ids: Array.from(new Set(item.creator_ids.map(creatorId))) }))],
-        followups: [...data.followups, ...fresh(preview.followups || []).map((item) => ({ ...item, creator_id: creatorId(item.creator_id) }))],
+        followups: [...data.followups, ...fresh(preview.followups || []).map((item) => ({ ...item, creator_id: item.creator_id ? creatorId(item.creator_id) : null }))],
         meetings: [...data.meetings, ...fresh(preview.meetings).map((item) => ({ ...item, related_id: item.related_type === "creator" && item.related_id ? creatorId(item.related_id) : item.related_type === "brand" && item.related_id ? brandId(item.related_id) : item.related_id }))],
         activities: [...fresh(preview.activities), ...data.activities],
       };
@@ -285,6 +289,8 @@ export function SettingsPage() {
       <ProfileSettings />
       <SecuritySettings />
       <WorkspaceSettings />
+      <GmailSettings />
+      <FollowupRulesSettings />
       <NotificationSettings />
       <ScoringSettings />
       <TemplateSettings />

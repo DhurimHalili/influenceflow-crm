@@ -2,7 +2,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import {
   Archive, BarChart3, Building2, CalendarDays, Check, ChevronRight, CircleDollarSign, Clock3, Cloud, CloudOff, Command, HelpCircle, Inbox, LoaderCircle,
   Keyboard, LayoutDashboard, LifeBuoy, LogOut, Menu, MessageCircle, MonitorX, Moon, Palette, Plus, Search, SearchX, Settings, ShieldCheck, Sun,
-  Sparkles, UserX, Users, Wallet, X,
+  Sparkles, TrendingUp, UserX, Users, Wallet, X,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
@@ -10,6 +10,7 @@ import { useAuth } from "../contexts/AuthContext";
 import { useData } from "../contexts/DataContext";
 import { useToast } from "../contexts/ToastContext";
 import { Avatar, Button, Logo, Modal } from "./ui";
+import { useChase } from "../hooks/useChase";
 import { isPastDay, isTodayDay, LOSS_REASONS } from "../lib/utils";
 import type { SearchResult, ThemeName } from "../types";
 
@@ -23,7 +24,7 @@ const lossIcons: Record<string, typeof CircleDollarSign> = {
 };
 
 const navSections = [
-  { label: "Overview", items: [{ to: "/app", label: "Dashboard", icon: LayoutDashboard, end: true }] },
+  { label: "Overview", items: [{ to: "/app", label: "Dashboard", icon: LayoutDashboard, end: true }, { to: "/app/reports", label: "Reports", icon: TrendingUp }] },
   { label: "Manage", items: [
     { to: "/app/influencers", label: "Influencers", icon: Users },
     { to: "/app/brands", label: "Brands", icon: Building2 },
@@ -48,6 +49,7 @@ const ShieldIcon = () => <ShieldCheck size={17} />;
 export default function AppShell() {
   const { user, signOut } = useAuth();
   const data = useData();
+  const chase = useChase();
   const { toast } = useToast();
   const navigate = useNavigate();
   const location = useLocation();
@@ -163,6 +165,8 @@ export default function AppShell() {
   // Browser reminders: meeting/task alerts at their reminder time, plus one
   // morning summary per day for action due dates (today + overdue).
   const { meetings, creators, brands, updateMeeting } = data;
+  const chaseRef = useRef(0);
+  chaseRef.current = chase.due.length + chase.reply.length;
   const reminderPrefs = data.profile.reminder_prefs;
   useEffect(() => {
     if (!("Notification" in window) || reminderPrefs === "off" || reminderPrefs === "email") return;
@@ -182,9 +186,10 @@ export default function AppShell() {
       } catch {
         lastDigest = todayKey;
       }
-      if (data.profile.preferences?.action_digest !== false && due.length && lastDigest !== todayKey && new Date().getHours() >= 8 && Notification.permission === "granted") {
+      const chasing = chaseRef.current;
+      if (data.profile.preferences?.action_digest !== false && (due.length || chasing) && lastDigest !== todayKey && new Date().getHours() >= 8 && Notification.permission === "granted") {
         const overdueCount = due.filter((item) => isPastDay(item.next_action_date)).length;
-        new Notification("InfluenceFlow · Today's actions", { body: `${due.length} action${due.length === 1 ? "" : "s"} due${overdueCount ? ` (${overdueCount} overdue)` : ""}: ${due.slice(0, 3).map((item) => item.name).join(", ")}${due.length > 3 ? "…" : ""}`, icon: "./favicon.svg", tag: "action-digest" });
+        new Notification("InfluenceFlow · Today's actions", { body: [due.length ? `${due.length} action${due.length === 1 ? "" : "s"} due${overdueCount ? ` (${overdueCount} overdue)` : ""}: ${due.slice(0, 3).map((item) => item.name).join(", ")}${due.length > 3 ? "…" : ""}` : "", chasing ? `${chasing} follow-up${chasing === 1 ? "" : "s"} or replies waiting on you` : ""].filter(Boolean).join(" · "), icon: "./favicon.svg", tag: "action-digest" });
         try {
           localStorage.setItem("if.action-digest", todayKey);
         } catch {
@@ -234,7 +239,7 @@ export default function AppShell() {
       <div className="sidebar-top"><Logo /><button className="mobile-close" onClick={() => setMobileOpen(false)}><X size={19} /></button></div>
       <nav className="side-nav">
         {navSections.map((section) => (
-          <div className="nav-section" key={section.label}><span className="nav-label">{section.label}</span>{section.items.map((item) => <NavLink key={item.to} to={item.to} end={"end" in item ? item.end : false} className={({ isActive }) => isActive ? "active" : ""}><item.icon size={17} strokeWidth={1.8} /><span>{item.label}</span>{item.label === "Calendar" && dueToday > 0 && <b className="nav-due" title={`${dueToday} due today or overdue`}>{dueToday}</b>}{item.label === "Archive" && <b>{data.creators.filter((x) => x.archived_at).length + data.brands.filter((x) => x.archived_at).length + data.campaigns.filter((x) => x.archived_at).length || ""}</b>}</NavLink>)}</div>
+          <div className="nav-section" key={section.label}><span className="nav-label">{section.label}</span>{section.items.map((item) => <NavLink key={item.to} to={item.to} end={"end" in item ? item.end : false} className={({ isActive }) => isActive ? "active" : ""}><item.icon size={17} strokeWidth={1.8} /><span>{item.label}</span>{item.label === "Calendar" && dueToday > 0 && <b className="nav-due" title={`${dueToday} due today or overdue`}>{dueToday}</b>}{(item.label === "Influencers" || item.label === "Brands") && (() => { const kind = item.label === "Influencers" ? "creator" : "brand"; const n = chase.due.filter((c) => c.type === kind).length + chase.reply.filter((c) => c.type === kind).length; return n > 0 ? <b className="nav-due nav-follow" title={`${n} need a follow-up or a reply`}>{n}</b> : null; })()}{item.label === "Archive" && <b>{data.creators.filter((x) => x.archived_at).length + data.brands.filter((x) => x.archived_at).length + data.campaigns.filter((x) => x.archived_at).length || ""}</b>}</NavLink>)}</div>
         ))}
       </nav>
       <div className="user-footer">
