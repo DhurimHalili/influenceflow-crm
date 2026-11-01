@@ -63,6 +63,10 @@ That's it. Your data is private to your account — other users can't see it. Ex
 | **Bulk import** | Paste `Rory Alexander, https://youtube.com/channel/UC...` or `Name, email, niche` — or **Attach CSV**. Auto-dedupes by name + link |
 | **Campaigns** | Edit name, brand, platform, dates and deliverables any time. Two deal models: **fixed fee + markup** (default — lock the creator at e.g. 2,000, pitch the brand 5,000, keep 3,000; per-creator fees filled from their rate card, "pitch at 40% margin" suggestions) or **percentage split**. Live split bar, margin and markup, editable after creation. Status, dates, deliverables, assignments, conflict warning |
 | **Calendar** | Month / week / day / agenda views. Meetings, tasks (check off), reminders, every influencer & brand **action due date** and campaign start/due dates on one timeline. Drag to reschedule, overdue panel, reminder presets, browser alerts, `.ics` export |
+| **Gmail sync** | Connect Gmail once: emails to and from your influencers, brands and brand contacts show up on their profile, move the pipeline (email → Contacted, reply → Replied, they write first → Inbound) and drive follow-up flags. Send and follow up from the CRM in the same Gmail thread. Your hand-set status always wins until a newer email arrives; Negotiating, Roster, Signed and Denied are never changed for you. Only metadata (who, when, subject, Gmail's short preview) for CRM contacts is stored |
+| **Follow-up engine** | Yellow flag after one business day without a reply (email Monday → follow up Wednesday), stays until you follow up or they reply; "Reply needed" when they wrote last. Cadence per follow-up, working days, holidays and a stop limit in Settings → Follow-up rules. Log DMs, calls and WhatsApp replies by hand. Filters, quick chips, dashboard, calendar and sidebar badges |
+| **Reports** | Reply rate, typical reply time in business days, which follow-up gets the replies, revenue and profit by month, best brands, reply rate by niche and country |
+| **Media kits** | One click publishes a clean public page for a creator (socials, reach, engagement, optional rates and contact button) to send brands — an unguessable link you can update or take offline; Save as PDF |
 | **Email drafts** | A compact card on each profile that opens into a large focused composer. Per-influencer and per-brand subject + body that autosave, reusable templates with `{first_name}` / `{niche}` / `{company}` tokens, open in Gmail or your mail app, "mark as sent" moves the lead to Contacted |
 | **Creator scorecard** | Four manual star ratings — audience quality, niche & brand fit, engagement quality, posting consistency — combined with agency-scorecard weights (35 / 30 / 20 / 15, adjustable in Settings). Engagement rate is shown as a benchmark, never sets the stars |
 | **Billing** | Per-campaign invoice tracking (Unpaid → Invoiced → Paid, invoice due date on the calendar, overdue alerts) and creator payout status; "Outstanding invoices" on the dashboard |
@@ -115,6 +119,17 @@ npm run dev
 2. In **SQL Editor**, run the files in `supabase/migrations/` in timestamp order (starting with the `20200101` bootstrap — it creates the core tables, RLS and policies). They create core CRM tables, RLS policies, and auto-seed for new users.
 3. In **Auth → URL Configuration**, set the Site URL to your app URL and add your app URL + `#/update-password` to **Redirect URLs** (password recovery links must be allow-listed).
 4. In **Auth → Emails → SMTP Settings**, connect your own SMTP provider (Resend, Postmark, Brevo, Gmail app password…). Supabase's built-in sender only delivers to your own team's addresses and ~2 emails per hour, so password-reset emails to your users silently never arrive without it.
+
+</details>
+
+<details>
+<summary><strong>Gmail sync (optional)</strong></summary>
+
+1. In Google Cloud Console create an OAuth client (Web application), enable the **Gmail API**, and add the redirect URI `https://<project>.supabase.co/functions/v1/gmail-oauth-callback`.
+2. OAuth consent screen scopes: `gmail.readonly`, `gmail.send`, `openid`, `email`. While the app is in *Testing*, add each user as a test user (Google expires testing refresh tokens after 7 days); for everyone, submit the app for Google verification (restricted scopes).
+3. Supabase → Edge Functions → Secrets: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GMAIL_OAUTH_REDIRECT_URI` (the URI above), `APP_URL` (your app URL).
+4. Deploy `gmail-oauth-start` (JWT verified), `gmail-sync` and `gmail-oauth-callback` (both `--no-verify-jwt`: they authenticate themselves — a user JWT or the Vault cron secret, and a one-time OAuth state).
+5. Background sync: the migration generates the cron secret inside Vault and schedules the job every 10 minutes. Tell it where the function lives, once: `select vault.create_secret('https://<project>.supabase.co/functions/v1/gmail-sync', 'gmail_sync_url');`
 
 </details>
 

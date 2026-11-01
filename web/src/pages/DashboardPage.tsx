@@ -4,7 +4,8 @@ import { AlertCircle, ArrowRight, ArrowUpRight, BarChart3, Building2, CalendarDa
 import { Link, useNavigate } from "react-router-dom";
 import { useData } from "../contexts/DataContext";
 import { Button, EmptyState, Metric, PageHeader, Tabs } from "../components/ui";
-import { needsFollowup } from "../lib/followups";
+import { useChase } from "../hooks/useChase";
+import { flagFor } from "../lib/followupEngine";
 import { currencySymbol, dateLabel, daysAgoLabel, daysSince, dayKey, dueLabel, isOverdue, isPastDay, isTodayDay, money, parseDay, relativeTime, timeLabel } from "../lib/utils";
 import { ENTITY_STATUSES, STATUS_LABELS } from "../types";
 
@@ -13,6 +14,7 @@ const funnelColors = ["#7c6bf0", "#e0794a", "#4d88e8", "#24a6a1", "#d59b48", "#6
 export default function DashboardPage() {
   const data = useData();
   const navigate = useNavigate();
+  const chase = useChase();
   const creators = data.creators.filter((item) => !item.archived_at);
   const brands = data.brands.filter((item) => !item.archived_at);
   const campaigns = data.campaigns.filter((item) => !item.archived_at);
@@ -231,7 +233,9 @@ export default function DashboardPage() {
     actionables.filter((item) => item.next_action_date && isPastDay(item.next_action_date)).sort((a, b) => (a.next_action_date || "").localeCompare(b.next_action_date || "")).forEach((item) => push({ id: item.id, type: `${item.kind} · ${dueLabel(item.next_action_date)}`, title: item.name, detail: item.next_action || "Action overdue", to: item.to, urgent: true, rank: 1 }));
     data.meetings.filter((m) => m.kind !== "meeting" && !m.done && new Date(m.ends_at).getTime() < Date.now()).forEach((m) => push({ id: m.id, type: `${m.kind === "task" ? "Task" : "Reminder"} overdue`, title: m.title, detail: `Was due ${dateLabel(m.starts_at)}`, to: `/app/calendar?open=${m.id}`, urgent: true, rank: 1 }));
     actionables.filter((item) => item.next_action_date && isTodayDay(item.next_action_date)).forEach((item) => push({ id: item.id, type: `${item.kind} · Due today`, title: item.name, detail: item.next_action || "Action due today", to: item.to, urgent: false, rank: 2 }));
-    creators.filter(needsFollowup).sort((a, b) => (a.last_followup_at || a.date_contacted || "").localeCompare(b.last_followup_at || b.date_contacted || "")).forEach((item) => push({ id: `fu-${item.id}`, type: `Follow-up due · quiet ${daysSince(item.last_followup_at || item.date_contacted)} days`, title: item.name, detail: item.followup_count ? `${item.followup_count} follow-up${item.followup_count === 1 ? "" : "s"} so far · last ${dateLabel(item.last_followup_at)}` : `Contacted ${dateLabel(item.date_contacted)} · no follow-up yet`, to: `/app/influencers/${item.id}`, urgent: false, rank: 2.5 }));
+    // The follow-up engine: no reply after the business-day gap, or they wrote and you haven't answered.
+    chase.due.sort((a, b) => (b.state.kind === "due" ? b.state.overdueDays : 0) - (a.state.kind === "due" ? a.state.overdueDays : 0)).forEach((item) => push({ id: `fu-${item.id}`, type: `${item.type === "creator" ? "Influencer" : "Brand"} · ${flagFor(item.state)?.short || "Follow up"}`, title: item.name, detail: flagFor(item.state)?.long || "", to: item.type === "creator" ? `/app/influencers/${item.id}` : `/app/brands/${item.id}`, urgent: item.state.kind === "due" && item.state.overdueDays > 0, rank: 0.5 }));
+    chase.reply.forEach((item) => push({ id: `re-${item.id}`, type: `${item.type === "creator" ? "Influencer" : "Brand"} · Reply needed`, title: item.name, detail: flagFor(item.state)?.long || "", to: item.type === "creator" ? `/app/influencers/${item.id}` : `/app/brands/${item.id}`, urgent: item.state.kind === "reply-needed" && item.state.days >= 1, rank: 0.6 }));
     actionables.filter((item) => item.next_action && !item.next_action_date && !["signed", "denied"].includes(item.pipeline_status) && Date.now() - new Date(item.status_updated_at || item.created_at).getTime() > 7 * 86400000).forEach((item) => push({ id: item.id, type: `${item.kind} · No movement 7+ days`, title: item.name, detail: item.next_action!, to: item.to, urgent: false, rank: 3 }));
     return out.sort((a, b) => a.rank - b.rank);
   })();

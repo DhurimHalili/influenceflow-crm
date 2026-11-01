@@ -5,6 +5,7 @@ import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { DataProvider } from "./contexts/DataContext";
 import { ToastProvider } from "./contexts/ToastContext";
 import { UpdateWatcher } from "./components/UpdateWatcher";
+import { GmailProvider } from "./contexts/GmailContext";
 
 const AppShell = lazy(() => import("./components/AppShell"));
 const LandingPage = lazy(() => import("./pages/PublicPages").then((module) => ({ default: module.LandingPage })));
@@ -15,6 +16,8 @@ const UpdatePasswordPage = lazy(() => import("./pages/PublicPages").then((module
 const LegalPage = lazy(() => import("./pages/PublicPages").then((module) => ({ default: module.LegalPage })));
 const HelpPage = lazy(() => import("./pages/PublicPages").then((module) => ({ default: module.HelpPage })));
 const DashboardPage = lazy(() => import("./pages/DashboardPage"));
+const ReportsPage = lazy(() => import("./pages/ReportsPage"));
+const MediaKitPage = lazy(() => import("./pages/MediaKitPage"));
 const InfluencersPage = lazy(() => import("./pages/InfluencersPage"));
 const InfluencerDetailPage = lazy(() => import("./pages/InfluencersPage").then((module) => ({ default: module.InfluencerDetailPage })));
 const BrandsPage = lazy(() => import("./pages/BrandsPage"));
@@ -51,6 +54,7 @@ export default function App() {
       <AuthProvider>
         <ToastProvider>
           <DataProvider>
+            <GmailProvider>
             <UpdateWatcher />
             <Suspense fallback={<LoadingScreen />}>
               <Routes>
@@ -62,6 +66,7 @@ export default function App() {
                 <Route path="/privacy" element={<LegalPage type="privacy" />} />
                 <Route path="/terms" element={<LegalPage type="terms" />} />
                 <Route path="/help" element={<HelpPage />} />
+                <Route path="/kit/:slug" element={<MediaKitPage />} />
                 <Route path="/hire" element={<Navigate to="/" replace />} />
                 <Route path="/app" element={<RequireAuth><AppShell /></RequireAuth>}>
                   <Route index element={<DashboardPage />} />
@@ -71,6 +76,7 @@ export default function App() {
                   <Route path="brands/:id" element={<BrandDetailPage />} />
                   <Route path="campaigns" element={<CampaignsPage />} />
                   <Route path="calendar" element={<CalendarPage />} />
+                  <Route path="reports" element={<ReportsPage />} />
                   <Route path="settings" element={<SettingsPage />} />
                   <Route path="themes" element={<ThemesPage />} />
                   <Route path="deleted" element={<DeletedPage />} />
@@ -80,6 +86,7 @@ export default function App() {
                 <Route path="*" element={<NotFound />} />
               </Routes>
             </Suspense>
+            </GmailProvider>
           </DataProvider>
         </ToastProvider>
       </AuthProvider>

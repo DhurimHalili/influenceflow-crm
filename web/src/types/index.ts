@@ -49,6 +49,8 @@ export interface WorkspacePreferences {
   email_signature: string;
   /** Daily browser summary of due actions. */
   action_digest: boolean;
+  /** When to follow up with people who haven't replied. */
+  followup_rules: FollowupRules;
   start_page: "dashboard" | "influencers" | "calendar";
 }
 
@@ -78,6 +80,22 @@ export interface RateCard {
  * percent — the creator receives a share of the brand deal.
  */
 export type PayoutModel = "fixed" | "percent";
+
+/**
+ * Follow-up cadence in business days. gaps[0] is the wait after your first
+ * email, gaps[1] after your 1st follow-up, … then `then` for every later one.
+ * A gap of 1 means: email Monday, wait Tuesday, follow up Wednesday.
+ */
+export interface FollowupRules {
+  gaps: number[];
+  then: number;
+  /** Stop reminding after this many follow-ups; 0 = never stop. */
+  stop_after: number;
+  /** Working days, 0 = Sunday … 6 = Saturday. */
+  workdays: number[];
+  /** Days off (YYYY-MM-DD) that don't count as business days. */
+  holidays: string[];
+}
 
 export type PaymentStatus = "unpaid" | "invoiced" | "paid";
 export type PayoutStatus = "pending" | "paid";
@@ -134,6 +152,10 @@ export interface Creator {
   last_followup_at: string | null;
   priority: Priority;
   next_action_date: string | null;
+  /** Follow-up reminders paused until this day ('9999-12-31' = off). */
+  followup_snooze_until?: string | null;
+  /** Who set the current status: you, or Gmail. */
+  status_source?: "manual" | "gmail";
   archived_at: string | null;
   created_at: string;
 }
@@ -188,6 +210,10 @@ export interface Brand {
   next_action?: string;
   priority: Priority;
   next_action_date: string | null;
+  followup_snooze_until?: string | null;
+  status_source?: "manual" | "gmail";
+  followup_count?: number;
+  last_followup_at?: string | null;
   lost_reason: string;
   lost_at: string | null;
   archived_at: string | null;
@@ -274,11 +300,29 @@ export interface Activity {
   entity_id?: string;
 }
 
+/** A touch you logged by hand: a follow-up you sent (email, DM, call…) or a reply you got outside Gmail. */
 export interface Followup {
   id: string;
   user_id: string;
-  creator_id: string;
+  creator_id: string | null;
+  brand_id?: string | null;
+  kind?: "followup" | "reply";
+  channel?: string;
   note: string;
+  at: string;
+}
+
+/** One Gmail message to/from someone in the CRM (synced by the server; read-only here). */
+export interface EmailEvent {
+  id: string;
+  gmail_id: string;
+  thread_id: string;
+  direction: "out" | "in";
+  entity_type: "creator" | "brand";
+  entity_id: string;
+  counterpart: string;
+  subject: string;
+  snippet: string;
   at: string;
 }
 
@@ -289,6 +333,8 @@ export interface WorkspaceData {
   contacts: BrandContact[];
   campaigns: Campaign[];
   followups: Followup[];
+  /** Gmail activity (empty until Gmail is connected). */
+  emailEvents?: EmailEvent[];
   meetings: Meeting[];
   activities: Activity[];
   demoSeeded: boolean;

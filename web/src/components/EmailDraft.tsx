@@ -3,6 +3,7 @@ import { Check, ChevronRight, Copy, ExternalLink, FileText, Mail, Maximize2, Min
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useData } from "../contexts/DataContext";
+import { useGmail } from "../contexts/GmailContext";
 import { useToast } from "../contexts/ToastContext";
 import { FLUSH_DRAFTS_EVENT } from "../lib/appUpdate";
 import { fillTemplate, gmailComposeUrl, mailtoUrl, relativeTime, TEMPLATE_TOKENS, uid, unfilledTokens } from "../lib/utils";
@@ -31,6 +32,7 @@ type SendTo = "primary" | "secondary" | "both";
 
 export function EmailDraftPanel({ recordId, recipient: primaryEmail, secondary, recipientName, subject, body, vars: recordVars, onSave, onSent, sentLabel }: Props) {
   const data = useData();
+  const gmail = useGmail();
   // Profile-level tokens ({agency}, {signature}, {my_name}) apply everywhere.
   const prefs = data.profile.preferences;
   const vars: Record<string, string> = { agency: prefs?.agency_name || "", signature: prefs?.email_signature || "", ...recordVars, my_name: recordVars.my_name || data.profile.display_name };
@@ -56,6 +58,11 @@ export function EmailDraftPanel({ recordId, recipient: primaryEmail, secondary, 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [second, primaryEmail]);
   const recipient = sendTo === "secondary" ? second : primaryEmail || second;
+  // The latest Gmail conversation with this record — follow-ups go in that thread.
+  const lastThread = (data.emailEvents || []).filter((e) => e.entity_id === recordId && e.thread_id).sort((a, b) => b.at.localeCompare(a.at))[0];
+  const [inThread, setInThread] = useState(true);
+  const [sending, setSending] = useState(false);
+  const canGmailSend = gmail.connected && gmail.canSend;
   const cc = sendTo === "both" && primaryEmail && second ? second : "";
 
   // Pick up saved values that arrive later (cloud load, another tab) as long
@@ -185,6 +192,20 @@ export function EmailDraftPanel({ recordId, recipient: primaryEmail, secondary, 
     setOpened(true);
   };
 
+  const sendWithGmail = async () => {
+    if (!recipient || !(draftSubject.trim() || draftBody.trim())) return;
+    const threaded = inThread && !!lastThread;
+    setSending(true);
+    const res = await gmail.send({ to: [recipient], cc: cc ? [cc] : [], subject: threaded ? "" : draftSubject, body: draftBody, threadId: threaded ? lastThread.thread_id : undefined });
+    setSending(false);
+    if (!res.ok) return toast(res.message || "Couldn't send", "error");
+    setDraftSubject("");
+    setDraftBody("");
+    onSave("", "", false);
+    setExpanded(false);
+    toast(`Sent from ${gmail.email || "Gmail"}${threaded ? " in the same thread" : ""}${res.statusChanges ? " · status updated" : ""}`);
+  };
+
   const clear = () => {
     if (!confirm("Clear this draft? The subject and body will be emptied.")) return;
     setDraftSubject("");
@@ -275,7 +296,7 @@ export function EmailDraftPanel({ recordId, recipient: primaryEmail, secondary, 
               value={draftSubject}
               onFocus={() => (lastFocused.current = "subject")}
               onChange={(event) => setDraftSubject(event.target.value)}
-              placeholder={`Subject — e.g. Partnership idea for ${recipientName.split(" ")[0] || "you"}`}
+              placeholder={canGmailSend && inThread && lastThread ? `Re: ${lastThread.subject || "(no subject)"} — leave empty to keep the thread subject` : `Subject — e.g. Partnership idea for ${recipientName.split(" ")[0] || "you"}`}
               aria-label="Email subject"
             />
             <textarea
@@ -302,10 +323,12 @@ export function EmailDraftPanel({ recordId, recipient: primaryEmail, secondary, 
                 <Button type="button" size="sm" variant="ghost" onClick={() => void copy(`${draftSubject}\n\n${draftBody}`, "Email")} disabled={!hasContent}><Copy size={14} /> Copy</Button>
                 <Button type="button" size="sm" variant="secondary" onClick={saveNow} disabled={!dirty && !!savedAt}><Save size={14} /> Save</Button>
               </div>
+              {canGmailSend && lastThread && <label className="thread-toggle"><input type="checkbox" checked={inThread} onChange={(event) => setInThread(event.target.checked)} /><span>Reply in the same thread <em>“{lastThread.subject || "(no subject)"}” — the thread's subject is kept so it stays one conversation</em></span></label>}
               <div className="composer-send">
-                <Button type="button" onClick={() => open("gmail")} disabled={!recipient || !hasContent}><ExternalLink size={14} /> Open in Gmail</Button>
+                {canGmailSend && <Button type="button" onClick={() => void sendWithGmail()} disabled={!recipient || !hasContent} loading={sending}><Send size={14} /> {inThread && lastThread ? "Send follow-up" : "Send with Gmail"}</Button>}
+                <Button type="button" variant={canGmailSend ? "secondary" : "primary"} onClick={() => open("gmail")} disabled={!recipient || !hasContent}><ExternalLink size={14} /> Open in Gmail</Button>
                 <Button type="button" variant="secondary" onClick={() => open("mail")} disabled={!recipient || !hasContent}><Mail size={14} /> Mail app</Button>
-                <Button type="button" variant={opened ? "primary" : "ghost"} onClick={() => { onSent(); setOpened(false); setExpanded(false); }}><Send size={14} /> {sentLabel}</Button>
+                {!canGmailSend && <Button type="button" variant={opened ? "primary" : "ghost"} onClick={() => { onSent(); setOpened(false); setExpanded(false); }}><Send size={14} /> {sentLabel}</Button>}
               </div>
             </footer>
           </motion.div>
@@ -334,7 +357,7 @@ export function EmailDraftPanel({ recordId, recipient: primaryEmail, secondary, 
           <div className="email-dock-actions">
             <button type="button" onClick={() => open("gmail")} disabled={!recipient}><ExternalLink size={13} /> Gmail</button>
             <button type="button" onClick={() => open("mail")} disabled={!recipient}><Mail size={13} /> Mail app</button>
-            <button type="button" className={opened ? "hot" : ""} onClick={() => { onSent(); setOpened(false); }}><Send size={13} /> {sentLabel}</button>
+            {canGmailSend ? <button type="button" className="hot" onClick={() => setExpanded(true)}><Send size={13} /> Review & send</button> : <button type="button" className={opened ? "hot" : ""} onClick={() => { onSent(); setOpened(false); }}><Send size={13} /> {sentLabel}</button>}
           </div>
         )}
       </div>

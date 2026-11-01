@@ -1,4 +1,4 @@
-import type { Currency, PayoutModel, RateCard, WorkspacePreferences } from "../types";
+import type { Currency, FollowupRules, PayoutModel, RateCard, WorkspacePreferences } from "../types";
 
 export const CURRENCIES: { value: Currency; label: string }[] = [
   { value: "USD", label: "US Dollar ($)" },
@@ -9,6 +9,29 @@ export const CURRENCIES: { value: Currency; label: string }[] = [
   { value: "AUD", label: "Australian Dollar (A$)" },
 ];
 
+// Agency standard: follow up after one business day, three times; then every
+// two business days, with no limit.
+export const DEFAULT_FOLLOWUP_RULES: FollowupRules = { gaps: [1, 1, 1], then: 2, stop_after: 0, workdays: [1, 2, 3, 4, 5], holidays: [] };
+
+const clampDays = (v: unknown, fallback: number) => {
+  const n = Math.round(Number(v));
+  return Number.isFinite(n) && n >= 0 && n <= 60 ? n : fallback;
+};
+
+export const normalizeFollowupRules = (value: unknown): FollowupRules => {
+  const v = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  const gaps = Array.isArray(v.gaps) ? v.gaps.slice(0, 12).map((g) => clampDays(g, 1)) : DEFAULT_FOLLOWUP_RULES.gaps;
+  const workdays = Array.isArray(v.workdays) ? Array.from(new Set(v.workdays.map(Number).filter((d) => Number.isInteger(d) && d >= 0 && d <= 6))).sort() : DEFAULT_FOLLOWUP_RULES.workdays;
+  const holidays = Array.isArray(v.holidays) ? v.holidays.filter((d): d is string => typeof d === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d)).slice(0, 200) : [];
+  return {
+    gaps: gaps.length ? gaps : DEFAULT_FOLLOWUP_RULES.gaps,
+    then: clampDays(v.then, DEFAULT_FOLLOWUP_RULES.then) || 1,
+    stop_after: clampDays(v.stop_after, 0),
+    workdays: workdays.length ? workdays : DEFAULT_FOLLOWUP_RULES.workdays,
+    holidays,
+  };
+};
+
 export const DEFAULT_PREFERENCES: WorkspacePreferences = {
   agency_name: "",
   currency: "USD",
@@ -16,6 +39,7 @@ export const DEFAULT_PREFERENCES: WorkspacePreferences = {
   default_deal_model: "fixed",
   email_signature: "",
   action_digest: true,
+  followup_rules: DEFAULT_FOLLOWUP_RULES,
   start_page: "dashboard",
 };
 
@@ -64,6 +88,7 @@ export const normalizePreferences = (value: unknown): WorkspacePreferences => {
     default_deal_model: v.default_deal_model === "percent" ? "percent" : ("fixed" as PayoutModel),
     email_signature: typeof v.email_signature === "string" ? v.email_signature : "",
     action_digest: v.action_digest !== false,
+    followup_rules: normalizeFollowupRules(v.followup_rules),
     start_page: v.start_page === "influencers" || v.start_page === "calendar" ? v.start_page : "dashboard",
   };
 };
