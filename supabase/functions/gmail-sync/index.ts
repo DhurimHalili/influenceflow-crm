@@ -1,19 +1,24 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
+import { isSealed, openToken, sealToken } from "../_shared/googleTokens.ts";
+import { scanForLead, type Lead } from "../_shared/leadScanner.ts";
 
-// Gmail ⇄ CRM sync.
+// Gmail ⇄ CRM sync, for every mailbox a user connected (an agency often runs
+// two or three).
 //
 // Actions (POST JSON, user JWT unless noted):
-//   status      — is Gmail connected, which scopes, last sync, last error
-//   sync        — pull new mail for this user now (rate-limited)
-//   send        — send an email (optionally as a reply in an existing thread)
-//   disconnect  — revoke Google access and forget the tokens
+//   status      — the connected mailboxes: address, scopes, last sync, last error
+//   sync        — pull new mail for all of this user's mailboxes now (rate-limited)
+//   send        — send an email from one mailbox (optionally as a reply in a thread)
+//   disconnect  — revoke Google access for one mailbox and forget its tokens
 //   cron        — background sync for everyone (x-cron-secret header only)
 //   health      — no auth; only says whether the server is configured
 //
-// What is stored: for messages to/from an email address that is on one of
-// your influencers, brands or brand contacts — direction, date, subject and
-// Gmail's ~100-character preview. Bodies and unrelated mail are never stored.
+// What is stored, per message to/from someone in your CRM: direction, date,
+// subject, Gmail's ~100-character preview and which mailbox it went through.
+// For people NOT in your CRM, only messages that pass the inbound-lead scanner
+// (_shared/leadScanner.ts) are kept, as a suggestion you can add or dismiss.
+// Bodies, attachments and the rest of your inbox are never stored.
 //
 // Status automation ("the email moves the pipeline, you keep the last word"):
 //   New        + you email them        → Contacted
@@ -24,25 +29,33 @@ import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 // you set by hand stays until a newer email arrives — and Negotiating, Roster,
 // Signed and Denied are never changed automatically.
 
-const cors = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-cron-secret",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
+const APP_URL = (Deno.env.get("APP_URL") || "https://dhurimhalili.github.io/influenceflow-crm").replace(/\/$/, "");
+const ALLOWED_ORIGINS = new Set([new URL(APP_URL).origin, "http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:4173"]);
+const corsFor = (req: Request) => {
+  const origin = req.headers.get("Origin") || "";
+  return {
+    "Access-Control-Allow-Origin": ALLOWED_ORIGINS.has(origin) ? origin : new URL(APP_URL).origin,
+    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    Vary: "Origin",
+  };
 };
-const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...cors, "Content-Type": "application/json" } });
 
 const GMAIL = "https://gmail.googleapis.com/gmail/v1/users/me";
 const EMAIL_RE = /[A-Z0-9._%+'-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
 const VALID_EMAIL = /^[^\s@<>(),;:"]+@[^\s@<>(),;:"]+\.[^\s@<>(),;:"]+$/;
 const BACKFILL_DAYS = 180;
+const LEAD_LOOKBACK_DAYS = 30;
 const USER_MIN_INTERVAL_MS = 20_000;
 const RUN_BUDGET_MS = 110_000;
+const SENDS_PER_DAY = 400; // per mailbox, well under Gmail's own limits
+const MAX_MAILBOXES = 5;
 
 type Admin = SupabaseClient;
-type TokenRow = { user_id: string; access_token: string | null; refresh_token: string; expiry: string | null; email: string | null; scopes: string; history_id: string | null; last_sync_at: string | null; backfilled: string[] | null };
+type TokenRow = { id: string; user_id: string; access_token: string | null; refresh_token: string; expiry: string | null; email: string | null; scopes: string; history_id: string | null; last_sync_at: string | null; backfilled: string[] | null; sync_error?: string; connected_at?: string | null; send_day?: string | null; send_count?: number; leads_scanned_at?: string | null };
 type Entity = { type: "creator" | "brand"; id: string };
 type Meta = { id: string; threadId: string; labelIds?: string[]; snippet?: string; internalDate?: string; payload?: { headers?: { name: string; value: string }[] } };
-type EventRow = { user_id: string; gmail_id: string; thread_id: string; direction: "out" | "in"; entity_type: "creator" | "brand"; entity_id: string; counterpart: string; subject: string; snippet: string; at: string };
+type EventRow = { user_id: string; gmail_id: string; thread_id: string; direction: "out" | "in"; entity_type: "creator" | "brand"; entity_id: string; counterpart: string; subject: string; snippet: string; at: string; mailbox: string; message_key: string };
 
 class GmailError extends Error {
   constructor(message: string, public status = 0, public reconnect = false) {
@@ -59,25 +72,41 @@ const timingSafeEqual = (a: string, b: string) => {
 };
 const addresses = (value: string | undefined) => Array.from(new Set((value || "").match(EMAIL_RE)?.map((e) => e.toLowerCase()) || []));
 const header = (meta: Meta, name: string) => meta.payload?.headers?.find((h) => h.name.toLowerCase() === name.toLowerCase())?.value || "";
+const mailboxOf = (row: TokenRow) => (row.email || "").toLowerCase();
+const messageKey = (meta: Meta) => header(meta, "Message-ID").trim().replace(/^<|>$/g, "").toLowerCase().slice(0, 300);
+const chunk = <T,>(list: T[], size: number) => Array.from({ length: Math.ceil(list.length / size) }, (_, i) => list.slice(i * size, i * size + size));
 
 // ----- tokens ----------------------------------------------------------------
 
 async function accessToken(admin: Admin, row: TokenRow): Promise<string> {
-  if (row.access_token && row.expiry && new Date(row.expiry).getTime() - Date.now() > 90_000) return row.access_token;
+  const current = await openToken(admin, row.access_token);
+  // Rows saved before encryption existed are sealed the first time they're used.
+  if (row.refresh_token && !isSealed(row.refresh_token)) {
+    const sealed = { refresh_token: await sealToken(admin, row.refresh_token), access_token: await sealToken(admin, current) };
+    await admin.from("gmail_tokens").update(sealed).eq("id", row.id);
+    row.refresh_token = sealed.refresh_token!;
+    row.access_token = sealed.access_token;
+  }
+  if (current && row.expiry && new Date(row.expiry).getTime() - Date.now() > 90_000) return current;
+  const refresh = await openToken(admin, row.refresh_token);
   const res = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({ client_id: Deno.env.get("GOOGLE_CLIENT_ID")!, client_secret: Deno.env.get("GOOGLE_CLIENT_SECRET")!, refresh_token: row.refresh_token, grant_type: "refresh_token" }),
+    body: new URLSearchParams({ client_id: Deno.env.get("GOOGLE_CLIENT_ID")!, client_secret: Deno.env.get("GOOGLE_CLIENT_SECRET")!, refresh_token: refresh || "", grant_type: "refresh_token" }),
   });
   const body = await res.json().catch(() => ({}));
   if (!res.ok || !body.access_token) {
     const reconnect = body.error === "invalid_grant" || body.error === "unauthorized_client";
-    throw new GmailError(reconnect ? "Google access expired or was removed — reconnect Gmail in Settings." : "Couldn't refresh Gmail access.", res.status, reconnect);
+    throw new GmailError(reconnect ? "Google access expired or was removed — reconnect this mailbox in Settings." : "Couldn't refresh Gmail access.", res.status, reconnect);
   }
-  row.access_token = body.access_token;
   row.expiry = new Date(Date.now() + Number(body.expires_in || 3600) * 1000).toISOString();
-  await admin.from("gmail_tokens").update({ access_token: row.access_token, expiry: row.expiry, ...(body.scope ? { scopes: body.scope } : {}) }).eq("user_id", row.user_id);
-  if (body.scope) row.scopes = body.scope;
+  const patch: Record<string, unknown> = { access_token: await sealToken(admin, body.access_token), expiry: row.expiry };
+  if (body.scope) { patch.scopes = body.scope; row.scopes = body.scope; }
+  // Rows from before encryption get sealed the first time they're used.
+  if (!isSealed(row.refresh_token) && refresh) patch.refresh_token = await sealToken(admin, refresh);
+  await admin.from("gmail_tokens").update(patch).eq("id", row.id);
+  row.access_token = patch.access_token as string;
+  if (patch.refresh_token) row.refresh_token = patch.refresh_token as string;
   return body.access_token as string;
 }
 
@@ -98,7 +127,7 @@ async function gmail<T>(token: string, path: string, init?: RequestInit, attempt
 
 // ----- matching --------------------------------------------------------------
 
-async function addressBook(admin: Admin, userId: string, own: string | null) {
+async function addressBook(admin: Admin, userId: string, own: Set<string>) {
   const [creators, brands, contacts] = await Promise.all([
     admin.from("creators").select("id, contact_email, secondary_email").eq("user_id", userId).is("archived_at", null),
     admin.from("brands").select("id, contact_email, secondary_email").eq("user_id", userId).is("archived_at", null),
@@ -107,7 +136,7 @@ async function addressBook(admin: Admin, userId: string, own: string | null) {
   const map = new Map<string, Entity[]>();
   const add = (email: string | null | undefined, entity: Entity) => {
     for (const e of addresses(email || "")) {
-      if (own && e === own.toLowerCase()) continue;
+      if (own.has(e)) continue;
       const list = map.get(e) || [];
       if (!list.some((x) => x.id === entity.id)) list.push(entity);
       map.set(e, list);
@@ -119,21 +148,22 @@ async function addressBook(admin: Admin, userId: string, own: string | null) {
   return map;
 }
 
-function eventsFor(meta: Meta, userId: string, book: Map<string, Entity[]>, own: string | null): EventRow[] {
+const isOutgoing = (meta: Meta, own: Set<string>) => (meta.labelIds || []).includes("SENT") || addresses(header(meta, "From")).some((e) => own.has(e));
+const sentAt = (meta: Meta) => (meta.internalDate ? new Date(Number(meta.internalDate)) : new Date(header(meta, "Date") || Date.now())).toISOString();
+
+function eventsFor(meta: Meta, userId: string, book: Map<string, Entity[]>, own: Set<string>, mailbox: string): EventRow[] {
   const labels = meta.labelIds || [];
   if (labels.some((l) => l === "DRAFT" || l === "SPAM" || l === "TRASH" || l === "CHAT")) return [];
-  const self = (own || "").toLowerCase();
-  const from = addresses(header(meta, "From"));
-  const out = labels.includes("SENT") || (!!self && from.includes(self));
-  const counterparts = out ? [...addresses(header(meta, "To")), ...addresses(header(meta, "Cc"))].filter((e) => e !== self) : from.filter((e) => e !== self);
-  const at = meta.internalDate ? new Date(Number(meta.internalDate)).toISOString() : new Date(header(meta, "Date") || Date.now()).toISOString();
+  const out = isOutgoing(meta, own);
+  const counterparts = (out ? [...addresses(header(meta, "To")), ...addresses(header(meta, "Cc"))] : addresses(header(meta, "From"))).filter((e) => !own.has(e));
+  const at = sentAt(meta);
   const rows: EventRow[] = [];
   const seen = new Set<string>();
   for (const email of counterparts) {
     for (const entity of book.get(email) || []) {
       if (seen.has(entity.id)) continue;
       seen.add(entity.id);
-      rows.push({ user_id: userId, gmail_id: meta.id, thread_id: meta.threadId || "", direction: out ? "out" : "in", entity_type: entity.type, entity_id: entity.id, counterpart: email, subject: header(meta, "Subject").slice(0, 300), snippet: (meta.snippet || "").slice(0, 240), at });
+      rows.push({ user_id: userId, gmail_id: meta.id, thread_id: meta.threadId || "", direction: out ? "out" : "in", entity_type: entity.type, entity_id: entity.id, counterpart: email, subject: header(meta, "Subject").slice(0, 300), snippet: (meta.snippet || "").slice(0, 240), at, mailbox, message_key: messageKey(meta) });
     }
   }
   return rows;
@@ -153,7 +183,8 @@ async function listIds(token: string, q: string, maxPages: number) {
   return ids;
 }
 
-const META_PATH = (id: string) => `/messages/${id}?format=metadata&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Cc&metadataHeaders=Subject&metadataHeaders=Date&metadataHeaders=Message-ID`;
+const META_HEADERS = ["From", "To", "Cc", "Subject", "Date", "Message-ID", "Reply-To", "List-Unsubscribe", "List-Id", "Precedence", "Auto-Submitted", "X-Autoreply", "X-Autorespond", "In-Reply-To", "References"];
+const META_PATH = (id: string) => `/messages/${id}?format=metadata&${META_HEADERS.map((h) => `metadataHeaders=${h}`).join("&")}`;
 
 async function fetchMetas(token: string, ids: string[], deadline: number) {
   const metas: Meta[] = [];
@@ -165,8 +196,64 @@ async function fetchMetas(token: string, ids: string[], deadline: number) {
   return metas;
 }
 
-const chunk = <T,>(list: T[], size: number) => Array.from({ length: Math.ceil(list.length / size) }, (_, i) => list.slice(i * size, i * size + size));
 const searchFor = (emails: string[], days: number) => `{${emails.map((e) => `from:${e} to:${e} cc:${e}`).join(" ")}} newer_than:${days}d`;
+
+// A message that reached two of your mailboxes (cc'd, forwarded) counts once.
+async function dropCrossMailboxDuplicates(admin: Admin, userId: string, rows: EventRow[]) {
+  const keys = Array.from(new Set(rows.map((r) => r.message_key).filter(Boolean)));
+  const taken = new Map<string, string>(); // message+record → the Gmail id already stored
+  for (const part of chunk(keys, 200)) {
+    const { data } = await admin.from("email_events").select("message_key, entity_id, gmail_id").eq("user_id", userId).in("message_key", part);
+    for (const r of data || []) taken.set(`${r.message_key}|${r.entity_id}`, r.gmail_id);
+  }
+  const seen = new Set<string>();
+  return rows.filter((r) => {
+    if (!r.message_key) return true;
+    const key = `${r.message_key}|${r.entity_id}`;
+    const stored = taken.get(key);
+    if ((stored && stored !== r.gmail_id) || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+// ----- inbound leads -------------------------------------------------------------
+
+function leadFrom(meta: Meta, own: Set<string>, book: Map<string, Entity[]>): Lead | null {
+  if (isOutgoing(meta, own)) return null;
+  const headers: Record<string, string> = {};
+  for (const h of meta.payload?.headers || []) headers[h.name.toLowerCase()] = h.value;
+  const lead = scanForLead({ from: header(meta, "From"), replyTo: header(meta, "Reply-To"), to: header(meta, "To"), subject: header(meta, "Subject"), snippet: meta.snippet || "", labels: meta.labelIds || [], headers, own: Array.from(own) });
+  if (!lead || book.has(lead.email)) return null;
+  return lead;
+}
+
+async function storeLeads(admin: Admin, userId: string, mailbox: string, found: { lead: Lead; meta: Meta }[]) {
+  if (!found.length) return 0;
+  const latest = new Map<string, { lead: Lead; meta: Meta; count: number }>();
+  for (const f of found) {
+    const prev = latest.get(f.lead.email);
+    if (!prev || Number(f.meta.internalDate || 0) > Number(prev.meta.internalDate || 0)) latest.set(f.lead.email, { ...f, count: (prev?.count || 0) + 1 });
+    else prev.count++;
+  }
+  const emails = Array.from(latest.keys());
+  const { data: existing } = await admin.from("inbound_leads").select("id, email, status, gmail_id, score, messages, last_at, first_at").eq("user_id", userId).in("email", emails);
+  const byEmail = new Map((existing || []).map((r) => [r.email as string, r]));
+  let added = 0;
+  for (const [email, { lead, meta, count }] of latest) {
+    const at = sentAt(meta);
+    const row = byEmail.get(email);
+    const fields = { name: lead.name, company: lead.company, mailbox, kind: lead.kind, reasons: lead.reasons, subject: header(meta, "Subject").slice(0, 300), snippet: (meta.snippet || "").slice(0, 240), gmail_id: meta.id, thread_id: meta.threadId || "", via_form: lead.viaForm };
+    if (!row) {
+      const { error } = await admin.from("inbound_leads").insert({ user_id: userId, email, ...fields, score: lead.score, messages: count, first_at: at, last_at: at });
+      if (!error) added++;
+    } else if (row.status === "new" && row.gmail_id !== meta.id) {
+      const newer = new Date(at).getTime() > new Date(row.last_at).getTime();
+      await admin.from("inbound_leads").update({ ...(newer ? { ...fields, last_at: at } : {}), score: Math.max(row.score, lead.score), messages: (row.messages || 1) + count, first_at: new Date(at) < new Date(row.first_at) ? at : row.first_at, updated_at: new Date().toISOString() }).eq("id", row.id);
+    }
+  }
+  return added;
+}
 
 // ----- status automation ------------------------------------------------------
 
@@ -184,7 +271,7 @@ async function applyStatuses(admin: Admin, userId: string, entityIds: string[]) 
   for (const ids of chunk(entityIds, 100)) {
     const since = new Date(Date.now() - BACKFILL_DAYS * 86400000).toISOString();
     const [{ data: events }, { data: creators }, { data: brands }] = await Promise.all([
-      admin.from("email_events").select("entity_id, entity_type, direction, at, subject").eq("user_id", userId).in("entity_id", ids).gte("at", since).order("at", { ascending: true }),
+      admin.from("email_events").select("entity_id, entity_type, direction, at, subject, mailbox").eq("user_id", userId).in("entity_id", ids).gte("at", since).order("at", { ascending: true }),
       admin.from("creators").select("id, name, pipeline_status, status_updated_at, date_contacted, archived_at").eq("user_id", userId).in("id", ids),
       admin.from("brands").select("id, name, pipeline_status, status_updated_at, date_contacted, archived_at").eq("user_id", userId).in("id", ids),
     ]);
@@ -204,17 +291,14 @@ async function applyStatuses(admin: Admin, userId: string, entityIds: string[]) 
         if (next) {
           status = next;
           at = ev.at;
-          why = ev.direction === "out" ? `you emailed “${ev.subject || "(no subject)"}”` : `they emailed “${ev.subject || "(no subject)"}”`;
+          const via = ev.mailbox ? ` (${ev.mailbox})` : "";
+          why = ev.direction === "out" ? `you emailed “${ev.subject || "(no subject)"}”${via}` : `they emailed “${ev.subject || "(no subject)"}”${via}`;
         }
       }
       if (!at || status === record.pipeline_status) continue;
       const patch: Record<string, unknown> = { pipeline_status: status, status_updated_at: at, status_source: "gmail" };
       if (!record.date_contacted) patch.date_contacted = (first || at).slice(0, 10);
-      let { error } = await admin.from(record.table).update(patch).eq("id", record.id).eq("user_id", userId).eq("pipeline_status", record.pipeline_status);
-      if (error && /status_source/.test(error.message)) {
-        delete patch.status_source;
-        ({ error } = await admin.from(record.table).update(patch).eq("id", record.id).eq("user_id", userId).eq("pipeline_status", record.pipeline_status));
-      }
+      const { error } = await admin.from(record.table).update(patch).eq("id", record.id).eq("user_id", userId).eq("pipeline_status", record.pipeline_status);
       if (error) continue;
       changed++;
       await admin.from("activities").insert({ user_id: userId, text: `Gmail: ${record.name} moved to ${LABEL[status] || status} — ${why}`.slice(0, 500), at: new Date().toISOString(), entity_type: record.kind, entity_id: record.id });
@@ -223,12 +307,12 @@ async function applyStatuses(admin: Admin, userId: string, entityIds: string[]) 
   return changed;
 }
 
-// ----- one user's sync ---------------------------------------------------------
+// ----- one mailbox's sync -------------------------------------------------------
 
-async function syncUser(admin: Admin, row: TokenRow, deadline: number) {
+async function syncMailbox(admin: Admin, row: TokenRow, own: Set<string>, book: Map<string, Entity[]>, deadline: number) {
   const token = await accessToken(admin, row);
-  if (!(row.scopes || "").includes("gmail.readonly")) throw new GmailError("Gmail read access wasn't granted — reconnect and tick “Read your email”.", 403, true);
-  const book = await addressBook(admin, row.user_id, row.email);
+  if (!(row.scopes || "").includes("gmail.readonly")) throw new GmailError("Gmail read access wasn't granted — reconnect this mailbox and tick “Read your email”.", 403, true);
+  const mailbox = mailboxOf(row);
   const all = Array.from(book.keys());
   const done = new Set((row.backfilled || []).map((e) => e.toLowerCase()));
   const fresh = all.filter((e) => !done.has(e));
@@ -243,7 +327,15 @@ async function syncUser(admin: Admin, row: TokenRow, deadline: number) {
     backfilled.push(...group);
   }
 
-  // 2. Everything since the last run, via Gmail's change history.
+  // 2. First time: look through the last month of the primary inbox for people
+  //    who reached out and aren't in the CRM yet.
+  let leadsScanned = !!row.leads_scanned_at;
+  if (!leadsScanned && Date.now() < deadline) {
+    (await listIds(token, `in:inbox newer_than:${LEAD_LOOKBACK_DAYS}d -category:promotions -category:social -category:forums -in:chats`, 2)).forEach((id) => ids.add(id));
+    leadsScanned = true;
+  }
+
+  // 3. Everything since the last run, via Gmail's change history.
   let historyId = row.history_id;
   if (historyId) {
     try {
@@ -268,42 +360,66 @@ async function syncUser(admin: Admin, row: TokenRow, deadline: number) {
     }
   }
 
-  // 3. Skip messages already stored, read the rest (headers only), match them.
+  // 4. Skip messages already stored, read the rest (headers only), match them.
   const list = Array.from(ids);
   const known = new Set<string>();
   for (const part of chunk(list, 300)) {
     const { data } = await admin.from("email_events").select("gmail_id").eq("user_id", row.user_id).in("gmail_id", part);
     (data || []).forEach((r) => known.add(r.gmail_id));
   }
-  const metas = await fetchMetas(token, list.filter((id) => !known.has(id)), deadline);
-  if (metas.length < list.filter((id) => !known.has(id)).length) complete = false;
-  const rows = metas.flatMap((m) => eventsFor(m, row.user_id, book, row.email));
+  const todo = list.filter((id) => !known.has(id));
+  const metas = await fetchMetas(token, todo, deadline);
+  if (metas.length < todo.length) complete = false;
+  const matched = metas.flatMap((m) => eventsFor(m, row.user_id, book, own, mailbox));
+  const rows = await dropCrossMailboxDuplicates(admin, row.user_id, matched);
   for (const part of chunk(rows, 200)) {
     const { error } = await admin.from("email_events").upsert(part, { onConflict: "user_id,gmail_id,entity_id", ignoreDuplicates: true });
     if (error) throw new GmailError(`Couldn't store email activity: ${error.message}`);
   }
 
-  // 4. Move statuses (self-healing: also re-checks anything with recent mail).
+  // 5. Mail from people who aren't in the CRM: is it a real enquiry?
+  const matchedIds = new Set(matched.map((r) => r.gmail_id));
+  const found = metas.filter((m) => !matchedIds.has(m.id)).map((meta) => ({ meta, lead: leadFrom(meta, own, book) })).filter((f): f is { meta: Meta; lead: Lead } => !!f.lead);
+  const leads = await storeLeads(admin, row.user_id, mailbox, found).catch(() => 0);
+
+  // 6. Move statuses (self-healing: also re-checks anything with recent mail).
   const { data: recent } = await admin.from("email_events").select("entity_id").eq("user_id", row.user_id).gte("at", new Date(Date.now() - 14 * 86400000).toISOString()).limit(2000);
   const touched = Array.from(new Set([...rows.map((r) => r.entity_id), ...(recent || []).map((r) => r.entity_id)]));
   const changed = await applyStatuses(admin, row.user_id, touched);
 
-  // 5. Remember where we got to. An unfinished run keeps the old history id so
+  // 7. Remember where we got to. An unfinished run keeps the old history id so
   //    the next run picks up exactly where this one stopped.
   const patch: Record<string, unknown> = { last_sync_at: new Date().toISOString(), sync_error: "", backfilled: Array.from(new Set([...done, ...backfilled])).slice(-5000) };
+  if (leadsScanned && !row.leads_scanned_at && complete) patch.leads_scanned_at = new Date().toISOString();
   if (complete || !row.history_id) {
     const profile = await gmail<{ historyId?: string; emailAddress?: string }>(token, "/profile");
     if (complete || !historyId) patch.history_id = profile.historyId || historyId;
-    if (profile.emailAddress && !row.email) patch.email = profile.emailAddress;
   }
-  await admin.from("gmail_tokens").update(patch).eq("user_id", row.user_id);
-  return { messages: metas.length, events: rows.length, statusChanges: changed, complete };
+  await admin.from("gmail_tokens").update(patch).eq("id", row.id);
+  return { mailbox, messages: metas.length, events: rows.length, leads, statusChanges: changed, complete };
 }
 
-async function recordError(admin: Admin, userId: string, e: unknown) {
+async function recordError(admin: Admin, row: TokenRow, e: unknown) {
   const message = e instanceof Error ? e.message : String(e);
-  await admin.from("gmail_tokens").update({ sync_error: message.slice(0, 300), last_sync_at: new Date().toISOString() }).eq("user_id", userId);
+  await admin.from("gmail_tokens").update({ sync_error: message.slice(0, 300), last_sync_at: new Date().toISOString() }).eq("id", row.id);
   return message;
+}
+
+async function syncUser(admin: Admin, rows: TokenRow[], allRows: TokenRow[], deadline: number, force: boolean) {
+  const own = new Set(allRows.map(mailboxOf).filter(Boolean));
+  const book = await addressBook(admin, allRows[0].user_id, own);
+  const results: Record<string, unknown>[] = [];
+  const errors: { mailbox: string; error: string; reconnect: boolean }[] = [];
+  for (const row of rows) {
+    if (Date.now() > deadline - 5_000) break;
+    if (!force && row.last_sync_at && Date.now() - new Date(row.last_sync_at).getTime() < USER_MIN_INTERVAL_MS) continue;
+    try {
+      results.push(await syncMailbox(admin, row, own, book, deadline));
+    } catch (e) {
+      errors.push({ mailbox: mailboxOf(row), error: await recordError(admin, row, e), reconnect: e instanceof GmailError && e.reconnect });
+    }
+  }
+  return { results, errors };
 }
 
 // ----- sending ------------------------------------------------------------------
@@ -327,15 +443,34 @@ const recipients = (value: unknown) => {
   return list;
 };
 
-async function send(admin: Admin, row: TokenRow, input: Record<string, unknown>) {
-  if (!(row.scopes || "").includes("gmail.send")) throw new GmailError("Sending wasn't allowed when Gmail was connected — reconnect and tick “Send email on your behalf”.", 403, true);
+async function pickSender(admin: Admin, rows: TokenRow[], input: Record<string, unknown>, threadId: string) {
+  if (typeof input.mailboxId === "string" && input.mailboxId) {
+    const row = rows.find((r) => r.id === input.mailboxId);
+    if (!row) throw new GmailError("That mailbox isn't connected to your account.", 403);
+    return row;
+  }
+  if (threadId) {
+    // Gmail thread ids belong to one mailbox: reply from the one that has it.
+    const { data } = await admin.from("email_events").select("mailbox").eq("user_id", rows[0].user_id).eq("thread_id", threadId).neq("mailbox", "").limit(1).maybeSingle();
+    const row = data?.mailbox ? rows.find((r) => mailboxOf(r) === data.mailbox) : undefined;
+    if (row) return row;
+  }
+  return rows.find((r) => (r.scopes || "").includes("gmail.send")) || rows[0];
+}
+
+async function send(admin: Admin, rows: TokenRow[], input: Record<string, unknown>) {
+  const threadId = typeof input.threadId === "string" && /^[0-9a-f]{6,40}$/i.test(input.threadId) ? input.threadId : "";
+  const row = await pickSender(admin, rows, input, threadId);
+  if (!(row.scopes || "").includes("gmail.send")) throw new GmailError(`Sending wasn't allowed when ${row.email || "this mailbox"} was connected — reconnect it and tick “Send email on your behalf”.`, 403, true);
+  const today = new Date().toISOString().slice(0, 10);
+  const sentToday = row.send_day === today ? row.send_count || 0 : 0;
+  if (sentToday >= SENDS_PER_DAY) throw new GmailError(`Daily sending limit reached for ${row.email} (${SENDS_PER_DAY}). It resets tomorrow.`, 429);
   const token = await accessToken(admin, row);
   const to = recipients(input.to);
   const cc = input.cc ? recipients(input.cc) : [];
   if (!to.length) throw new GmailError("Add a recipient.", 400);
   let subject = clean(input.subject, 300);
   const body = String(input.body ?? "").slice(0, 100_000);
-  const threadId = typeof input.threadId === "string" && /^[0-9a-f]{6,40}$/i.test(input.threadId) ? input.threadId : "";
   const headers = [`To: ${to.join(", ")}`, ...(cc.length ? [`Cc: ${cc.join(", ")}`] : [])];
   if (threadId) {
     // Reply in the same thread: Gmail and the recipient's mail app keep the conversation together.
@@ -350,18 +485,24 @@ async function send(admin: Admin, row: TokenRow, input: Record<string, unknown>)
   headers.push(`Subject: =?UTF-8?B?${b64(subject)}?=`, "MIME-Version: 1.0", 'Content-Type: text/plain; charset="UTF-8"', "Content-Transfer-Encoding: base64");
   const raw = `${headers.join("\r\n")}\r\n\r\n${b64(body).replace(/(.{76})/g, "$1\r\n")}`;
   const sent = await gmail<{ id: string; threadId: string }>(token, "/messages/send", { method: "POST", body: JSON.stringify({ raw: b64url(new TextEncoder().encode(raw)), ...(threadId ? { threadId } : {}) }) });
+  await admin.from("gmail_tokens").update({ send_day: today, send_count: sentToday + 1 }).eq("id", row.id);
   // Record it right away so the CRM updates without waiting for the next sync.
-  const book = await addressBook(admin, row.user_id, row.email);
+  const own = new Set(rows.map(mailboxOf).filter(Boolean));
+  const book = await addressBook(admin, row.user_id, own);
   const meta = await gmail<Meta>(token, META_PATH(sent.id)).catch(() => null);
-  const rows = meta ? eventsFor({ ...meta, labelIds: Array.from(new Set([...(meta.labelIds || []), "SENT"])) }, row.user_id, book, row.email) : [];
-  if (rows.length) await admin.from("email_events").upsert(rows, { onConflict: "user_id,gmail_id,entity_id", ignoreDuplicates: true });
-  const changed = await applyStatuses(admin, row.user_id, rows.map((r) => r.entity_id));
-  return { id: sent.id, threadId: sent.threadId, events: rows.length, statusChanges: changed };
+  const events = meta ? eventsFor({ ...meta, labelIds: Array.from(new Set([...(meta.labelIds || []), "SENT"])) }, row.user_id, book, own, mailboxOf(row)) : [];
+  if (events.length) await admin.from("email_events").upsert(events, { onConflict: "user_id,gmail_id,entity_id", ignoreDuplicates: true });
+  const changed = await applyStatuses(admin, row.user_id, events.map((r) => r.entity_id));
+  return { id: sent.id, threadId: sent.threadId, from: row.email, events: events.length, statusChanges: changed };
 }
 
 // ----- entry -----------------------------------------------------------------------
 
+const publicMailbox = (r: TokenRow) => ({ id: r.id, email: r.email, canRead: (r.scopes || "").includes("gmail.readonly"), canSend: (r.scopes || "").includes("gmail.send"), lastSyncAt: r.last_sync_at, error: r.sync_error || "", connectedAt: r.connected_at || null, sentToday: r.send_day === new Date().toISOString().slice(0, 10) ? r.send_count || 0 : 0 });
+
 Deno.serve(async (req) => {
+  const cors = corsFor(req);
+  const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...cors, "Content-Type": "application/json", "Cache-Control": "no-store" } });
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
@@ -369,9 +510,12 @@ Deno.serve(async (req) => {
   const configured = !!(Deno.env.get("GOOGLE_CLIENT_ID") && Deno.env.get("GOOGLE_CLIENT_SECRET") && Deno.env.get("GMAIL_OAUTH_REDIRECT_URI"));
   let input: Record<string, unknown> = {};
   try {
-    input = await req.json();
+    const text = await req.text();
+    if (text.length > 200_000) return json({ error: "Request too large" }, 413);
+    input = text ? JSON.parse(text) : {};
+    if (!input || typeof input !== "object" || Array.isArray(input)) input = {};
   } catch {
-    // empty body
+    return json({ error: "Invalid JSON" }, 400);
   }
   const action = String(input.action || "status");
 
@@ -389,18 +533,22 @@ Deno.serve(async (req) => {
     if (!allowed) return json({ error: "Unauthorized" }, 401);
     if (!configured) return json({ skipped: "not configured" });
     const deadline = Date.now() + RUN_BUDGET_MS;
-    const { data: rows } = await admin.from("gmail_tokens").select("*").order("last_sync_at", { ascending: true, nullsFirst: true }).limit(200);
-    const results: Record<string, unknown>[] = [];
-    for (const row of (rows || []) as TokenRow[]) {
+    const { data } = await admin.from("gmail_tokens").select("*").order("last_sync_at", { ascending: true, nullsFirst: true }).limit(500);
+    const byUser = new Map<string, TokenRow[]>();
+    for (const row of (data || []) as TokenRow[]) byUser.set(row.user_id, [...(byUser.get(row.user_id) || []), row]);
+    let mailboxes = 0;
+    for (const rows of byUser.values()) {
       if (Date.now() > deadline - 10_000) break;
-      if (row.last_sync_at && Date.now() - new Date(row.last_sync_at).getTime() < 4 * 60_000) continue;
+      const due = rows.filter((r) => !r.last_sync_at || Date.now() - new Date(r.last_sync_at).getTime() >= 4 * 60_000);
+      if (!due.length) continue;
       try {
-        results.push(await syncUser(admin, row, Math.min(deadline, Date.now() + 40_000)));
-      } catch (e) {
-        await recordError(admin, row.user_id, e);
+        const { results } = await syncUser(admin, due, rows, Math.min(deadline, Date.now() + 45_000), true);
+        mailboxes += results.length;
+      } catch {
+        // one user's trouble never stops everyone else's sync
       }
     }
-    return json({ users: results.length });
+    return json({ users: byUser.size, mailboxes });
   }
 
   const auth = req.headers.get("Authorization") || "";
@@ -408,41 +556,49 @@ Deno.serve(async (req) => {
   const { data: userData, error: userError } = await createClient(supabaseUrl, Deno.env.get("SUPABASE_ANON_KEY")!, { global: { headers: { Authorization: auth } } }).auth.getUser();
   if (userError || !userData.user) return json({ error: "Unauthorized" }, 401);
   const userId = userData.user.id;
-  const { data: row } = await admin.from("gmail_tokens").select("*").eq("user_id", userId).maybeSingle();
-  const tokenRow = row as TokenRow | null;
+  const { data } = await admin.from("gmail_tokens").select("*").eq("user_id", userId).order("connected_at", { ascending: true, nullsFirst: true }).limit(MAX_MAILBOXES);
+  const rows = (data || []) as TokenRow[];
+  const first = rows[0];
 
   if (action === "status") {
-    if (!tokenRow) return json({ configured, connected: false });
-    return json({ configured, connected: true, email: tokenRow.email, canRead: (tokenRow.scopes || "").includes("gmail.readonly"), canSend: (tokenRow.scopes || "").includes("gmail.send"), lastSyncAt: tokenRow.last_sync_at, error: (row as { sync_error?: string }).sync_error || "" });
+    const mailboxes = rows.map(publicMailbox);
+    if (!first) return json({ configured, connected: false, mailboxes });
+    // Top-level fields describe the first mailbox (older app versions read them).
+    return json({ configured, connected: true, ...publicMailbox(first), mailboxes, maxMailboxes: MAX_MAILBOXES });
   }
 
   if (action === "disconnect") {
-    if (tokenRow) {
-      await fetch(`https://oauth2.googleapis.com/revoke?token=${encodeURIComponent(tokenRow.refresh_token)}`, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" } }).catch(() => null);
-      await admin.from("gmail_tokens").delete().eq("user_id", userId);
+    const targets = input.all === true ? rows : rows.filter((r) => r.id === input.id || (!input.id && rows.length === 1));
+    if (!targets.length && rows.length) return json({ error: "Pick which mailbox to disconnect." }, 400);
+    for (const row of targets) {
+      const refresh = await openToken(admin, row.refresh_token).catch(() => null);
+      if (refresh) await fetch("https://oauth2.googleapis.com/revoke", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ token: refresh }) }).catch(() => null);
+      await admin.from("gmail_tokens").delete().eq("id", row.id).eq("user_id", userId);
+      if (input.clearHistory === true) {
+        await admin.from("email_events").delete().eq("user_id", userId).eq("mailbox", mailboxOf(row));
+        await admin.from("inbound_leads").delete().eq("user_id", userId).eq("mailbox", mailboxOf(row)).eq("status", "new");
+      }
     }
-    await admin.from("profiles").update({ gmail_connected: false }).eq("id", userId);
-    if (input.clearHistory === true) await admin.from("email_events").delete().eq("user_id", userId);
-    return json({ connected: false });
+    const remaining = rows.length - targets.length;
+    if (input.clearHistory === true && remaining === 0) await admin.from("email_events").delete().eq("user_id", userId).eq("mailbox", "");
+    await admin.from("profiles").update({ gmail_connected: remaining > 0 }).eq("id", userId);
+    return json({ connected: remaining > 0, removed: targets.map((r) => r.email) });
   }
 
   if (!configured) return json({ error: "Gmail isn't set up on the server yet.", code: "not_configured" }, 503);
-  if (!tokenRow) return json({ error: "Connect Gmail first.", code: "not_connected" }, 409);
+  if (!first) return json({ error: "Connect Gmail first.", code: "not_connected" }, 409);
 
   if (action === "sync") {
-    if (tokenRow.last_sync_at && Date.now() - new Date(tokenRow.last_sync_at).getTime() < USER_MIN_INTERVAL_MS && input.force !== true) return json({ skipped: true, lastSyncAt: tokenRow.last_sync_at });
-    try {
-      const result = await syncUser(admin, tokenRow, Date.now() + RUN_BUDGET_MS);
-      return json({ ok: true, ...result });
-    } catch (e) {
-      const message = await recordError(admin, userId, e);
-      return json({ error: message, reconnect: e instanceof GmailError && e.reconnect }, e instanceof GmailError && e.reconnect ? 409 : 502);
-    }
+    const { results, errors } = await syncUser(admin, rows, rows, Date.now() + RUN_BUDGET_MS, input.force === true);
+    const sum = (key: string) => results.reduce((s, r) => s + Number(r[key] || 0), 0);
+    if (!results.length && !errors.length) return json({ skipped: true });
+    const failed = errors.length > 0 && !results.length;
+    return json({ ok: errors.length === 0, events: sum("events"), leads: sum("leads"), statusChanges: sum("statusChanges"), mailboxes: results.length, errors, ...(failed ? { error: errors[0].error, reconnect: errors[0].reconnect } : {}) }, failed ? (errors[0].reconnect ? 409 : 502) : 200);
   }
 
   if (action === "send") {
     try {
-      return json({ ok: true, ...(await send(admin, tokenRow, input)) });
+      return json({ ok: true, ...(await send(admin, rows, input)) });
     } catch (e) {
       const status = e instanceof GmailError && e.status >= 400 && e.status < 500 ? e.status : 502;
       return json({ error: e instanceof Error ? e.message : "Couldn't send", reconnect: e instanceof GmailError && e.reconnect }, status);

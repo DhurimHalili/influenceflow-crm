@@ -324,6 +324,30 @@ export interface EmailEvent {
   subject: string;
   snippet: string;
   at: string;
+  /** Which of your connected mailboxes it went through ('' for older rows). */
+  mailbox?: string;
+}
+
+/** Someone outside the CRM who wrote to one of your mailboxes and looks like a real enquiry. */
+export interface InboundLead {
+  id: string;
+  email: string;
+  name: string;
+  company: string;
+  mailbox: string;
+  kind: "brand" | "creator" | "unknown";
+  score: number;
+  reasons: string[];
+  subject: string;
+  snippet: string;
+  thread_id: string;
+  via_form: boolean;
+  messages: number;
+  first_at: string;
+  last_at: string;
+  status: "new" | "added" | "dismissed";
+  entity_type: "creator" | "brand" | null;
+  entity_id: string | null;
 }
 
 export interface WorkspaceData {

@@ -139,6 +139,7 @@ const normalizeEmailEvent = (row: Record<string, unknown>): EmailEvent => ({
   subject: text(row.subject),
   snippet: text(row.snippet),
   at: typeof row.at === "string" && row.at ? row.at : new Date().toISOString(),
+  mailbox: text(row.mailbox).toLowerCase(),
 });
 
 const normalizeBrand = (row: Record<string, unknown>, userId: string): Brand => ({

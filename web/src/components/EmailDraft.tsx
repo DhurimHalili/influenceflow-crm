@@ -61,6 +61,12 @@ export function EmailDraftPanel({ recordId, recipient: primaryEmail, secondary, 
   // The latest Gmail conversation with this record — follow-ups go in that thread.
   const lastThread = (data.emailEvents || []).filter((e) => e.entity_id === recordId && e.thread_id).sort((a, b) => b.at.localeCompare(a.at))[0];
   const [inThread, setInThread] = useState(true);
+  // Send from: the mailbox that owns the thread when replying, else the one you last used with them, else your first.
+  const senders = gmail.mailboxes.filter((m) => m.canSend);
+  const usualMailbox = (data.emailEvents || []).filter((e) => e.entity_id === recordId && e.direction === "out" && e.mailbox).sort((a, b) => b.at.localeCompare(a.at))[0]?.mailbox;
+  const [fromId, setFromId] = useState("");
+  const threadMailbox = inThread && lastThread?.mailbox ? senders.find((m) => m.email === lastThread.mailbox) : undefined;
+  const sender = threadMailbox || senders.find((m) => m.id === fromId) || senders.find((m) => m.email === usualMailbox) || senders[0];
   const [sending, setSending] = useState(false);
   const canGmailSend = gmail.connected && gmail.canSend;
   const cc = sendTo === "both" && primaryEmail && second ? second : "";
@@ -196,14 +202,14 @@ export function EmailDraftPanel({ recordId, recipient: primaryEmail, secondary, 
     if (!recipient || !(draftSubject.trim() || draftBody.trim())) return;
     const threaded = inThread && !!lastThread;
     setSending(true);
-    const res = await gmail.send({ to: [recipient], cc: cc ? [cc] : [], subject: threaded ? "" : draftSubject, body: draftBody, threadId: threaded ? lastThread.thread_id : undefined });
+    const res = await gmail.send({ to: [recipient], cc: cc ? [cc] : [], subject: threaded ? "" : draftSubject, body: draftBody, threadId: threaded ? lastThread.thread_id : undefined, mailboxId: sender?.id });
     setSending(false);
     if (!res.ok) return toast(res.message || "Couldn't send", "error");
     setDraftSubject("");
     setDraftBody("");
     onSave("", "", false);
     setExpanded(false);
-    toast(`Sent from ${gmail.email || "Gmail"}${threaded ? " in the same thread" : ""}${res.statusChanges ? " · status updated" : ""}`);
+    toast(`Sent from ${res.from || sender?.email || "Gmail"}${threaded ? " in the same thread" : ""}${res.statusChanges ? " · status updated" : ""}`);
   };
 
   const clear = () => {
@@ -325,6 +331,7 @@ export function EmailDraftPanel({ recordId, recipient: primaryEmail, secondary, 
               </div>
               {canGmailSend && lastThread && <label className="thread-toggle"><input type="checkbox" checked={inThread} onChange={(event) => setInThread(event.target.checked)} /><span>Reply in the same thread <em>“{lastThread.subject || "(no subject)"}” — the thread's subject is kept so it stays one conversation</em></span></label>}
               <div className="composer-send">
+                {canGmailSend && senders.length > 1 && <label className="from-picker"><span>From</span><select value={sender?.id || ""} onChange={(event) => setFromId(event.target.value)} disabled={!!threadMailbox} title={threadMailbox ? "Replies go out from the mailbox that has the thread" : "Choose which mailbox sends this"}>{senders.map((m) => <option key={m.id} value={m.id}>{m.email}</option>)}</select></label>}
                 {canGmailSend && <Button type="button" onClick={() => void sendWithGmail()} disabled={!recipient || !hasContent} loading={sending}><Send size={14} /> {inThread && lastThread ? "Send follow-up" : "Send with Gmail"}</Button>}
                 <Button type="button" variant={canGmailSend ? "secondary" : "primary"} onClick={() => open("gmail")} disabled={!recipient || !hasContent}><ExternalLink size={14} /> Open in Gmail</Button>
                 <Button type="button" variant="secondary" onClick={() => open("mail")} disabled={!recipient || !hasContent}><Mail size={14} /> Mail app</Button>
