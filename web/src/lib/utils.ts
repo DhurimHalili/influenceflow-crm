@@ -57,6 +57,35 @@ export const timeLabel = (value: string) =>
 
 export const relativeTime = (value: string) => formatDistanceToNow(new Date(value), { addSuffix: true });
 
+/** Whole calendar days between a date and today (0 = today). */
+export const daysSince = (value?: string | null) => {
+  const d = parseDay(value);
+  if (!d) return null;
+  const start = new Date(d);
+  start.setHours(0, 0, 0, 0);
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
+  return Math.round((now.getTime() - start.getTime()) / 86400000);
+};
+
+/** "today", "yesterday", "4 days ago", "3 weeks ago" — exact day counts under a month. */
+export const daysAgoLabel = (value?: string | null) => {
+  const days = daysSince(value);
+  if (days === null) return "";
+  if (days <= 0) return "today";
+  if (days === 1) return "yesterday";
+  if (days < 31) return `${days} days ago`;
+  const months = Math.round(days / 30.4);
+  return months < 12 ? `${months} month${months === 1 ? "" : "s"} ago` : `${Math.floor(days / 365)} year${days >= 730 ? "s" : ""} ago`;
+};
+
+/** "Oct 28, 2026 · 4:12 PM" — full stamp for logs. */
+export const stampLabel = (value: string) => {
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "";
+  return `${new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" }).format(d)} · ${new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit" }).format(d)}`;
+};
+
 export const initials = (name: string) =>
   name
     .split(/\s+/)
@@ -74,8 +103,8 @@ export const isOverdue = (value: string) => {
   return d ? isBefore(d, new Date()) : false;
 };
 
-export const download = (name: string, value: string, type = "application/json") => {
-  const url = URL.createObjectURL(new Blob([value], { type }));
+export const download = (name: string, value: string | Blob, type = "application/json") => {
+  const url = URL.createObjectURL(typeof value === "string" ? new Blob([value], { type }) : value);
   const anchor = document.createElement("a");
   anchor.href = url;
   anchor.download = name;
@@ -256,14 +285,15 @@ export const fillTemplate = (value: string, vars: Record<string, string>) =>
 
 export const unfilledTokens = (value: string) => Array.from(new Set(value.match(/\{(first_name|name|niche|platform|channel|my_name|company|domain|agency|signature)\}/g) || []));
 
-export const gmailComposeUrl = (to: string, subject: string, body: string) =>
-  `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(to)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+export const gmailComposeUrl = (to: string, subject: string, body: string, cc = "") =>
+  `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(to)}${cc ? `&cc=${encodeURIComponent(cc)}` : ""}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
 
-export const mailtoUrl = (to: string, subject: string, body: string) =>
-  `mailto:${to}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+export const mailtoUrl = (to: string, subject: string, body: string, cc = "") =>
+  `mailto:${to}?${cc ? `cc=${encodeURIComponent(cc)}&` : ""}subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
 
-// Any status past "new" means first contact already happened.
-export const OUTREACH_STAGES = ["contacted", "replied", "negotiating", "roster", "signed", "no_reply"];
+// Any status past "new" means first contact already happened — including
+// "inbound", where they reached out to you.
+export const OUTREACH_STAGES = ["inbound", "contacted", "replied", "negotiating", "roster", "signed", "no_reply"];
 
 // Overall score for a record: weighted from the four ratings, falling back to
 // a legacy whole-star rating for rows imported before the breakdown existed.
@@ -285,3 +315,19 @@ export const looksLikeHeader = (cells: string[] | undefined, known: string[]) =>
 
 // Undo the export's formula guard ('=SUM… → =SUM…) so a round trip is lossless.
 export const unguard = (cell: string) => (/^'[=+\-@\t\r]/.test(cell) ? cell.slice(1) : cell);
+
+// Importers accept what exports write ("No reply", "Follow up soon") as well
+// as raw keys ("no_reply", "soon").
+const STATUS_WORDS: Record<string, string> = {
+  new: "new", inbound: "inbound", incoming: "inbound", "inbound lead": "inbound", contacted: "contacted", "reach back": "contacted", reach_back: "contacted", replied: "replied",
+  negotiating: "negotiating", roster: "roster", signed: "signed", denied: "denied", "no reply": "no_reply", no_reply: "no_reply",
+  active: "active", completed: "completed", cancelled: "cancelled", canceled: "cancelled",
+};
+export const parseStatusCell = (value: string) => (value.trim() ? STATUS_WORDS[value.trim().toLowerCase()] || value.trim().toLowerCase() : "");
+export const parsePriorityCell = (value: string) => {
+  const v = value.trim().toLowerCase();
+  if (!v || v === "none" || v === "no priority") return "none";
+  if (v === "urgent") return "urgent";
+  if (v === "soon" || v === "follow up soon") return "soon";
+  return v;
+};

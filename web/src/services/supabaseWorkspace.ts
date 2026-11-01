@@ -5,6 +5,7 @@ import { PLATFORMS, type Activity, type Brand, type BrandContact, type Campaign,
 import { asPlatform, detectPlatform, normalizeSocials, socialsWithChannel } from "../lib/socials";
 import { normalizeBrief } from "../lib/brandBrief";
 import { changedRows, removedIds, sameRecord } from "../lib/sync";
+import { withDealMath } from "../lib/deal";
 
 type JoinRow = { campaign_id: string; creator_id: string };
 
@@ -68,6 +69,8 @@ const normalizeCreator = (row: Record<string, unknown>, userId: string): Creator
   user_id: typeof row.user_id === "string" ? row.user_id : userId,
   name: text(row.name),
   contact_email: text(row.contact_email),
+  secondary_email: text(row.secondary_email),
+  secondary_email_label: text(row.secondary_email_label),
   channel_link: text(row.channel_link),
   niche: text(row.niche),
   country: text(row.country),
@@ -127,6 +130,8 @@ const normalizeBrand = (row: Record<string, unknown>, userId: string): Brand => 
   domain: text(row.domain),
   brand_type: text(row.brand_type),
   contact_email: text(row.contact_email),
+  secondary_email: text(row.secondary_email),
+  secondary_email_label: text(row.secondary_email_label),
   brief: normalizeBrief(row.brief),
   socials: normalizeSocials(row.socials),
   pipeline_status: (mapStatus(row.pipeline_status) as Brand["pipeline_status"]) || "new",
@@ -167,18 +172,22 @@ const normalizeContact = (row: Record<string, unknown>, userId: string): BrandCo
 });
 
 const normalizeCampaign = (row: Record<string, unknown>, userId: string, links: JoinRow[]): Campaign => {
-  const agreed = num(row.agreed_payment);
-  const percent = num(row.agency_percent);
-  return {
+  // The payout is always derived from the deal inputs, never read from the
+  // creator_payout column: that column is not written by the app (it is a
+  // generated column on fresh installs), so a stored value can be stale or
+  // NULL — which used to load as 0 and broke payouts in stats and exports.
+  return withDealMath({
     id: String(row.id ?? ""),
     user_id: typeof row.user_id === "string" ? row.user_id : userId,
     name: text(row.name),
     brand_id: typeof row.brand_id === "string" ? row.brand_id : "",
     platform: platformOf(row.platform),
     deliverables: toDeliverables(row),
-    agreed_payment: agreed,
-    agency_percent: percent,
-    creator_payout: num(row.creator_payout, (agreed * percent) / 100),
+    agreed_payment: num(row.agreed_payment),
+    agency_percent: num(row.agency_percent),
+    payout_model: row.payout_model === "fixed" ? "fixed" : "percent",
+    creator_fees: (row.creator_fees && typeof row.creator_fees === "object" ? row.creator_fees : {}) as Record<string, number>,
+    creator_payout: 0,
     status: (["negotiating", "active", "completed", "cancelled"] as const).includes(row.status as Campaign["status"])
       ? (row.status as Campaign["status"])
       : "negotiating",
@@ -195,7 +204,7 @@ const normalizeCampaign = (row: Record<string, unknown>, userId: string, links: 
     payout_status: row.payout_status === "paid" ? "paid" : "pending",
     archived_at: dateOrNull(row.archived_at),
     created_at: typeof row.created_at === "string" && row.created_at ? row.created_at : new Date().toISOString(),
-  };
+  });
 };
 
 const normalizeMeeting = (row: Record<string, unknown>, userId: string): Meeting => {
@@ -335,7 +344,7 @@ export async function loadCloudWorkspace(userId: string): Promise<WorkspaceData 
 // PostgREST rejects the upsert with an unknown-column error: strip exactly
 // the column it names and retry, so one missing column never blocks the
 // whole save (and never drops the columns that do exist).
-const OPTIONAL_COLUMNS = ["engagement_rate", "next_action", "deliverables_items", "entity_type", "entity_id", "updated_at", "followup_count", "last_followup_at", "lost_reason", "lost_at", "stars", "stars_consistency", "stars_demographics", "stars_niche", "stars_engagement", "priority", "next_action_date", "kind", "done", "draft_subject", "draft_body", "status_updated_at", "email_templates", "rating_weights", "preferences", "rates", "payment_status", "invoice_due", "paid_at", "payout_status", "socials", "brief", "country"];
+const OPTIONAL_COLUMNS = ["engagement_rate", "next_action", "deliverables_items", "entity_type", "entity_id", "updated_at", "followup_count", "last_followup_at", "lost_reason", "lost_at", "stars", "stars_consistency", "stars_demographics", "stars_niche", "stars_engagement", "priority", "next_action_date", "kind", "done", "draft_subject", "draft_body", "status_updated_at", "email_templates", "rating_weights", "preferences", "rates", "payment_status", "invoice_due", "paid_at", "payout_status", "socials", "brief", "country", "secondary_email", "secondary_email_label", "payout_model", "creator_fees"];
 
 const missingColumn = (error: { message?: string; details?: string; hint?: string; code?: string }) => {
   const msg = `${error.message || ""} ${error.details || ""} ${error.hint || ""}`;
@@ -352,6 +361,15 @@ async function upsertResilient(table: string, rows: Record<string, unknown>[], o
   for (let attempt = 0; attempt <= OPTIONAL_COLUMNS.length; attempt++) {
     const { error } = await supabase.from(table).upsert(payload as never[], opts?.ignoreDuplicates ? { ignoreDuplicates: true } : undefined);
     if (!error) return;
+    // A database that hasn't run the "inbound" migration rejects that status
+    // with a check violation. Save those rows as "new" rather than blocking
+    // every other change; the status returns once the migration is run.
+    if (error.code === "23514" && /pipeline_status/.test(`${error.message} ${error.details || ""}`) && !stripped.has("inbound")) {
+      stripped.add("inbound");
+      console.warn(`[sync] ${table}: the database does not know the "inbound" status yet — run the latest migrations. Saving those rows as "new".`);
+      payload = payload.map((row) => (row.pipeline_status === "inbound" ? { ...row, pipeline_status: "new" } : row));
+      continue;
+    }
     const column = missingColumn(error);
     // campaign_creators.user_id is structural (RLS scoping) and is handled by
     // the caller; never strip it here.

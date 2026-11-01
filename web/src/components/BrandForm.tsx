@@ -5,7 +5,7 @@ import { AGES, budgetLabel, BUDGET_PRESETS, emptyBrief, EXCLUSIVITY, FORMATS, GE
 import { extractFromText, SOCIAL_META, SOCIAL_ORDER } from "../lib/socials";
 import { currencySymbol, dueLabel, isValidEmail, isValidUrl, OUTREACH_STAGES, today } from "../lib/utils";
 import { ENTITY_STATUSES, STATUS_LABELS, type Brand, type BrandBrief, type BudgetPeriod, type CreatorTier, type EntityStatus, type Priority, type SocialPlatform } from "../types";
-import { appendSocials, ChipGroup, Fold, rowsToSocials, socialRowError, SocialsEditor, socialsToRows, TagInput, useFolds, type SocialDraft } from "./FormKit";
+import { appendSocials, ChipGroup, Fold, rowsToSocials, SecondaryEmailField, secondaryEmailError, socialRowError, SocialsEditor, socialsToRows, TagInput, useFolds, type SocialDraft } from "./FormKit";
 import { SocialGlyph } from "./SocialIcon";
 import { Input, Select, Textarea } from "./ui";
 
@@ -14,12 +14,12 @@ import { Input, Select, Textarea } from "./ui";
 // ---------------------------------------------------------------------------
 
 export type BrandDraft = {
-  name: string; domain: string; brand_type: string; contact_email: string; pipeline_status: EntityStatus; date_contacted: string; notes: string; next_action: string; priority: Priority; next_action_date: string;
+  name: string; domain: string; brand_type: string; contact_email: string; secondary_email: string; secondary_email_label: string; pipeline_status: EntityStatus; date_contacted: string; notes: string; next_action: string; priority: Priority; next_action_date: string;
   socials: SocialDraft[];
   brief: BrandBrief;
 };
 
-export const blankBrand: BrandDraft = { name: "", domain: "", brand_type: "", contact_email: "", pipeline_status: "new", date_contacted: "", notes: "", next_action: "", priority: "none", next_action_date: "", socials: [], brief: emptyBrief() };
+export const blankBrand: BrandDraft = { name: "", domain: "", brand_type: "", contact_email: "", secondary_email: "", secondary_email_label: "", pipeline_status: "new", date_contacted: "", notes: "", next_action: "", priority: "none", next_action_date: "", socials: [], brief: emptyBrief() };
 
 /** "https://www.Brand.com/en/" → "brand.com/en" — what we keep as the website. */
 export const cleanDomain = (value: string) => value.trim().replace(/^https?:\/\//i, "").replace(/^www\./i, "").replace(/\/+$/, "");
@@ -27,6 +27,7 @@ export const cleanDomain = (value: string) => value.trim().replace(/^https?:\/\/
 // "New" means nobody reached out yet, so it never carries a contact date.
 export const brandValue = (draft: BrandDraft) => ({
   name: draft.name.trim(), domain: cleanDomain(draft.domain), brand_type: draft.brand_type.trim(), contact_email: draft.contact_email.trim(),
+  secondary_email: draft.secondary_email.trim(), secondary_email_label: draft.secondary_email.trim() ? draft.secondary_email_label.trim() : "",
   pipeline_status: draft.pipeline_status, notes: draft.notes, next_action: draft.next_action,
   priority: (["none", "soon", "urgent"] as const).includes(draft.priority) ? draft.priority : "none" as Priority,
   next_action_date: draft.next_action_date || null,
@@ -36,12 +37,12 @@ export const brandValue = (draft: BrandDraft) => ({
 });
 
 export const brandToDraft = (brand: Brand): BrandDraft => ({
-  name: brand.name, domain: brand.domain, brand_type: brand.brand_type, contact_email: brand.contact_email, pipeline_status: brand.pipeline_status, date_contacted: brand.date_contacted || "", notes: brand.notes, next_action: brand.next_action || "", priority: brand.priority || "none", next_action_date: brand.next_action_date || "",
+  name: brand.name, domain: brand.domain, brand_type: brand.brand_type, contact_email: brand.contact_email, secondary_email: brand.secondary_email || "", secondary_email_label: brand.secondary_email_label || "", pipeline_status: brand.pipeline_status, date_contacted: brand.date_contacted || "", notes: brand.notes, next_action: brand.next_action || "", priority: brand.priority || "none", next_action_date: brand.next_action_date || "",
   socials: socialsToRows(brand.socials), brief: normalizeBrief(brand.brief),
 });
 
 export const brandDraftErrors = (draft: BrandDraft) =>
-  !draft.name.trim() || !isValidEmail(draft.contact_email) || !isValidUrl(cleanDomain(draft.domain)) || draft.socials.some((row) => socialRowError(row)) || (draft.brief.budget_min > 0 && draft.brief.budget_max > 0 && draft.brief.budget_min > draft.brief.budget_max);
+  !draft.name.trim() || !isValidEmail(draft.contact_email) || secondaryEmailError(draft.secondary_email) || !isValidUrl(cleanDomain(draft.domain)) || draft.socials.some((row) => socialRowError(row)) || (draft.brief.budget_min > 0 && draft.brief.budget_max > 0 && draft.brief.budget_min > draft.brief.budget_max);
 
 // Status change inside a form: entering an outreach stage pre-fills today's
 // contact date; going back to New clears it.
@@ -130,6 +131,7 @@ export function BrandFields({ draft, setDraft, mode, focus }: Props) {
       <Input label="Contact email" type="email" value={draft.contact_email} onChange={(event) => setDraft({ ...draft, contact_email: event.target.value })} error={!isValidEmail(draft.contact_email) ? "Enter a valid email" : ""} placeholder="partners@brand.com" />
       <label className="field-wrap"><span className="field-label">Industry</span><input className="field" list="bf-industries" value={draft.brand_type} onChange={(event) => setDraft({ ...draft, brand_type: event.target.value })} placeholder="Consumer tech, beauty…" /><datalist id="bf-industries">{industries.map((n) => <option key={n} value={n} />)}</datalist></label>
     </div>
+    <SecondaryEmailField email={draft.secondary_email} label={draft.secondary_email_label} onChange={(patch) => setDraft({ ...draft, ...patch })} roles={["Brand manager", "Marketing lead", "Partnerships", "PR agency", "Media buyer", "Finance", "Founder", "Assistant"]} />
 
     <SocialsEditor rows={draft.socials} onChange={(socials) => setDraft({ ...draft, socials })} followers={false} title="Brand socials" mainHint="marks their main account" />
 
@@ -178,7 +180,7 @@ export function BrandFields({ draft, setDraft, mode, focus }: Props) {
     <Fold id="pipeline" icon={<Megaphone size={14} />} title="Pipeline & next step" open={open.includes("pipeline")} onToggle={toggle} filled={draft.pipeline_status !== "new" || draft.priority !== "none" || !!draft.next_action || !!draft.next_action_date} summary={pipeBits.join(" · ")}>
       <div className="form-grid">
         <Select label="Pipeline status" value={draft.pipeline_status} onChange={(event) => setDraft(withStatus(draft, event.target.value as EntityStatus))}>{ENTITY_STATUSES.map((item) => <option key={item} value={item}>{STATUS_LABELS[item]}</option>)}</Select>
-        {OUTREACH_STAGES.includes(draft.pipeline_status) ? <Input label="Date contacted" type="date" value={draft.date_contacted} max={today()} onChange={(event) => setDraft({ ...draft, date_contacted: event.target.value })} hint="Defaults to today — change it if you reached out earlier." /> : <div className="field-wrap contact-date-note"><span className="field-label">Date contacted</span><p>Set automatically the moment you move them to Contacted.</p></div>}
+        {OUTREACH_STAGES.includes(draft.pipeline_status) ? <Input label={draft.pipeline_status === "inbound" ? "They reached out on" : "Date contacted"} type="date" value={draft.date_contacted} max={today()} onChange={(event) => setDraft({ ...draft, date_contacted: event.target.value })} hint={draft.pipeline_status === "inbound" ? "The day their message came in — defaults to today." : "Defaults to today — change it if you reached out earlier."} /> : <div className="field-wrap contact-date-note"><span className="field-label">Date contacted</span><p>Set automatically the moment you move them to Contacted.</p></div>}
         <Select label="Priority" value={draft.priority} onChange={(event) => setDraft({ ...draft, priority: event.target.value as Priority })}><option value="none">No priority</option><option value="soon">Follow up soon</option><option value="urgent">Urgent</option></Select>
         <Input label="Action due" type="date" value={draft.next_action_date} onChange={(event) => setDraft({ ...draft, next_action_date: event.target.value })} />
         {mode === "add" && <Input label="Next action" value={draft.next_action} onChange={(event) => setDraft({ ...draft, next_action: event.target.value })} placeholder="Send media kit + rate card" />}

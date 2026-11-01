@@ -1,9 +1,10 @@
 import { lazy, Suspense, type ReactNode } from "react";
 import { HashRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
-import { LoaderCircle } from "lucide-react";
+import { LogoMark } from "./components/ui";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { DataProvider } from "./contexts/DataContext";
 import { ToastProvider } from "./contexts/ToastContext";
+import { UpdateWatcher } from "./components/UpdateWatcher";
 
 const AppShell = lazy(() => import("./components/AppShell"));
 const LandingPage = lazy(() => import("./pages/PublicPages").then((module) => ({ default: module.LandingPage })));
@@ -13,7 +14,6 @@ const ForgotPasswordPage = lazy(() => import("./pages/PublicPages").then((module
 const UpdatePasswordPage = lazy(() => import("./pages/PublicPages").then((module) => ({ default: module.UpdatePasswordPage })));
 const LegalPage = lazy(() => import("./pages/PublicPages").then((module) => ({ default: module.LegalPage })));
 const HelpPage = lazy(() => import("./pages/PublicPages").then((module) => ({ default: module.HelpPage })));
-const HirePage = lazy(() => import("./pages/PublicPages").then((module) => ({ default: module.HirePage })));
 const DashboardPage = lazy(() => import("./pages/DashboardPage"));
 const InfluencersPage = lazy(() => import("./pages/InfluencersPage"));
 const InfluencerDetailPage = lazy(() => import("./pages/InfluencersPage").then((module) => ({ default: module.InfluencerDetailPage })));
@@ -26,7 +26,7 @@ const ThemesPage = lazy(() => import("./pages/WorkspacePages").then((module) => 
 const DeletedPage = lazy(() => import("./pages/WorkspacePages").then((module) => ({ default: module.DeletedPage })));
 
 function LoadingScreen() {
-  return <div className="loading-screen"><div className="logo-mark"><span /><span /><span /></div><LoaderCircle className="spin" /><span>Opening your workspace</span></div>;
+  return <div className="loading-screen"><LogoMark size={40} /><span>Opening your workspace</span></div>;
 }
 
 function RequireAuth({ children }: { children: ReactNode }) {
@@ -51,6 +51,7 @@ export default function App() {
       <AuthProvider>
         <ToastProvider>
           <DataProvider>
+            <UpdateWatcher />
             <Suspense fallback={<LoadingScreen />}>
               <Routes>
                 <Route path="/" element={<LandingPage />} />
@@ -61,7 +62,7 @@ export default function App() {
                 <Route path="/privacy" element={<LegalPage type="privacy" />} />
                 <Route path="/terms" element={<LegalPage type="terms" />} />
                 <Route path="/help" element={<HelpPage />} />
-                <Route path="/hire" element={<HirePage />} />
+                <Route path="/hire" element={<Navigate to="/" replace />} />
                 <Route path="/app" element={<RequireAuth><AppShell /></RequireAuth>}>
                   <Route index element={<DashboardPage />} />
                   <Route path="influencers" element={<InfluencersPage />} />
@@ -74,7 +75,7 @@ export default function App() {
                   <Route path="themes" element={<ThemesPage />} />
                   <Route path="deleted" element={<DeletedPage />} />
                   <Route path="help" element={<HelpPage embedded />} />
-                  <Route path="hire" element={<HirePage embedded />} />
+                  <Route path="hire" element={<Navigate to="/app" replace />} />
                 </Route>
                 <Route path="*" element={<NotFound />} />
               </Routes>

@@ -1,6 +1,6 @@
 import { AnimatePresence, motion } from "framer-motion";
 import {
-  Archive, BarChart3, Building2, CalendarDays, Check, ChevronRight, CircleDollarSign, Clock3, Cloud, CloudOff, Command, Crown, HelpCircle, LoaderCircle,
+  Archive, BarChart3, Building2, CalendarDays, Check, ChevronRight, CircleDollarSign, Clock3, Cloud, CloudOff, Command, HelpCircle, Inbox, LoaderCircle,
   Keyboard, LayoutDashboard, LifeBuoy, LogOut, Menu, MessageCircle, MonitorX, Moon, Palette, Plus, Search, SearchX, Settings, ShieldCheck, Sun,
   Sparkles, UserX, Users, Wallet, X,
 } from "lucide-react";
@@ -237,11 +237,6 @@ export default function AppShell() {
           <div className="nav-section" key={section.label}><span className="nav-label">{section.label}</span>{section.items.map((item) => <NavLink key={item.to} to={item.to} end={"end" in item ? item.end : false} className={({ isActive }) => isActive ? "active" : ""}><item.icon size={17} strokeWidth={1.8} /><span>{item.label}</span>{item.label === "Calendar" && dueToday > 0 && <b className="nav-due" title={`${dueToday} due today or overdue`}>{dueToday}</b>}{item.label === "Archive" && <b>{data.creators.filter((x) => x.archived_at).length + data.brands.filter((x) => x.archived_at).length + data.campaigns.filter((x) => x.archived_at).length || ""}</b>}</NavLink>)}</div>
         ))}
       </nav>
-      <div className="hire-card">
-        <div><Crown size={17} /><span>Need a sharper edge?</span></div>
-        <p>Hire the studio behind InfluenceFlow for strategy and custom builds.</p>
-        <NavLink to="/app/hire">Meet the studio <ChevronRight size={14} /></NavLink>
-      </div>
       <div className="user-footer">
         <Avatar name={data.profile.display_name || user?.email || "IF"} size="sm" />
         <div><strong>{accountName}</strong><span><i /> {agencyName || "Private workspace"}</span></div>
@@ -301,7 +296,7 @@ export default function AppShell() {
 
       <Modal open={commandOpen} onClose={() => setCommandOpen(false)} title="Command center" description="Jump anywhere or start a new workflow.">
         <div className="command-list">
-          {[{ label: "Add influencer", to: "/app/influencers?new=1", icon: Users }, { label: "Add brand", to: "/app/brands?new=1", icon: Building2 }, { label: "Create campaign", to: "/app/campaigns?new=1", icon: BarChart3 }, { label: "Schedule meeting", to: "/app/calendar?new=1", icon: CalendarDays }, { label: "Search workspace", action: () => setSearchOpen(true), icon: Search }, { label: "Settings", to: "/app/settings", icon: Settings }, { label: "Keyboard shortcuts", action: () => setShortcutsOpen(true), icon: Keyboard }, { label: "Sign out", action: () => setSignOutOpen(true), icon: LogOut }].map((command) => <button key={command.label} onClick={() => { setCommandOpen(false); if (command.to) navigate(command.to); else command.action?.(); }}><command.icon size={17} /><span>{command.label}</span><ChevronRight size={15} /></button>)}
+          {[{ label: "Add influencer", to: "/app/influencers?new=1", icon: Users }, { label: "Add brand", to: "/app/brands?new=1", icon: Building2 }, { label: "New inbound brand", to: "/app/brands?new=inbound", icon: Inbox }, { label: "New inbound influencer", to: "/app/influencers?new=inbound", icon: Inbox }, { label: "Create campaign", to: "/app/campaigns?new=1", icon: BarChart3 }, { label: "Schedule meeting", to: "/app/calendar?new=1", icon: CalendarDays }, { label: "Search workspace", action: () => setSearchOpen(true), icon: Search }, { label: "Settings", to: "/app/settings", icon: Settings }, { label: "Keyboard shortcuts", action: () => setShortcutsOpen(true), icon: Keyboard }, { label: "Sign out", action: () => setSignOutOpen(true), icon: LogOut }].map((command) => <button key={command.label} onClick={() => { setCommandOpen(false); if (command.to) navigate(command.to); else command.action?.(); }}><command.icon size={17} /><span>{command.label}</span><ChevronRight size={15} /></button>)}
         </div>
       </Modal>
 

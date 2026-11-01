@@ -218,3 +218,24 @@ export function TagInput({ label, value, onChange, suggestions = [], placeholder
     {open.length > 0 && <div className="tag-suggest">{open.map((s) => <button type="button" key={s} onMouseDown={(event) => event.preventDefault()} onClick={() => add(s)}><Plus size={11} /> {s}</button>)}</div>}
   </div>;
 }
+
+// ----- secondary email -----------------------------------------------------------
+
+const EMAIL_ROLES = ["Manager", "Agent", "Assistant", "Business inbox", "Brand manager", "PR", "Partnerships", "Finance"];
+
+/** The main email needs no explanation; a second one says whose inbox it is. */
+export function SecondaryEmailField({ email, label, onChange, roles = EMAIL_ROLES }: { email: string; label: string; onChange: (patch: { secondary_email?: string; secondary_email_label?: string }) => void; roles?: string[] }) {
+  const [open, setOpen] = useState(!!email || !!label);
+  const invalid = !!email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
+  if (!open) return <button type="button" className="cf-second-add" onClick={() => setOpen(true)}><Plus size={13} /> Add a second email <small>manager, agent, assistant…</small></button>;
+  return <div className="cf-second" role="group" aria-label="Second email">
+    <div className="cf-second-row">
+      <label className="field-wrap"><span className="field-label">Second email <small>· optional</small></span><input className={`field${invalid ? " field-error" : ""}`} type="email" value={email} onChange={(event) => onChange({ secondary_email: event.target.value })} placeholder="manager@agency.com" autoFocus={!email} />{invalid && <span className="field-hint error-text">Enter a valid email</span>}</label>
+      <label className="field-wrap"><span className="field-label">Whose inbox is it?</span><input className="field" value={label} list="cf-email-roles" onChange={(event) => onChange({ secondary_email_label: event.target.value })} placeholder="e.g. Manager" maxLength={40} /><datalist id="cf-email-roles">{roles.map((r) => <option key={r} value={r} />)}</datalist></label>
+      <button type="button" className="cf-second-remove" onClick={() => { onChange({ secondary_email: "", secondary_email_label: "" }); setOpen(false); }} aria-label="Remove second email" title="Remove second email"><X size={14} /></button>
+    </div>
+    <div className="chip-row cf-second-roles">{roles.slice(0, 6).map((r) => <button type="button" key={r} className={`pick-chip${label === r ? " on" : ""}`} aria-pressed={label === r} onClick={() => onChange({ secondary_email_label: label === r ? "" : r })}>{r}</button>)}</div>
+  </div>;
+}
+
+export const secondaryEmailError = (email: string) => !!email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());

@@ -1,5 +1,7 @@
 export type EntityStatus =
   | "new"
+  /** They reached out to you first (website form, DM, inbound email). */
+  | "inbound"
   | "contacted"
   | "replied"
   | "negotiating"
@@ -40,22 +42,42 @@ export type Currency = "USD" | "EUR" | "GBP" | "CHF" | "CAD" | "AUD";
 export interface WorkspacePreferences {
   agency_name: string;
   currency: Currency;
-  /** Default share of the deal paid to the creator, in percent. */
+  /** Default share of the deal paid to the creator, in percent (percent model). */
   default_creator_percent: number;
+  /** How new campaigns are priced: a fixed creator fee + your markup, or a % split. */
+  default_deal_model: PayoutModel;
   email_signature: string;
   /** Daily browser summary of due actions. */
   action_digest: boolean;
   start_page: "dashboard" | "influencers" | "calendar";
 }
 
-/** Creator's prices per deliverable, in the workspace currency. */
+/** Creator's prices per deliverable, in the workspace currency. 0 = not offered / unknown. */
 export interface RateCard {
+  /** YouTube integration — a 60-90 s sponsored segment inside a video. */
   video: number;
+  /** A whole video about the brand. */
+  dedicated: number;
   short: number;
-  story: number;
   post: number;
+  carousel: number;
+  story: number;
   stream: number;
+  podcast: number;
+  /** Content made for the brand to post (no posting on the creator's channel). */
+  ugc: number;
+  /** Add-ons, priced on top of a deliverable. */
+  link_in_bio: number;
+  usage_rights: number;
+  exclusivity: number;
 }
+
+/**
+ * fixed   — you agree a fee with each creator and pitch the brand a higher
+ *           price; your profit is the spread (brand price − creator fees).
+ * percent — the creator receives a share of the brand deal.
+ */
+export type PayoutModel = "fixed" | "percent";
 
 export type PaymentStatus = "unpaid" | "invoiced" | "paid";
 export type PayoutStatus = "pending" | "paid";
@@ -79,6 +101,10 @@ export interface Creator {
   user_id: string;
   name: string;
   contact_email: string;
+  /** Optional second address (manager, agent, assistant…). */
+  secondary_email: string;
+  /** Who the second address belongs to, e.g. "Manager". */
+  secondary_email_label: string;
   channel_link: string;
   /** Every social profile; the main one is mirrored in channel_link/platform. */
   socials: SocialLink[];
@@ -149,6 +175,8 @@ export interface Brand {
   domain: string;
   brand_type: string;
   contact_email: string;
+  secondary_email: string;
+  secondary_email_label: string;
   brief: BrandBrief;
   socials: SocialLink[];
   pipeline_status: EntityStatus;
@@ -196,8 +224,14 @@ export interface Campaign {
   brand_id: string;
   platform: Platform;
   deliverables: Deliverable[];
+  /** What the brand pays (your price to the brand). */
   agreed_payment: number;
+  /** Creator share in percent (percent model; kept in sync for the fixed model too). */
   agency_percent: number;
+  payout_model: PayoutModel;
+  /** Agreed fee per creator id (fixed model). */
+  creator_fees: Record<string, number>;
+  /** Derived: total paid out to creators. */
   creator_payout: number;
   status: CampaignStatus;
   start_date: string;
@@ -270,6 +304,7 @@ export type SearchResult = {
 
 export const ENTITY_STATUSES: EntityStatus[] = [
   "new",
+  "inbound",
   "contacted",
   "replied",
   "negotiating",
@@ -284,6 +319,7 @@ export const PLATFORMS: Platform[] = ["YouTube", "Instagram", "TikTok", "X", "Tw
 
 export const STATUS_LABELS: Record<EntityStatus | CampaignStatus, string> = {
   new: "New",
+  inbound: "Inbound",
   contacted: "Contacted",
   replied: "Replied",
   negotiating: "Negotiating",

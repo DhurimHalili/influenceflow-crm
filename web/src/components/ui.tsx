@@ -1,14 +1,41 @@
 import { AnimatePresence, motion } from "framer-motion";
 import { Archive, Check, ChevronDown, Inbox, LoaderCircle, Merge, Search, Star, X } from "lucide-react";
-import { forwardRef, useEffect, useRef, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from "react";
+import { forwardRef, useEffect, useId, useRef, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from "react";
 import { cn } from "../utils/cn";
 import { initials } from "../lib/utils";
 import { STATUS_LABELS, type CampaignStatus, type EntityStatus } from "../types";
 
+// The InfluenceFlow mark: a creator (the node) sending a wave of influence
+// out to an audience (the three dots), which light up as it reaches them.
+export function LogoMark({ size = 28, still = false }: { size?: number; still?: boolean }) {
+  // Unique per instance: a gradient defined inside a hidden copy (e.g. the
+  // collapsed mobile sidebar) would otherwise blank every other logo.
+  const gradient = `if-mark-${useId().replace(/:/g, "")}`;
+  return (
+    <svg className={cn("logo-mark", still && "is-still")} width={size} height={size} viewBox="0 0 32 32" aria-hidden="true">
+      <defs>
+        <linearGradient id={gradient} x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
+          <stop className="lm-stop-a" offset="0" />
+          <stop className="lm-stop-b" offset="1" />
+        </linearGradient>
+      </defs>
+      <rect width="32" height="32" rx="9" fill={`url(#${gradient})`} />
+      <circle className="lm-ripple" cx="9" cy="16" r="3" />
+      <circle className="lm-ripple lm-ripple-2" cx="9" cy="16" r="3" />
+      <path className="lm-wave-track" d="M9 16 C 13 7, 17 25, 23.5 16" />
+      <path className="lm-wave" d="M9 16 C 13 7, 17 25, 23.5 16" pathLength="100" />
+      <circle className="lm-node" cx="9" cy="16" r="3.2" />
+      <circle className="lm-dot lm-dot-1" cx="25" cy="9.5" r="1.7" />
+      <circle className="lm-dot lm-dot-2" cx="26" cy="16" r="1.9" />
+      <circle className="lm-dot lm-dot-3" cx="25" cy="22.5" r="1.7" />
+    </svg>
+  );
+}
+
 export function Logo({ compact = false, inverse = false }: { compact?: boolean; inverse?: boolean }) {
   return (
     <div className={cn("logo-lockup", inverse && "logo-inverse")}>
-      <div className="logo-mark" aria-hidden="true"><span /><span /><span /></div>
+      <LogoMark />
       {!compact && <span className="logo-word">Influence<span>Flow</span></span>}
     </div>
   );

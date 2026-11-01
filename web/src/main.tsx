@@ -8,6 +8,9 @@ import './styles/creator-form.css'
 import './styles/brands.css'
 import './styles/mobile.css'
 import App from './App.tsx'
+import './styles/v3.css'
+import { startFaviconAnimation } from './lib/favicon'
+import { bootUpdateCheck } from './lib/appUpdate'
 
 const seo = document.getElementById('seo-landing')
 if (seo) seo.remove()
@@ -17,6 +20,18 @@ document.documentElement.dataset.appBoot = '1'
 
 // Drop the old login-lock store (replaced by .v2 with fair decay).
 try { localStorage.removeItem('influenceflow.login-attempts') } catch { /* ignore */ }
+
+startFaviconAnimation()
+bootUpdateCheck()
+
+// Drop the ?v=<build> cache-buster an update reload adds, keeping URLs clean.
+try {
+  const url = new URL(window.location.href)
+  if (url.searchParams.has('v')) {
+    url.searchParams.delete('v')
+    window.history.replaceState(window.history.state, '', url.toString())
+  }
+} catch { /* ignore */ }
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
