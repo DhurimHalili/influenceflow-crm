@@ -137,10 +137,32 @@ revoke all on function public.get_media_kit(text) from public;
 grant execute on function public.get_media_kit(text) to anon, authenticated;
 
 -- ---------------------------------------------------------------------------
--- Background sync every 10 minutes for everyone who connected Gmail. The
--- shared secret lives in Vault ('gmail_cron_secret') and in the function's
--- GMAIL_CRON_SECRET, never in this file.
+-- Background sync every 10 minutes for everyone who connected Gmail.
+-- The shared secret is generated inside Vault and never leaves the database:
+-- the cron job reads it from Vault, and gmail-sync checks it through
+-- gmail_cron_secret_ok(), which only the service role may call.
+-- Set the function URL once per project:
+--   select vault.create_secret('https://<project>.supabase.co/functions/v1/gmail-sync', 'gmail_sync_url');
 -- ---------------------------------------------------------------------------
+do $$
+begin
+  if exists (select 1 from pg_extension where extname = 'supabase_vault') and not exists (select 1 from vault.secrets where name = 'gmail_cron_secret') then
+    perform vault.create_secret(replace(gen_random_uuid()::text || gen_random_uuid()::text, '-', ''), 'gmail_cron_secret', 'Shared secret between pg_cron and the gmail-sync function');
+  end if;
+end $$;
+
+create or replace function public.gmail_cron_secret_ok(p_secret text)
+returns boolean
+language sql
+security definer
+set search_path = public
+stable
+as $$
+  select coalesce(length(p_secret) >= 32 and exists (select 1 from vault.decrypted_secrets where name = 'gmail_cron_secret' and decrypted_secret = p_secret), false);
+$$;
+revoke all on function public.gmail_cron_secret_ok(text) from public, anon, authenticated;
+grant execute on function public.gmail_cron_secret_ok(text) to service_role;
+
 do $$
 begin
   if exists (select 1 from pg_extension where extname = 'pg_cron') and exists (select 1 from pg_extension where extname = 'pg_net') then

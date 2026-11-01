@@ -127,9 +127,9 @@ npm run dev
 
 1. In Google Cloud Console create an OAuth client (Web application), enable the **Gmail API**, and add the redirect URI `https://<project>.supabase.co/functions/v1/gmail-oauth-callback`.
 2. OAuth consent screen scopes: `gmail.readonly`, `gmail.send`, `openid`, `email`. While the app is in *Testing*, add each user as a test user (Google expires testing refresh tokens after 7 days); for everyone, submit the app for Google verification (restricted scopes).
-3. Supabase → Edge Functions → Secrets: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GMAIL_OAUTH_REDIRECT_URI` (the URI above), `APP_URL` (your app URL), `GMAIL_CRON_SECRET` (a long random string).
-4. Deploy `gmail-oauth-start`, `gmail-sync` (JWT verified) and `gmail-oauth-callback` (`--no-verify-jwt`: Google calls it; it authenticates by a one-time state).
-5. Background sync: store the same secret in Vault as `gmail_cron_secret` and the function URL as `gmail_sync_url` (`https://<project>.supabase.co/functions/v1/gmail-sync`). The migration schedules the job every 10 minutes.
+3. Supabase → Edge Functions → Secrets: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GMAIL_OAUTH_REDIRECT_URI` (the URI above), `APP_URL` (your app URL).
+4. Deploy `gmail-oauth-start` (JWT verified), `gmail-sync` and `gmail-oauth-callback` (both `--no-verify-jwt`: they authenticate themselves — a user JWT or the Vault cron secret, and a one-time OAuth state).
+5. Background sync: the migration generates the cron secret inside Vault and schedules the job every 10 minutes. Tell it where the function lives, once: `select vault.create_secret('https://<project>.supabase.co/functions/v1/gmail-sync', 'gmail_sync_url');`
 
 </details>
 

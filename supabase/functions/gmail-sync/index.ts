@@ -227,7 +227,7 @@ async function applyStatuses(admin: Admin, userId: string, entityIds: string[]) 
 
 async function syncUser(admin: Admin, row: TokenRow, deadline: number) {
   const token = await accessToken(admin, row);
-  if (!row.scopes.includes("gmail.readonly")) throw new GmailError("Gmail read access wasn't granted — reconnect and tick “Read your email”.", 403, true);
+  if (!(row.scopes || "").includes("gmail.readonly")) throw new GmailError("Gmail read access wasn't granted — reconnect and tick “Read your email”.", 403, true);
   const book = await addressBook(admin, row.user_id, row.email);
   const all = Array.from(book.keys());
   const done = new Set((row.backfilled || []).map((e) => e.toLowerCase()));
@@ -328,7 +328,7 @@ const recipients = (value: unknown) => {
 };
 
 async function send(admin: Admin, row: TokenRow, input: Record<string, unknown>) {
-  if (!row.scopes.includes("gmail.send")) throw new GmailError("Sending wasn't allowed when Gmail was connected — reconnect and tick “Send email on your behalf”.", 403, true);
+  if (!(row.scopes || "").includes("gmail.send")) throw new GmailError("Sending wasn't allowed when Gmail was connected — reconnect and tick “Send email on your behalf”.", 403, true);
   const token = await accessToken(admin, row);
   const to = recipients(input.to);
   const cc = input.cc ? recipients(input.cc) : [];
@@ -378,7 +378,15 @@ Deno.serve(async (req) => {
   if (action === "health") return json({ configured });
 
   if (action === "cron") {
-    if (!timingSafeEqual(req.headers.get("x-cron-secret") || "", Deno.env.get("GMAIL_CRON_SECRET") || "")) return json({ error: "Unauthorized" }, 401);
+    // The secret lives in Vault (checked by a service-role-only function); an
+    // env secret also works for self-hosted setups.
+    const given = req.headers.get("x-cron-secret") || "";
+    let allowed = timingSafeEqual(given, Deno.env.get("GMAIL_CRON_SECRET") || "");
+    if (!allowed && given.length >= 32) {
+      const { data } = await admin.rpc("gmail_cron_secret_ok", { p_secret: given });
+      allowed = data === true;
+    }
+    if (!allowed) return json({ error: "Unauthorized" }, 401);
     if (!configured) return json({ skipped: "not configured" });
     const deadline = Date.now() + RUN_BUDGET_MS;
     const { data: rows } = await admin.from("gmail_tokens").select("*").order("last_sync_at", { ascending: true, nullsFirst: true }).limit(200);
@@ -405,7 +413,7 @@ Deno.serve(async (req) => {
 
   if (action === "status") {
     if (!tokenRow) return json({ configured, connected: false });
-    return json({ configured, connected: true, email: tokenRow.email, canRead: tokenRow.scopes.includes("gmail.readonly"), canSend: tokenRow.scopes.includes("gmail.send"), lastSyncAt: tokenRow.last_sync_at, error: (row as { sync_error?: string }).sync_error || "" });
+    return json({ configured, connected: true, email: tokenRow.email, canRead: (tokenRow.scopes || "").includes("gmail.readonly"), canSend: (tokenRow.scopes || "").includes("gmail.send"), lastSyncAt: tokenRow.last_sync_at, error: (row as { sync_error?: string }).sync_error || "" });
   }
 
   if (action === "disconnect") {
