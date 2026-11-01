@@ -10,6 +10,8 @@ import { BRAND_HEADERS, brandRow, CAMPAIGN_HEADERS, campaignRow, CONTACT_HEADERS
 import { creatorScore, money, dateLabel, DEFAULT_RATING_WEIGHTS, today, download, normalize, RATING_DIMS, ratingScore, resolveWeights, TEMPLATE_TOKENS, toCSV, uid, weightShares, type RatingWeightsValue } from "../lib/utils";
 import { Stars, Textarea } from "../components/ui";
 import type { EmailTemplate, ThemeName, WorkspaceData } from "../types";
+import { columnKeys } from "../lib/exportFormats";
+import { APP_BUILT_AT, APP_VERSION, liveVersion, reloadInto } from "../lib/appUpdate";
 
 const WEIGHT_HELP: Record<string, string> = {
   audience: "Decides whether the brand's buyers are even watching. The #1 factor in most agency scorecards.",
@@ -263,6 +265,21 @@ export function SettingsPage() {
     toast(`${built.rows.length} ${type} exported (archived included)`);
   };
 
+  // One Excel file, one sheet per record type — the whole workspace at a glance.
+  const exportWorkbook = async () => {
+    const sets = [
+      { name: "Influencers", rows: data.creators.map((item) => creatorRow(item, data.profile.rating_weights)), headers: CREATOR_HEADERS },
+      { name: "Brands", rows: data.brands.map((item) => brandRow(item, data.contacts)), headers: BRAND_HEADERS },
+      { name: "Brand contacts", rows: data.contacts.map((item) => contactRow(item, data.brands)), headers: CONTACT_HEADERS },
+      { name: "Campaigns", rows: data.campaigns.map((item) => campaignRow(item, data.brands, data.creators)), headers: CAMPAIGN_HEADERS },
+    ].filter((set) => set.rows.length);
+    if (!sets.length) { toast("Nothing to export yet", "info"); return; }
+    const { buildXlsx } = await import("../lib/xlsx");
+    const blob = buildXlsx(sets.map((set) => ({ name: set.name, headers: set.headers, rows: set.rows as Record<string, string | number | null>[], keys: columnKeys(set.rows as Record<string, string | number | null>[]) })));
+    download(`influenceflow-workspace-${today()}.xlsx`, blob);
+    toast(`Workspace exported · ${sets.map((set) => `${set.rows.length} ${set.name.toLowerCase()}`).join(", ")}`);
+  };
+
   return <div className="settings-page"><PageHeader eyebrow="Workspace control" title="Settings" description="Your profile, agency, security, notifications, scoring, templates and data — all in one place." />
     <div className="settings-layout"><SettingsNav /><main>
       <ProfileSettings />
@@ -271,7 +288,8 @@ export function SettingsPage() {
       <NotificationSettings />
       <ScoringSettings />
       <TemplateSettings />
-      <section id="data" className="settings-section"><div className="settings-heading"><span><Database /></span><div><h2>Data & backup</h2><p>Export everything in versioned formats or import a previous workspace safely.</p></div></div><div className="settings-body"><div className="data-actions"><button onClick={exportBackup}><span><HardDriveDownload /></span><div><strong>JSON backup v2</strong><small>All records, links, settings and activity</small></div><Download /></button><button onClick={() => fileRef.current?.click()}><span><Upload /></span><div><strong>Import backup</strong><small>Validate and preview before changes</small></div><ChevronRight /></button><input ref={fileRef} type="file" accept=".json,application/json" onChange={readBackup} hidden /></div><div className="csv-export-row"><span><FileJson /> CSV exports</span>{(["influencers", "brands", "contacts", "campaigns"] as const).map((type) => <button key={type} onClick={() => exportCollection(type)}>{type}<Download /></button>)}</div>{importError && <div className="import-error"><AlertTriangle /> <span><strong>Backup validation failed</strong>{importError}</span><button onClick={() => fileRef.current?.click()}><RefreshCcw /> Retry</button></div>}<div className="privacy-note"><LockKeyhole /><span><strong>Your exports are generated in the browser.</strong>Keep backup files somewhere private. They can contain contact and campaign details.</span></div></div>      </section>
+      <section id="data" className="settings-section"><div className="settings-heading"><span><Database /></span><div><h2>Data & backup</h2><p>Export everything in versioned formats or import a previous workspace safely.</p></div></div><div className="settings-body"><div className="data-actions"><button onClick={() => void exportWorkbook()}><span><Download /></span><div><strong>Everything in Excel</strong><small>One .xlsx — influencers, brands, contacts and campaigns, a sheet each</small></div><Download /></button><button onClick={exportBackup}><span><HardDriveDownload /></span><div><strong>JSON backup v2</strong><small>All records, links, settings and activity</small></div><Download /></button><button onClick={() => fileRef.current?.click()}><span><Upload /></span><div><strong>Import backup</strong><small>Validate and preview before changes</small></div><ChevronRight /></button><input ref={fileRef} type="file" accept=".json,application/json" onChange={readBackup} hidden /></div><div className="csv-export-row"><span><FileJson /> CSV exports</span>{(["influencers", "brands", "contacts", "campaigns"] as const).map((type) => <button key={type} onClick={() => exportCollection(type)}>{type}<Download /></button>)}</div>{importError && <div className="import-error"><AlertTriangle /> <span><strong>Backup validation failed</strong>{importError}</span><button onClick={() => fileRef.current?.click()}><RefreshCcw /> Retry</button></div>}<div className="privacy-note"><LockKeyhole /><span><strong>Your exports are generated in the browser.</strong>Keep backup files somewhere private. They can contain contact and campaign details.</span></div></div>      </section>
+      <VersionCard />
       <DangerZone onExport={exportBackup} />
     </main></div>
     <Modal open={Boolean(preview)} onClose={() => setPreview(null)} title="Backup preview" description="Review the schema and choose how name conflicts should be handled.">{preview && <div className="backup-preview"><div className="backup-counts"><span><b>{preview.creators.length}</b> influencers</span><span><b>{preview.brands.length}</b> brands</span><span><b>{preview.contacts.length}</b> contacts</span><span><b>{preview.campaigns.length}</b> campaigns</span><span><b>{preview.meetings.length}</b> meetings</span><span><b>{(preview.followups || []).length}</b> follow-ups</span></div><Select label="Conflict handling" value={conflictMode} onChange={(event) => setConflictMode(event.target.value)}><option value="skip">Merge and skip matching names</option><option value="keep-both">Merge and keep both</option><option value="replace">Replace current workspace</option></Select><div className="schema-valid"><ShieldCheck /><span><strong>Schema validation passed</strong>Core collections are present. Missing legacy collections were initialized safely.</span></div><div className="modal-actions"><Button variant="ghost" onClick={() => setPreview(null)}>Cancel</Button><Button onClick={importNow}>Import workspace</Button></div></div>}</Modal>
@@ -317,4 +335,19 @@ export function DeletedPage() {
   const liveCampaignsLost = groups.brand.flatMap((b) => data.campaigns.filter((c) => c.brand_id === b.id && !c.archived_at && ["negotiating", "active"].includes(c.status)));
   const empty = () => { if (confirm(`Permanently delete all ${count} archived records?${liveCampaignsLost.length ? `\n\nArchived brands take ${liveCampaignsLost.length} live campaign${liveCampaignsLost.length === 1 ? "" : "s"} with them: ${liveCampaignsLost.map((c) => c.name).join(", ")}.` : ""}\n\nThis cannot be undone.`)) { (Object.keys(groups) as TrashType[]).forEach((type) => data.permanentlyDelete(type, groups[type].map((item) => item.id))); toast("Trash emptied"); } };
   return <div className="deleted-page"><PageHeader eyebrow="Unified trash" title="Archive" description="Restore soft-deleted records or permanently remove them when you are certain." actions={count ? <Button variant="danger" onClick={empty}><Trash2 size={15} /> Empty trash</Button> : undefined} /><Tabs active={tab} onChange={(value) => setTab(value as TrashType)} tabs={[{ value: "creator", label: "Influencers", count: groups.creator.length }, { value: "brand", label: "Brands", count: groups.brand.length }, { value: "campaign", label: "Campaigns", count: groups.campaign.length }]} />{!rows.length ? <EmptyState icon="archive" title={`${tab === "creator" ? "Influencer" : tab === "brand" ? "Brand" : "Campaign"} trash is empty`} text="Archived records appear here and can be restored until permanently deleted." /> : <div className="trash-list">{rows.map((item) => <div key={item.id}><span className="trash-icon">{tab === "creator" ? <UserRound /> : tab === "brand" ? <Database /> : <Sparkles />}</span><div><strong>{item.name}</strong><small>Archived {dateLabel(item.archived_at)}</small></div><span className="trash-type">{tab}</span><Button variant="secondary" size="sm" onClick={() => { data.archive(tab, [item.id], true); toast(`${item.name} restored`); }}><RotateCcw size={14} /> Restore</Button><button className="icon-btn danger" onClick={() => { if (confirm(deleteWarning(tab, item.id, item.name))) { data.permanentlyDelete(tab, [item.id]); toast("Record permanently deleted"); } }}><X size={16} /></button></div>)}</div>}</div>;
+}
+
+// Which build this device runs, so "is my phone up to date?" has an answer.
+function VersionCard() {
+  const { toast } = useToast();
+  const [state, setState] = useState<"idle" | "checking" | "latest">("idle");
+  const built = new Date(APP_BUILT_AT);
+  const check = async () => {
+    setState("checking");
+    const live = await liveVersion();
+    if (live && live !== APP_VERSION) { toast("New version found — installing"); if (!reloadInto(live)) window.location.reload(); return; }
+    setState("latest");
+    toast(live ? "You're on the latest version" : "Couldn't reach the server — try again online", live ? "success" : "error");
+  };
+  return <section id="version" className="settings-section"><div className="settings-heading"><span><Sparkles /></span><div><h2>App version</h2><p>Updates install by themselves — this shows which one this device runs.</p></div></div><div className="settings-body"><div className="version-row"><div><strong>Version {APP_VERSION.slice(0, 7)}</strong><small>Released {Number.isNaN(built.getTime()) ? "—" : `${dateLabel(APP_BUILT_AT)} at ${built.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`}{state === "latest" ? " · up to date" : ""}</small></div><Button variant="secondary" size="sm" onClick={() => void check()} loading={state === "checking"}><RefreshCcw size={14} /> Check for updates</Button></div></div></section>;
 }

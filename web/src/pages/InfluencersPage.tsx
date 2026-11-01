@@ -1,5 +1,5 @@
 import Papa from "papaparse";
-import { Archive, ArrowDownAZ, CalendarClock, ArrowLeft, ArrowRight, Columns3, Download, ExternalLink, FileSpreadsheet, Filter, Flag, Globe2, Inbox, LayoutGrid, List, Mail, Merge, Pencil, Plus, RotateCcw, Send, SlidersHorizontal, Sparkles, Star, Undo2, Upload, X } from "lucide-react";
+import { Archive, ArrowDownAZ, CalendarClock, ClipboardCopy, ArrowLeft, ArrowRight, Columns3, Download, ExternalLink, FileSpreadsheet, Filter, Flag, Globe2, Inbox, LayoutGrid, List, Mail, Merge, Pencil, Plus, RotateCcw, Send, SlidersHorizontal, Sparkles, Star, Undo2, Upload, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { EmailDraftPanel } from "../components/EmailDraft";
@@ -19,6 +19,7 @@ import { useToast } from "../contexts/ToastContext";
 import { CSV_BOM, compact, creatorScore, currencySymbol, dateLabel, daysAgoLabel, daysSince, download, dueLabel, erContext, firstName, followupWords, isPastDay, isTodayDay, isValidEmail, isValidUrl, lossReasonLabel, money, normalize, OUTREACH_STAGES, parsePriorityCell, parseStatusCell, PRIORITY_LABELS, RATING_DIMS, relativeTime, scoreLabel, shortDate, stampLabel, headerKey, looksLikeHeader, unguard, today, weightShares } from "../lib/utils";
 import { ENTITY_STATUSES, PLATFORMS, STATUS_LABELS, type Creator, type EntityStatus, type Platform, type Priority, type RateCard, type SocialPlatform } from "../types";
 import { FOLLOWUP_GAP_DAYS, lastTouch, needsFollowup } from "../lib/followups";
+import { copyText, emailList } from "../lib/clipboard";
 
 const SAVED_FLAG = "if.creator-saved";
 const SAVED_FILTERS = "if.creator-filters";
@@ -111,7 +112,8 @@ const linkedStatus = params.get("status");
     }
   };
 
-  useEffect(() => { if (params.get("new")) setCreateOpen(true); }, [params]);
+  // ?new=1 opens the form; ?new=inbound opens it already marked Inbound.
+  useEffect(() => { const mode = params.get("new"); if (!mode) return; if (mode === "inbound") setDraft((current) => ({ ...current, pipeline_status: "inbound", date_contacted: current.date_contacted || today() })); setCreateOpen(true); }, [params]);
   const closeCreate = () => { setCreateOpen(false); setParams((current) => { current.delete("new"); return current; }, { replace: true }); setDraft(emptyDraft); setDuplicateIds([]); };
 
   const weights = data.profile.rating_weights;
@@ -226,6 +228,20 @@ const linkedStatus = params.get("status");
   const bulkArchive = () => { data.archive("creator", picked); toast(`${picked.length} influencers moved to Archive`); setSelected([]); };
   const [exportOpen, setExportOpen] = useState(false);
   const exportSelected = () => setExportOpen(true);
+  // Follow-up day: log one for every ticked influencer in one go.
+  const bulkFollowup = () => {
+    const targets = data.creators.filter((item) => picked.includes(item.id));
+    targets.forEach((item) => { data.logFollowup(item.id); if (item.pipeline_status === "new") data.updateCreator(item.id, { pipeline_status: "contacted" }); });
+    toast(`Follow-up logged for ${targets.length} influencer${targets.length === 1 ? "" : "s"} · ${dateLabel(today())}`);
+    setSelected([]);
+  };
+  // Each person's main email (or their second one when that's all there is).
+  const copyEmails = async () => {
+    const list = emailList(data.creators.filter((item) => picked.includes(item.id)).map((item) => item.contact_email || item.secondary_email));
+    if (!list) return toast("None of them has an email yet", "error");
+    const ok = await copyText(list);
+    toast(ok ? `${list.split(", ").length} emails copied — paste into To or BCC` : "Copy failed — your browser blocked the clipboard", ok ? "success" : "error");
+  };
 
 
   const toggleView = (next: string) => { setView(next); localStorage.setItem("if.creator-view", next); };
@@ -243,7 +259,7 @@ const linkedStatus = params.get("status");
       {countries.length > 1 && countries.slice(0, 5).map(([name, count]) => <button type="button" key={name} className={`qchip${country === name ? " on" : ""}`} onClick={() => setCountry(country === name ? "all" : name)} aria-pressed={country === name}><Globe2 size={12} /> {name} <b>{count}</b></button>)}
     </div>}
     <div className="results-meta"><span><strong>{filtered.length}</strong> influencers {filtered.length !== data.creators.filter((item) => !item.archived_at).length && "in this view"}</span>{narrowed && <button type="button" className="reset-view" onClick={resetAll} title="Clear search, filters and sort"><RotateCcw size={12} /> Reset</button>}</div>
-    {picked.length > 0 && <div className="bulk-bar"><span><b>{picked.length}</b> selected</span><label>Status <select defaultValue="" onChange={(event) => setBulkStatus(event.target.value as EntityStatus)}><option value="" disabled>Change to...</option>{ENTITY_STATUSES.map((item) => <option key={item} value={item}>{STATUS_LABELS[item]}</option>)}</select></label><button onClick={exportSelected}><Download size={15} /> Export</button><button onClick={bulkArchive}><Archive size={15} /> Archive</button><button onClick={() => setSelected([])}><X size={15} /></button></div>}
+    {picked.length > 0 && <div className="bulk-bar"><span><b>{picked.length}</b> selected</span><label>Status <select defaultValue="" onChange={(event) => setBulkStatus(event.target.value as EntityStatus)}><option value="" disabled>Change to...</option>{ENTITY_STATUSES.map((item) => <option key={item} value={item}>{STATUS_LABELS[item]}</option>)}</select></label><button onClick={bulkFollowup} title="Log a follow-up for each selected influencer"><Send size={15} /> Log follow-up</button><button onClick={() => void copyEmails()} title="Copy their emails for To or BCC"><Mail size={15} /> Copy emails</button><button onClick={exportSelected}><Download size={15} /> Export</button><button onClick={bulkArchive}><Archive size={15} /> Archive</button><button onClick={() => setSelected([])}><X size={15} /></button></div>}
     {!filtered.length ? <EmptyState icon="search" title={narrowed ? "No influencers match this view" : "Build your creator pipeline"} text={narrowed ? "Your search and filters are kept while you move around — reset them to see everyone." : "Add creators manually or import a clean CSV with duplicate protection."} action={narrowed ? <Button variant="secondary" onClick={resetAll}><RotateCcw size={15} /> Reset filters</Button> : <Button onClick={() => setCreateOpen(true)}><Plus size={15} /> Add influencer</Button>} /> : view === "kanban" ? <CreatorKanban creators={filtered} /> : view === "cards" ? <CreatorCards creators={filtered} cyclePriority={cyclePriority} setStatus={setCardStatus} /> : <CreatorTable creators={filtered} selected={selected} setSelected={setSelected} density={density} cyclePriority={cyclePriority} setStatus={setCardStatus} />}
 
     <Modal open={createOpen} onClose={closeCreate} title="Add influencer" description="Start with the essentials. You can enrich the record anytime." wide>
@@ -446,11 +462,25 @@ function CreatorProfile({ creator }: { creator: Creator }) {
       toast(`Follow-up logged (${(creator.followup_count || 0) + 1} total)`);
     }
   };
+  // A clean summary to paste into a brand email or chat: who, reach, results, prices.
+  const copyPitch = async () => {
+    const followers = (creator.socials || []).reduce((sum, social) => sum + (social.followers || 0), 0);
+    const rates = { ...EMPTY_RATES, ...(creator.rates || {}) };
+    const priced = RATE_FIELDS.filter((f) => rates[f.key] > 0);
+    const lines = [
+      `${creator.name}${creator.niche ? ` — ${creator.niche}` : ""} creator${creator.country ? ` · ${creator.country}` : ""}`,
+      ...(creator.socials || []).map((social) => `${SOCIAL_META[social.platform]?.label || social.platform}: ${social.url}${social.followers ? ` (${compact(social.followers)} followers)` : ""}`),
+      [followers ? `${compact(followers)} total followers` : "", creator.avg_views ? `${compact(creator.avg_views)} avg views` : "", creator.engagement_rate ? `${creator.engagement_rate}% engagement` : ""].filter(Boolean).join(" · "),
+      ...(priced.length ? ["", "Rates:", ...priced.map((f) => `• ${f.label}: ${f.group === "addon" ? "+" : ""}${money(rates[f.key])}${f.group !== "addon" && creator.avg_views ? ` (CPM ${money(cpm(rates[f.key], creator.avg_views))})` : ""}`)] : []),
+    ].filter((line, index, all) => line !== "" || (index > 0 && all[index - 1] !== ""));
+    const ok = await copyText(lines.join("\n").trim());
+    toast(ok ? "Pitch copied — paste it into your brand email" : "Copy failed — your browser blocked the clipboard", ok ? "success" : "error");
+  };
   const vars = { first_name: firstName(creator.name), name: creator.name, niche: creator.niche, platform: creator.platform, channel: creator.channel_link, my_name: data.profile.display_name, company: "" };
   const stageIndex = ENTITY_STATUSES.indexOf(creator.pipeline_status);
   const closed = creator.pipeline_status === "denied" || creator.pipeline_status === "no_reply";
 
-  return <div className="detail-page"><Link to="/app/influencers" className="back-link"><ArrowLeft size={15} /> Influencers</Link>{creator.archived_at && <ArchivedBanner noun="influencer" archivedAt={creator.archived_at} onRestore={() => { data.archive("creator", [creator.id], true); toast("Restored"); }} />}<header className="detail-header"><div className="detail-identity"><Avatar name={creator.name} size="lg" /><div><span className="eyebrow">Influencer profile</span><h1>{creator.name}</h1><div><StatusBadge status={creator.pipeline_status} /><span>{creator.platform}</span><span>{creator.niche || "No niche"}</span>{creator.country && <span>{creator.country}</span>}<Stars value={score} showValue />{creator.pipeline_status === "denied" && creator.lost_at ? <button className="lost-inline" onClick={() => data.reviewLoss("creator", creator.id)} title="Edit loss reason"><span>Lost · {lossReasonLabel(creator.lost_reason)} · {dateLabel(creator.lost_at)}</span></button> : creator.pipeline_status === "denied" ? <span className="muted">Closed early — no active deal</span> : null}</div></div></div><div className="page-actions"><Button variant="secondary" onClick={() => setMergeOpen(true)}><Merge size={15} /> Merge</Button><Button variant="secondary" onClick={() => setEditOpen(true)}><Pencil size={15} /> Edit profile</Button><button className="icon-btn danger" onClick={archive} aria-label="Archive influencer" title="Archive"><Archive size={17} /></button></div></header>
+  return <div className="detail-page"><Link to="/app/influencers" className="back-link"><ArrowLeft size={15} /> Influencers</Link>{creator.archived_at && <ArchivedBanner noun="influencer" archivedAt={creator.archived_at} onRestore={() => { data.archive("creator", [creator.id], true); toast("Restored"); }} />}<header className="detail-header"><div className="detail-identity"><Avatar name={creator.name} size="lg" /><div><span className="eyebrow">Influencer profile</span><h1>{creator.name}</h1><div><StatusBadge status={creator.pipeline_status} /><span>{creator.platform}</span><span>{creator.niche || "No niche"}</span>{creator.country && <span>{creator.country}</span>}<Stars value={score} showValue />{creator.pipeline_status === "denied" && creator.lost_at ? <button className="lost-inline" onClick={() => data.reviewLoss("creator", creator.id)} title="Edit loss reason"><span>Lost · {lossReasonLabel(creator.lost_reason)} · {dateLabel(creator.lost_at)}</span></button> : creator.pipeline_status === "denied" ? <span className="muted">Closed early — no active deal</span> : null}</div></div></div><div className="page-actions"><Button variant="secondary" onClick={() => void copyPitch()} title="Copy a ready-to-send summary for brands"><ClipboardCopy size={15} /> Copy pitch</Button><Button variant="secondary" onClick={() => setMergeOpen(true)}><Merge size={15} /> Merge</Button><Button variant="secondary" onClick={() => setEditOpen(true)}><Pencil size={15} /> Edit profile</Button><button className="icon-btn danger" onClick={archive} aria-label="Archive influencer" title="Archive"><Archive size={17} /></button></div></header>
     <section className="detail-stats"><div><span>Average views</span><strong>{compact(creator.avg_views)}</strong><small>per post</small></div><div><span>Engagement rate</span><strong>{creator.engagement_rate}%</strong><small>{erContext(creator.engagement_rate, creator.platform).replace(" — reference only", "").replace(/^\S+% is /, "")}</small></div><div><span>Campaign value</span><strong>{money(linkedCampaigns.reduce((sum, item) => sum + item.agreed_payment, 0))}</strong><small>{linkedCampaigns.length} linked campaign{linkedCampaigns.length === 1 ? "" : "s"}</small></div><div><span>Last status change</span><strong className="date-stat">{relativeTime(creator.status_updated_at)}</strong><small>{STATUS_LABELS[creator.pipeline_status]}{creator.date_contacted ? ` · first contact ${dateLabel(creator.date_contacted)}` : ""}</small></div></section>
     <div className="detail-grid"><main>
       <section className="detail-section"><div className="detail-section-head"><div><span>Contact</span><h2>Reach {firstName(creator.name)}</h2></div></div><div className="contact-block"><div><small>Email</small><strong>{creator.contact_email || "Not added"}</strong>{creator.contact_email && <a href={`mailto:${creator.contact_email}`}>Send email <ExternalLink size={13} /></a>}{creator.secondary_email && <span className="second-email"><Mail size={12} /><em>{creator.secondary_email_label || "Second email"}</em><a href={`mailto:${creator.secondary_email}`}>{creator.secondary_email}</a></span>}</div><div><small>{creator.pipeline_status === "inbound" ? "Reached out to you" : "Date contacted"}</small><strong>{creator.date_contacted ? dateLabel(creator.date_contacted) : "Not contacted yet"}</strong><span className="contact-sub">{creator.date_contacted ? `${daysAgoLabel(creator.date_contacted)} · ` : ""}{creator.followup_count > 0 ? `${followupWords(creator.followup_count)}${creator.last_followup_at ? ` · last ${dateLabel(creator.last_followup_at)} (${daysAgoLabel(creator.last_followup_at)})` : ""}` : "No follow-ups yet"}</span></div><div className="contact-socials"><small>Socials{(creator.socials || []).length > 1 ? ` · ${creator.socials.length}` : ""}</small>{(creator.socials || []).length ? <SocialList socials={creator.socials} /> : <><strong>None added</strong><button type="button" className="contact-add" onClick={() => setEditOpen(true)}>Add Instagram, TikTok, YouTube… <ExternalLink size={13} /></button></>}</div></div></section>

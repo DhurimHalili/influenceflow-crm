@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useData } from "../contexts/DataContext";
 import { useToast } from "../contexts/ToastContext";
+import { FLUSH_DRAFTS_EVENT } from "../lib/appUpdate";
 import { fillTemplate, gmailComposeUrl, mailtoUrl, relativeTime, TEMPLATE_TOKENS, uid, unfilledTokens } from "../lib/utils";
 import { Button } from "./ui";
 
@@ -81,13 +82,27 @@ export function EmailDraftPanel({ recordId, recipient: primaryEmail, secondary, 
   // Leaving the page mid-sentence still saves what was typed.
   const latest = useRef({ draftSubject, draftBody, dirty, onSave });
   latest.current = { draftSubject, draftBody, dirty, onSave };
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    const flush = () => {
       const { dirty: pending, draftSubject: s, draftBody: b, onSave: save } = latest.current;
-      if (pending) save(s, b, false);
-    },
-    [],
-  );
+      if (!pending) return;
+      latest.current.dirty = false;
+      save(s, b, false);
+    };
+    // Closing the tab, the phone suspending it, or an app update also save it.
+    const onHide = () => {
+      if (document.visibilityState === "hidden") flush();
+    };
+    window.addEventListener(FLUSH_DRAFTS_EVENT, flush);
+    window.addEventListener("pagehide", flush);
+    document.addEventListener("visibilitychange", onHide);
+    return () => {
+      window.removeEventListener(FLUSH_DRAFTS_EVENT, flush);
+      window.removeEventListener("pagehide", flush);
+      document.removeEventListener("visibilitychange", onHide);
+      flush();
+    };
+  }, []);
 
   const saveNow = () => {
     onSave(draftSubject, draftBody, true);

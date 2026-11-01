@@ -10,6 +10,7 @@ import './styles/mobile.css'
 import App from './App.tsx'
 import './styles/v3.css'
 import { startFaviconAnimation } from './lib/favicon'
+import { bootUpdateCheck } from './lib/appUpdate'
 
 const seo = document.getElementById('seo-landing')
 if (seo) seo.remove()
@@ -21,6 +22,7 @@ document.documentElement.dataset.appBoot = '1'
 try { localStorage.removeItem('influenceflow.login-attempts') } catch { /* ignore */ }
 
 startFaviconAnimation()
+bootUpdateCheck()
 
 // Drop the ?v=<build> cache-buster an update reload adds, keeping URLs clean.
 try {

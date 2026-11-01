@@ -3,47 +3,31 @@ import { RefreshCw, Sparkles, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { useData } from "../contexts/DataContext";
+import { APP_VERSION, FLUSH_DRAFTS_EVENT, liveVersion, reloadInto } from "../lib/appUpdate";
 
-// Keeps every open tab on the newest release — no hard refresh needed.
+// Keeps every open tab on the newest release — nobody waits, nobody needs a
+// hard refresh.
 //
-// How: each build ships /version.json with its id. The app asks for it
-// (bypassing every cache) on start, every 2 minutes, and whenever the tab
-// comes back into view. When a newer build is live, the tab updates itself at
-// a safe moment — after your changes reached the cloud, when you switch pages
-// or the tab is in the background — and offers an "Update now" button
-// meanwhile. A chunk that fails to load after a deploy also triggers one
-// clean reload instead of a broken page.
+// 1. On open: main.tsx checks the live build at once and jumps to it.
+// 2. While open: a tiny version.json request (≈60 bytes, never cached) runs
+//    every minute while the tab is visible, and every time it comes back into
+//    view (unlocking the phone, switching back to the tab).
+// 3. A newer build installs itself the moment it is safe: no dialog or
+//    composer open, nothing focused for typing, every change in the cloud.
+//    Half-typed notes and drafts are saved first. Switching pages or sending
+//    the tab to the background also count as safe moments.
+// 4. A page chunk from the previous deploy that fails to load triggers one
+//    clean reload instead of a broken screen.
 
-const CHECK_EVERY_MS = 2 * 60 * 1000;
-const RELOAD_GUARD = "if.update-reload";
-const base = import.meta.env.BASE_URL || "/";
+const CHECK_EVERY_MS = 60 * 1000;
+const SAFE_POLL_MS = 1500;
 
-async function liveVersion(): Promise<string | null> {
-  try {
-    const res = await fetch(`${base}version.json?t=${Date.now()}`, { cache: "no-store", headers: { "Cache-Control": "no-cache" } });
-    if (!res.ok) return null;
-    const json = (await res.json()) as { version?: string };
-    return typeof json.version === "string" ? json.version : null;
-  } catch {
-    return null;
-  }
-}
-
-/** One reload per new version, so a bad deploy can never cause a reload loop. */
-function reloadOnce(version: string) {
-  try {
-    if (sessionStorage.getItem(RELOAD_GUARD) === version) return false;
-    sessionStorage.setItem(RELOAD_GUARD, version);
-  } catch {
-    // storage off: still reload once in this page's life
-  }
-  // A fresh URL skips the cached index.html (GitHub Pages caches it ~10 min),
-  // so the reload really lands on the new build.
-  const url = new URL(window.location.href);
-  url.searchParams.set("v", version);
-  window.location.replace(url.toString());
-  return true;
-}
+const typingNow = () => {
+  const el = document.activeElement as HTMLElement | null;
+  if (!el) return false;
+  return el.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName);
+};
+const dialogOpen = () => !!document.querySelector(".modal-backdrop, .composer-backdrop");
 
 export function UpdateWatcher() {
   const data = useData();
@@ -51,42 +35,51 @@ export function UpdateWatcher() {
   const [next, setNext] = useState<string | null>(null);
   const [dismissed, setDismissed] = useState(false);
   const [updating, setUpdating] = useState(false);
-  const firstPath = useRef(location.pathname);
+  const lastPath = useRef(location.pathname);
   const nextRef = useRef<string | null>(null);
   nextRef.current = next;
   const dataRef = useRef(data);
   dataRef.current = data;
+  const applying = useRef(false);
 
   const apply = async (version: string) => {
+    if (applying.current) return;
+    applying.current = true;
     setUpdating(true);
-    // Never lose an edit: push pending changes first (they also stay on this device).
+    // Never lose a word: editors save what is typed, then the cloud confirms.
+    window.dispatchEvent(new Event(FLUSH_DRAFTS_EVENT));
+    await new Promise((resolve) => window.setTimeout(resolve, 60));
     await dataRef.current.flushAndWait(8000);
-    if (!reloadOnce(version)) setUpdating(false);
+    if (!reloadInto(version)) {
+      applying.current = false;
+      setUpdating(false);
+    }
   };
 
-  // Poll for a newer build.
+  // Look for a newer build.
   useEffect(() => {
     if (import.meta.env.DEV) return;
     let stopped = false;
     const check = async () => {
+      if (document.visibilityState !== "visible") return;
       const live = await liveVersion();
-      if (stopped || !live || live === __APP_VERSION__) return;
+      if (stopped || !live || live === APP_VERSION) return;
       setNext(live);
     };
     void check();
     const timer = window.setInterval(() => void check(), CHECK_EVERY_MS);
-    const onShow = () => {
-      if (document.visibilityState === "visible") void check();
-    };
+    const onShow = () => void check();
     document.addEventListener("visibilitychange", onShow);
     window.addEventListener("focus", onShow);
     window.addEventListener("online", onShow);
+    window.addEventListener("pageshow", onShow);
     return () => {
       stopped = true;
       window.clearInterval(timer);
       document.removeEventListener("visibilitychange", onShow);
       window.removeEventListener("focus", onShow);
       window.removeEventListener("online", onShow);
+      window.removeEventListener("pageshow", onShow);
     };
   }, []);
 
@@ -94,39 +87,52 @@ export function UpdateWatcher() {
   useEffect(() => {
     const onPreloadError = (event: Event) => {
       event.preventDefault();
-      void liveVersion().then((live) => reloadOnce(live || `chunk-${Date.now()}`));
+      void liveVersion().then((live) => reloadInto(live || `chunk-${Date.now()}`));
     };
     window.addEventListener("vite:preloadError", onPreloadError);
     return () => window.removeEventListener("vite:preloadError", onPreloadError);
   }, []);
 
-  // Safe moments to update on its own: the tab goes to the background, or you
-  // move to another page (nothing half-typed is on screen).
+  // Install as soon as it is safe — usually within a second or two.
   useEffect(() => {
     if (!next) return;
+    const tryNow = () => {
+      const v = nextRef.current;
+      if (!v || applying.current) return;
+      const state = dataRef.current.syncState;
+      const settled = state === "synced" || state === "local";
+      if (document.visibilityState === "hidden") return void apply(v);
+      if (settled && !typingNow() && !dialogOpen()) void apply(v);
+    };
+    tryNow();
+    const timer = window.setInterval(tryNow, SAFE_POLL_MS);
     const onHide = () => {
-      if (document.visibilityState === "hidden" && nextRef.current && dataRef.current.syncState !== "saving") void apply(nextRef.current);
+      if (document.visibilityState === "hidden") tryNow();
     };
     document.addEventListener("visibilitychange", onHide);
-    return () => document.removeEventListener("visibilitychange", onHide);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onHide);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [next]);
+
+  // Moving to another page is always a safe moment (unless a dialog is open).
   useEffect(() => {
-    if (!next || location.pathname === firstPath.current) return;
-    firstPath.current = location.pathname;
-    if (document.querySelector(".modal-backdrop, .composer-backdrop")) return;
-    void apply(next);
+    const moved = location.pathname !== lastPath.current;
+    lastPath.current = location.pathname;
+    if (moved && next && !dialogOpen()) void apply(next);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [location.pathname, next]);
+  }, [location.pathname]);
 
   return (
     <AnimatePresence>
       {next && !dismissed && (
         <motion.div className="update-card" role="status" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 12 }}>
           <span className="update-icon"><Sparkles size={16} /></span>
-          <span><strong>A new version of InfluenceFlow is ready</strong><small>It installs itself when you switch pages — your work is saved first.</small></span>
+          <span><strong>{updating ? "Installing the new version…" : "A new version of InfluenceFlow is ready"}</strong><small>{updating ? "Saving your work first — one moment." : "It installs itself as soon as you stop typing."}</small></span>
           <button type="button" className="update-now" onClick={() => void apply(next)} disabled={updating}><RefreshCw size={14} className={updating ? "spin" : ""} /> {updating ? "Updating…" : "Update now"}</button>
-          <button type="button" className="update-close" onClick={() => setDismissed(true)} aria-label="Later"><X size={14} /></button>
+          {!updating && <button type="button" className="update-close" onClick={() => setDismissed(true)} aria-label="Later"><X size={14} /></button>}
         </motion.div>
       )}
     </AnimatePresence>

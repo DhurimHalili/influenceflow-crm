@@ -1,6 +1,13 @@
 import type { Brand, BrandBrief, BudgetPeriod, Creator, CreatorTier, SocialPlatform } from "../types";
 import { SOCIAL_ORDER } from "./socials";
 import { compact, currencySymbol } from "./utils";
+import { DELIVERABLE_RATES } from "./prefs";
+
+// Brief formats → the rate-card price a brand would actually pay for them.
+const FORMAT_RATE: Record<string, string[]> = {
+  "Integrated video": ["video"], "Dedicated video": ["dedicated"], "Short / Reel": ["short"], Story: ["story"], "Static post": ["post", "carousel"],
+  Livestream: ["stream"], "Unboxing / review": ["dedicated", "video"], "UGC (no posting)": ["ugc"], "Podcast mention": ["podcast"],
+};
 
 // The agency brief for a brand — option lists, cleaning, summaries and the
 // creator ⇄ brand matching that powers "Best-fit creators".
@@ -173,7 +180,11 @@ export const matchCreator = (raw: BrandBrief | undefined, creator: Creator, rati
       reasons.push({ label: `${TIERS[idx].label} creator`, ok: ok ? true : near ? null : false });
     }
   }
-  const rates = Object.values(creator.rates || {}).filter((v) => typeof v === "number" && v > 0) as number[];
+  // Only real deliverables count (add-ons like usage rights are extras), and
+  // the formats the brand asked for win when the creator prices them.
+  const priced = (keys: string[]) => keys.map((k) => Number((creator.rates as unknown as Record<string, number> | undefined)?.[k]) || 0).filter((v) => v > 0);
+  const wanted = priced(brief.formats.flatMap((f) => FORMAT_RATE[f] || []));
+  const rates = wanted.length ? wanted : priced(DELIVERABLE_RATES.map((f) => f.key));
   const cap = brief.budget_max || 0;
   if (cap && rates.length && brief.budget_period === "campaign") {
     possible += 20;
