@@ -4,10 +4,11 @@ import { AlertCircle, ArrowRight, ArrowUpRight, BarChart3, Building2, CalendarDa
 import { Link, useNavigate } from "react-router-dom";
 import { useData } from "../contexts/DataContext";
 import { Button, EmptyState, Metric, PageHeader, Tabs } from "../components/ui";
-import { currencySymbol, dateLabel, dayKey, dueLabel, isOverdue, isPastDay, isTodayDay, money, parseDay, relativeTime, timeLabel } from "../lib/utils";
+import { needsFollowup } from "../lib/followups";
+import { currencySymbol, dateLabel, daysAgoLabel, daysSince, dayKey, dueLabel, isOverdue, isPastDay, isTodayDay, money, parseDay, relativeTime, timeLabel } from "../lib/utils";
 import { ENTITY_STATUSES, STATUS_LABELS } from "../types";
 
-const funnelColors = ["#7c6bf0", "#4d88e8", "#24a6a1", "#d59b48", "#69a969", "#895ee2", "#ce6475", "#8c95a7"];
+const funnelColors = ["#7c6bf0", "#e0794a", "#4d88e8", "#24a6a1", "#d59b48", "#69a969", "#895ee2", "#ce6475", "#8c95a7"];
 
 export default function DashboardPage() {
   const data = useData();
@@ -217,6 +218,11 @@ export default function DashboardPage() {
       out.push(item);
     };
     campaigns.filter((item) => item.status !== "cancelled" && item.payment_status !== "paid" && item.invoice_due && isPastDay(item.invoice_due)).forEach((item) => push({ id: `inv-${item.id}`, type: `Invoice · ${dueLabel(item.invoice_due)}`, title: item.name, detail: `${data.brands.find((b) => b.id === item.brand_id)?.name || "Brand"} owes ${money(item.agreed_payment)}`, to: `/app/campaigns?id=${item.id}&billing=1`, urgent: true, rank: 0 }));
+    // Someone reached out to you: reply fast, the longest-waiting first.
+    [...creators.map((c) => ({ ...c, kind: "Influencer", to: `/app/influencers/${c.id}` })), ...brands.map((b) => ({ ...b, kind: "Brand", to: `/app/brands/${b.id}` }))]
+      .filter((item) => item.pipeline_status === "inbound")
+      .sort((a, b) => (a.date_contacted || a.status_updated_at || "").localeCompare(b.date_contacted || b.status_updated_at || ""))
+      .forEach((item) => { const waited = daysSince(item.date_contacted || item.status_updated_at) || 0; push({ id: `in-${item.id}`, type: `Inbound ${item.kind.toLowerCase()} · ${waited ? `waiting ${daysAgoLabel(item.date_contacted || item.status_updated_at).replace(" ago", "")}` : "came in today"}`, title: item.name, detail: item.next_action || "Reached out to you — reply while they're warm", to: item.to, urgent: waited >= 1, rank: 0 }); });
     campaigns.filter((item) => item.status === "active" && isOverdue(item.due_date)).forEach((item) => push({ id: item.id, type: "Campaign overdue", title: item.name, detail: `Was due ${dateLabel(item.due_date)}`, to: `/app/campaigns?id=${item.id}`, urgent: true, rank: 0 }));
     const actionables = [
       ...creators.map((c) => ({ ...c, kind: "Influencer", to: `/app/influencers/${c.id}` })),
@@ -225,6 +231,7 @@ export default function DashboardPage() {
     actionables.filter((item) => item.next_action_date && isPastDay(item.next_action_date)).sort((a, b) => (a.next_action_date || "").localeCompare(b.next_action_date || "")).forEach((item) => push({ id: item.id, type: `${item.kind} · ${dueLabel(item.next_action_date)}`, title: item.name, detail: item.next_action || "Action overdue", to: item.to, urgent: true, rank: 1 }));
     data.meetings.filter((m) => m.kind !== "meeting" && !m.done && new Date(m.ends_at).getTime() < Date.now()).forEach((m) => push({ id: m.id, type: `${m.kind === "task" ? "Task" : "Reminder"} overdue`, title: m.title, detail: `Was due ${dateLabel(m.starts_at)}`, to: `/app/calendar?open=${m.id}`, urgent: true, rank: 1 }));
     actionables.filter((item) => item.next_action_date && isTodayDay(item.next_action_date)).forEach((item) => push({ id: item.id, type: `${item.kind} · Due today`, title: item.name, detail: item.next_action || "Action due today", to: item.to, urgent: false, rank: 2 }));
+    creators.filter(needsFollowup).sort((a, b) => (a.last_followup_at || a.date_contacted || "").localeCompare(b.last_followup_at || b.date_contacted || "")).forEach((item) => push({ id: `fu-${item.id}`, type: `Follow-up due · quiet ${daysSince(item.last_followup_at || item.date_contacted)} days`, title: item.name, detail: item.followup_count ? `${item.followup_count} follow-up${item.followup_count === 1 ? "" : "s"} so far · last ${dateLabel(item.last_followup_at)}` : `Contacted ${dateLabel(item.date_contacted)} · no follow-up yet`, to: `/app/influencers/${item.id}`, urgent: false, rank: 2.5 }));
     actionables.filter((item) => item.next_action && !item.next_action_date && !["signed", "denied"].includes(item.pipeline_status) && Date.now() - new Date(item.status_updated_at || item.created_at).getTime() > 7 * 86400000).forEach((item) => push({ id: item.id, type: `${item.kind} · No movement 7+ days`, title: item.name, detail: item.next_action!, to: item.to, urgent: false, rank: 3 }));
     return out.sort((a, b) => a.rank - b.rank);
   })();
@@ -237,7 +244,7 @@ export default function DashboardPage() {
     {!creators.length && !brands.length ? <EmptyState title="A clear workspace, ready for your relationships" text="Add your first influencer to start building your pipeline." action={<div className="empty-actions"><Button onClick={() => navigate("/app/influencers?new=1")}>Add influencer</Button></div>} /> : <>
       <section className="metric-row">
         <Metric label="Active deal value" value={money(activeValue)} detail={<><span className="positive"><TrendingUp size={13} /> {active.length} live deals</span></>} icon={<DollarSign size={15} />} />
-        <Metric label="Agency revenue" value={money(agencyRevenue)} detail={`${activeValue ? Math.round(agencyRevenue / activeValue * 100) : 0}% retained`} icon={<Sparkles size={15} />} />
+        <Metric label="Your profit" value={money(agencyRevenue)} detail={`${activeValue ? Math.round(agencyRevenue / activeValue * 100) : 0}% margin on live deals`} icon={<Sparkles size={15} />} />
         <Metric label="Creator payouts" value={money(creatorPayout)} detail="Across active campaigns" icon={<Users size={15} />} />
         <Metric label="Outstanding invoices" value={money(campaigns.filter((item) => item.status !== "cancelled" && item.payment_status !== "paid").reduce((sum, item) => sum + item.agreed_payment, 0))} detail={(() => { const late = campaigns.filter((item) => item.status !== "cancelled" && item.payment_status !== "paid" && item.invoice_due && isPastDay(item.invoice_due)).length; return late ? <span className="negative">{late} overdue</span> : `${campaigns.filter((item) => item.payment_status === "paid").length} paid campaigns`; })()} icon={<BarChart3 size={15} />} />
       </section>

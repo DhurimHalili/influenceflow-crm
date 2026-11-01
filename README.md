@@ -30,10 +30,10 @@
 
 1. Go to **[Sign up free](https://dhurimhalili.github.io/influenceflow-crm/#/signup)** → create account
 2. Add influencers manually, or **Bulk import** (`Name, channelUrl` paste or CSV file)
-3. Track them: `New → Contacted → Replied → Negotiating → Roster → Signed` (plus `Denied` / `No reply`), table, Kanban board or cards
+3. Track them: `New → Contacted → Replied → Negotiating → Roster → Signed` (plus `Inbound` for people who reached out to you, and `Denied` / `No reply`), table, Kanban board or cards
 4. Create campaigns and schedule meetings in Calendar
 
-That's it. Your data is private to your account — other users can't see it. Export anytime (CSV / JSON).
+That's it. Your data is private to your account — other users can't see it. Export anytime (Excel, CSV, JSON, copy-as-table or PDF).
 
 > **Do I need my own Supabase?** No — for regular use. The live app already runs on a hosted Supabase (by the maintainer). You only need your own Supabase if you **fork the repo and want to self-host** your own copy. See [Self-host (for developers)](#-self-host-for-developers) below.
 
@@ -53,20 +53,25 @@ That's it. Your data is private to your account — other users can't see it. Ex
 
 | Area | How you'd explain it to a teammate |
 |------|-------------------------------------|
-| **Influencers CRM** | Table + Kanban board + mobile cards. Filter, bulk-change status, bulk-delete, merge duplicates by name, personal notes per influencer |
+| **Influencers CRM** | Table + Kanban board + mobile cards. Filter (incl. country and "follow-up due"), sort by country, quick-filter chips, bulk-change status, bulk-delete, merge duplicates by name, personal notes per influencer |
+| **Inbound leads** | An `Inbound` status for brands and creators who contacted you (website form, DM, email). Their arrival date is kept, the dashboard lists them longest-waiting first, and replying moves them to Replied |
+| **Second email** | Optional second address per influencer and brand with a label (Manager, Agent, Brand manager…). The composer can send to either or CC both |
+| **Follow-up log** | Every follow-up with its exact date and "N days ago", days quiet since last touch, "follow-up due" after 5 quiet days, undo the last one or remove any single one |
 | **Socials** | Every influencer can have Instagram, TikTok, YouTube, X, Twitch, Kick, LinkedIn, Facebook, Snapchat, Pinterest, Threads and website links with follower counts. Paste a link-in-bio into **Quick fill** to add them all at once; ★ marks the main channel. Search by `@handle`, filter by any network, dedupe on any profile, CSV import/export columns per network |
 | **Brand briefs** | Capture what every brand wants: creator niches, platforms, creator size (nano → mega), content formats, budget range + period, payment terms, usage rights, exclusivity, gifting, goals, markets, audience age/gender and what to avoid — in folded, chip-based sections. The profile shows the brief at a glance with a completeness ring, and **Best-fit creators** ranks your influencers against it (with reasons) so you can start a campaign in one click; each influencer profile shows the brands looking for them. Filter/sort brands by budget, wanted platform and niche; CSV import/export includes every brief field |
 | **Brands & contacts** | Each brand has its own people (first/last name, title, email, LinkedIn). Same pipeline statuses |
 | **Bulk import** | Paste `Rory Alexander, https://youtube.com/channel/UC...` or `Name, email, niche` — or **Attach CSV**. Auto-dedupes by name + link |
-| **Campaigns** | Name, brand, platform, deliverables, payment + agency % → auto payout, status (negotiating/active/completed/cancelled), start/due dates, assign influencers, conflict warning |
+| **Campaigns** | Two deal models: **fixed fee + markup** (default — lock the creator at e.g. 2,000, pitch the brand 5,000, keep 3,000; per-creator fees filled from their rate card, "pitch at 40% margin" suggestions) or **percentage split**. Live split bar, margin and markup, editable after creation. Status, dates, deliverables, assignments, conflict warning |
 | **Calendar** | Month / week / day / agenda views. Meetings, tasks (check off), reminders, every influencer & brand **action due date** and campaign start/due dates on one timeline. Drag to reschedule, overdue panel, reminder presets, browser alerts, `.ics` export |
-| **Email drafts** | Per-influencer and per-brand subject + body that autosave, reusable templates with `{first_name}` / `{niche}` / `{company}` tokens, open in Gmail or your mail app, "mark as sent" moves the lead to Contacted |
+| **Email drafts** | A compact card on each profile that opens into a large focused composer. Per-influencer and per-brand subject + body that autosave, reusable templates with `{first_name}` / `{niche}` / `{company}` tokens, open in Gmail or your mail app, "mark as sent" moves the lead to Contacted |
 | **Creator scorecard** | Four manual star ratings — audience quality, niche & brand fit, engagement quality, posting consistency — combined with agency-scorecard weights (35 / 30 / 20 / 15, adjustable in Settings). Engagement rate is shown as a benchmark, never sets the stars |
 | **Billing** | Per-campaign invoice tracking (Unpaid → Invoiced → Paid, invoice due date on the calendar, overdue alerts) and creator payout status; "Outstanding invoices" on the dashboard |
-| **Rate cards** | What each creator charges per video / short / post / story / stream, with CPM calculated from their average views |
+| **Rate cards** | Every way a sponsorship is sold: integrated video, dedicated video, short, post, carousel, stories, stream, podcast read, UGC — plus add-ons (link in bio, usage rights, exclusivity). CPM from average views |
 | **Account & settings** | Account menu with sign out, sign out & clear device, sign out everywhere; profile, agency name & email signature; currency (USD / EUR / GBP / CHF / CAD / AUD); default creator payout %; start page; notifications with daily action summary; keyboard shortcuts (`?`) |
 | **Pipeline hygiene** | Contact date stamps itself the moment a lead leaves New (table, kanban, cards, bulk or profile); offline-safe sync that never lets an older cloud copy overwrite your edits |
-| **Data & privacy** | Per-user Supabase Auth + RLS (no one sees your data), global search, CSV export, JSON backup export/import (v2 + legacy), Deleted list, activity log |
+| **Exports** | Real Excel workbooks (.xlsx — frozen header, filters, numbers and dates as real values; opens the same in Excel desktop/web, Google Sheets, Numbers), CSV, CSV for European Excel, JSON, **copy as table** (pastes into Google Docs, Word, Sheets, Notion) and **print / PDF**. Column presets such as a brand-safe pitch sheet. Re-importable |
+| **Always up to date** | Open tabs notice a new release and update themselves at a safe moment (after saving, on page change or in the background) — nobody needs a hard refresh |
+| **Data & privacy** | Per-user Supabase Auth + RLS (no one sees your data), global search, JSON backup export/import (v2 + legacy), Deleted list, activity log |
 | **Polish** | Agency (default), Light, Dark, Honey, Ocean themes, fully responsive, larger readable type scale |
 
 > Note: legacy discovery/outreach edge functions remain under `supabase/functions/` but are not wired to the UI.

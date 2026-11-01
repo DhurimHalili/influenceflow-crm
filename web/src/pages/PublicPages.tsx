@@ -1,14 +1,13 @@
 import { motion } from "framer-motion";
-import { ArrowRight, CalendarDays, Check, ChevronRight, Code2, Contact, Database, Eye, EyeOff, HeartHandshake, KeyRound, LockKeyhole, Menu, MessageCircle, Plus, ShieldCheck, Sparkles, Users, X } from "lucide-react";
+import { ArrowRight, CalendarDays, ChevronRight, Code2, Database, Eye, EyeOff, HeartHandshake, KeyRound, LockKeyhole, Menu, Plus, ShieldCheck, Sparkles, Users, X } from "lucide-react";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
-import { useToast } from "../contexts/ToastContext";
 import { Button, Input, Logo } from "../components/ui";
 
 function PublicNav({ dark = false }: { dark?: boolean }) {
   const [open, setOpen] = useState(false);
-  return <nav className={`public-nav ${dark ? "nav-dark" : ""}`}><Link to="/"><Logo inverse={dark} /></Link><div className={`public-links ${open ? "open" : ""}`}><Link to="/help">Help</Link><Link to="/privacy">Privacy</Link><Link to="/hire">Hire us</Link><Link to="/login">Log in</Link><Link className="nav-cta" to="/signup">Start free <ArrowRight size={14} /></Link></div><button className="public-menu" onClick={() => setOpen(!open)}>{open ? <X /> : <Menu />}</button></nav>;
+  return <nav className={`public-nav ${dark ? "nav-dark" : ""}`}><Link to="/"><Logo inverse={dark} /></Link><div className={`public-links ${open ? "open" : ""}`}><Link to="/help">Help</Link><Link to="/privacy">Privacy</Link><Link to="/login">Log in</Link><Link className="nav-cta" to="/signup">Start free <ArrowRight size={14} /></Link></div><button className="public-menu" onClick={() => setOpen(!open)}>{open ? <X /> : <Menu />}</button></nav>;
 }
 
 export function LandingPage() {
@@ -217,12 +216,3 @@ export function HelpPage({ embedded = false }: { embedded?: boolean }) {
 }
 
 function Guide({ title, icon, children }: { title: string; icon: ReactNode; children: ReactNode }) { return <article><span>{icon}</span><div><h3>{title}</h3>{children}</div></article>; }
-
-export function HirePage({ embedded = false }: { embedded?: boolean }) {
-  const { toast } = useToast();
-  const location = useLocation();
-  const appMode = embedded || location.pathname.startsWith("/app");
-  const content = <><header className="hire-hero"><span>Built by Dhurim Halili</span><h1>Make your internal tools feel like an unfair advantage.</h1><p>I help focused teams turn messy operations into clear, useful software, from product strategy through a production-ready build.</p><div><a className="hire-primary" href="https://wa.me/38349878908" target="_blank" rel="noreferrer"><MessageCircle /> Start on WhatsApp</a><a href="https://linkedin.com" target="_blank" rel="noreferrer"><Contact /> Connect on LinkedIn</a></div></header><section className="hire-services"><span>Ways to work together</span><div><article><b>01</b><h2>Product clarity</h2><p>Workflow mapping, information architecture, and a practical product specification your team can execute.</p></article><article><b>02</b><h2>Custom systems</h2><p>Polished CRM, operations, and client portals built around the work you actually do.</p></article><article><b>03</b><h2>Design direction</h2><p>A distinctive interface system with responsive behavior, motion, and high-trust UX.</p></article></div></section><section className="hire-contact"><h2>Have something specific in mind?</h2><p>Send a short note about the workflow, who uses it, and what is getting in the way.</p><button onClick={() => { void navigator.clipboard?.writeText("+38349878908"); toast("WhatsApp number copied"); }}><Check /> Copy +383 49 878 908</button></section></>;
-  if (appMode) return <div className="embedded-hire">{content}</div>;
-  return <div className="public-page inner-public hire-page"><PublicNav />{content}<PublicFooter /></div>;
-}

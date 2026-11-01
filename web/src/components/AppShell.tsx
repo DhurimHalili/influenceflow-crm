@@ -1,6 +1,6 @@
 import { AnimatePresence, motion } from "framer-motion";
 import {
-  Archive, BarChart3, Building2, CalendarDays, Check, ChevronRight, CircleDollarSign, Clock3, Cloud, CloudOff, Command, Crown, HelpCircle, LoaderCircle,
+  Archive, BarChart3, Building2, CalendarDays, Check, ChevronRight, CircleDollarSign, Clock3, Cloud, CloudOff, Command, HelpCircle, LoaderCircle,
   Keyboard, LayoutDashboard, LifeBuoy, LogOut, Menu, MessageCircle, MonitorX, Moon, Palette, Plus, Search, SearchX, Settings, ShieldCheck, Sun,
   Sparkles, UserX, Users, Wallet, X,
 } from "lucide-react";
@@ -237,11 +237,6 @@ export default function AppShell() {
           <div className="nav-section" key={section.label}><span className="nav-label">{section.label}</span>{section.items.map((item) => <NavLink key={item.to} to={item.to} end={"end" in item ? item.end : false} className={({ isActive }) => isActive ? "active" : ""}><item.icon size={17} strokeWidth={1.8} /><span>{item.label}</span>{item.label === "Calendar" && dueToday > 0 && <b className="nav-due" title={`${dueToday} due today or overdue`}>{dueToday}</b>}{item.label === "Archive" && <b>{data.creators.filter((x) => x.archived_at).length + data.brands.filter((x) => x.archived_at).length + data.campaigns.filter((x) => x.archived_at).length || ""}</b>}</NavLink>)}</div>
         ))}
       </nav>
-      <div className="hire-card">
-        <div><Crown size={17} /><span>Need a sharper edge?</span></div>
-        <p>Hire the studio behind InfluenceFlow for strategy and custom builds.</p>
-        <NavLink to="/app/hire">Meet the studio <ChevronRight size={14} /></NavLink>
-      </div>
       <div className="user-footer">
         <Avatar name={data.profile.display_name || user?.email || "IF"} size="sm" />
         <div><strong>{accountName}</strong><span><i /> {agencyName || "Private workspace"}</span></div>

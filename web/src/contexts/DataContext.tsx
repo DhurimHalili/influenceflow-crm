@@ -10,15 +10,16 @@ import { useAuth } from "./AuthContext";
 import { socialKey } from "../lib/socials";
 import { mergeBriefs } from "../lib/brandBrief";
 import { mergeSocialLists } from "../lib/socials";
+import { withDealMath } from "../lib/deal";
 
-type NewCreator = Omit<Creator, "id" | "user_id" | "created_at" | "status_updated_at" | "archived_at" | "on_roster" | "followup_count" | "last_followup_at" | "lost_reason" | "lost_at" | "draft_subject" | "draft_body" | "stars_engagement" | "rates"> &
-  Partial<Pick<Creator, "draft_subject" | "draft_body" | "stars_engagement" | "rates">>;
-type NewBrand = Omit<Brand, "id" | "user_id" | "created_at" | "archived_at" | "lost_reason" | "lost_at" | "status_updated_at" | "draft_subject" | "draft_body"> &
-  Partial<Pick<Brand, "draft_subject" | "draft_body">>;
+type NewCreator = Omit<Creator, "id" | "user_id" | "created_at" | "status_updated_at" | "archived_at" | "on_roster" | "followup_count" | "last_followup_at" | "lost_reason" | "lost_at" | "draft_subject" | "draft_body" | "stars_engagement" | "rates" | "secondary_email" | "secondary_email_label"> &
+  Partial<Pick<Creator, "draft_subject" | "draft_body" | "stars_engagement" | "rates" | "secondary_email" | "secondary_email_label">>;
+type NewBrand = Omit<Brand, "id" | "user_id" | "created_at" | "archived_at" | "lost_reason" | "lost_at" | "status_updated_at" | "draft_subject" | "draft_body" | "secondary_email" | "secondary_email_label"> &
+  Partial<Pick<Brand, "draft_subject" | "draft_body" | "secondary_email" | "secondary_email_label">>;
 type UpdateOpts = { quiet?: boolean; activity?: string };
 type NewContact = Omit<BrandContact, "id" | "user_id" | "created_at" | "lost_reason" | "lost_at">;
-type NewCampaign = Omit<Campaign, "id" | "user_id" | "created_at" | "archived_at" | "creator_payout" | "lost_reason" | "lost_at" | "payment_status" | "invoice_due" | "paid_at" | "payout_status"> &
-  Partial<Pick<Campaign, "payment_status" | "invoice_due" | "paid_at" | "payout_status">>;
+type NewCampaign = Omit<Campaign, "id" | "user_id" | "created_at" | "archived_at" | "creator_payout" | "lost_reason" | "lost_at" | "payment_status" | "invoice_due" | "paid_at" | "payout_status" | "payout_model" | "creator_fees"> &
+  Partial<Pick<Campaign, "payment_status" | "invoice_due" | "paid_at" | "payout_status" | "payout_model" | "creator_fees">>;
 type NewMeeting = Omit<Meeting, "id" | "user_id" | "created_at" | "reminder_sent" | "done"> & { done?: boolean };
 
 type DuplicateMatch = { type: "name" | "link" | "domain"; id: string; label: string };
@@ -27,7 +28,7 @@ type DuplicateMatch = { type: "name" | "link" | "domain"; id: string; label: str
 // untouched lead (new/contacted) or a cold thread (no_reply) is NOT a loss —
 // only replied-or-beyond moving to denied counts. Campaigns count when
 // cancelled out of negotiating/active.
-const DEAL_STAGES = ["replied", "negotiating", "roster", "signed"];
+const DEAL_STAGES = ["inbound", "replied", "negotiating", "roster", "signed"];
 
 export interface LossItem {
   kind: "creator" | "brand" | "contact" | "campaign";
@@ -67,6 +68,8 @@ type DataContextValue = WorkspaceData & {
   permanentlyDelete: (type: "creator" | "brand" | "campaign", ids: string[]) => void;
   updateProfile: (value: Partial<Profile>) => void;
   logFollowup: (creatorId: string, note?: string) => void;
+  /** Removes one logged follow-up (the latest when no id is given). */
+  removeFollowup: (creatorId: string, followupId?: string) => void;
   clearFollowups: (creatorId: string) => void;
   pendingLoss: LossItem[];
   resolveLoss: (reason: string | null) => void;
@@ -99,6 +102,8 @@ const upgradeWorkspace = (value: WorkspaceData, userId: string): WorkspaceData =
     draft_subject: c.draft_subject || "",
     draft_body: c.draft_body || "",
     country: c.country || "",
+    secondary_email: c.secondary_email || "",
+    secondary_email_label: c.secondary_email_label || "",
     priority: c.priority || "none",
     next_action_date: c.next_action_date || null,
   })),
@@ -106,18 +111,24 @@ const upgradeWorkspace = (value: WorkspaceData, userId: string): WorkspaceData =
     ...b,
     draft_subject: b.draft_subject || "",
     draft_body: b.draft_body || "",
+    secondary_email: b.secondary_email || "",
+    secondary_email_label: b.secondary_email_label || "",
     status_updated_at: b.status_updated_at || b.created_at || new Date().toISOString(),
     priority: b.priority || "none",
     next_action_date: b.next_action_date || null,
   })),
   contacts: value.contacts || [],
-  campaigns: (value.campaigns || []).map((c) => ({
-    ...c,
-    payment_status: c.payment_status || "unpaid",
-    invoice_due: c.invoice_due || null,
-    paid_at: c.paid_at || null,
-    payout_status: c.payout_status || "pending",
-  })),
+  campaigns: (value.campaigns || []).map((c) =>
+    withDealMath({
+      ...c,
+      payout_model: c.payout_model === "fixed" ? "fixed" : "percent",
+      creator_fees: c.creator_fees || {},
+      payment_status: c.payment_status || "unpaid",
+      invoice_due: c.invoice_due || null,
+      paid_at: c.paid_at || null,
+      payout_status: c.payout_status || "pending",
+    }),
+  ),
   followups: value.followups || [],
   meetings: (value.meetings || []).map((m) => ({ ...m, kind: m.kind || "meeting", done: m.done === true })),
   activities: value.activities || [],
@@ -486,6 +497,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
       notes: sanitize(value.notes),
       draft_subject: value.draft_subject || "",
       draft_body: value.draft_body || "",
+      secondary_email: value.secondary_email || "",
+      secondary_email_label: value.secondary_email_label || "",
       stars_engagement: value.stars_engagement || 0,
       rates: value.rates || { ...EMPTY_RATES },
       date_contacted: contactDateFor(value.pipeline_status, value.date_contacted),
@@ -513,6 +526,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
       notes: sanitize(value.notes),
       draft_subject: value.draft_subject || "",
       draft_body: value.draft_body || "",
+      secondary_email: value.secondary_email || "",
+      secondary_email_label: value.secondary_email_label || "",
       stars_engagement: value.stars_engagement || 0,
       rates: value.rates || { ...EMPTY_RATES },
       date_contacted: contactDateFor(value.pipeline_status, value.date_contacted),
@@ -687,6 +702,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
       notes: sanitize(value.notes),
       draft_subject: value.draft_subject || "",
       draft_body: value.draft_body || "",
+      secondary_email: value.secondary_email || "",
+      secondary_email_label: value.secondary_email_label || "",
       date_contacted: contactDateFor(value.pipeline_status, value.date_contacted),
       status_updated_at: new Date().toISOString(),
       created_at: new Date().toISOString(),
@@ -708,6 +725,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
       notes: sanitize(value.notes),
       draft_subject: value.draft_subject || "",
       draft_body: value.draft_body || "",
+      secondary_email: value.secondary_email || "",
+      secondary_email_label: value.secondary_email_label || "",
       date_contacted: contactDateFor(value.pipeline_status, value.date_contacted),
       status_updated_at: stamp,
       created_at: stamp,
@@ -839,13 +858,15 @@ export function DataProvider({ children }: { children: ReactNode }) {
     });
 
   const addCampaign = (value: NewCampaign) => {
-    const campaign: Campaign = {
+    const campaign: Campaign = withDealMath({
       ...value,
       id: uid(),
       user_id: userId,
       name: sanitize(value.name),
       notes: sanitize(value.notes),
-      creator_payout: (value.agreed_payment * value.agency_percent) / 100,
+      payout_model: value.payout_model === "fixed" ? "fixed" : "percent",
+      creator_fees: value.creator_fees || {},
+      creator_payout: 0,
       payment_status: value.payment_status || "unpaid",
       invoice_due: value.invoice_due || null,
       paid_at: value.paid_at || null,
@@ -854,7 +875,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       archived_at: null,
       lost_reason: "",
       lost_at: null,
-    };
+    });
     setData((current) => addActivity({ ...current, campaigns: [campaign, ...current.campaigns] }, `${campaign.name} campaign created`, "campaign", campaign.id));
     return campaign;
   };
@@ -882,7 +903,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
           ...(toCancelled ? { lost_reason: "", lost_at: lostStamp } : {}),
           ...(clearLoss ? { lost_reason: "", lost_at: null } : {}),
         };
-        return { ...next, creator_payout: (next.agreed_payment * next.agency_percent) / 100 };
+        return withDealMath(next);
       });
       const label = before?.name || "Campaign";
       const text = value.status
@@ -891,7 +912,9 @@ export function DataProvider({ children }: { children: ReactNode }) {
           ? `${label} invoice ${value.payment_status === "paid" ? "paid by brand" : value.payment_status === "invoiced" ? "sent to brand" : "marked unpaid"}`
           : value.payout_status
             ? `${label} creator payout ${value.payout_status === "paid" ? "sent" : "marked pending"}`
-            : `${label} updated`;
+            : value.agreed_payment !== undefined || value.creator_fees !== undefined || value.payout_model !== undefined || value.agency_percent !== undefined
+              ? `${label} deal terms updated`
+              : `${label} updated`;
       return addActivity({ ...current, campaigns }, text, "campaign", id);
     });
     if (toCancelled && lostStamp && before) queueLoss({ kind: "campaign", id, name: before.name });
@@ -1088,6 +1111,30 @@ export function DataProvider({ children }: { children: ReactNode }) {
     setHydrated(true);
   };
 
+  const removeFollowup = (creatorId: string, followupId?: string) => {
+    const target = data.creators.find((item) => item.id === creatorId);
+    if (!target || (target.followup_count || 0) <= 0) return;
+    const history = data.followups.filter((f) => f.creator_id === creatorId).sort((a, b) => b.at.localeCompare(a.at));
+    const doomed = followupId ? history.find((f) => f.id === followupId) : history[0];
+    if (doomed && !followupTombstones.current.includes(doomed.id)) followupTombstones.current = [...followupTombstones.current, doomed.id];
+    const remaining = history.filter((f) => f.id !== doomed?.id);
+    setData((current) => {
+      const creators = current.creators.map((item) =>
+        item.id === creatorId
+          ? {
+              ...item,
+              followup_count: Math.max(0, (item.followup_count || 0) - 1),
+              // Older counts without a logged row keep the previous stamp.
+              last_followup_at: remaining[0]?.at || (Math.max(0, (item.followup_count || 0) - 1) > 0 && !doomed ? item.last_followup_at : null),
+            }
+          : item,
+      );
+      const followups = doomed ? current.followups.filter((f) => f.id !== doomed.id) : current.followups;
+      const when = doomed ? new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(new Date(doomed.at)) : "";
+      return addActivity({ ...current, creators, followups }, `Removed a follow-up${when ? ` from ${when}` : ""} for ${target.name}`, "creator", creatorId);
+    });
+  };
+
   const clearFollowups = (creatorId: string) => {
     const target = data.creators.find((item) => item.id === creatorId);
     if (!target) return;
@@ -1145,6 +1192,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       updateProfile,
       importBackup,
       logFollowup,
+      removeFollowup,
       clearFollowups,
       pendingLoss,
       resolveLoss,

@@ -6,7 +6,8 @@ import { compact, dueLabel, erContext, OUTREACH_STAGES, overallStars, RATING_DIM
 import { ENTITY_STATUSES, STATUS_LABELS, type Creator, type EntityStatus, type Platform, type Priority, type SocialLink, type SocialPlatform } from "../types";
 import { SocialBadge } from "./SocialIcon";
 import { CountryPicker } from "./CountryPicker";
-import { appendSocials, Fold, rowsToSocials, socialRow, socialRowError, SocialsEditor, socialsToRows, useFolds, type SocialDraft } from "./FormKit";
+import { appendSocials, Fold, rowsToSocials, SecondaryEmailField, secondaryEmailError, socialRow, socialRowError, SocialsEditor, socialsToRows, useFolds, type SocialDraft } from "./FormKit";
+import type { RateCard } from "../types";
 
 export { socialRow, socialRowError, type SocialDraft };
 import { Input, Select, StarInput, Stars, Textarea } from "./ui";
@@ -17,13 +18,15 @@ import { Input, Select, StarInput, Stars, Textarea } from "./ui";
 
 
 export type CreatorDraft = {
-  name: string; contact_email: string; channel_link: string; niche: string; country: string; avg_views: string; engagement_rate: string; stars_consistency: number; stars_demographics: number; stars_niche: number; stars_engagement: number; priority: Priority; next_action_date: string;
+  name: string; contact_email: string; secondary_email: string; secondary_email_label: string; channel_link: string; niche: string; country: string; avg_views: string; engagement_rate: string; stars_consistency: number; stars_demographics: number; stars_niche: number; stars_engagement: number; priority: Priority; next_action_date: string;
   platform: Platform; pipeline_status: EntityStatus; date_contacted: string; notes: string; next_action: string;
   /** First row is the main channel. */
   socials: SocialDraft[];
+  /** Only set by imports that carry rate columns. */
+  rates?: RateCard;
 };
 
-export const emptyDraft: CreatorDraft = { name: "", contact_email: "", channel_link: "", niche: "", country: "", avg_views: "", engagement_rate: "", stars_consistency: 0, stars_demographics: 0, stars_niche: 0, stars_engagement: 0, priority: "none", next_action_date: "", platform: "YouTube", pipeline_status: "new", date_contacted: "", notes: "", next_action: "", socials: [] };
+export const emptyDraft: CreatorDraft = { name: "", contact_email: "", secondary_email: "", secondary_email_label: "", channel_link: "", niche: "", country: "", avg_views: "", engagement_rate: "", stars_consistency: 0, stars_demographics: 0, stars_niche: 0, stars_engagement: 0, priority: "none", next_action_date: "", platform: "YouTube", pipeline_status: "new", date_contacted: "", notes: "", next_action: "", socials: [] };
 
 const dimClamp = (v: number) => Math.min(5, Math.max(0, Math.round(v) || 0));
 export const draftDims = (draft: CreatorDraft) => ({ stars_consistency: dimClamp(draft.stars_consistency), stars_demographics: dimClamp(draft.stars_demographics), stars_niche: dimClamp(draft.stars_niche), stars_engagement: dimClamp(draft.stars_engagement) });
@@ -32,7 +35,7 @@ export const draftDims = (draft: CreatorDraft) => ({ stars_consistency: dimClamp
 /** Resolved social links in order (main first), skipping empty rows. */
 export const draftSocials = (draft: CreatorDraft): SocialLink[] => rowsToSocials(draft.socials);
 
-export const draftHasErrors = (draft: CreatorDraft) => draft.socials.some((row) => socialRowError(row));
+export const draftHasErrors = (draft: CreatorDraft) => draft.socials.some((row) => socialRowError(row)) || secondaryEmailError(draft.secondary_email);
 
 export const draftToCreator = (draft: CreatorDraft) => {
   const dims = draftDims(draft);
@@ -41,7 +44,7 @@ export const draftToCreator = (draft: CreatorDraft) => {
   const socials = fromRows.length || draft.socials.length ? fromRows : socialsWithChannel([], draft.channel_link.trim(), draft.platform);
   const main = socials[0];
   return {
-    name: draft.name.trim(), contact_email: draft.contact_email.trim(), channel_link: main ? main.url : "", niche: draft.niche.trim(), country: draft.country.trim(), socials,
+    name: draft.name.trim(), contact_email: draft.contact_email.trim(), secondary_email: draft.secondary_email.trim(), secondary_email_label: draft.secondary_email.trim() ? draft.secondary_email_label.trim() : "", ...(draft.rates ? { rates: draft.rates } : {}), channel_link: main ? main.url : "", niche: draft.niche.trim(), country: draft.country.trim(), socials,
     avg_views: Number(draft.avg_views) || 0, engagement_rate: Number(draft.engagement_rate) || 0, ...dims, stars: overallStars(dims), priority: (["none", "soon", "urgent"] as const).includes(draft.priority) ? draft.priority : "none" as Priority, next_action_date: draft.next_action_date || null,
     platform: main ? asPlatform(main.platform) : draft.platform,
     // "New" means nobody reached out yet, so it never carries a contact date.
@@ -50,7 +53,7 @@ export const draftToCreator = (draft: CreatorDraft) => {
 };
 
 export const creatorToDraft = (creator: Creator): CreatorDraft => ({
-  name: creator.name, contact_email: creator.contact_email, channel_link: creator.channel_link, niche: creator.niche, country: creator.country || "", avg_views: creator.avg_views ? String(creator.avg_views) : "", engagement_rate: creator.engagement_rate ? String(creator.engagement_rate) : "",
+  name: creator.name, contact_email: creator.contact_email, secondary_email: creator.secondary_email || "", secondary_email_label: creator.secondary_email_label || "", channel_link: creator.channel_link, niche: creator.niche, country: creator.country || "", avg_views: creator.avg_views ? String(creator.avg_views) : "", engagement_rate: creator.engagement_rate ? String(creator.engagement_rate) : "",
   stars_consistency: creator.stars_consistency || 0, stars_demographics: creator.stars_demographics || 0, stars_niche: creator.stars_niche || 0, stars_engagement: creator.stars_engagement || 0,
   priority: creator.priority || "none", next_action_date: creator.next_action_date || "", platform: creator.platform, pipeline_status: creator.pipeline_status, date_contacted: creator.date_contacted || "", notes: creator.notes, next_action: creator.next_action || "",
   socials: socialsToRows(creator.socials),
@@ -148,6 +151,7 @@ export function CreatorFields({ draft, setDraft, mode }: Props) {
       <label className="field-wrap cf-niche"><span className="field-label">Niche</span><input className="field" list="cf-niches" value={draft.niche} onChange={(event) => setDraft({ ...draft, niche: event.target.value })} placeholder="Tech, beauty, travel…" /><datalist id="cf-niches">{niches.map((n) => <option key={n} value={n} />)}</datalist></label>
       <CountryPicker value={draft.country} onChange={(country) => setDraft({ ...draft, country })} />
     </div>
+    <SecondaryEmailField email={draft.secondary_email} label={draft.secondary_email_label} onChange={(patch) => setDraft({ ...draft, ...patch })} />
 
     <SocialsEditor rows={draft.socials} onChange={(socials) => setDraft({ ...draft, socials })} />
 
@@ -161,7 +165,7 @@ export function CreatorFields({ draft, setDraft, mode }: Props) {
     <Fold id="pipeline" title="Pipeline & next step" open={open.includes("pipeline")} onToggle={toggle} filled={pipelineFilled} summary={pipeBits.join(" · ")}>
       <div className="form-grid">
         <Select label="Pipeline status" value={draft.pipeline_status} onChange={(event) => setDraft(withStatus(draft, event.target.value as EntityStatus))}>{ENTITY_STATUSES.map((item) => <option value={item} key={item}>{STATUS_LABELS[item]}</option>)}</Select>
-        {OUTREACH_STAGES.includes(draft.pipeline_status) ? <Input label="Date contacted" type="date" value={draft.date_contacted} max={today()} onChange={(event) => setDraft({ ...draft, date_contacted: event.target.value })} hint="Defaults to today — change it if you reached out earlier." /> : <div className="field-wrap contact-date-note"><span className="field-label">Date contacted</span><p>Set automatically the moment you move them to Contacted.</p></div>}
+        {OUTREACH_STAGES.includes(draft.pipeline_status) ? <Input label={draft.pipeline_status === "inbound" ? "They reached out on" : "Date contacted"} type="date" value={draft.date_contacted} max={today()} onChange={(event) => setDraft({ ...draft, date_contacted: event.target.value })} hint={draft.pipeline_status === "inbound" ? "The day their message came in — defaults to today." : "Defaults to today — change it if you reached out earlier."} /> : <div className="field-wrap contact-date-note"><span className="field-label">Date contacted</span><p>Set automatically the moment you move them to Contacted.</p></div>}
         <Select label="Priority" value={draft.priority} onChange={(event) => setDraft({ ...draft, priority: event.target.value as Priority })}><option value="none">No priority</option><option value="soon">Follow up soon</option><option value="urgent">Urgent</option></Select>
         <Input label="Action due" type="date" value={draft.next_action_date} onChange={(event) => setDraft({ ...draft, next_action_date: event.target.value })} />
         <Input label="Next action" value={draft.next_action} onChange={(event) => setDraft({ ...draft, next_action: event.target.value })} placeholder="Send media kit" />
