@@ -17,4 +17,7 @@ These are standing instructions from the owner (Dhurim). Follow them in every se
 
 ## Product notes
 - Follow-up engine: `web/src/lib/followupEngine.ts` (business-day cadence, configurable in Settings → Follow-up rules). Denied, Signed and Roster are never chased.
-- Gmail sync: `supabase/functions/gmail-sync` — the email moves the pipeline forward; any status the user sets by hand wins until a newer email arrives.
+- Gmail sync: `supabase/functions/gmail-sync` — several mailboxes per user (`gmail_tokens` row per mailbox); the email moves the pipeline forward; any status the user sets by hand wins until a newer email arrives. Shared code lives in `supabase/functions/_shared/` (deploy it with each function that imports it as `../_shared/...`).
+- Google tokens are encrypted (`_shared/googleTokens.ts`, key in Vault via `gmail_token_key()`); never store or log them in plain text.
+- Inbound lead scanner: `_shared/leadScanner.ts` + its test file — run the tests after any change to the rules.
+- Influencer profiles have no email draft (users write in Gmail; sync tracks it). Brands keep the composer.

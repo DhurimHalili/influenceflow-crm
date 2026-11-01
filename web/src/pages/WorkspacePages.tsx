@@ -14,6 +14,7 @@ import { columnKeys } from "../lib/exportFormats";
 import { FollowupRulesSettings, GmailSettings } from "../components/SettingsGmail";
 import { CalendarDays, Mail } from "lucide-react";
 import { APP_BUILT_AT, APP_VERSION, liveVersion, reloadInto } from "../lib/appUpdate";
+import { pwnedCount, pwnedMessage } from "../lib/pwned";
 
 const WEIGHT_HELP: Record<string, string> = {
   audience: "Decides whether the brand's buyers are even watching. The #1 factor in most agency scorecards.",
@@ -133,6 +134,8 @@ function SecuritySettings() {
     if (pw1.length < 8) return toast("New password needs at least 8 characters", "error");
     if (pw1 !== pw2) return toast("Passwords do not match", "error");
     setBusy("password");
+    const leaks = await pwnedCount(pw1);
+    if (leaks) { setBusy(""); return toast(pwnedMessage(leaks), "error"); }
     const message = await updatePassword(pw1);
     setBusy("");
     if (message) toast(message, "error");

@@ -4,6 +4,7 @@ import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { Button, Input, Logo } from "../components/ui";
+import { pwnedCount, pwnedMessage } from "../lib/pwned";
 
 function PublicNav({ dark = false }: { dark?: boolean }) {
   const [open, setOpen] = useState(false);
@@ -95,6 +96,10 @@ function AuthPage({ mode, returnTo }: { mode: "login" | "signup"; returnTo?: str
   const suggestion = emailSuggestion(email);
   const submit = async (event: FormEvent) => {
     event.preventDefault(); setError(null); setLoading(true);
+    if (mode === "signup") {
+      const leaks = await pwnedCount(password);
+      if (leaks) { setLoading(false); setError({ message: pwnedMessage(leaks), code: "pwned" }); return; }
+    }
     const result = await (mode === "login" ? signIn(email, password) : signUp(email, password));
     setLoading(false);
     if (result.error) { setError({ message: result.error, code: result.code, attemptsLeft: result.attemptsLeft }); return; }
@@ -165,6 +170,8 @@ export function UpdatePasswordPage() {
     if (pw1.length < 8) { setError("New password needs at least 8 characters."); return; }
     if (pw1 !== pw2) { setError("Passwords do not match."); return; }
     setLoading(true);
+    const leaks = await pwnedCount(pw1);
+    if (leaks) { setLoading(false); setError(pwnedMessage(leaks)); return; }
     const message = await updatePassword(pw1);
     setLoading(false);
     if (message) setError(message); else setDone(true);
@@ -190,6 +197,8 @@ const legalContent: Record<string, { label: string; title: string; intro: string
     { title: "What we store", body: "Your account email, profile settings, and the CRM records you choose to add. We do not sell personal information or use workspace data for advertising." },
     { title: "How access works", body: "Hosted data is protected by Supabase authentication and PostgreSQL row-level security. Policies restrict every record to its user_id owner." },
     { title: "Your control", body: "Export influencers, brands, contacts, and campaigns as CSV, or download a complete versioned JSON backup. Archived records can be restored or permanently removed." },
+    { title: "Gmail (optional)", body: "If you connect Gmail, InfluenceFlow requests read access (gmail.readonly) and send access (gmail.send). It reads message headers — sender, recipients, date, subject — and Gmail's short preview, only to (1) match emails to the influencers and brands in your CRM so their status and follow-up reminders update, and (2) suggest people who emailed you first about a sponsorship, collaboration or management (inbound leads). It stores only that metadata for matching or suggested messages; message bodies, attachments and the rest of your inbox are never stored. Emails are sent only when you press Send. You can connect several mailboxes and disconnect any of them at any time in Settings or in your Google Account, which revokes access immediately; you can also delete the stored email history." },
+    { title: "Google API data: Limited Use", body: "InfluenceFlow's use and transfer of information received from Google APIs adheres to the Google API Services User Data Policy, including the Limited Use requirements. Google user data is used only to provide the features above to you, is never sold, never used for advertising, never used to train AI or machine-learning models, and is never read by people except with your explicit permission, for security reasons, or where required by law. Google access tokens are encrypted at rest (AES-256-GCM) and never sent to your browser." },
     { title: "Self-hosting", body: "The project is MIT licensed. You can deploy the app and database migrations to infrastructure you control." },
   ] },
   terms: { label: "Plain-language terms", title: "Use InfluenceFlow responsibly.", intro: "These terms keep the open-source product useful and sustainable. They are not a substitute for your own client agreements.", sections: [
@@ -202,7 +211,7 @@ const legalContent: Record<string, { label: string; title: string; intro: string
 
 export function LegalPage({ type }: { type: "privacy" | "terms" }) {
   const content = legalContent[type];
-  return <div className="public-page inner-public"><PublicNav /><header className="legal-hero"><span>{content.label}</span><h1>{content.title}</h1><p>{content.intro}</p></header><main className="legal-content">{content.sections.map((section, index) => <section key={section.title}><span>0{index + 1}</span><div><h2>{section.title}</h2><p>{section.body}</p></div></section>)}<p className="legal-date">Last updated March 2026. Questions? <a href="mailto:hello@influenceflow.app">Contact us.</a></p></main><PublicFooter /></div>;
+  return <div className="public-page inner-public"><PublicNav /><header className="legal-hero"><span>{content.label}</span><h1>{content.title}</h1><p>{content.intro}</p></header><main className="legal-content">{content.sections.map((section, index) => <section key={section.title}><span>0{index + 1}</span><div><h2>{section.title}</h2><p>{section.body}</p></div></section>)}<p className="legal-date">Last updated November 2026. Questions? <a href="mailto:hello@influenceflow.app">Contact us.</a></p></main><PublicFooter /></div>;
 }
 
 export function HelpPage({ embedded = false }: { embedded?: boolean }) {

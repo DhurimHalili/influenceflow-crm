@@ -1,57 +1,76 @@
-import { AlertTriangle, CalendarDays, Check, LoaderCircle, Mail, RefreshCcw, ShieldCheck, Unplug } from "lucide-react";
+import { AlertTriangle, CalendarDays, Check, LoaderCircle, Mail, Plus, RefreshCcw, ShieldCheck, Trophy, Unplug } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useData } from "../contexts/DataContext";
 import { useGmail } from "../contexts/GmailContext";
 import { useToast } from "../contexts/ToastContext";
 import { cadencePreview } from "../lib/followupEngine";
+import { mailboxStats } from "../lib/mailboxStats";
 import { DEFAULT_FOLLOWUP_RULES } from "../lib/prefs";
 import { relativeTime } from "../lib/utils";
 import type { FollowupRules } from "../types";
-import { Button } from "./ui";
+import { Button, Tabs } from "./ui";
 
 const RESULT: Record<string, { ok: boolean; text: string }> = {
-  connected: { ok: true, text: "Gmail connected — your recent emails are being matched to your CRM now." },
-  "missing-read": { ok: false, text: "Gmail connected, but reading email wasn't allowed. Reconnect and tick “View your email messages” so replies can be tracked." },
+  connected: { ok: true, text: "Mailbox connected — your recent emails are being matched to your CRM now." },
+  reconnected: { ok: true, text: "Mailbox reconnected — syncing again." },
+  "missing-read": { ok: false, text: "Connected, but reading email wasn't allowed. Reconnect and tick “View your email messages” so replies can be tracked." },
   cancelled: { ok: false, text: "Gmail connection cancelled." },
   "no-refresh": { ok: false, text: "Google didn't give lasting access. Remove InfluenceFlow under Google Account → Security → Third-party access, then connect again." },
+  "too-many": { ok: false, text: "You've reached the mailbox limit. Disconnect one first." },
+  "in-use": { ok: false, text: "That mailbox is already connected to another InfluenceFlow account." },
   failed: { ok: false, text: "Gmail couldn't be connected. Please try again." },
 };
 
+function Spark({ values }: { values: number[] }) {
+  const max = Math.max(1, ...values);
+  const w = 4;
+  const gap = 2;
+  return <svg className="mbx-spark" viewBox={`0 0 ${values.length * (w + gap)} 24`} preserveAspectRatio="none" aria-hidden="true">{values.map((v, i) => <rect key={i} x={i * (w + gap)} y={24 - Math.max(v ? 3 : 1, (v / max) * 24)} width={w} height={Math.max(v ? 3 : 1, (v / max) * 24)} rx={1.5} className={v ? "on" : ""} />)}</svg>;
+}
+
 export function GmailSettings() {
   const gmail = useGmail();
+  const data = useData();
   const { toast } = useToast();
   const location = useLocation();
   const navigate = useNavigate();
-  const [busy, setBusy] = useState<"" | "connect" | "disconnect" | "sync">("");
+  const [busy, setBusy] = useState("");
+  const [range, setRange] = useState<"30" | "all">("30");
 
   // Back from Google: say how it went, then sync straight away.
   useEffect(() => {
-    const result = new URLSearchParams(location.search).get("gmail");
+    const params = new URLSearchParams(location.search);
+    const result = params.get("gmail");
     if (!result) return;
     const info = RESULT[result] || RESULT.failed;
-    toast(info.text, info.ok ? "success" : "error");
+    const mailbox = params.get("mailbox");
+    toast(mailbox && info.ok ? `${mailbox}: ${info.text}` : info.text, info.ok ? "success" : "error");
     navigate({ pathname: location.pathname, hash: "#gmail" }, { replace: true });
-    void gmail.refreshStatus().then(() => (result === "connected" ? gmail.syncNow(true) : undefined));
+    void gmail.refreshStatus().then(() => (info.ok ? gmail.syncNow(true) : undefined));
     window.setTimeout(() => document.getElementById("gmail")?.scrollIntoView({ behavior: "smooth", block: "start" }), 300);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.search]);
 
-  const connect = async () => {
-    setBusy("connect");
+  const connect = async (reconnect?: string) => {
+    setBusy(reconnect ? `re:${reconnect}` : "connect");
     try {
-      await gmail.connect();
+      await gmail.connect(reconnect);
     } catch (e) {
       toast(e instanceof Error ? e.message : "Couldn't start the Gmail connection", "error");
       setBusy("");
     }
   };
-  const disconnect = async () => {
-    if (!confirm("Disconnect Gmail? Google access is revoked right away. The email history already in your CRM stays.")) return;
-    setBusy("disconnect");
-    await gmail.disconnect(false);
+  const disconnect = async (id: string, email: string) => {
+    if (!confirm(`Disconnect ${email}? Google access is revoked right away. Its email history stays in your CRM.`)) return;
+    setBusy(`off:${id}`);
+    try {
+      await gmail.disconnect(id, false);
+      toast(`${email} disconnected — Google access revoked`);
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Couldn't disconnect", "error");
+    }
     setBusy("");
-    toast("Gmail disconnected — Google access revoked");
   };
   const sync = async () => {
     setBusy("sync");
@@ -59,25 +78,34 @@ export function GmailSettings() {
     setBusy("");
     toast(res.ok ? "Gmail synced" : res.message || "Sync failed", res.ok ? "success" : "error");
   };
+  const stats = mailboxStats(data.emailEvents || [], gmail.leads, gmail.mailboxes.map((m) => m.email), range === "30" ? 30 : null);
+  const statFor = (email: string) => stats.find((s) => s.mailbox === email);
+  const top = stats.length > 1 && stats[0].sent > 0 ? stats[0].mailbox : "";
 
-  return <section id="gmail" className="settings-section"><div className="settings-heading"><span><Mail /></span><div><h2>Gmail</h2><p>Emails to and from your influencers and brands update the CRM by themselves.</p></div></div><div className="settings-body">
+  return <section id="gmail" className="settings-section"><div className="settings-heading"><span><Mail /></span><div><h2>Gmail</h2><p>Emails to and from your influencers and brands update the CRM by themselves — from every mailbox you connect.</p></div></div><div className="settings-body">
     {!gmail.loaded ? <p className="muted-copy"><LoaderCircle size={14} className="spin" /> Checking…</p>
-      : gmail.connected ? <div className="gmail-card connected">
-        <div className="gmail-row"><span className="gmail-dot ok" /><div><strong>{gmail.email || "Gmail connected"}</strong><small>{gmail.lastSyncAt ? `Last synced ${relativeTime(gmail.lastSyncAt)}` : "First sync in progress…"}{gmail.canSend ? " · can send from the CRM" : ""}</small></div><div className="gmail-actions"><Button size="sm" variant="secondary" onClick={() => void sync()} loading={busy === "sync" || gmail.syncing}><RefreshCcw size={14} /> Sync now</Button><Button size="sm" variant="ghost" onClick={() => void disconnect()} loading={busy === "disconnect"}><Unplug size={14} /> Disconnect</Button></div></div>
-        {gmail.error && <div className="gmail-error"><AlertTriangle size={14} /><span>{gmail.error}</span>{/reconnect/i.test(gmail.error) && <Button size="sm" onClick={() => void connect()}>Reconnect</Button>}</div>}
-        {!gmail.canRead && <div className="gmail-error"><AlertTriangle size={14} /><span>Reading email wasn't allowed, so replies can't be tracked.</span><Button size="sm" onClick={() => void connect()}>Reconnect</Button></div>}
+      : gmail.connected ? <div className="mbx-wrap">
+        <div className="mbx-head"><span>{gmail.mailboxes.length} mailbox{gmail.mailboxes.length === 1 ? "" : "es"} connected</span><div className="mbx-head-actions"><Tabs active={range} onChange={(v) => setRange(v as "30" | "all")} tabs={[{ value: "30", label: "30 days" }, { value: "all", label: "All time" }]} /><Button size="sm" variant="secondary" onClick={() => void sync()} loading={busy === "sync" || gmail.syncing}><RefreshCcw size={14} /> Sync now</Button></div></div>
+        <div className="mbx-list">{gmail.mailboxes.map((m) => { const st = statFor(m.email); return <article className={`mbx-card${m.error ? " has-error" : ""}`} key={m.id}>
+          <div className="mbx-id"><span className={`gmail-dot ${m.error ? "bad" : "ok"}`} /><div><strong>{m.email}{top === m.email && <em className="mbx-top" title="Sends the most in this range"><Trophy size={11} /> Top sender</em>}</strong><small>{m.lastSyncAt ? `Synced ${relativeTime(m.lastSyncAt)}` : "First sync in progress…"}{m.canSend ? " · can send" : " · read only"}{m.sentToday ? ` · ${m.sentToday} sent from the CRM today` : ""}</small></div><Button size="sm" variant="ghost" onClick={() => void disconnect(m.id, m.email)} loading={busy === `off:${m.id}`} aria-label={`Disconnect ${m.email}`}><Unplug size={14} /> <span className="hide-sm">Disconnect</span></Button></div>
+          <div className="mbx-stats"><div><b>{st?.sent ?? 0}</b><span>Sent</span></div><div><b>{st?.reached ?? 0}</b><span>Reached</span></div><div><b>{st?.reached ? `${st.replyRate}%` : "—"}</b><span>Reply rate</span></div><div><b>{st?.received ?? 0}</b><span>Received</span></div><div><b>{st?.leads ?? 0}</b><span>Leads</span></div><div className="mbx-spark-cell"><Spark values={st?.daily || []} /><span>Sent per day</span></div></div>
+          {m.error && <div className="gmail-error"><AlertTriangle size={14} /><span>{m.error}</span>{/reconnect|expired|granted|allowed/i.test(m.error) && <Button size="sm" onClick={() => void connect(m.email)} loading={busy === `re:${m.email}`}>Reconnect</Button>}</div>}
+          {!m.canRead && !m.error && <div className="gmail-error"><AlertTriangle size={14} /><span>Reading email wasn't allowed, so replies can't be tracked.</span><Button size="sm" onClick={() => void connect(m.email)}>Reconnect</Button></div>}
+        </article>; })}</div>
+        {gmail.mailboxes.length < gmail.maxMailboxes && <button type="button" className="mbx-add" onClick={() => void connect()} disabled={busy === "connect"}>{busy === "connect" ? <LoaderCircle size={16} className="spin" /> : <Plus size={16} />}<span><strong>Add another mailbox</strong><small>Run outreach from two or more addresses? Connect each one — everything lands in the same CRM, and stats stay per mailbox.</small></span></button>}
       </div>
       : <div className="gmail-card">
         <ul className="gmail-points">
           <li><Check size={14} /> You email someone → they move to <b>Contacted</b>; they reply → <b>Replied</b>; they write first → <b>Inbound</b>.</li>
+          <li><Check size={14} /> New brands and creators who email you are spotted for you — newsletters, warm-up mail and personal email are filtered out.</li>
           <li><Check size={14} /> Follow-up flags count your emails and their replies — no logging by hand.</li>
-          <li><Check size={14} /> Send and follow up from the CRM, in the same Gmail thread.</li>
+          <li><Check size={14} /> Connect several mailboxes and see which one sends the most and gets the most replies.</li>
           <li><Check size={14} /> You stay in charge: any status you set yourself wins until a newer email arrives. Negotiating, Roster, Signed and Denied are never changed for you.</li>
         </ul>
         <Button onClick={() => void connect()} loading={busy === "connect"} disabled={gmail.loaded && !gmail.configured && !!gmail.error}><Mail size={15} /> Connect Gmail</Button>
         {!gmail.configured && gmail.loaded && <p className="field-hint">If connecting fails, Gmail isn't set up on the server yet — see the README “Gmail sync” section.</p>}
       </div>}
-    <p className="privacy-note gmail-privacy"><ShieldCheck size={15} /><span><strong>What InfluenceFlow keeps:</strong> only emails to or from addresses in your CRM — who, when, the subject and Gmail's short preview. Message bodies and everything else in your inbox are never stored. Google access can be removed any time here or in your Google Account.</span></p>
+    <p className="privacy-note gmail-privacy"><ShieldCheck size={15} /><span><strong>What InfluenceFlow keeps:</strong> for people in your CRM — who, when, the subject and Gmail's short preview. For possible new leads — the same, only for messages that look like a real enquiry. Message bodies, attachments and the rest of your inbox are never stored. Google tokens are encrypted, never reach your browser, and access can be removed any time here or in your Google Account.</span></p>
   </div></section>;
 }
 

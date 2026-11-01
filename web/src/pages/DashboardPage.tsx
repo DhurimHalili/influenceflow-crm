@@ -5,9 +5,66 @@ import { Link, useNavigate } from "react-router-dom";
 import { useData } from "../contexts/DataContext";
 import { Button, EmptyState, Metric, PageHeader, Tabs } from "../components/ui";
 import { useChase } from "../hooks/useChase";
+import { useGmail } from "../contexts/GmailContext";
 import { flagFor } from "../lib/followupEngine";
 import { currencySymbol, dateLabel, daysAgoLabel, daysSince, dayKey, dueLabel, isOverdue, isPastDay, isTodayDay, money, parseDay, relativeTime, timeLabel } from "../lib/utils";
 import { ENTITY_STATUSES, STATUS_LABELS } from "../types";
+
+// One line a day, so the dashboard greets you with something to aim at.
+const NUDGES = [
+  "Five emails today beat fifty next week.",
+  "The fortune is in the follow-up — check your yellow flags first.",
+  "Every roster creator started as a cold email. Send one more.",
+  "Reply to inbound leads while they're warm — speed wins deals.",
+  "A no today is often a yes next quarter. Log it, move on.",
+  "Pitch the creator you'd be proud to sign.",
+  "Small daily outreach compounds into a full roster.",
+  "Brands buy confidence: know your creators' numbers cold.",
+  "Protect your margin — price the deal, not the hours.",
+  "Clear the Needs-attention list and the rest of the day is yours.",
+  "One thoughtful follow-up beats three generic ones.",
+  "Your next big deal is probably already in your pipeline.",
+  "Consistency closes. Show up for your pipeline today.",
+  "Celebrate the replies — then book the call.",
+];
+const nudgeOfDay = () => NUDGES[Math.floor((Date.now() - new Date(new Date().getFullYear(), 0, 0).getTime()) / 86400000) % NUDGES.length];
+
+function FirstWins() {
+  const data = useData();
+  const gmail = useGmail();
+  const [hidden, setHidden] = useState(() => {
+    try {
+      return localStorage.getItem("if.firstwins.hidden") === "1";
+    } catch {
+      return false;
+    }
+  });
+  const creators = data.creators.filter((c) => !c.archived_at);
+  const reached = [...creators, ...data.brands.filter((b) => !b.archived_at)].filter((r) => r.date_contacted || !["new"].includes(r.pipeline_status)).length;
+  const replied = [...creators, ...data.brands].some((r) => ["replied", "negotiating", "roster", "signed"].includes(r.pipeline_status) || !!r.lost_at);
+  const steps = [
+    { done: creators.length > 0, label: "Add your first influencer", hint: "Paste a channel link — or import a CSV", to: "/app/influencers?new=1" },
+    { done: gmail.connected, label: "Connect Gmail", hint: "Statuses and follow-ups update by themselves", to: "/app/settings#gmail" },
+    { done: reached >= 10, label: "Reach out to 10 people", hint: `${Math.min(reached, 10)} of 10 so far`, to: "/app/influencers" },
+    { done: replied, label: "Get your first reply", hint: "Follow up on day 2 — the flag will remind you", to: "/app/influencers?status=contacted" },
+    { done: creators.some((c) => ["roster", "signed"].includes(c.pipeline_status)), label: "Sign your first roster creator", hint: "The moment it becomes an agency", to: "/app/influencers" },
+  ];
+  const done = steps.filter((x) => x.done).length;
+  if (hidden || done === steps.length) return null;
+  const cheer = ["Let's get your first win on the board.", "Great start — momentum is everything.", "You're building something real.", "Over halfway. Keep the streak alive.", "One step from a real agency milestone."][Math.min(done, 4)];
+  const hide = () => {
+    setHidden(true);
+    try {
+      localStorage.setItem("if.firstwins.hidden", "1");
+    } catch {
+      // fine: it stays hidden for this visit
+    }
+  };
+  return <section className="dash-panel first-wins">
+    <div className="fw-head"><div className="fw-ring" style={{ ["--p" as string]: `${(done / steps.length) * 100}%` }}><b>{done}/{steps.length}</b></div><div><span>Your first wins</span><h2>{cheer}</h2></div><button type="button" className="fw-hide" onClick={hide} aria-label="Hide first wins">Hide</button></div>
+    <ol className="fw-steps">{steps.map((x) => <li key={x.label} className={x.done ? "done" : ""}><Link to={x.to}><i>{x.done ? <CheckCircle2 size={15} /> : null}</i><span><strong>{x.label}</strong><small>{x.done ? "Done" : x.hint}</small></span>{!x.done && <ArrowRight size={14} />}</Link></li>)}</ol>
+  </section>;
+}
 
 const funnelColors = ["#7c6bf0", "#e0794a", "#4d88e8", "#24a6a1", "#d59b48", "#69a969", "#895ee2", "#ce6475", "#8c95a7"];
 
@@ -15,6 +72,7 @@ export default function DashboardPage() {
   const data = useData();
   const navigate = useNavigate();
   const chase = useChase();
+  const gmail = useGmail();
   const creators = data.creators.filter((item) => !item.archived_at);
   const brands = data.brands.filter((item) => !item.archived_at);
   const campaigns = data.campaigns.filter((item) => !item.archived_at);
@@ -225,6 +283,9 @@ export default function DashboardPage() {
       .filter((item) => item.pipeline_status === "inbound")
       .sort((a, b) => (a.date_contacted || a.status_updated_at || "").localeCompare(b.date_contacted || b.status_updated_at || ""))
       .forEach((item) => { const waited = daysSince(item.date_contacted || item.status_updated_at) || 0; push({ id: `in-${item.id}`, type: `Inbound ${item.kind.toLowerCase()} · ${waited ? `waiting ${daysAgoLabel(item.date_contacted || item.status_updated_at).replace(" ago", "")}` : "came in today"}`, title: item.name, detail: item.next_action || "Reached out to you — reply while they're warm", to: item.to, urgent: waited >= 1, rank: 0 }); });
+    // New people who emailed you first (spotted by the Gmail scanner).
+    const freshLeads = gmail.leads.filter((l) => l.status === "new");
+    if (freshLeads.length) push({ id: "leads", type: `Gmail · ${freshLeads.length === 1 ? `new inbound ${freshLeads[0].kind === "creator" ? "creator" : "brand"}` : "new inbound leads"} · ${relativeTime(freshLeads[0].last_at)}`, title: freshLeads.length === 1 ? freshLeads[0].name || freshLeads[0].company || freshLeads[0].email : `${freshLeads.length} people emailed you first`, detail: freshLeads.length === 1 ? `“${freshLeads[0].subject || "(no subject)"}” — review and add to your CRM` : freshLeads.slice(0, 3).map((l) => l.company || l.name || l.email).join(", ") + " — review and add them", to: "/app/leads", urgent: true, rank: 0 });
     campaigns.filter((item) => item.status === "active" && isOverdue(item.due_date)).forEach((item) => push({ id: item.id, type: "Campaign overdue", title: item.name, detail: `Was due ${dateLabel(item.due_date)}`, to: `/app/campaigns?id=${item.id}`, urgent: true, rank: 0 }));
     const actionables = [
       ...creators.map((c) => ({ ...c, kind: "Influencer", to: `/app/influencers/${c.id}` })),
@@ -243,8 +304,9 @@ export default function DashboardPage() {
   if (!data.ready) return <div className="dashboard-skeleton"><i /><i /><i /><i /></div>;
 
   return <div className="dashboard-page">
-    <PageHeader eyebrow="Private workspace" title={`Good ${new Date().getHours() < 12 ? "morning" : new Date().getHours() < 18 ? "afternoon" : "evening"}, ${data.profile.display_name?.split(" ")[0] || "there"}.`} description="Here is what is moving, what is earning, and what needs your attention." actions={<Button onClick={() => navigate("/app/campaigns?new=1")}><Plus size={16} /> New campaign</Button>} />
+    <PageHeader eyebrow="Private workspace" title={`Good ${new Date().getHours() < 12 ? "morning" : new Date().getHours() < 18 ? "afternoon" : "evening"}, ${data.profile.display_name?.split(" ")[0] || "there"}.`} description={nudgeOfDay()} actions={<Button onClick={() => navigate("/app/campaigns?new=1")}><Plus size={16} /> New campaign</Button>} />
 
+    <FirstWins />
     {!creators.length && !brands.length ? <EmptyState title="A clear workspace, ready for your relationships" text="Add your first influencer to start building your pipeline." action={<div className="empty-actions"><Button onClick={() => navigate("/app/influencers?new=1")}>Add influencer</Button></div>} /> : <>
       <section className="metric-row">
         <Metric label="Active deal value" value={money(activeValue)} detail={<><span className="positive"><TrendingUp size={13} /> {active.length} live deals</span></>} icon={<DollarSign size={15} />} />

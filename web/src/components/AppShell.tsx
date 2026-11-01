@@ -8,8 +8,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { useData } from "../contexts/DataContext";
+import { useGmail } from "../contexts/GmailContext";
 import { useToast } from "../contexts/ToastContext";
-import { Avatar, Button, Logo, Modal } from "./ui";
+import { Avatar, Button, Logo, LogoMark, Modal } from "./ui";
 import { useChase } from "../hooks/useChase";
 import { isPastDay, isTodayDay, LOSS_REASONS } from "../lib/utils";
 import type { SearchResult, ThemeName } from "../types";
@@ -28,6 +29,7 @@ const navSections = [
   { label: "Manage", items: [
     { to: "/app/influencers", label: "Influencers", icon: Users },
     { to: "/app/brands", label: "Brands", icon: Building2 },
+    { to: "/app/leads", label: "Inbound leads", icon: Inbox },
     { to: "/app/campaigns", label: "Campaigns", icon: BarChart3 },
     { to: "/app/calendar", label: "Calendar", icon: CalendarDays },
   ] },
@@ -50,6 +52,8 @@ export default function AppShell() {
   const { user, signOut } = useAuth();
   const data = useData();
   const chase = useChase();
+  const gmail = useGmail();
+  const newLeads = gmail.leads.filter((l) => l.status === "new").length;
   const { toast } = useToast();
   const navigate = useNavigate();
   const location = useLocation();
@@ -59,9 +63,21 @@ export default function AppShell() {
   const [commandOpen, setCommandOpen] = useState(false);
   const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [bannerVisible, setBannerVisible] = useState(true);
-  const [onboardingStep, setOnboardingStep] = useState(1);
+  const [onboardingStep, setOnboardingStep] = useState(0);
   const [displayName, setDisplayName] = useState(data.profile.display_name);
   const [theme, setTheme] = useState<ThemeName>(data.profile.theme);
+  // First visit: open the welcome right away (once per session), not just a banner.
+  useEffect(() => {
+    if (!data.ready || data.profile.onboarding_done) return;
+    try {
+      if (sessionStorage.getItem("if.welcomed")) return;
+      sessionStorage.setItem("if.welcomed", "1");
+    } catch {
+      // private mode: show it anyway
+    }
+    setOnboardingStep(0);
+    setOnboardingOpen(true);
+  }, [data.ready, data.profile.onboarding_done]);
   // Loss-reason picker: opens automatically only when a live deal just died.
   const lossIds = data.pendingLoss.map((l) => `${l.kind}:${l.id}`).join(",");
   const [lossReason, setLossReason] = useState("");
@@ -239,7 +255,7 @@ export default function AppShell() {
       <div className="sidebar-top"><Logo /><button className="mobile-close" onClick={() => setMobileOpen(false)}><X size={19} /></button></div>
       <nav className="side-nav">
         {navSections.map((section) => (
-          <div className="nav-section" key={section.label}><span className="nav-label">{section.label}</span>{section.items.map((item) => <NavLink key={item.to} to={item.to} end={"end" in item ? item.end : false} className={({ isActive }) => isActive ? "active" : ""}><item.icon size={17} strokeWidth={1.8} /><span>{item.label}</span>{item.label === "Calendar" && dueToday > 0 && <b className="nav-due" title={`${dueToday} due today or overdue`}>{dueToday}</b>}{(item.label === "Influencers" || item.label === "Brands") && (() => { const kind = item.label === "Influencers" ? "creator" : "brand"; const n = chase.due.filter((c) => c.type === kind).length + chase.reply.filter((c) => c.type === kind).length; return n > 0 ? <b className="nav-due nav-follow" title={`${n} need a follow-up or a reply`}>{n}</b> : null; })()}{item.label === "Archive" && <b>{data.creators.filter((x) => x.archived_at).length + data.brands.filter((x) => x.archived_at).length + data.campaigns.filter((x) => x.archived_at).length || ""}</b>}</NavLink>)}</div>
+          <div className="nav-section" key={section.label}><span className="nav-label">{section.label}</span>{section.items.map((item) => <NavLink key={item.to} to={item.to} end={"end" in item ? item.end : false} className={({ isActive }) => isActive ? "active" : ""}><item.icon size={17} strokeWidth={1.8} /><span>{item.label}</span>{item.label === "Calendar" && dueToday > 0 && <b className="nav-due" title={`${dueToday} due today or overdue`}>{dueToday}</b>}{(item.label === "Influencers" || item.label === "Brands") && (() => { const kind = item.label === "Influencers" ? "creator" : "brand"; const n = chase.due.filter((c) => c.type === kind).length + chase.reply.filter((c) => c.type === kind).length; return n > 0 ? <b className="nav-due nav-follow" title={`${n} need a follow-up or a reply`}>{n}</b> : null; })()}{item.label === "Inbound leads" && newLeads > 0 && <b className="nav-due nav-leads" title={`${newLeads} new inbound lead${newLeads === 1 ? "" : "s"} to review`}>{newLeads}</b>}{item.label === "Archive" && <b>{data.creators.filter((x) => x.archived_at).length + data.brands.filter((x) => x.archived_at).length + data.campaigns.filter((x) => x.archived_at).length || ""}</b>}</NavLink>)}</div>
         ))}
       </nav>
       <div className="user-footer">
@@ -286,7 +302,7 @@ export default function AppShell() {
           </div>
         </header>
         {!data.profile.onboarding_done && bannerVisible && (
-          <div className="onboarding-banner"><div><Sparkles size={16} /><span><strong>Your workspace is almost ready.</strong> Take the 30-second setup and start with your real workspace.</span></div><div><Button size="sm" onClick={() => setOnboardingOpen(true)}>Finish setup</Button><button onClick={() => setBannerVisible(false)} aria-label="Dismiss"><X size={16} /></button></div></div>
+          <div className="onboarding-banner"><div><Sparkles size={16} /><span><strong>Your workspace is almost ready.</strong> Take the 30-second setup and start with your real workspace.</span></div><div><Button size="sm" onClick={() => { setOnboardingStep(0); setOnboardingOpen(true); }}>Finish setup</Button><button onClick={() => setBannerVisible(false)} aria-label="Dismiss"><X size={16} /></button></div></div>
         )}
         <main className="app-main"><motion.div key={location.pathname} initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.22 }}><Outlet /></motion.div></main>
       </div>
@@ -337,11 +353,12 @@ export default function AppShell() {
         <div className="modal-actions"><Button variant="ghost" onClick={() => data.resolveLoss(null)}>Skip</Button><Button onClick={() => data.resolveLoss(lossReason || null)}>Save reason</Button></div>
       </Modal>
 
-      <Modal open={onboardingOpen} onClose={() => setOnboardingOpen(false)} title="Set up your workspace" description={`Step ${onboardingStep} of 2 / About 30 seconds`}>
-        <div className="setup-progress"><span className={onboardingStep >= 1 ? "done" : ""} /><span className={onboardingStep >= 2 ? "done" : ""} /></div>
+      <Modal open={onboardingOpen} onClose={() => setOnboardingOpen(false)} title={onboardingStep === 0 ? "Welcome to InfluenceFlow" : "Set up your workspace"} description={onboardingStep === 0 ? "Your agency's new home base" : `Step ${onboardingStep} of 2 / About 30 seconds`}>
+        <div className="setup-progress"><span className="done" /><span className={onboardingStep >= 1 ? "done" : ""} /><span className={onboardingStep >= 2 ? "done" : ""} /></div>
+        {onboardingStep === 0 && <div className="setup-step welcome-step"><span className="welcome-mark"><LogoMark size={44} /></span><h3>Every signed creator starts with one email.</h3><p>The agencies that win aren't the ones with the biggest lists — they're the ones that follow up, every time. InfluenceFlow makes sure you never drop one.</p><ul className="welcome-promises"><li><b>1</b><span><strong>Reach out</strong>Add influencers and brands, write in Gmail — the pipeline moves by itself.</span></li><li><b>2</b><span><strong>Follow up</strong>A yellow flag tells you exactly who to chase, and when.</span></li><li><b>3</b><span><strong>Close</strong>Track deals, your margin and your roster growing week by week.</span></li></ul><p className="welcome-quote">“The fortune is in the follow-up.” Most people stop after one email — you won't.</p></div>}
         {onboardingStep === 1 && <div className="setup-step"><span className="setup-icon"><Users /></span><h3>What should we call you?</h3><p>This name is only visible inside your private workspace.</p><label className="field-wrap"><span className="field-label">Display name</span><input className="field" autoFocus value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="Alex Morgan" /></label></div>}
         {onboardingStep === 2 && <div className="setup-step"><span className="setup-icon"><Palette /></span><h3>Choose your atmosphere</h3><p>You can switch themes instantly at any time.</p><div className="theme-mini-grid">{themeOptions.map((item) => <button key={item.value} className={theme === item.value ? "selected" : ""} onClick={() => { setTheme(item.value); document.documentElement.dataset.theme = item.value; }}><i className={`theme-swatch swatch-${item.value}`} />{item.label}{theme === item.value && <Check size={14} />}</button>)}</div></div>}
-        <div className="modal-actions">{onboardingStep > 1 && <Button variant="ghost" onClick={() => setOnboardingStep((step) => step - 1)}>Back</Button>}<Button onClick={() => onboardingStep < 2 ? setOnboardingStep((step) => step + 1) : completeOnboarding()} disabled={onboardingStep === 1 && !displayName.trim()}>{onboardingStep === 2 ? "Open my workspace" : "Continue"}<ChevronRight size={16} /></Button></div>
+        <div className="modal-actions">{onboardingStep > 0 && <Button variant="ghost" onClick={() => setOnboardingStep((step) => step - 1)}>Back</Button>}<Button onClick={() => onboardingStep < 2 ? setOnboardingStep((step) => step + 1) : completeOnboarding()} disabled={onboardingStep === 1 && !displayName.trim()}>{onboardingStep === 2 ? "Open my workspace" : onboardingStep === 0 ? "Let's build it" : "Continue"}<ChevronRight size={16} /></Button></div>
       </Modal>
     </div>
   );
