@@ -6,7 +6,8 @@
 -- counted as scheduled, not sent. Each sync re-checks these rows: sent → the
 -- flag clears; cancelled (back to Drafts) or deleted → the row is removed.
 alter table public.email_events add column if not exists scheduled boolean not null default false;
-create index if not exists email_events_scheduled on public.email_events (user_id, mailbox) where scheduled;
+-- Same index the 20261102064151 migration already created on the hosted project.
+create index if not exists email_events_scheduled_idx on public.email_events (user_id, mailbox) where scheduled;
 
 -- 2 ---------------------------------------------------------------------------
 -- Profile pictures: a path in the private "avatars" bucket, under the owner's
