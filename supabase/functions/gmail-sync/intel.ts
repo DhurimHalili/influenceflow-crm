@@ -33,9 +33,22 @@ const USER_QUOTA = 300 * 1024 * 1024;
 const ALLOWED: Record<string, string> = { "application/pdf": "pdf", "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp" };
 const AI_DAILY_LIMIT = 150;
 
+// Base64url → bytes without an intermediate binary string (edge functions have little memory).
+const B64 = new Uint8Array(128).fill(255);
+"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789".split("").forEach((c, i) => (B64[c.charCodeAt(0)] = i));
+B64[43] = 62; B64[45] = 62; B64[47] = 63; B64[95] = 63; // + - / _
 export const b64urlToBytes = (data: string) => {
-  const bin = atob(data.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((data.length + 3) % 4));
-  return Uint8Array.from(bin, (c) => c.charCodeAt(0));
+  let len = data.length;
+  while (len && data.charCodeAt(len - 1) === 61) len--; // "="
+  const out = new Uint8Array(Math.floor((len * 3) / 4));
+  let o = 0, buf = 0, bits = 0;
+  for (let i = 0; i < len; i++) {
+    const v = B64[data.charCodeAt(i) & 127];
+    if (v === 255) continue;
+    buf = (buf << 6) | v; bits += 6;
+    if (bits >= 8) { bits -= 8; out[o++] = (buf >> bits) & 255; }
+  }
+  return o === out.length ? out : out.subarray(0, o);
 };
 const bytesToB64 = (bytes: Uint8Array) => {
   let bin = "";
@@ -251,7 +264,7 @@ async function fetchPublic(url: string): Promise<{ bytes: Uint8Array; mime: stri
 
 // ---- one email from a creator ------------------------------------------------------
 
-export type MailCtx = { admin: Admin; userId: string; mailbox: string; currency: string; get: Fetcher; budget: { files: number; ai: number }; historical?: boolean };
+export type MailCtx = { admin: Admin; userId: string; mailbox: string; currency: string; get: Fetcher; budget: { files: number; ai: number; bytes?: number }; historical?: boolean };
 
 async function usedBytes(admin: Admin, userId: string) {
   const { data } = await admin.from("creator_files").select("size").eq("user_id", userId).eq("storage", "bucket");
@@ -280,6 +293,20 @@ async function storeFile(ctx: MailCtx, p: Profile, f: { bytes: Uint8Array; mime:
   return row as FileRow;
 }
 
+/** A big PDF/image left in Gmail: recorded by its place in the email, downloaded only when you open it. */
+async function keepInGmail(ctx: MailCtx, p: Profile, att: Attachment, gmailId: string, at: string) {
+  if (!att.partId || att.size > MAX_GMAIL) return false;
+  const mime = ALLOWED[att.mime] ? att.mime : /\.pdf$/i.test(att.filename) ? "application/pdf" : /\.png$/i.test(att.filename) ? "image/png" : /\.jpe?g$/i.test(att.filename) ? "image/jpeg" : /\.webp$/i.test(att.filename) ? "image/webp" : "";
+  if (!mime) return false;
+  const hash = await sha256(new TextEncoder().encode(`gmail:${gmailId}:${att.partId}`));
+  const filename = safeName(att.filename);
+  const { error } = await ctx.admin.from("creator_files").insert({ user_id: ctx.userId, creator_id: p.c.id, path: "", filename, mime, size: att.size, sha256: hash, source: "gmail", gmail_id: gmailId, part_id: att.partId, mailbox: ctx.mailbox, received_at: at, kind: looksLikeKit(filename) ? "media_kit" : "unknown", storage: "gmail", url: "" });
+  if (error) return false;
+  ctx.budget.files--;
+  p.activities.push(`Saved “${filename}” from ${p.c.name}'s email (kept in Gmail — too big for storage)`);
+  return true;
+}
+
 async function tryAi(ctx: MailCtx) {
   return ctx.budget.ai > 0 && (await aiAllowed(ctx.admin, ctx.userId));
 }
@@ -287,18 +314,26 @@ async function tryAi(ctx: MailCtx) {
 export async function processCreatorMail(ctx: MailCtx & { message: FullMessage; creatorId: string }) {
   const { admin, userId, message } = ctx;
   const p = await loadProfile(admin, userId, ctx.creatorId, ctx.currency);
-  if (!p) return { files: 0, changes: 0 };
+  if (!p) return { files: 0, changes: 0, deferred: false };
   const historical = !!ctx.historical;
   const { text, attachments } = bodyOf(message);
   const subject = decodeEntities(message.payload?.headers?.find((h) => h.name.toLowerCase() === "subject")?.value || "").slice(0, 200);
   const at = message.internalDate ? new Date(Number(message.internalDate)).toISOString() : new Date().toISOString();
   let saved = 0;
+  let deferred = false;
 
   // ---- attachments ----
   for (const att of attachments) {
     if (ctx.budget.files <= 0) break;
     if (!declaredOk(att) || att.size > MAX_GMAIL || att.size < 15_000) continue; // signature logos & oversize
     if (att.inline && att.mime.startsWith("image/") && !looksLikeKit(att.filename) && att.size < 150_000) continue; // pictures in the signature/body
+    if (att.size > MAX_STORE) {
+      // Too big to hold in memory here: keep it in Gmail and record it. Its real type is checked when you download it.
+      if (await keepInGmail(ctx, p, att, message.id, at)) saved++;
+      continue;
+    }
+    if ((ctx.budget.bytes ?? Infinity) < att.size) { deferred = true; continue; } // this run has downloaded enough; the email is checked again next run
+    if (ctx.budget.bytes !== undefined) ctx.budget.bytes -= att.size;
     const res = await ctx.get<{ data?: string }>(`/messages/${message.id}/attachments/${att.attachmentId}`).catch(() => null);
     if (!res?.data) continue;
     const bytes = b64urlToBytes(res.data);
@@ -370,7 +405,7 @@ export async function processCreatorMail(ctx: MailCtx & { message: FullMessage; 
   }
 
   await p.save();
-  return { files: saved, changes: p.touched ? 1 : 0 };
+  return { files: saved, changes: p.touched ? 1 : 0, deferred };
 }
 
 // ---- files waiting for the AI (saved while it was off or out of quota) ----------------
@@ -402,6 +437,7 @@ export async function drainQueue(ctx: { admin: Admin; userId: string; currency: 
   const queue = ((data || []) as FileRow[]).filter((f) => f.storage === "bucket" || f.mailbox === ctx.mailbox).sort((a, b) => Number(b.kind === "media_kit") - Number(a.kind === "media_kit"));
   let read = 0;
   for (const file of queue.slice(0, ctx.max)) {
+    if (file.size > MAX_AI) { await ctx.admin.from("creator_files").update({ ai_attempts: 9, verdict: "Too large for the AI to read — open it to check" }).eq("id", file.id); continue; }
     if (Date.now() > ctx.deadline || !(await aiAllowed(ctx.admin, ctx.userId))) break;
     const bytes = await fileBytes(ctx.admin, file, ctx.get);
     const mime = bytes ? sniff(bytes) : null;
@@ -422,6 +458,7 @@ export async function analyzeStoredFile(admin: Admin, userId: string, fileId: st
   if (!file) return { error: "File not found." };
   const f = file as FileRow;
   if (f.storage === "link") return { error: "That's a link — open it to view the kit." };
+  if (f.size > MAX_AI) return { error: "This file is too large for the AI to read — open it to check it yourself." };
   if (!(await aiAllowed(admin, userId))) return { error: "Daily AI limit reached — try again tomorrow." };
   const bytes = await fileBytes(admin, f, getFor(f.mailbox));
   const mime = bytes ? sniff(bytes) : null;

@@ -23,5 +23,8 @@ These are standing instructions from the owner (Dhurim). Follow them in every se
 - Influencer profiles have no email draft (users write in Gmail; sync tracks it). Brands keep the composer.
 - Inbound leads are strict: only creator-wants-management, brand-wants-creators, influencer-agency partnership. Warm-up (TrulyInbox "Phone_N0:"), pitches and personal mail never count.
 - Negotiation rules: `_shared/negotiation.ts` (shared by app + server via `web/src/lib/negotiation.ts`). Integrated ⇄ dedicated cascade by the same %; nothing else is inferred. Run its tests after any change.
-- AI reading (`_shared/ai.ts`) treats emails/files as untrusted data: structured output only, values re-validated, nothing applied unless confident and about the right creator. Never trust a creator's typed audience claims as verified.
+- AI reading (`_shared/ai.ts`) treats emails/files as untrusted data: structured output only, values re-validated, nothing applied unless confident and about the right creator. Never trust a creator's typed audience claims as verified. Providers: Claude (`ANTHROPIC_API_KEY`) or Gemini (`GEMINI_API_KEYS`, one model, key failover, quota → queue). The owner will not add an Anthropic key — Gemini or rules only.
+- Prices without AI: `_shared/priceReader.ts` (+ tests). Strict: money marker required, one price + one format per sentence, no ranges/CPM/questions. Older mail (backfill) never overwrites a hand-typed price.
+- Creator mail is claimed per email (`email_events.intel_at`) so two syncs never process it twice; old mail is backfilled roster-first.
+- Invoices (`invoices` table) chase on the follow-up business-day schedule; contracts live in `campaigns.contract`. Teams: `teams`/`team_members` + `team_leaderboard()` — teammates only ever see names and daily counts.
 - Deal models: `web/src/lib/dealTerms.ts`; `agreed_payment` is derived from `brand_terms` for non-flat deals.

@@ -335,18 +335,23 @@ async function applyStatuses(admin: Admin, userId: string, entityIds: string[]) 
 
 // ----- creators' older mail --------------------------------------------------------
 
-/** Take one email for checking. Two syncs at once (a cron run and "Sync now") never read the same email twice. */
+// Claim one email for checking, so two syncs at once (a cron run and "Sync now")
+// never read it twice. A claim is stamped 100 years in the past; finishing writes
+// the real time. A claim older than 30 minutes (the run crashed) is picked up again.
+const CLAIM_MS = 100 * 365 * 86400000;
+const claimStamp = () => new Date(Date.now() - CLAIM_MS).toISOString();
+const staleClaim = () => new Date(Date.now() - CLAIM_MS - 30 * 60_000).toISOString();
 async function claim(admin: Admin, userId: string, gmailId: string) {
-  const { data } = await admin.from("email_events").update({ intel_at: new Date().toISOString() }).eq("user_id", userId).eq("gmail_id", gmailId).is("intel_at", null).select("id");
+  const { data } = await admin.from("email_events").update({ intel_at: claimStamp() }).eq("user_id", userId).eq("gmail_id", gmailId).or(`intel_at.is.null,intel_at.lt.${staleClaim()}`).select("id");
   return (data || []).length > 0;
 }
 const unclaim = (admin: Admin, userId: string, gmailId: string) => admin.from("email_events").update({ intel_at: null }).eq("user_id", userId).eq("gmail_id", gmailId);
 
 const STATUS_RANK: Record<string, number> = { roster: 0, signed: 0, negotiating: 1, replied: 2, inbound: 3 };
 
-async function backfillCreatorMail(ctx: { admin: Admin; userId: string; mailbox: string; currency: string; get: Fetcher; budget: { files: number; ai: number }; deadline: number; checked: string[]; creatorId?: string; max?: number }) {
+async function backfillCreatorMail(ctx: { admin: Admin; userId: string; mailbox: string; currency: string; get: Fetcher; budget: { files: number; ai: number; bytes?: number }; deadline: number; checked: string[]; creatorId?: string; max?: number }) {
   if (Date.now() > ctx.deadline) return 0;
-  let q = ctx.admin.from("email_events").select("gmail_id, entity_id, at").eq("user_id", ctx.userId).eq("mailbox", ctx.mailbox).eq("direction", "in").eq("entity_type", "creator").is("intel_at", null);
+  let q = ctx.admin.from("email_events").select("gmail_id, entity_id, at").eq("user_id", ctx.userId).eq("mailbox", ctx.mailbox).eq("direction", "in").eq("entity_type", "creator").or(`intel_at.is.null,intel_at.lt.${staleClaim()}`);
   if (ctx.creatorId) q = q.eq("entity_id", ctx.creatorId);
   const { data: todo } = await q.order("at", { ascending: true }).limit(400);
   const events = (todo || []).filter((e) => !ctx.checked.includes(e.gmail_id));
@@ -370,6 +375,7 @@ async function backfillCreatorMail(ctx: { admin: Admin; userId: string; mailbox:
       // A message that fails to process is still marked done, so it can't block the queue forever.
       const res = await processCreatorMail({ admin: ctx.admin, userId: ctx.userId, mailbox: ctx.mailbox, currency: ctx.currency, message, creatorId: ev.entity_id, get: ctx.get, budget: ctx.budget, historical: true }).catch(() => null);
       files += res?.files || 0;
+      if (res?.deferred) { await unclaim(ctx.admin, ctx.userId, ev.gmail_id); continue; } // attachments left for the next run
     }
     ctx.checked.push(ev.gmail_id);
   }
@@ -452,7 +458,7 @@ async function syncMailbox(admin: Admin, row: TokenRow, own: Set<string>, book: 
   const leads = await storeLeads(admin, row.user_id, mailbox, found).catch(() => 0);
 
   // 5b. New mail from creators in the CRM: media kits, prices, agreed rates (newest first, capped per run).
-  const budget = { files: 10, ai: 12 };
+  const budget = { files: 8, ai: 12, bytes: 24 * 1024 * 1024 };
   const get: Fetcher = (path) => gmail(token, path);
   const { data: prof } = await admin.from("profiles").select("preferences").eq("id", row.user_id).maybeSingle();
   const currency = String(((prof?.preferences || {}) as { currency?: string }).currency || "USD").toUpperCase();
@@ -461,13 +467,13 @@ async function syncMailbox(admin: Admin, row: TokenRow, own: Set<string>, book: 
   const checked: string[] = [];
   for (const ev of creatorMail) {
     if (Date.now() > deadline) break;
-    checked.push(ev.gmail_id);
     if (!(await claim(admin, row.user_id, ev.gmail_id))) continue; // another sync has it
     const message = await gmail<FullMessage>(token, `/messages/${ev.gmail_id}?format=full`).catch(() => null);
-    if (message) {
-      const res = await processCreatorMail({ admin, userId: row.user_id, mailbox, currency, message, creatorId: ev.entity_id, get, budget }).catch(() => ({ files: 0, changes: 0 }));
-      filesSaved += res.files;
-    }
+    if (!message) { await unclaim(admin, row.user_id, ev.gmail_id); continue; } // picked up again by the backfill
+    const res = await processCreatorMail({ admin, userId: row.user_id, mailbox, currency, message, creatorId: ev.entity_id, get, budget }).catch(() => ({ files: 0, changes: 0, deferred: false }));
+    filesSaved += res.files;
+    if (res.deferred) await unclaim(admin, row.user_id, ev.gmail_id);
+    else checked.push(ev.gmail_id);
   }
 
   // 5c. Older mail from creators that was never checked (kits sent before this
@@ -692,7 +698,7 @@ Deno.serve(async (req) => {
     if (!rows.length) return json({ error: "Connect Gmail first.", code: "not_connected" }, 409);
     await admin.from("email_events").update({ intel_at: null }).eq("user_id", userId).eq("entity_id", input.id).eq("direction", "in");
     const currency = await currencyOf();
-    const budget = { files: 10, ai: 6 };
+    const budget = { files: 10, ai: 6, bytes: 30 * 1024 * 1024 };
     const deadline = Date.now() + 80_000;
     let files = 0;
     let left = 0;
