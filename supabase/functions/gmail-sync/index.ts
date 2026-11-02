@@ -30,6 +30,10 @@ import { analyzeStoredFile, bodyOf, drainQueue, gmailAttachment, processCreatorM
 //   New        + they email you        → Inbound
 //   Contacted / No reply + they reply  → Replied
 //   Inbound    + you answer            → Replied
+// A message waiting in Gmail's "Scheduled" folder counts as your touch but is
+// stored as scheduled (not sent) and re-checked every run: once it goes out it
+// counts as sent; cancel it (it goes back to Drafts) or delete it and it is
+// removed again — along with a status that only that email had moved.
 // Only emails newer than the record's last status change count, so any status
 // you set by hand stays until a newer email arrives — and Negotiating, Roster,
 // Signed and Denied are never changed automatically.
@@ -60,7 +64,7 @@ type Admin = SupabaseClient;
 type TokenRow = { id: string; user_id: string; access_token: string | null; refresh_token: string; expiry: string | null; email: string | null; scopes: string; history_id: string | null; last_sync_at: string | null; backfilled: string[] | null; sync_error?: string; connected_at?: string | null; send_day?: string | null; send_count?: number; leads_scanned_at?: string | null };
 type Entity = { type: "creator" | "brand"; id: string };
 type Meta = { id: string; threadId: string; labelIds?: string[]; snippet?: string; internalDate?: string; payload?: { headers?: { name: string; value: string }[] } };
-type EventRow = { user_id: string; gmail_id: string; thread_id: string; direction: "out" | "in"; entity_type: "creator" | "brand"; entity_id: string; counterpart: string; subject: string; snippet: string; at: string; mailbox: string; message_key: string };
+type EventRow = { user_id: string; gmail_id: string; thread_id: string; direction: "out" | "in"; entity_type: "creator" | "brand"; entity_id: string; counterpart: string; subject: string; snippet: string; at: string; mailbox: string; message_key: string; scheduled: boolean };
 
 class GmailError extends Error {
   constructor(message: string, public status = 0, public reconnect = false) {
@@ -162,6 +166,8 @@ function eventsFor(meta: Meta, userId: string, book: Map<string, Entity[]>, own:
   const labels = meta.labelIds || [];
   if (labels.some((l) => l === "DRAFT" || l === "SPAM" || l === "TRASH" || l === "CHAT")) return [];
   const out = isOutgoing(meta, own);
+  // Waiting in Gmail's Scheduled folder: your touch, but not sent yet.
+  const scheduled = out && labels.includes("SCHEDULED") && !labels.includes("SENT");
   // "X shared a file with you" comes from Google; the person who shared it is in Reply-To.
   const sender = DRIVE_SHARE.test(header(meta, "From")) ? addresses(header(meta, "Reply-To")) : addresses(header(meta, "From"));
   const counterparts = (out ? [...addresses(header(meta, "To")), ...addresses(header(meta, "Cc"))] : sender).filter((e) => !own.has(e));
@@ -172,7 +178,7 @@ function eventsFor(meta: Meta, userId: string, book: Map<string, Entity[]>, own:
     for (const entity of book.get(email) || []) {
       if (seen.has(entity.id)) continue;
       seen.add(entity.id);
-      rows.push({ user_id: userId, gmail_id: meta.id, thread_id: meta.threadId || "", direction: out ? "out" : "in", entity_type: entity.type, entity_id: entity.id, counterpart: email, subject: decodeEntities(header(meta, "Subject")).slice(0, 300), snippet: decodeEntities(meta.snippet || "").slice(0, 240), at, mailbox, message_key: messageKey(meta) });
+      rows.push({ user_id: userId, gmail_id: meta.id, thread_id: meta.threadId || "", direction: out ? "out" : "in", entity_type: entity.type, entity_id: entity.id, counterpart: email, subject: decodeEntities(header(meta, "Subject")).slice(0, 300), snippet: decodeEntities(meta.snippet || "").slice(0, 240), at, mailbox, message_key: messageKey(meta), scheduled });
     }
   }
   return rows;
@@ -298,6 +304,7 @@ const LABEL: Record<string, string> = { contacted: "Contacted", inbound: "Inboun
 async function applyStatuses(admin: Admin, userId: string, entityIds: string[]) {
   if (!entityIds.length) return 0;
   let changed = 0;
+  const nowIso = new Date().toISOString();
   for (const ids of chunk(entityIds, 100)) {
     const since = new Date(Date.now() - BACKFILL_DAYS * 86400000).toISOString();
     const [{ data: events }, { data: creators }, { data: brands }] = await Promise.all([
@@ -320,7 +327,8 @@ async function applyStatuses(admin: Admin, userId: string, entityIds: string[]) 
         const next = NEXT[status]?.[ev.direction as "out" | "in"];
         if (next) {
           status = next;
-          at = ev.at;
+          // A scheduled email carries its future send time; a status change is never dated ahead.
+          at = ev.at > nowIso ? nowIso : ev.at;
           const via = ev.mailbox ? ` (${ev.mailbox})` : "";
           why = ev.direction === "out" ? `you emailed “${ev.subject || "(no subject)"}”${via}` : `they emailed “${ev.subject || "(no subject)"}”${via}`;
         }
@@ -386,12 +394,71 @@ async function backfillCreatorMail(ctx: { admin: Admin; userId: string; mailbox:
   return files;
 }
 
+// ----- scheduled sends -------------------------------------------------------------
+
+// Every run looks again at the emails still waiting in this mailbox's Scheduled
+// folder. Sent → it counts as sent from now on (dated when it went out).
+// Cancelled (Gmail turns it back into a draft), trashed or deleted → the row
+// goes, and a status that only that email had moved is put back.
+async function recheckScheduled(admin: Admin, userId: string, token: string, mailbox: string, deadline: number) {
+  // What Gmail says is waiting right now — also catches rows stored as sent
+  // before scheduled sends were told apart.
+  const waiting = await listIds(token, "in:scheduled", 3).catch(() => [] as string[]);
+  for (const part of chunk(waiting, 200)) await admin.from("email_events").update({ scheduled: true }).eq("user_id", userId).eq("mailbox", mailbox).eq("direction", "out").eq("scheduled", false).in("gmail_id", part);
+  const { data, error } = await admin.from("email_events").select("gmail_id, entity_id, entity_type, direction").eq("user_id", userId).eq("mailbox", mailbox).eq("scheduled", true).limit(300);
+  if (error || !data?.length) return { sent: 0, cancelled: 0 };
+  let sent = 0;
+  const gone: string[] = [];
+  for (const ids of chunk(Array.from(new Set(data.map((r) => r.gmail_id as string))), 10)) {
+    if (Date.now() > deadline) break;
+    await Promise.all(ids.map(async (id) => {
+      const meta = await gmail<Meta>(token, META_PATH(id)).catch((e) => (e instanceof GmailError && e.status === 404 ? null : undefined));
+      if (meta === undefined) return; // Gmail hiccup: look again next run
+      const labels = meta?.labelIds || [];
+      if (!meta || labels.some((l) => l === "DRAFT" || l === "TRASH" || l === "SPAM")) { gone.push(id); return; }
+      const stillScheduled = labels.includes("SCHEDULED") && !labels.includes("SENT");
+      const { error: upd } = await admin.from("email_events").update({ scheduled: stillScheduled, at: sentAt(meta) }).eq("user_id", userId).eq("gmail_id", id);
+      if (!upd && !stillScheduled) sent++;
+    }));
+  }
+  if (!gone.length) return { sent, cancelled: 0 };
+  await admin.from("email_events").delete().eq("user_id", userId).in("gmail_id", gone);
+  const records = Array.from(new Map(data.filter((r) => gone.includes(r.gmail_id) && r.direction === "out").map((r) => [r.entity_id as string, r.entity_type as "creator" | "brand"])).entries());
+  for (const [id, type] of records) await undoScheduledStatus(admin, userId, type, id);
+  return { sent, cancelled: gone.length };
+}
+
+// Gmail moved New → Contacted (or Inbound → Replied) because of an email that
+// never went out: put it back, but only while nothing else you sent counts.
+async function undoScheduledStatus(admin: Admin, userId: string, type: "creator" | "brand", id: string) {
+  const table = type === "creator" ? "creators" : "brands";
+  const { data: record } = await admin.from(table).select("id, name, pipeline_status, status_source, archived_at").eq("id", id).eq("user_id", userId).maybeSingle();
+  if (!record || record.archived_at || record.status_source !== "gmail") return;
+  const [{ data: mail }, { data: logged }] = await Promise.all([
+    admin.from("email_events").select("direction").eq("user_id", userId).eq("entity_id", id).limit(200),
+    admin.from("followups").select("kind").eq("user_id", userId).eq(type === "creator" ? "creator_id" : "brand_id", id).limit(200),
+  ]);
+  const outs = (mail || []).filter((m) => m.direction === "out").length + (logged || []).filter((f) => f.kind !== "reply").length;
+  const ins = (mail || []).filter((m) => m.direction === "in").length + (logged || []).filter((f) => f.kind === "reply").length;
+  if (outs > 0) return;
+  const back = record.pipeline_status === "contacted" && ins === 0 ? "new" : record.pipeline_status === "replied" && ins > 0 ? "inbound" : "";
+  if (!back) return;
+  const patch: Record<string, unknown> = { pipeline_status: back, status_updated_at: new Date().toISOString(), status_source: "gmail" };
+  if (back === "new") patch.date_contacted = null;
+  const { error } = await admin.from(table).update(patch).eq("id", id).eq("user_id", userId).eq("pipeline_status", record.pipeline_status);
+  if (error) return;
+  await admin.from("activities").insert({ user_id: userId, text: `Gmail: the scheduled email to ${record.name} was cancelled — moved back to ${back === "new" ? "New" : "Inbound"}`.slice(0, 500), at: new Date().toISOString(), entity_type: type, entity_id: id });
+}
+
 // ----- one mailbox's sync -------------------------------------------------------
 
 async function syncMailbox(admin: Admin, row: TokenRow, own: Set<string>, book: Map<string, Entity[]>, deadline: number) {
   const token = await accessToken(admin, row);
   if (!(row.scopes || "").includes("gmail.readonly")) throw new GmailError("Gmail read access wasn't granted — reconnect this mailbox and tick “Read your email”.", 403, true);
   const mailbox = mailboxOf(row);
+  // 0. Scheduled sends from earlier runs: gone out, still waiting, or cancelled?
+  //    (First, so a cancelled one is gone before its sent twin is stored.)
+  const scheduled = await recheckScheduled(admin, row.user_id, token, mailbox, deadline - 60_000).catch(() => ({ sent: 0, cancelled: 0 }));
   const all = Array.from(book.keys());
   const done = new Set((row.backfilled || []).map((e) => e.toLowerCase()));
   const fresh = all.filter((e) => !done.has(e));
@@ -458,7 +525,9 @@ async function syncMailbox(admin: Admin, row: TokenRow, own: Set<string>, book: 
   const matched = metas.flatMap((m) => eventsFor(m, row.user_id, book, own, mailbox));
   const rows = await dropCrossMailboxDuplicates(admin, row.user_id, matched);
   for (const part of chunk(rows, 200)) {
-    const { error } = await admin.from("email_events").upsert(part, { onConflict: "user_id,gmail_id,entity_id", ignoreDuplicates: true });
+    let { error } = await admin.from("email_events").upsert(part, { onConflict: "user_id,gmail_id,entity_id", ignoreDuplicates: true });
+    // A database without the scheduled column yet still gets the mail.
+    if (error && /scheduled/.test(error.message)) ({ error } = await admin.from("email_events").upsert(part.map(({ scheduled: _s, ...r }) => r), { onConflict: "user_id,gmail_id,entity_id", ignoreDuplicates: true }));
     if (error) throw new GmailError(`Couldn't store email activity: ${error.message}`);
   }
 
@@ -508,7 +577,7 @@ async function syncMailbox(admin: Admin, row: TokenRow, own: Set<string>, book: 
     if (complete || !historyId) patch.history_id = profile.historyId || historyId;
   }
   await admin.from("gmail_tokens").update(patch).eq("id", row.id);
-  return { mailbox, messages: metas.length, events: rows.length, leads, files: filesSaved, aiRead, statusChanges: changed, complete };
+  return { mailbox, messages: metas.length, events: rows.length, leads, files: filesSaved, aiRead, statusChanges: changed, scheduledChanges: scheduled.sent + scheduled.cancelled, complete };
 }
 
 async function recordError(admin: Admin, row: TokenRow, e: unknown) {
@@ -759,7 +828,7 @@ Deno.serve(async (req) => {
     const sum = (key: string) => results.reduce((s, r) => s + Number(r[key] || 0), 0);
     if (!results.length && !errors.length) return json({ skipped: true });
     const failed = errors.length > 0 && !results.length;
-    return json({ ok: errors.length === 0, events: sum("events"), leads: sum("leads"), files: sum("files"), statusChanges: sum("statusChanges"), mailboxes: results.length, errors, ...(failed ? { error: errors[0].error, reconnect: errors[0].reconnect } : {}) }, failed ? (errors[0].reconnect ? 409 : 502) : 200);
+    return json({ ok: errors.length === 0, events: sum("events"), leads: sum("leads"), files: sum("files"), statusChanges: sum("statusChanges"), scheduledChanges: sum("scheduledChanges"), mailboxes: results.length, errors, ...(failed ? { error: errors[0].error, reconnect: errors[0].reconnect } : {}) }, failed ? (errors[0].reconnect ? 409 : 502) : 200);
   }
 
   if (action === "send") {

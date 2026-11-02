@@ -20,6 +20,10 @@ These are standing instructions from the owner (Dhurim). Follow them in every se
 - Gmail sync: `supabase/functions/gmail-sync` — several mailboxes per user (`gmail_tokens` row per mailbox); the email moves the pipeline forward; any status the user sets by hand wins until a newer email arrives. Shared code lives in `supabase/functions/_shared/` (deploy it with each function that imports it as `../_shared/...`).
 - Google tokens are encrypted (`_shared/googleTokens.ts`, key in Vault via `gmail_token_key()`); never store or log them in plain text.
 - Inbound lead scanner: `_shared/leadScanner.ts` + its test file — run the tests after any change to the rules.
+- Gmail scheduled sends: stored with `email_events.scheduled = true` — they count as your touch (follow-up done) but show as "Scheduled" and are not counted as sent. Every sync re-checks them (`in:scheduled` + per-message labels): sent → flag clears; cancelled/deleted → row removed and a status only that email moved goes back.
+- Outreach counts (dashboard tiles, 14-day chart, coach) all come from one log: `web/src/lib/outreach.ts` (Gmail from every mailbox + hand-logged touches + stamped contact dates, each once). Don't count `data.followups` alone.
+- The coach slide-in shows at most once per 12 h across tabs (localStorage), never on the dashboard (the card is there) or on a profile page.
+- Profile pictures: private `avatars` bucket, `<user id>/...` paths in `avatar_path` (creators, brands, profiles); cropped to 256 px WebP in the browser (`lib/avatars.ts`), shown via batched signed URLs.
 - Influencer profiles have no email draft (users write in Gmail; sync tracks it). Brands keep the composer.
 - Inbound leads are strict: only creator-wants-management, brand-wants-creators, influencer-agency partnership. Warm-up (TrulyInbox "Phone_N0:"), pitches and personal mail never count.
 - Negotiation rules: `_shared/negotiation.ts` (shared by app + server via `web/src/lib/negotiation.ts`). Integrated ⇄ dedicated cascade by the same %; nothing else is inferred. Run its tests after any change.

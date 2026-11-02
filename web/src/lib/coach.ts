@@ -1,4 +1,4 @@
-import type { Brand, Creator, EmailEvent, Followup } from "../types";
+import type { Sent } from "./outreach";
 
 // The coach: one honest read of how today is going — emails sent against the
 // daily goal, follow-ups that slipped past your own rules, people waiting on a
@@ -8,6 +8,8 @@ import type { Brand, Creator, EmailEvent, Followup } from "../types";
 export type CoachStats = {
   goal: number;
   sentToday: number;
+  /** Waiting in Gmail's Scheduled folder (they count once they go out). */
+  scheduled: number;
   yesterday: number;
   weekAvg: number;
   /** Consecutive days (before today) the goal was hit. */
@@ -30,49 +32,22 @@ export type Nudge = {
 
 const dayKey = (d: Date) => `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
 
-/** Outreach per local day: emails you sent (once per message), follow-ups you logged, and first contacts stamped without Gmail. */
-export function outreachByDay(events: EmailEvent[], followups: Followup[], creators: Creator[], brands: Brand[], days = 15, now = new Date()) {
+/** Outreach per local day — every email and follow-up you sent (see lib/outreach), scheduled ones not yet. */
+export function outreachByDay(log: Sent[], days = 15, now = new Date()) {
   const counts = new Map<string, number>();
   const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - (days - 1)).getTime();
-  const seen = new Set<string>();
-  const touched = new Set<string>();
-  for (const e of events) {
-    if (e.direction !== "out") continue;
-    const t = new Date(e.at);
-    if (t.getTime() < start) continue;
+  for (const s of log) {
+    const t = new Date(s.at);
+    if (s.scheduled || t.getTime() < start) continue;
     const key = dayKey(t);
-    touched.add(`${e.entity_id}|${key}`);
-    if (seen.has(e.gmail_id)) continue;
-    seen.add(e.gmail_id);
-    counts.set(key, (counts.get(key) || 0) + 1);
-  }
-  for (const f of followups) {
-    if (f.kind === "reply") continue;
-    const t = new Date(f.at);
-    if (t.getTime() < start) continue;
-    const key = dayKey(t);
-    const who = f.creator_id || f.brand_id || "";
-    if (touched.has(`${who}|${key}`)) continue; // already counted from Gmail
-    touched.add(`${who}|${key}`);
-    counts.set(key, (counts.get(key) || 0) + 1);
-  }
-  for (const r of [...creators, ...brands]) {
-    if (!r.date_contacted || r.archived_at || r.pipeline_status === "inbound") continue;
-    const [y, m, d] = r.date_contacted.split("-").map(Number);
-    if (!y) continue;
-    const t = new Date(y, m - 1, d);
-    if (t.getTime() < start) continue;
-    const key = dayKey(t);
-    if (touched.has(`${r.id}|${key}`)) continue;
-    touched.add(`${r.id}|${key}`);
     counts.set(key, (counts.get(key) || 0) + 1);
   }
   return counts;
 }
 
-export function coachStats(input: { events: EmailEvent[]; followups: Followup[]; creators: Creator[]; brands: Brand[]; goal: number; overdue: number; oldestOverdueDays: number; replyNeeded: number; now?: Date }): CoachStats {
+export function coachStats(input: { log: Sent[]; goal: number; overdue: number; oldestOverdueDays: number; replyNeeded: number; now?: Date }): CoachStats {
   const now = input.now || new Date();
-  const counts = outreachByDay(input.events, input.followups, input.creators, input.brands, 15, now);
+  const counts = outreachByDay(input.log, 15, now);
   const back = (i: number) => counts.get(dayKey(new Date(now.getFullYear(), now.getMonth(), now.getDate() - i))) || 0;
   let streak = 0;
   for (let i = 1; i <= 14; i++) {
@@ -82,7 +57,7 @@ export function coachStats(input: { events: EmailEvent[]; followups: Followup[];
     else break;
   }
   const week = [1, 2, 3, 4, 5, 6, 7].map(back);
-  return { goal: input.goal, sentToday: back(0), yesterday: back(1), weekAvg: Math.round(week.reduce((a, b) => a + b, 0) / 7), streak, overdue: input.overdue, oldestOverdueDays: input.oldestOverdueDays, replyNeeded: input.replyNeeded, hour: now.getHours(), weekday: now.getDay() };
+  return { goal: input.goal, sentToday: back(0), scheduled: input.log.filter((s) => s.scheduled).length, yesterday: back(1), weekAvg: Math.round(week.reduce((a, b) => a + b, 0) / 7), streak, overdue: input.overdue, oldestOverdueDays: input.oldestOverdueDays, replyNeeded: input.replyNeeded, hour: now.getHours(), weekday: now.getDay() };
 }
 
 const pick = <T,>(list: T[], seed: number) => list[Math.abs(seed) % list.length];

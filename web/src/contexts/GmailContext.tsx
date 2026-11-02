@@ -132,7 +132,7 @@ export function GmailProvider({ children }: { children: ReactNode }) {
     busy.current = true;
     setSyncing(true);
     try {
-      const res = await invoke<{ ok?: boolean; skipped?: boolean; events?: number; leads?: number; statusChanges?: number; errors?: { mailbox: string; error: string }[] }>("gmail-sync", { action: "sync", force });
+      const res = await invoke<{ ok?: boolean; skipped?: boolean; events?: number; leads?: number; statusChanges?: number; scheduledChanges?: number; errors?: { mailbox: string; error: string }[] }>("gmail-sync", { action: "sync", force });
       lastSync.current = Date.now();
       if (res.error) {
         await refreshStatus();
@@ -141,7 +141,7 @@ export function GmailProvider({ children }: { children: ReactNode }) {
       if (res.data?.skipped) return { ok: true };
       await refreshStatus();
       // New mail or a moved status: bring the fresh rows in right away.
-      if (res.data && ((res.data.events || 0) > 0 || (res.data.statusChanges || 0) > 0)) refresh.current();
+      if (res.data && ((res.data.events || 0) > 0 || (res.data.statusChanges || 0) > 0 || (res.data.scheduledChanges || 0) > 0)) refresh.current();
       if (res.data && (res.data.leads || 0) > 0) void refreshLeads();
       const partial = res.data?.errors?.[0];
       return partial ? { ok: false, message: `${partial.mailbox}: ${partial.error}` } : { ok: true };

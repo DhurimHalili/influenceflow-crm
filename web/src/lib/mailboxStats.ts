@@ -26,7 +26,7 @@ export function mailboxStats(events: EmailEvent[], leads: InboundLead[], mailbox
   const names = Array.from(new Set([...mailboxes.map((m) => m.toLowerCase()), ...events.map((e) => (e.mailbox || "").toLowerCase()).filter(Boolean)]));
   return names.map((mailbox) => {
     const mine = events.filter((e) => (e.mailbox || "").toLowerCase() === mailbox && new Date(e.at).getTime() >= since);
-    const out = mine.filter((e) => e.direction === "out");
+    const out = mine.filter((e) => e.direction === "out" && !e.scheduled);
     const sentIds = new Set(out.map((e) => e.gmail_id));
     const reachedAt = new Map<string, number>();
     for (const e of out) {

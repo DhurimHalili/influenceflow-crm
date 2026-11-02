@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { AlertCircle, ArrowRight, ArrowUpRight, BarChart3, Building2, CalendarDays, CheckCircle2, Clock3, DollarSign, Handshake, Mail, Plus, Reply, Send, Sparkles, TrendingUp, Trophy, UserCheck, UserPlus, Users, XCircle, Zap } from "lucide-react";
+import { AlertCircle, ArrowRight, ArrowUpRight, BarChart3, Building2, CalendarClock, CalendarDays, CheckCircle2, Clock3, DollarSign, Handshake, Mail, Plus, Reply, Send, Sparkles, TrendingUp, Trophy, UserCheck, UserPlus, Users, XCircle, Zap } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { useData } from "../contexts/DataContext";
 import { Button, EmptyState, Metric, PageHeader, Tabs } from "../components/ui";
@@ -8,8 +8,10 @@ import { useChase } from "../hooks/useChase";
 import { useGmail } from "../contexts/GmailContext";
 import { CoachCard } from "../components/Coach";
 import { TeamBoard } from "../components/Team";
-import { flagFor } from "../lib/followupEngine";
-import { currencySymbol, dateLabel, daysAgoLabel, daysSince, dayKey, dueLabel, isOverdue, isPastDay, isTodayDay, money, parseDay, relativeTime, timeLabel } from "../lib/utils";
+import { flagFor, sendsAt } from "../lib/followupEngine";
+import { scheduledNow, sentIn } from "../lib/outreach";
+import { useOutreach } from "../hooks/useOutreach";
+import { currencySymbol, dateLabel, daysAgoLabel, daysSince, dayKey, dueLabel, isOverdue, isPastDay, isTodayDay, money, relativeTime, timeLabel } from "../lib/utils";
 import { ENTITY_STATUSES, STATUS_LABELS } from "../types";
 
 // One line a day, so the dashboard greets you with something to aim at.
@@ -75,6 +77,7 @@ export default function DashboardPage() {
   const navigate = useNavigate();
   const chase = useChase();
   const gmail = useGmail();
+  const log = useOutreach();
   const creators = data.creators.filter((item) => !item.archived_at);
   const brands = data.brands.filter((item) => !item.archived_at);
   const campaigns = data.campaigns.filter((item) => !item.archived_at);
@@ -118,8 +121,8 @@ export default function DashboardPage() {
     return buckets.map(({ month, deals, total }) => ({ month, deals, value: Math.round(total / 1000) }));
   })();
   // Outreach momentum: real events bucketed into a selectable time range.
-  // Emails = first contacts dated in range; follow-ups = logged follow-up
-  // events; replies/negotiations/lost = status-change events the app writes
+  // Emails and follow-ups = everything you sent (Gmail + logged by hand, see
+  // lib/outreach); replies/negotiations/lost = status-change events the app writes
   // to the activity log. Deals closed = campaigns signed (active) or
   // completed; roster signings = influencers moved onto the roster. Nothing
   // is estimated or placeholder.
@@ -182,12 +185,6 @@ export default function DashboardPage() {
     };
     const statusIn = (status: string, s = start, e = end) =>
       data.activities.filter((a) => a.text.endsWith(` updated to ${status}`) && inR(a.at, s, e)).length;
-    // Date-only first-contact stamps ("2026-10-08") are local calendar days.
-    const inDay = (value: string | null, s = start, e = end) => {
-      const dd = parseDay(value);
-      if (!dd) return false;
-      return dd.getTime() >= new Date(s).setHours(0, 0, 0, 0) && dd.getTime() < e;
-    };
     const createdCampaigns = (s = start, e = end) =>
       data.activities.filter((a) => a.text.endsWith("campaign created") && inR(a.at, s, e)).length;
     // A lost deal is stamped exactly when a replied-or-beyond record moves to
@@ -195,14 +192,11 @@ export default function DashboardPage() {
     // inflate this number.
     const lostIn = (s = start, e = end) =>
       [...creators, ...brands, ...data.contacts, ...campaigns].filter((item) => item.lost_at && inR(item.lost_at, s, e)).length;
-    // Emails sent counts dated first contacts that are still live outreach.
-    // Moving someone back to New revokes theirs (explicit undo); closing the
-    // lead keeps history on the record but drops it from this tile.
-    const LIVE_OUTREACH = ["contacted", "replied", "negotiating", "roster", "signed"];
-    const emails = (s = start, e = end) =>
-      creators.filter((c) => inDay(c.date_contacted, s, e) && LIVE_OUTREACH.includes(c.pipeline_status)).length +
-      brands.filter((b) => inDay(b.date_contacted, s, e) && LIVE_OUTREACH.includes(b.pipeline_status)).length +
-      data.contacts.filter((c) => inDay(c.date_contacted, s, e) && LIVE_OUTREACH.includes(c.pipeline_status)).length;
+    // Emails and follow-ups come from one log (lib/outreach): Gmail from every
+    // connected mailbox, follow-ups logged by hand and stamped contact dates,
+    // each counted once. Scheduled sends count when they actually go out.
+    const emails = (s = start, e = end) => sentIn(log, s, e, "email");
+    const followups = (s = start, e = end) => sentIn(log, s, e, "followup");
     // The first moment each record reached a "won" status, counted once:
     // a campaign that goes active and later completes is one closed deal.
     // Records created straight into that status count from creation.
@@ -226,7 +220,7 @@ export default function DashboardPage() {
     const winsIn = (wins: number[], s = start, e = end) => wins.filter((t) => t >= s && t < e).length;
     const count = {
       emails: emails(),
-      followups: data.followups.filter((f) => inR(f.at)).length,
+      followups: followups(),
       replies: statusIn("replied"),
       negotiating: statusIn("negotiating") + createdCampaigns(),
       closed: winsIn(dealWins),
@@ -236,7 +230,7 @@ export default function DashboardPage() {
     };
     const prev = {
       emails: emails(pStart, pFinish),
-      followups: data.followups.filter((f) => inR(f.at, pStart, pFinish)).length,
+      followups: followups(pStart, pFinish),
       replies: statusIn("replied", pStart, pFinish),
       negotiating: statusIn("negotiating", pStart, pFinish) + createdCampaigns(pStart, pFinish),
       closed: winsIn(dealWins, pStart, pFinish),
@@ -253,7 +247,7 @@ export default function DashboardPage() {
         key: dayKey(new Date(s)),
         label: new Date(s).toLocaleDateString("en-US", { weekday: "short", day: "numeric" }),
         Emails: emails(s, e),
-        "Follow-ups": data.followups.filter((f) => inR(f.at, s, e)).length,
+        "Follow-ups": followups(s, e),
         Replies: statusIn("replied", s, e),
       };
     });
@@ -326,7 +320,9 @@ export default function DashboardPage() {
           const prev = momentum.prev[tile.key];
           const diff = curr - prev;
           const good = tile.invert ? diff < 0 : diff > 0;
-          return <div className="momentum-tile" key={tile.key}><span className="momentum-icon"><tile.icon size={15} /></span><strong>{curr}</strong><small>{tile.label}</small><em className={diff === 0 ? "delta-flat" : good ? "delta-up" : "delta-down"} title={momentum.prevLabel}>{diff === 0 ? `— ${momentum.prevLabel}` : `${diff > 0 ? "+" : ""}${diff} ${momentum.prevLabel}`}</em></div>;
+          const waiting = tile.key === "emails" ? scheduledNow(log, "email") : tile.key === "followups" ? scheduledNow(log, "followup") : [];
+          const next = waiting.map((s) => sendsAt(s.at)).find(Boolean);
+          return <div className="momentum-tile" key={tile.key}><span className="momentum-icon"><tile.icon size={15} /></span><strong>{curr}</strong><small>{tile.label}</small>{waiting.length > 0 && <span className="momentum-sched" title={`Waiting in Gmail's Scheduled folder${next ? ` — next sends ${next}` : ""}. They count here once they go out.`}><CalendarClock size={11} /> {waiting.length}<span className="ms-word"> scheduled</span></span>}<em className={diff === 0 ? "delta-flat" : good ? "delta-up" : "delta-down"} title={momentum.prevLabel}>{diff === 0 ? `— ${momentum.prevLabel}` : `${diff > 0 ? "+" : ""}${diff} ${momentum.prevLabel}`}</em></div>;
         })}</div>
         <div className="daily-strip"><div className="daily-strip-head"><span>Daily outreach · last 14 days</span><span className="daily-legend"><i className="lg-emails" /> Emails <i className="lg-followups" /> Follow-ups <i className="lg-replies" /> Replies</span></div><div className="daily-chart"><ResponsiveContainer width="100%" height="100%"><BarChart data={momentum.daily} margin={{ top: 6, right: 4, left: -18, bottom: 0 }} barCategoryGap="22%"><CartesianGrid stroke="var(--line)" vertical={false} /><XAxis dataKey="label" axisLine={false} tickLine={false} interval="preserveStartEnd" minTickGap={8} tick={{ fill: "var(--muted)", fontSize: 10 }} /><YAxis allowDecimals={false} axisLine={false} tickLine={false} width={34} tick={{ fill: "var(--muted)", fontSize: 11 }} /><Tooltip cursor={{ fill: "rgba(var(--accent-rgb),.06)" }} contentStyle={{ background: "var(--surface-solid)", border: "1px solid var(--line)", borderRadius: 10, fontSize: 13 }} /><Bar dataKey="Emails" stackId="o" fill="var(--accent)" radius={[0, 0, 0, 0]} /><Bar dataKey="Follow-ups" stackId="o" fill="#24a6a1" /><Bar dataKey="Replies" stackId="o" fill="#d59b48" radius={[3, 3, 0, 0]} /></BarChart></ResponsiveContainer></div></div>
       </section>

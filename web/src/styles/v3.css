@@ -335,6 +335,13 @@ svg.logo-mark { display: block; flex: none; width: auto; height: auto; padding: 
 .follow-flag.tone-reply { color: #1d5fb4; background: color-mix(in srgb, #3d8af0 13%, var(--surface-solid)); box-shadow: inset 0 0 0 1px color-mix(in srgb, #3d8af0 30%, transparent); }
 .follow-flag.tone-wait { color: var(--muted); background: var(--surface-alt); }
 .follow-flag.tone-muted { color: var(--muted); background: transparent; box-shadow: inset 0 0 0 1px var(--line); }
+/* Scheduled in Gmail: done on your side, not gone out yet — accent, dashed = "pending". */
+.follow-flag.tone-sched { color: var(--accent); background: var(--accent-soft); box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), .3); }
+.chase-banner.tone-sched { border-style: dashed; border-color: rgba(var(--accent-rgb), .45); background: color-mix(in srgb, var(--accent) 6%, var(--surface-solid)); }
+.chase-banner.tone-sched .chase-icon { background: var(--accent); color: #fff; border-color: transparent; }
+.sched-chip { display: inline-flex; align-items: center; gap: 3px; padding: 0 6px; border-radius: 6px; background: var(--accent-soft); color: var(--accent); font-style: normal; font-size: 9.5px; font-weight: 800; letter-spacing: .3px; text-transform: uppercase; }
+.touch.is-scheduled > i { background: transparent; border: 1.5px dashed rgba(var(--accent-rgb), .6); }
+.touch.is-scheduled .touch-when { color: var(--accent); font-weight: 650; }
 [data-theme="dark"] .follow-flag.tone-due { color: #ffd56b; background: rgba(255, 196, 0, .14); box-shadow: inset 0 0 0 1px rgba(255, 196, 0, .35); }
 [data-theme="dark"] .follow-flag.tone-reply { color: #8ab9ff; }
 .follow-flag.big { margin: 0; padding: 5px 10px; font-size: 11px; }
@@ -876,6 +883,12 @@ body:has(.kit-page) { background: #fbfaf7; }
 .coach-mini { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
 .coach-mini span { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border-radius: 999px; background: var(--surface-alt); font-size: 11.5px; color: var(--text-soft); font-weight: 650; }
 .coach-mini span:first-child svg { color: #e07a2e; }
+.momentum-sched { display: inline-flex; align-items: center; gap: 4px; width: fit-content; max-width: 100%; margin: 3px 0 1px; padding: 1px 7px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-size: 10.5px; font-weight: 750; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: help; }
+.momentum-sched svg { flex: none; }
+.momentum-tile { container-type: inline-size; }
+@container (max-width: 112px) { .momentum-sched .ms-word { display: none; } }
+.coach-mini span.coach-sched { background: var(--accent-soft); color: var(--accent); }
+.coach-mini span.coach-sched svg { color: var(--accent); }
 @media (max-width: 760px) {
   .coach-card { grid-template-columns: auto 1fr; }
   .coach-side { grid-column: 1 / -1; justify-items: stretch; }

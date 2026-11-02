@@ -32,7 +32,8 @@ const partOf = (d: Date) => {
 /** Your emails and their replies with one person, in time order, one per Gmail message. */
 const threadOf = (events: EmailEvent[], id: string) => {
   const seen = new Set<string>();
-  return events.filter((e) => e.entity_id === id && !seen.has(e.gmail_id) && seen.add(e.gmail_id)).sort((a, b) => a.at.localeCompare(b.at));
+  // Scheduled sends haven't gone out: no reply timing from them yet.
+  return events.filter((e) => e.entity_id === id && !e.scheduled && !seen.has(e.gmail_id) && seen.add(e.gmail_id)).sort((a, b) => a.at.localeCompare(b.at));
 };
 
 export function replySpeed(events: EmailEvent[], creatorId: string): ReplySpeed | null {

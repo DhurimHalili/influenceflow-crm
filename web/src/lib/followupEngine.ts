@@ -16,7 +16,9 @@ import { dayKey, parseDay } from "./utils";
 // Roster are never chased, nor archived or snoozed records.
 
 export type TouchSource = "gmail" | "manual" | "legacy";
-export type Touch = { id: string; at: string; dir: "out" | "in"; source: TouchSource; label: string; detail: string; channel: string; threadId?: string; removable: boolean };
+export type Touch = { id: string; at: string; dir: "out" | "in"; source: TouchSource; label: string; detail: string; channel: string; threadId?: string; removable: boolean; mailbox?: string;
+  /** Waiting in Gmail's Scheduled folder: it counts as your touch, but hasn't gone out yet. */
+  scheduled?: boolean };
 
 export type FollowupState =
   | { kind: "idle"; reason: "no-contact" | "paused" | "closed" | "snoozed"; touches: Touch[]; until?: string }
@@ -83,11 +85,13 @@ export function timeline(target: Target, followups: Followup[], events: EmailEve
     at: e.at,
     dir: e.direction,
     source: "gmail",
-    label: e.direction === "out" ? "You emailed" : "They emailed",
+    label: e.direction === "in" ? "They emailed" : e.scheduled ? "Email scheduled" : "You emailed",
     detail: [e.subject || "(no subject)", e.snippet].filter(Boolean).join(" — "),
     channel: "email",
     threadId: e.thread_id,
     removable: false,
+    mailbox: e.mailbox || undefined,
+    scheduled: e.direction === "out" && !!e.scheduled,
   }));
   // Stored newest-first; reversed so touches logged in the same second keep their order.
   const manual = followups
@@ -126,7 +130,10 @@ export function followupState(target: Target, followups: Followup[], events: Ema
   for (let i = touches.length - 1; i >= 0 && touches[i].dir === "out"; i--) round++;
   const followupsSent = round - 1;
   if (rules.stop_after > 0 && followupsSent >= rules.stop_after) return { kind: "exhausted", round, last, touches };
-  const due = dueDate(new Date(last.at), round, rules);
+  // A scheduled email hasn't gone out yet: the clock starts once it does.
+  const from = last.scheduled && new Date(last.at) < now ? now : new Date(last.at);
+  const due = dueDate(from, round, rules);
+  if (last.scheduled) return { kind: "waiting", round, due: dayKey(due), last, touches };
   const today = new Date(now);
   today.setHours(0, 0, 0, 0);
   if (today >= due) return { kind: "due", round, due: dayKey(due), overdueDays: businessDaysBetween(due, today, rules), last, touches };
@@ -157,7 +164,21 @@ const weekday = (key: string) => {
   return new Intl.DateTimeFormat("en-US", diff > 0 && diff < 7 ? { weekday: "long" } : { weekday: "short", month: "short", day: "numeric" }).format(d);
 };
 
-export type Flag = { tone: "due" | "reply" | "wait" | "muted"; short: string; long: string };
+/** "today 9:00", "tomorrow 14:30", "Tue 9:00" — or "" once the time has passed (Gmail's date may be when it was written). */
+export const sendsAt = (iso: string, now = new Date()) => {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime()) || d <= now) return "";
+  const time = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(d);
+  const today = new Date(now);
+  today.setHours(0, 0, 0, 0);
+  const day = new Date(d);
+  day.setHours(0, 0, 0, 0);
+  const diff = Math.round((day.getTime() - today.getTime()) / 86400000);
+  const date = diff === 0 ? "today" : diff === 1 ? "tomorrow" : new Intl.DateTimeFormat("en-US", diff < 7 ? { weekday: "short" } : { month: "short", day: "numeric" }).format(d);
+  return `${date} ${time}`;
+};
+
+export type Flag = { tone: "due" | "reply" | "wait" | "sched" | "muted"; short: string; long: string };
 
 export function flagFor(state: FollowupState): Flag | null {
   switch (state.kind) {
@@ -165,8 +186,13 @@ export function flagFor(state: FollowupState): Flag | null {
       return { tone: "due", short: state.overdueDays > 0 ? `Follow up · ${state.overdueDays}d late` : "Follow up today", long: `No reply to ${roundLabel(state.round)} — send your ${nextFollowupLabel(state.round)}${state.overdueDays > 0 ? ` (due ${state.overdueDays} business day${state.overdueDays === 1 ? "" : "s"} ago)` : " today"}` };
     case "reply-needed":
       return { tone: "reply", short: state.days > 0 ? `Reply · ${state.days}d` : "Reply needed", long: `They wrote ${state.days > 0 ? `${state.days} business day${state.days === 1 ? "" : "s"} ago` : "today"} — your turn to answer` };
-    case "waiting":
+    case "waiting": {
+      if (state.last.scheduled) {
+        const when = sendsAt(state.last.at);
+        return { tone: "sched", short: when ? `Scheduled · ${when}` : "Scheduled", long: `${roundLabel(state.round).replace(/^your/, "Your")} is scheduled in Gmail${when ? ` — it sends ${when}` : ""}. It counts as done; cancel it in Gmail and the reminder comes back.` };
+      }
       return { tone: "wait", short: `Follow up ${weekday(state.due)}`, long: `Waiting for a reply to ${roundLabel(state.round)} — follow up ${weekday(state.due)} if they stay quiet` };
+    }
     case "exhausted":
       return { tone: "muted", short: "No reply", long: `No reply after ${state.round - 1} follow-ups — consider marking them No reply` };
     default:

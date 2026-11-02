@@ -1,8 +1,11 @@
-import { Check, ClipboardPaste, Wand2 } from "lucide-react";
-import { useState } from "react";
+import { ArchiveRestore, Check, ClipboardPaste, ExternalLink, RotateCcw, UserCheck, Wand2 } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { useData } from "../contexts/DataContext";
+import { useToast } from "../contexts/ToastContext";
+import { creatorClashes, similarCreators, type ClashReason } from "../lib/duplicates";
 import { asPlatform, extractFromText, parseFollowers, SOCIAL_META, SOCIAL_ORDER, socialsWithChannel } from "../lib/socials";
-import { compact, dueLabel, erContext, OUTREACH_STAGES, overallStars, RATING_DIMS, ratingScore, scoreLabel, today, weightShares } from "../lib/utils";
+import { compact, dateLabel, dueLabel, erContext, OUTREACH_STAGES, overallStars, RATING_DIMS, ratingScore, scoreLabel, today, weightShares } from "../lib/utils";
 import { ENTITY_STATUSES, STATUS_LABELS, type Creator, type EntityStatus, type Platform, type Priority, type SocialLink, type SocialPlatform } from "../types";
 import { SocialBadge } from "./SocialIcon";
 import { CountryPicker } from "./CountryPicker";
@@ -10,7 +13,7 @@ import { appendSocials, Fold, rowsToSocials, SecondaryEmailField, secondaryEmail
 import type { RateCard } from "../types";
 
 export { socialRow, socialRowError, type SocialDraft };
-import { Input, Select, StarInput, Stars, Textarea } from "./ui";
+import { Avatar, Input, Select, StarInput, Stars, Textarea } from "./ui";
 
 // ---------------------------------------------------------------------------
 // Draft model shared by Add, Edit and Import.
@@ -73,6 +76,32 @@ export function RatingPicker({ draft, setDraft }: { draft: CreatorDraft; setDraf
   const score = ratingScore(draftDims(draft), weights);
   const mainPlatform = draft.socials[0]?.platform;
   return <div className="rating-pick"><div className="rating-pick-head"><span className="field-label">Creator evaluation — your call, star by star</span><span className="overall-preview"><Stars value={score} size={13} showValue /> {scoreLabel(score)}</span></div><div className="rating-pick-grid four">{RATING_DIMS.map((dim) => (<label key={dim.key}><small>{dim.short} <em>{shares[dim.weight]}%</em></small><StarInput value={draft[dim.key]} onChange={(v) => setDraft({ ...draft, [dim.key]: v })} size={18} /></label>))}</div><small className="rating-pick-foot">Weighted like an agency scorecard — audience and brand fit count most. Unrated factors are left out, never counted as zero.{Number(draft.engagement_rate) > 0 && <> · {erContext(Number(draft.engagement_rate), mainPlatform ? asPlatform(mainPlatform) : draft.platform)}</>}</small></div>;
+}
+
+// ---------------------------------------------------------------------------
+// Already in the CRM? Checked live as you type — active and archived records.
+// ---------------------------------------------------------------------------
+
+const REASON_TEXT: Record<ClashReason, string> = { name: "same name", email: "same email", profile: "same profile" };
+
+function ClashNotice({ draft }: { draft: CreatorDraft }) {
+  const data = useData();
+  const { toast } = useToast();
+  const clashes = useMemo(() => creatorClashes(data.creators, { name: draft.name, emails: [draft.contact_email, draft.secondary_email], links: draftSocials(draft).map((s) => s.url) }), [data.creators, draft]);
+  const similar = useMemo(() => similarCreators(data.creators, draft.name, new Set(clashes.map((c) => c.creator.id))), [data.creators, draft.name, clashes]);
+  if (!clashes.length && !similar.length) return null;
+  const active = clashes.filter((c) => !c.archived);
+  const head = active.length ? "Already in your influencers" : clashes.length ? "You archived this influencer before" : "";
+  return <div className={`clash-notice${active.length ? " tone-active" : clashes.length ? " tone-archived" : " tone-soft"}`} role="status" aria-live="polite">
+    {head && <div className="clash-head">{active.length ? <UserCheck size={15} /> : <ArchiveRestore size={15} />}<strong>{head}</strong></div>}
+    {clashes.slice(0, 3).map(({ creator, reasons, archived }) => <div className="clash-row" key={creator.id}>
+      <Avatar name={creator.name} path={creator.avatar_path} size="sm" />
+      <span className="clash-who"><strong>{creator.name}</strong><small>{reasons.map((r) => REASON_TEXT[r]).join(" · ").replace(/^./, (c) => c.toUpperCase())} · {archived ? `archived ${dateLabel(creator.archived_at!)}` : STATUS_LABELS[creator.pipeline_status]}</small></span>
+      <em className={`clash-tag${archived ? " archived" : ""}`}>{archived ? "Archived" : "Added"}</em>
+      {archived ? <button type="button" className="clash-action" onClick={() => { data.archive("creator", [creator.id], true); toast(`${creator.name} restored from the archive`); }}><RotateCcw size={13} /> Restore</button> : <Link className="clash-action" to={`/app/influencers/${creator.id}`} target="_blank" rel="noreferrer">Open <ExternalLink size={12} /></Link>}
+    </div>)}
+    {similar.length > 0 && <p className="clash-similar"><span>{clashes.length ? "Also similar:" : "Similar names in your CRM:"}</span>{similar.map((c) => <Link key={c.id} to={`/app/influencers/${c.id}`} target="_blank" rel="noreferrer">{c.name}<small>{c.archived_at ? "archived" : STATUS_LABELS[c.pipeline_status]}</small></Link>)}</p>}
+  </div>;
 }
 
 // ---------------------------------------------------------------------------
@@ -152,6 +181,8 @@ export function CreatorFields({ draft, setDraft, mode }: Props) {
       <CountryPicker value={draft.country} onChange={(country) => setDraft({ ...draft, country })} />
     </div>
     <SecondaryEmailField email={draft.secondary_email} label={draft.secondary_email_label} onChange={(patch) => setDraft({ ...draft, ...patch })} />
+
+    {mode === "add" && <ClashNotice draft={draft} />}
 
     <SocialsEditor rows={draft.socials} onChange={(socials) => setDraft({ ...draft, socials })} />
 
