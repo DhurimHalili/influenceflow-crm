@@ -1,4 +1,4 @@
-import { AlertTriangle, Bell, Building, Check, ChevronRight, LogOut, MonitorX, FileText, Gauge, Pencil, Plus, Database, Download, FileJson, HardDriveDownload, LockKeyhole, RefreshCcw, RotateCcw, Save, ShieldCheck, Sparkles, Trash2, Upload, UserRound, X } from "lucide-react";
+import { AlertTriangle, Bell, Building, Check, ChevronRight, LogOut, MonitorX, FileText, Gauge, Pencil, Plus, Database, Download, FileJson, HardDriveDownload, LockKeyhole, RefreshCcw, RotateCcw, Save, ShieldCheck, Sparkles, Trash2, Upload, UserRound, X, Users } from "lucide-react";
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Avatar, Button, EmptyState, Input, Modal, PageHeader, Select, Tabs } from "../components/ui";
@@ -12,6 +12,7 @@ import { Stars, Textarea } from "../components/ui";
 import type { EmailTemplate, ThemeName, WorkspaceData } from "../types";
 import { columnKeys } from "../lib/exportFormats";
 import { CoachSettings, FollowupRulesSettings, GmailSettings } from "../components/SettingsGmail";
+import { TeamSettings } from "../components/Team";
 import { CalendarDays, Mail, Target } from "lucide-react";
 import { APP_BUILT_AT, APP_VERSION, liveVersion, reloadInto } from "../lib/appUpdate";
 import { pwnedCount, pwnedMessage } from "../lib/pwned";
@@ -70,6 +71,7 @@ const SECTIONS = [
   { id: "gmail", label: "Gmail", icon: Mail },
   { id: "followups", label: "Follow-up rules", icon: CalendarDays },
   { id: "coach", label: "Daily goal & coach", icon: Target },
+  { id: "team", label: "Team", icon: Users },
   { id: "reminders", label: "Notifications", icon: Bell },
   { id: "scoring", label: "Creator scoring", icon: Gauge },
   { id: "templates", label: "Email templates", icon: FileText },
@@ -296,6 +298,7 @@ export function SettingsPage() {
       <GmailSettings />
       <FollowupRulesSettings />
       <CoachSettings />
+      <TeamSettings />
       <NotificationSettings />
       <ScoringSettings />
       <TemplateSettings />

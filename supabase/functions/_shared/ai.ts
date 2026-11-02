@@ -314,7 +314,7 @@ export async function readAttachment(input: { creator: string; handles: string[]
 - rates: prices shown in the file. audience: audience stats shown in the file (countries %, age ranges %, female %, average views, followers per platform, engagement %). Use 0 / empty when not shown.
 - summary: one short sentence describing what the file is.` },
     media,
-  ], schema, 1500);
+  ], schema, 1500, "medium");
   if (!out) return null;
   const kind = ["media_kit", "rate_card", "stats_screenshot"].includes(String(out.kind)) ? (out.kind as FileReading["kind"]) : "other";
   const belongs = out.belongs_to_creator === "yes" ? "yes" : out.belongs_to_creator === "no" ? "no" : "unclear";

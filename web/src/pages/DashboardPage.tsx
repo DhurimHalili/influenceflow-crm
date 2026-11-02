@@ -7,6 +7,7 @@ import { Button, EmptyState, Metric, PageHeader, Tabs } from "../components/ui";
 import { useChase } from "../hooks/useChase";
 import { useGmail } from "../contexts/GmailContext";
 import { CoachCard } from "../components/Coach";
+import { TeamBoard } from "../components/Team";
 import { flagFor } from "../lib/followupEngine";
 import { currencySymbol, dateLabel, daysAgoLabel, daysSince, dayKey, dueLabel, isOverdue, isPastDay, isTodayDay, money, parseDay, relativeTime, timeLabel } from "../lib/utils";
 import { ENTITY_STATUSES, STATUS_LABELS } from "../types";
@@ -308,6 +309,7 @@ export default function DashboardPage() {
     <PageHeader eyebrow="Private workspace" title={`Good ${new Date().getHours() < 12 ? "morning" : new Date().getHours() < 18 ? "afternoon" : "evening"}, ${data.profile.display_name?.split(" ")[0] || "there"}.`} description={nudgeOfDay()} actions={<Button onClick={() => navigate("/app/campaigns?new=1")}><Plus size={16} /> New campaign</Button>} />
 
     <CoachCard />
+    <TeamBoard />
     <FirstWins />
     {!creators.length && !brands.length ? <EmptyState title="A clear workspace, ready for your relationships" text="Add your first influencer to start building your pipeline." action={<div className="empty-actions"><Button onClick={() => navigate("/app/influencers?new=1")}>Add influencer</Button></div>} /> : <>
       <section className="metric-row">

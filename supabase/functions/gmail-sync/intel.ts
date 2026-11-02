@@ -108,7 +108,7 @@ class Profile {
     this.history = normalizeRateHistory(c.rate_history);
     this.audience = { ...(c.audience || {}) };
     // A price with no history behind it was typed by hand — older mail never replaces it.
-    this.manual = new Set((Object.keys(this.rates) as RateKey[]).filter((k) => Number(this.rates[k]) > 0 && !this.meta[k]));
+    this.manual = new Set((Object.keys(this.rates) as RateKey[]).filter((k) => Number(this.rates[k]) > 0 && (!this.meta[k] || this.meta[k]!.source === "manual")));
   }
   /** Prices from mail sent at `at` may change these keys (never a hand-typed price from older mail, never anything changed after that email). */
   private allowed(prices: Partial<Record<RateKey, number>>, at: string, historical: boolean) {

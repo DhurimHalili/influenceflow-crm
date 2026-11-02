@@ -18,6 +18,8 @@ const HelpPage = lazy(() => import("./pages/PublicPages").then((module) => ({ de
 const DashboardPage = lazy(() => import("./pages/DashboardPage"));
 const ReportsPage = lazy(() => import("./pages/ReportsPage"));
 const LeadsPage = lazy(() => import("./pages/LeadsPage"));
+const InvoicesPage = lazy(() => import("./components/Money").then((m) => ({ default: m.InvoicesPage })));
+const PitchPage = lazy(() => import("./pages/PitchPage"));
 const MediaKitPage = lazy(() => import("./pages/MediaKitPage"));
 const InfluencersPage = lazy(() => import("./pages/InfluencersPage"));
 const InfluencerDetailPage = lazy(() => import("./pages/InfluencersPage").then((module) => ({ default: module.InfluencerDetailPage })));
@@ -79,6 +81,8 @@ export default function App() {
                   <Route path="calendar" element={<CalendarPage />} />
                   <Route path="reports" element={<ReportsPage />} />
                   <Route path="leads" element={<LeadsPage />} />
+                  <Route path="invoices" element={<InvoicesPage />} />
+                  <Route path="pitch" element={<PitchPage />} />
                   <Route path="settings" element={<SettingsPage />} />
                   <Route path="themes" element={<ThemesPage />} />
                   <Route path="deleted" element={<DeletedPage />} />

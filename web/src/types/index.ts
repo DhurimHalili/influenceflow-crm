@@ -1,5 +1,6 @@
 import type { RateEvent, RateMetaMap } from "../lib/negotiation";
 import type { BrandTerms } from "../lib/dealTerms";
+import type { Contract } from "../lib/money";
 export type EntityStatus =
   | "new"
   /** They reached out to you first (website form, DM, inbound email). */
@@ -156,6 +157,10 @@ export interface CreatorFile {
   kind: "media_kit" | "rate_card" | "stats_screenshot" | "other" | "unknown";
   status: "stored" | "analyzed" | "rejected";
   verdict: string;
+  /** bucket = private storage · gmail = big file left in Gmail · link = Canva/Drive/Dropbox link */
+  storage?: "bucket" | "gmail" | "link";
+  url?: string;
+  ai_attempts?: number;
 }
 
 export interface Creator {
@@ -295,6 +300,8 @@ export interface Deliverable {
 export interface Campaign {
   /** How the brand pays (flat, CPM with a window, CPA, hybrid…). */
   brand_terms?: BrandTerms;
+  /** Contract drafted from the deal terms (editable). */
+  contract?: Contract;
   id: string;
   user_id: string;
   name: string;

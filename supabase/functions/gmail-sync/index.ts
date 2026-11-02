@@ -335,6 +335,13 @@ async function applyStatuses(admin: Admin, userId: string, entityIds: string[]) 
 
 // ----- creators' older mail --------------------------------------------------------
 
+/** Take one email for checking. Two syncs at once (a cron run and "Sync now") never read the same email twice. */
+async function claim(admin: Admin, userId: string, gmailId: string) {
+  const { data } = await admin.from("email_events").update({ intel_at: new Date().toISOString() }).eq("user_id", userId).eq("gmail_id", gmailId).is("intel_at", null).select("id");
+  return (data || []).length > 0;
+}
+const unclaim = (admin: Admin, userId: string, gmailId: string) => admin.from("email_events").update({ intel_at: null }).eq("user_id", userId).eq("gmail_id", gmailId);
+
 const STATUS_RANK: Record<string, number> = { roster: 0, signed: 0, negotiating: 1, replied: 2, inbound: 3 };
 
 async function backfillCreatorMail(ctx: { admin: Admin; userId: string; mailbox: string; currency: string; get: Fetcher; budget: { files: number; ai: number }; deadline: number; checked: string[]; creatorId?: string; max?: number }) {
@@ -356,12 +363,13 @@ async function backfillCreatorMail(ctx: { admin: Admin; userId: string; mailbox:
     if (Date.now() > ctx.deadline || seen.size >= (ctx.max ?? 12)) break;
     if (seen.has(ev.gmail_id)) continue;
     seen.add(ev.gmail_id);
+    if (!(await claim(ctx.admin, ctx.userId, ev.gmail_id))) continue; // another sync has it
     const message = await ctx.get<FullMessage>(`/messages/${ev.gmail_id}?format=full`).catch((e) => (e instanceof GmailError && e.status === 404 ? "gone" : null));
-    if (message === null) continue; // temporary trouble: try again next run
+    if (message === null) { await unclaim(ctx.admin, ctx.userId, ev.gmail_id); continue; } // temporary trouble: try again next run
     if (message !== "gone") {
+      // A message that fails to process is still marked done, so it can't block the queue forever.
       const res = await processCreatorMail({ admin: ctx.admin, userId: ctx.userId, mailbox: ctx.mailbox, currency: ctx.currency, message, creatorId: ev.entity_id, get: ctx.get, budget: ctx.budget, historical: true }).catch(() => null);
-      if (!res) continue;
-      files += res.files;
+      files += res?.files || 0;
     }
     ctx.checked.push(ev.gmail_id);
   }
@@ -453,12 +461,13 @@ async function syncMailbox(admin: Admin, row: TokenRow, own: Set<string>, book: 
   const checked: string[] = [];
   for (const ev of creatorMail) {
     if (Date.now() > deadline) break;
+    checked.push(ev.gmail_id);
+    if (!(await claim(admin, row.user_id, ev.gmail_id))) continue; // another sync has it
     const message = await gmail<FullMessage>(token, `/messages/${ev.gmail_id}?format=full`).catch(() => null);
     if (message) {
       const res = await processCreatorMail({ admin, userId: row.user_id, mailbox, currency, message, creatorId: ev.entity_id, get, budget }).catch(() => ({ files: 0, changes: 0 }));
       filesSaved += res.files;
     }
-    checked.push(ev.gmail_id);
   }
 
   // 5c. Older mail from creators that was never checked (kits sent before this

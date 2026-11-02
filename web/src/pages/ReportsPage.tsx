@@ -1,3 +1,4 @@
+import { BestTimeCard } from "../components/Insights";
 import { BarChart3, Clock3, HandCoins, Inbox, Mail, Reply, Send, Target, TrendingDown, Trophy } from "lucide-react";
 import { useMemo } from "react";
 import { Link } from "react-router-dom";
@@ -202,6 +203,7 @@ export default function ReportsPage() {
 
       {report.boxes.length > 0 && <div className="dash-panel report-table wide mailbox-report"><div className="panel-heading"><div><span>Gmail</span><h2>Your mailboxes</h2></div><Link to="/app/settings#gmail">Manage</Link></div><table><thead><tr><th>Mailbox</th><th>Emails sent</th><th>People reached</th><th>Reply rate</th><th>{who === "creator" ? "Roster" : "Signed"} from it</th><th>Inbound leads</th></tr></thead><tbody>{report.boxes.map((b, i) => <tr key={b.mailbox}><td><span className="mbx-cell">{i === 0 && b.sent > 0 && report.boxes.length > 1 && <Trophy size={12} />}{b.mailbox}</span></td><td><b>{b.sent}</b></td><td>{b.reached}</td><td><span className="rate-bar"><i style={{ width: `${b.replyRate}%` }} />{b.reached ? `${b.replyRate}%` : "—"}</span></td><td>{b.won}</td><td>{b.leads}</td></tr>)}</tbody></table></div>}
 
+      <BestTimeCard />
       <div className="dash-panel wide"><div className="panel-heading"><div><span>Money</span><h2>Revenue & profit · 12 months</h2></div><BarChart3 size={16} /></div><div className="report-chart"><ResponsiveContainer width="100%" height="100%"><BarChart data={report.months} margin={{ top: 10, right: 8, left: 0, bottom: 0 }}><CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--line)" /><XAxis dataKey="name" tick={{ fontSize: 11, fill: "var(--muted)" }} axisLine={false} tickLine={false} /><YAxis tick={{ fontSize: 11, fill: "var(--muted)" }} axisLine={false} tickLine={false} tickFormatter={(v) => (v >= 1000 ? `${Math.round(v / 1000)}k` : String(v))} /><Tooltip formatter={(v) => money(Number(v))} cursor={{ fill: "var(--surface-alt)" }} contentStyle={{ borderRadius: 10, border: "1px solid var(--line)", background: "var(--surface-solid)" }} /><Legend wrapperStyle={{ fontSize: 12 }} /><Bar dataKey="Revenue" fill="color-mix(in srgb, var(--accent) 35%, var(--line))" radius={[6, 6, 0, 0]} /><Bar dataKey="Profit" fill="var(--success)" radius={[6, 6, 0, 0]} /></BarChart></ResponsiveContainer></div></div>
       {table("By niche", report.byNiche, who === "creator" ? "Niche" : "Industry")}
       {table("By country", report.byCountry, who === "creator" ? "Country" : "Market")}

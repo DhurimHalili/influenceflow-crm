@@ -28,8 +28,14 @@ export type GmailStatus = {
   connected: boolean;
   mailboxes: Mailbox[];
   maxMailboxes: number;
-  /** The server can read media kits / emails with AI (ANTHROPIC_API_KEY set). */
+  /** The server can read media kits / emails with AI (Gemini keys or ANTHROPIC_API_KEY set). */
   ai: boolean;
+  aiProvider?: "claude" | "gemini" | null;
+  aiModel?: string;
+  /** How many API keys the server rotates through. */
+  aiKeys?: number;
+  /** Every key is out of quota until this time (null = ready now). */
+  aiReadyAt?: string | null;
   /** Convenience: true when at least one mailbox can read / send. */
   canRead: boolean;
   canSend: boolean;
@@ -108,10 +114,10 @@ export function GmailProvider({ children }: { children: ReactNode }) {
 
   const refreshStatus = useCallback(async () => {
     if (!hasSupabase || !user) return setStatus(empty);
-    const res = await invoke<{ configured?: boolean; mailboxes?: Record<string, unknown>[]; maxMailboxes?: number; ai?: boolean }>("gmail-sync", { action: "status" });
+    const res = await invoke<{ configured?: boolean; mailboxes?: Record<string, unknown>[]; maxMailboxes?: number; ai?: boolean; aiProvider?: "claude" | "gemini" | null; aiModel?: string; aiKeys?: number; aiReadyAt?: string | null }>("gmail-sync", { action: "status" });
     if (res.data) {
       const mailboxes = (res.data.mailboxes || []).map(toMailbox);
-      setStatus({ ...empty, loaded: true, configured: !!res.data.configured, mailboxes, maxMailboxes: res.data.maxMailboxes || 5, ai: !!res.data.ai, ...summarize(mailboxes) });
+      setStatus({ ...empty, loaded: true, configured: !!res.data.configured, mailboxes, maxMailboxes: res.data.maxMailboxes || 5, ai: !!res.data.ai, aiProvider: res.data.aiProvider ?? null, aiModel: res.data.aiModel || "", aiKeys: Number(res.data.aiKeys) || 0, aiReadyAt: res.data.aiReadyAt || null, ...summarize(mailboxes) });
     } else setStatus({ ...empty, loaded: true, error: res.status === 404 ? "" : res.error || "" });
   }, [user]);
 
@@ -222,9 +228,10 @@ export const useGmail = () => {
 };
 
 /** Open Gmail's composer in a specific mailbox (browser Gmail picks the account by authuser). */
-export const gmailComposeUrl = (to: string, mailbox?: string, subject = "") => {
+export const gmailComposeUrl = (to: string, mailbox?: string, subject = "", body = "") => {
   const params = new URLSearchParams({ view: "cm", fs: "1", to });
   if (subject) params.set("su", subject);
+  if (body) params.set("body", body.slice(0, 1800));
   if (mailbox) params.set("authuser", mailbox);
   return `https://mail.google.com/mail/?${params}`;
 };
