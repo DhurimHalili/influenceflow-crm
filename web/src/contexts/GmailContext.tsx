@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { hasSupabase, supabase } from "../lib/supabase";
+import { decodeEntities } from "../lib/entities";
 import type { InboundLead } from "../types";
 import { useAuth } from "./AuthContext";
 import { useData } from "./DataContext";
@@ -27,6 +28,8 @@ export type GmailStatus = {
   connected: boolean;
   mailboxes: Mailbox[];
   maxMailboxes: number;
+  /** The server can read media kits / emails with AI (ANTHROPIC_API_KEY set). */
+  ai: boolean;
   /** Convenience: true when at least one mailbox can read / send. */
   canRead: boolean;
   canSend: boolean;
@@ -47,7 +50,7 @@ type GmailValue = GmailStatus & {
   resolveLead: (id: string, patch: Pick<InboundLead, "status"> & Partial<Pick<InboundLead, "entity_type" | "entity_id">>) => Promise<boolean>;
 };
 
-const empty: GmailStatus = { loaded: false, configured: false, connected: false, mailboxes: [], maxMailboxes: 5, canRead: false, canSend: false, lastSyncAt: null, error: "" };
+const empty: GmailStatus = { loaded: false, configured: false, connected: false, mailboxes: [], maxMailboxes: 5, ai: false, canRead: false, canSend: false, lastSyncAt: null, error: "" };
 const GmailContext = createContext<GmailValue | null>(null);
 const AUTO_SYNC_MS = 3 * 60 * 1000;
 const FOCUS_SYNC_AFTER_MS = 60 * 1000;
@@ -75,8 +78,8 @@ const text = (v: unknown) => (typeof v === "string" ? v : "");
 const toMailbox = (m: Record<string, unknown>): Mailbox => ({ id: text(m.id), email: text(m.email).toLowerCase(), canRead: !!m.canRead, canSend: !!m.canSend, lastSyncAt: text(m.lastSyncAt) || null, error: text(m.error), connectedAt: text(m.connectedAt) || null, sentToday: Number(m.sentToday) || 0 });
 const toLead = (r: Record<string, unknown>): InboundLead => ({
   id: text(r.id), email: text(r.email), name: text(r.name), company: text(r.company), mailbox: text(r.mailbox),
-  kind: r.kind === "brand" || r.kind === "creator" ? r.kind : "unknown", score: Number(r.score) || 0,
-  reasons: Array.isArray(r.reasons) ? (r.reasons as unknown[]).map(String) : [], subject: text(r.subject), snippet: text(r.snippet),
+  kind: r.kind === "brand" || r.kind === "creator" || r.kind === "agency" ? r.kind : "unknown", category: text(r.category), score: Number(r.score) || 0,
+  reasons: Array.isArray(r.reasons) ? (r.reasons as unknown[]).map(String) : [], subject: decodeEntities(text(r.subject)), snippet: decodeEntities(text(r.snippet)),
   thread_id: text(r.thread_id), via_form: !!r.via_form, messages: Number(r.messages) || 1, first_at: text(r.first_at), last_at: text(r.last_at),
   status: r.status === "added" || r.status === "dismissed" ? r.status : "new", entity_type: r.entity_type === "creator" || r.entity_type === "brand" ? r.entity_type : null, entity_id: text(r.entity_id) || null,
 });
@@ -105,10 +108,10 @@ export function GmailProvider({ children }: { children: ReactNode }) {
 
   const refreshStatus = useCallback(async () => {
     if (!hasSupabase || !user) return setStatus(empty);
-    const res = await invoke<{ configured?: boolean; mailboxes?: Record<string, unknown>[]; maxMailboxes?: number }>("gmail-sync", { action: "status" });
+    const res = await invoke<{ configured?: boolean; mailboxes?: Record<string, unknown>[]; maxMailboxes?: number; ai?: boolean }>("gmail-sync", { action: "status" });
     if (res.data) {
       const mailboxes = (res.data.mailboxes || []).map(toMailbox);
-      setStatus({ ...empty, loaded: true, configured: !!res.data.configured, mailboxes, maxMailboxes: res.data.maxMailboxes || 5, ...summarize(mailboxes) });
+      setStatus({ ...empty, loaded: true, configured: !!res.data.configured, mailboxes, maxMailboxes: res.data.maxMailboxes || 5, ai: !!res.data.ai, ...summarize(mailboxes) });
     } else setStatus({ ...empty, loaded: true, error: res.status === 404 ? "" : res.error || "" });
   }, [user]);
 

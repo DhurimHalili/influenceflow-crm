@@ -1,21 +1,30 @@
-// Inbound lead scanner: decides whether an email from someone who is NOT in
-// the CRM yet is a real brand or creator enquiry.
+// Inbound lead scanner (v3, strict): is an email from someone who is NOT in
+// the CRM yet one of the only three things an agency treats as an inbound lead?
 //
-// Evidence-based, never "everything new is a lead":
-//   1. Hard filters drop what is never a lead — spam, promotions/social/forum
-//      tabs, mailing lists and bulk mail, auto-replies, no-reply robots,
-//      receipts and security mail, your own mailboxes and colleagues on your
-//      company domain, and email warm-up traffic (tagged with tracking codes).
-//   2. What's left needs positive intent: words people use when they want a
-//      sponsorship, a collab or management ("sponsorship", "your rates",
-//      "media kit", "represent me"…). Personal mail and warm-up chatter don't
-//      have that, so they never cross the bar.
-//   3. Vendor pitches that borrow the same words (SEO, "grow your channel",
-//      guest posts, crypto…) are pushed back down.
-// Every lead carries the reasons it was picked, shown to you in the app, and
-// nothing enters the CRM until you press Add.
+//   1. creator_management  — a creator who wants management / to join your roster
+//   2. brand_needs_creators — a brand that wants your agency to find it creators
+//   3. agency_partnership  — another influencer-marketing / talent agency
+//                            proposing to work together (their brands ⇄ your talent)
 //
+// Every category needs BOTH halves of the evidence, in the sender's own words:
+// who they are (a creator / a brand / an influencer agency) AND what they want
+// (management / creators for a campaign / a partnership around brands & talent).
+// One matching word is never enough.
+//
+// Before that, hard filters drop what is never a lead: spam & promo tabs,
+// lists and bulk mail, auto-replies, robots, colleagues, your own mailboxes —
+// and email warm-up traffic. Warm-up tools (TrulyInbox and others) send
+// AI-written messages that look like real business mail; TrulyInbox stamps a
+// "Phone_N0: 123456789" line (zero, not O) into the body, so the server reads
+// the full body (in memory, never stored) before deciding. Any sales pitch
+// (software, "solutions", demand generation, SEO, growth services, "book a
+// call"…) is rejected outright, even if it borrows the right words.
+//
+// The server can ask Claude for a second opinion on what passes (see ai.ts);
+// a lead is only kept when both agree. Nothing enters the CRM until you add it.
 // Pure TypeScript (no Deno APIs) so it is unit-testable anywhere.
+
+export type LeadCategory = "creator_management" | "brand_needs_creators" | "agency_partnership";
 
 export type ScanInput = {
   from: string;
@@ -23,6 +32,8 @@ export type ScanInput = {
   to?: string;
   subject: string;
   snippet: string;
+  /** Plain-text body, when the server fetched it. Never stored. */
+  body?: string;
   labels: string[];
   headers: Record<string, string>;
   own: string[];
@@ -32,16 +43,14 @@ export type Lead = {
   email: string;
   name: string;
   company: string;
-  kind: "brand" | "creator" | "unknown";
+  kind: "brand" | "creator" | "agency";
+  category: LeadCategory;
   score: number;
   reasons: string[];
   viaForm: boolean;
 };
 
-export const LEAD_THRESHOLD = 4;
-/** One weak word ("campaign") is never enough: real enquiries say more. */
-export const MIN_INTENT = 3;
-export const STRONG_LEAD = 7;
+export const LEAD_THRESHOLD = 6;
 
 const EMAIL_RE = /[A-Z0-9._%+'-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
 const FREE_MAIL = new Set([
@@ -53,42 +62,49 @@ const ROBOT = /^(no-?reply|do-?not-?reply|donotreply|noreply-[\w-]+|notification
 const FORM_SENDERS = /(^|\.)(wix\.com|wixforms\.com|squarespace\.com|squarespace-mail\.com|webflow\.(io|com)|formspree\.io|typeform\.com|jotform\.com|tally\.so|hubspot\.com|hsforms\.com|framer\.com|framerforms\.com|carrd\.co|getform\.io|usebasin\.com|formsubmit\.co|wpforms\.com|elementor\.com|godaddy\.com|shopify\.com|weebly\.com|jimdo\.com|netlify\.com|formkeep\.com|google\.com)$/i;
 const FORM_SUBJECT = /(new (form )?(submission|message|inquiry|enquiry|lead|contact)|form submission|contact (form|request)|website (enquiry|inquiry|message)|you (have|got|received) a new (message|submission|lead)|someone (filled|submitted|sent)|message from your (website|site))/i;
 const AUTO_SUBJECT = /^(auto(matic)?[ -]?reply|out of (the )?office|ooo\b|away from|undeliver|delivery (status|failure|has failed)|returned mail|mail delivery|read:|accepted:|declined:|invitation:|updated invitation)/i;
-// Warm-up tools tag every message with a short tracking code (e.g. "7XK2PQ").
-const WARMUP_TAG = /(^|[\s|•·\-–—:#[(])(?=[A-Z0-9]{5,10}\b)(?=[A-Z0-9]*\d)(?=[A-Z0-9]*[A-Z])[A-Z0-9]{5,10}([\s)\]]|$)/;
-const WARMUP_WORDS = /\b(warm[ -]?up|lemwarm|mailreach|warmbox|warmy|instantly warm|smartlead warm|folderly|mailwarm)\b/i;
 
-type Signal = { re: RegExp; points: number; reason: string; side: "brand" | "creator" | "both" };
-const INTENT: Signal[] = [
-  { re: /\bsponsor(ship|ships|ed|ing)?\b/i, points: 3, reason: "Mentions a sponsorship", side: "brand" },
-  { re: /\b(paid (partnership|promotion|collab(oration)?|campaign|post)|brand deal|brand partnership)\b/i, points: 3, reason: "Talks about a paid brand deal", side: "brand" },
-  { re: /\b(dedicated (video|post|integration)|integrat(ion|ed) (in|into) (your|a) video|youtube integration)\b/i, points: 3, reason: "Asks about an integration or dedicated video", side: "brand" },
-  { re: /\b(collab|collabs|collaborat(e|ion|ions|ing))\b/i, points: 2, reason: "Wants to collaborate", side: "both" },
-  { re: /\bpartner(ship|ships|ing)?\b|\bpartner with\b/i, points: 2, reason: "Proposes a partnership", side: "brand" },
-  { re: /\b(campaign|campaigns|activation|product launch|launch(ing)? (our|a|the) )\b/i, points: 2, reason: "Mentions a campaign", side: "brand" },
-  { re: /\b(rate card|your rates?|pricing for|what (do|would) you charge|how much (do|would) you charge|budget)\b/i, points: 2, reason: "Asks about rates or budget", side: "brand" },
-  { re: /\b(campaign|collab(oration)?|partnership|sponsorship|brand deal|business|creator|influencer|ugc) (inquiry|enquiry|request|proposal|opportunity|brief)\b/i, points: 2, reason: "Labelled as a business inquiry", side: "brand" },
-  { re: /\bmedia ?kit\b/i, points: 2, reason: "Asks for a media kit", side: "brand" },
-  { re: /\b(pr package|gifting|seeding|send you (a|our|some) (product|sample)|product (seeding|gifting))\b/i, points: 2, reason: "Offers product seeding or gifting", side: "brand" },
-  { re: /\b(ugc|usage rights|whitelist(ing)?|spark ads?|paid usage|content licens)\b/i, points: 2, reason: "Mentions UGC or usage rights", side: "brand" },
-  { re: /\b(ambassador|ambassadors|affiliate program|promo code for your)\b/i, points: 2, reason: "Offers an ambassador or affiliate deal", side: "brand" },
-  { re: /\b(influencer marketing|influencers? for (our|a|the)|creators? for (our|a|the)|work with (you|creators|influencers)|feature (our|my) (product|brand|app))\b/i, points: 2, reason: "Looking to work with creators", side: "brand" },
-  { re: /\b(talent|book(ing)? (one of )?your (creators|talent))\b/i, points: 1, reason: "Asks about your talent", side: "brand" },
-  { re: /\b(management|manage me|represent(ation)?|sign with (you|your)|join (your )?(agency|roster|network)|looking for (an? )?(agency|manager)|be represented)\b/i, points: 3, reason: "Wants management or to join your roster", side: "creator" },
-  { re: /\b(i'?m a (content )?creator|i am a (content )?creator|youtuber|tiktoker|streamer|my (youtube|tiktok|instagram|twitch) (channel|account|page))\b/i, points: 2, reason: "Introduces themselves as a creator", side: "creator" },
-  { re: /\bmy (channel|audience|followers|subscribers|community|content)\b/i, points: 2, reason: "Talks about their own audience", side: "creator" },
-  { re: /\b\d+(\.\d+)?\s?(k|m|thousand|million)?\s?(subscribers|subs|followers)\b/i, points: 1, reason: "Shares audience numbers", side: "creator" },
-  { re: /(youtube\.com\/|youtu\.be\/|tiktok\.com\/@|instagram\.com\/|twitch\.tv\/)/i, points: 1, reason: "Links a social profile", side: "creator" },
-];
-const NEGATIVE: { re: RegExp; points: number; reason: string }[] = [
-  { re: /\b(seo|backlinks?|guest post|link (building|insertion)|domain authority|web(site)? (design|development|redesign)|app development|lead generation|outsourc\w*|virtual assistant|white[ -]label)\b/i, points: 5, reason: "Vendor pitch (SEO / dev / outsourcing)" },
-  { re: /\b(grow your (channel|account|audience)|increase (your )?(views|subscribers|followers)|(buy|get) (more )?(followers|subscribers|views)|promotion service|channel (growth|promotion)|monetiz(e|ation) (service|program))\b/i, points: 5, reason: "Growth-service pitch" },
-  { re: /\b(crypto|bitcoin|nft|forex|casino|betting|loan|investment opportunity|airdrop)\b/i, points: 4, reason: "High-risk / spam topic" },
-  { re: /\b(invoice|receipt|order (#|number|confirmation)|payment (received|failed|confirmation)|verify your|verification code|password|security alert|sign[ -]?in attempt|confirm your (email|account))\b/i, points: 5, reason: "Transactional or account mail" },
-  { re: /\b(we help|helping) (agencies|agency owners|brands|companies|businesses|founders)\b|\bscale your (agency|business)\b|\bbook a (call|demo|meeting)\b|\b15[- ]?min(ute)?s?\b|calendly\.com|\bworth a (quick )?chat\b|\bam i mistaken\b|\bmore (clients|leads)\b|\bopen to (a|exploring) (call|partnership|chat)\b/i, points: 4, reason: "Cold sales pitch to your agency" },
-  { re: /\bunsubscribe\b/i, points: 2, reason: "Has an unsubscribe line" },
-  { re: /\b(webinar|newsletter|\d+% off|sale ends|discount code|limited time)\b/i, points: 2, reason: "Marketing email" },
-  { re: /\b(job application|resume|curriculum vitae|\bcv\b|internship|applying for)\b/i, points: 3, reason: "Job application" },
-];
+// ---- warm-up traffic ---------------------------------------------------------
+// TrulyInbox: "Phone_N0: 123456789" (and look-alikes with O/0, space, dash).
+const WARMUP_PHONE = /\bph(one)?[_\s.-]*n[o0][_\s.]*[:#=-]?\s*\+?\d[\d\s-]{6,}\d/i;
+// Other tools tag messages with a short mixed code (e.g. "7XK2PQ") or name themselves.
+const WARMUP_TAG = /(^|[\s|•·\-–—:#[(])(?=[A-Z0-9]{5,10}\b)(?=[A-Z0-9]*\d)(?=[A-Z0-9]*[A-Z])[A-Z0-9]{5,10}([\s)\]]|$)/;
+const WARMUP_WORDS = /\b(warm[ -]?up|trulyinbox|lemwarm|mailreach|warmbox|warmy|mailivery|instantly warm|smartlead warm|folderly|mailwarm|inboxally)\b/i;
+
+// ---- sales pitches: never a lead, whatever else they say ---------------------
+const PITCH = new RegExp([
+  "demand generation", "lead gen(eration)?", "appointment setting", "marketing automation", "sales automation", "outbound (sales|campaigns?)", "cold (email|outreach) (service|campaigns?)",
+  "we can help (you|your)", "we help (agencies|agency owners|brands|companies|businesses|founders|creators)", "helping (agencies|brands|companies|businesses|creators) (to )?(grow|scale|get)",
+  "our (platform|software|tool|app|saas|solution|service|services|product) (helps|can|will|lets|allows)", "(software|saas) (solution|platform)", "free trial", "(book|schedule|hop on) a (quick )?(call|demo|meeting)", "calendly\\.com",
+  "worth a (quick )?chat", "quick call", "am i mistaken", "(more|qualified) (clients|leads|meetings)", "increase (your )?(sales|revenue|roi|conversions)", "case stud(y|ies)", "pricing plans?",
+  "seo", "backlinks?", "guest post", "link (building|insertion)", "web(site)? (design|development|redesign)", "app development", "outsourc\\w*", "virtual assistant", "white[ -]label",
+  "grow your (channel|account|audience|agency|business)", "(buy|get) (more )?(followers|subscribers|views)", "promotion service", "channel (growth|promotion)",
+  "crypto", "bitcoin", "nft", "forex", "casino", "betting", "loan", "investment opportunit(y|ies)", "airdrop",
+  "invoice", "receipt", "order (#|number|confirmation)", "verify your", "verification code", "password", "security alert",
+  "webinar", "newsletter", "\\d+% off", "discount code", "limited time", "unsubscribe",
+].map((p) => `\\b${p}\\b`).join("|"), "i");
+
+// ---- the two halves of each category ------------------------------------------
+const CREATOR_SELF = /\b(i'?m|i am|i'm a|we are|we're) (a |an )?(\w+ ){0,2}(content creator|creator|youtuber|tiktoker|streamer|influencer|podcaster|vlogger)\b|\bmy (youtube|tiktok|instagram|twitch|kick) (channel|account|page)\b|\bmy (channel|audience|community) (has|is|reaches|grew)\b|\bi (make|create|post|upload) (\w+ )?(videos|content|shorts|reels)\b|\b\d+(\.\d+)?\s?(k|m|thousand|million)?\+?\s?(subscribers|subs|followers)\b/i;
+const CREATOR_ASK = /\b(looking for|seeking|searching for|need|want|would love|interested in|open to) (a |an |some )?(new )?(management|manager|agency|representation|talent agency)\b|\b(represent|manage|sign) (me|my channel)\b|\b(join|be part of|be on|get on) (your )?(roster|agency|talent roster|network)\b|\bsign (with|to) (you|your agency)\b|\bmanagement (deal|contract|agreement|offer)\b|\b(would|could|do) (you|your agency) (be interested in |consider )?(represent|manag|sign)(ing)?\b/i;
+const BRAND_SELF = /\b(our|my) (brand|company|product|products|app|game|startup|store|shop|skincare line|clothing line|collection)\b|\bwe (are|'re) (a|an) [\w\s&-]{0,30}(brand|company|startup|label)\b|\b(i'?m|i am) (the |a )?[\w\s]{0,25}(marketing|brand|partnerships?|influencer|growth|social media)[\w\s]{0,12}(manager|lead|director|head|coordinator|specialist)\b|\bon behalf of [A-Z][\w&]+/i;
+const BRAND_ASK = /\b(looking for|looking to (work|partner) with|want(ing)? to (work|partner) with|searching for|need|hire|book|source|find) [\w\s,]{0,25}(creators|influencers|youtubers|tiktokers|streamers|talent)\b|\b(influencer|creator) (campaign|marketing campaign|program|partnership)s?\b|\bwork with (your|some of your) (creators|talent|influencers|roster)\b|\b(your )?(roster|talent)('s)? (rates|availability|media kits?)\b|\b(sponsor|sponsorship) (of|for|with) (your|one of your|a few of your) (creators|talent)\b/i;
+const AGENCY_SELF = /\b(our|my) (influencer marketing|influencer|talent management|talent|creator management|creator|management) (agency|company|network|firm)\b|\b(we are|we're|we run|i run|i own|i manage|i'?m (the )?(founder|co-?founder|ceo|head|director|partner|owner) (of|at))\b[\s\S]{0,60}?\b(influencer marketing|talent management|creator management|influencer|talent|creator) (agency|company|network|firm)\b|\bas an? (influencer marketing|talent|creator|influencer) agency\b|\b(mcn|multi-channel network)\b/i;
+const AGENCY_ASK = /\b(partner(ship)?|collaborat\w*|work together|team up|join forces|co-?operat\w*|referral (deal|partnership)|revenue share)\b/i;
+const AGENCY_ASSETS = /\b(our|your) (brands|brand clients|clients|talent|creators|roster|influencers)\b|\b(share|exchange|refer|swap|connect|bring) (our |your )?(brands|clients|talent|creators|deals|campaigns)\b|\bbrands? (for|to) your (creators|talent|roster)\b|\b(creators|talent) for our (brands|clients)\b/i;
+
+const LINK = /(youtube\.com\/|youtu\.be\/|tiktok\.com\/@|instagram\.com\/|twitch\.tv\/|kick\.com\/)/i;
+const BUDGET = /\b(budget|paid|fee|rates?|compensat\w+|\$\s?\d|€\s?\d|£\s?\d|usd|eur)\b/i;
+
+const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " " };
+/** Gmail snippets and HTML bodies arrive entity-encoded (&#39; …). */
+export const decodeEntities = (text: string) =>
+  text.replace(/&(#x?[0-9a-f]+|[a-z]+);/gi, (m, code: string) => {
+    if (code[0] === "#") {
+      const n = code[1].toLowerCase() === "x" ? parseInt(code.slice(2), 16) : parseInt(code.slice(1), 10);
+      return Number.isFinite(n) && n > 0 && n < 0x110000 ? String.fromCodePoint(n) : m;
+    }
+    return ENTITIES[code.toLowerCase()] ?? m;
+  });
 
 const addressesIn = (value: string | undefined) => Array.from(new Set((value || "").match(EMAIL_RE)?.map((e) => e.toLowerCase()) || []));
 const domainOf = (email: string) => email.split("@")[1] || "";
@@ -102,68 +118,102 @@ const companyFrom = (domain: string) => {
   return core ? core.charAt(0).toUpperCase() + core.slice(1) : "";
 };
 
-export function scanForLead(input: ScanInput): Lead | null {
+/** Quoted replies and signatures say nothing about what *this* sender wants. */
+const ownWords = (body: string) => {
+  const lines = body.replace(/\r/g, "").split("\n");
+  const out: string[] = [];
+  for (const line of lines) {
+    if (/^\s*>/.test(line)) continue;
+    if (/^\s*On .{5,120} wrote:\s*$/.test(line) || /^-{2,}\s*(original message|forwarded message)/i.test(line)) break;
+    out.push(line);
+  }
+  return out.join("\n").slice(0, 8000);
+};
+
+export type Precheck = { ok: false } | { ok: true; sender: string; viaForm: boolean };
+
+/** Cheap filters on headers + preview, before the server spends a call on the body. */
+export function precheck(input: ScanInput): Precheck {
   const labels = input.labels || [];
   const h = (name: string) => input.headers[name.toLowerCase()] || "";
   const own = new Set(input.own.map((e) => e.toLowerCase()));
   const ownDomains = new Set(input.own.map(domainOf).filter((d) => d && !FREE_MAIL.has(d)));
-  if (labels.some((l) => ["SPAM", "TRASH", "DRAFT", "SENT", "CHAT"].includes(l))) return null;
-
+  if (labels.some((l) => ["SPAM", "TRASH", "DRAFT", "SENT", "CHAT"].includes(l))) return { ok: false };
   const sender = addressesIn(input.from)[0] || "";
-  if (!sender || own.has(sender)) return null;
-  const subject = (input.subject || "").slice(0, 300);
-  const text = `${subject}\n${input.snippet || ""}`;
+  if (!sender || own.has(sender)) return { ok: false };
+  const subject = input.subject || "";
   const senderDomain = domainOf(sender);
-  const senderLocal = sender.split("@")[0];
+  const viaForm = FORM_SUBJECT.test(subject) && (FORM_SENDERS.test(senderDomain) || ROBOT.test(sender.split("@")[0]) || ownDomains.has(senderDomain) || !!input.replyTo);
+  if (!viaForm) {
+    if (ROBOT.test(sender.split("@")[0])) return { ok: false };
+    if (ownDomains.has(senderDomain)) return { ok: false }; // a colleague
+    if (labels.some((l) => ["CATEGORY_PROMOTIONS", "CATEGORY_SOCIAL", "CATEGORY_FORUMS"].includes(l))) return { ok: false };
+    if (h("list-id") || /^(bulk|list|junk)$/i.test(h("precedence").trim())) return { ok: false };
+  }
+  const auto = h("auto-submitted");
+  if ((auto && !/^no$/i.test(auto.trim())) || h("x-autoreply") || h("x-autorespond") || AUTO_SUBJECT.test(subject)) return { ok: false };
+  // Only read the body when the preview is even remotely about our business.
+  const hint = /\b(creator|influencer|talent|management|manager|agency|roster|brand|sponsor|collab|partner|campaign|channel|subscribers|followers|youtube|tiktok|instagram|twitch|represent)/i;
+  if (!viaForm && !hint.test(`${subject} ${decodeEntities(input.snippet || "")}`)) return { ok: false };
+  return { ok: true, sender, viaForm };
+}
 
-  // Website contact forms arrive from a robot address; the real person is in Reply-To or the text.
-  const viaForm = FORM_SUBJECT.test(subject) && (FORM_SENDERS.test(senderDomain) || ROBOT.test(senderLocal) || ownDomains.has(senderDomain) || !!input.replyTo);
-  let email = sender;
+export function scanForLead(input: ScanInput): Lead | null {
+  const pre = precheck(input);
+  if (!pre.ok) return null;
+  const h = (name: string) => input.headers[name.toLowerCase()] || "";
+  const own = new Set(input.own.map((e) => e.toLowerCase()));
+  const subject = decodeEntities(input.subject || "").slice(0, 300);
+  const fullBody = decodeEntities(input.body || "");
+  const snippet = decodeEntities(input.snippet || "");
+  const words = ownWords(fullBody) || snippet;
+  const text = `${subject}\n${words}`;
+
+  // Warm-up traffic: markers can sit anywhere, including the signature.
+  if (WARMUP_PHONE.test(fullBody) || WARMUP_PHONE.test(snippet) || WARMUP_WORDS.test(`${subject}\n${fullBody}\n${snippet}`) || WARMUP_TAG.test(subject) || WARMUP_TAG.test(snippet.slice(-40))) return null;
+  if (PITCH.test(text)) return null;
+
+  let email = pre.sender;
   let name = displayName(input.from);
-  if (viaForm) {
-    const candidate = [...addressesIn(input.replyTo), ...addressesIn(input.snippet)].find((e) => !own.has(e) && e !== sender && !ROBOT.test(e.split("@")[0]));
+  if (pre.viaForm) {
+    const candidate = [...addressesIn(input.replyTo), ...addressesIn(words)].find((e) => !own.has(e) && e !== pre.sender && !ROBOT.test(e.split("@")[0]));
     if (!candidate) return null;
     email = candidate;
     name = input.replyTo ? displayName(input.replyTo) : "";
-  } else {
-    if (ROBOT.test(senderLocal)) return null;
-    if (ownDomains.has(senderDomain)) return null; // a colleague
-    if (labels.some((l) => ["CATEGORY_PROMOTIONS", "CATEGORY_SOCIAL", "CATEGORY_FORUMS"].includes(l))) return null;
-    if (h("list-id") || /^(bulk|list|junk)$/i.test(h("precedence").trim())) return null;
   }
-  const auto = h("auto-submitted");
-  if ((auto && !/^no$/i.test(auto.trim())) || h("x-autoreply") || h("x-autorespond") || AUTO_SUBJECT.test(subject)) return null;
-  if (WARMUP_WORDS.test(text) || WARMUP_TAG.test(subject) || WARMUP_TAG.test((input.snippet || "").slice(-40))) return null;
 
   const reasons: string[] = [];
-  let score = 0;
-  let brand = 0;
-  let creator = 0;
-  let intent = 0;
-  for (const s of INTENT) {
-    if (!s.re.test(text)) continue;
-    score += s.points;
-    intent += s.points;
-    reasons.push(s.reason);
-    if (s.side !== "creator") brand += s.points;
-    if (s.side !== "brand") creator += s.points;
+  let category: LeadCategory | null = null;
+  if (AGENCY_SELF.test(text) && AGENCY_ASK.test(text) && AGENCY_ASSETS.test(text)) {
+    category = "agency_partnership";
+    reasons.push("Says they run an influencer / talent agency", "Proposes working together on brands and talent");
+  } else if (CREATOR_SELF.test(text) && CREATOR_ASK.test(text)) {
+    category = "creator_management";
+    reasons.push("Introduces themselves as a creator", "Asks for management or to join your roster");
+  } else if (BRAND_SELF.test(text) && BRAND_ASK.test(text)) {
+    category = "brand_needs_creators";
+    reasons.push("Writes for a brand", "Wants your agency to find creators for them");
   }
-  if (intent < MIN_INTENT && !viaForm) return null;
-  for (const n of NEGATIVE) {
-    if (!n.re.test(text)) continue;
-    score -= n.points;
-    reasons.push(`− ${n.reason}`);
-  }
-  if (viaForm) { score += 3; reasons.unshift("Came through your website contact form"); }
+  if (!category) return null;
+
+  let score = 6;
+  if (pre.viaForm) { score += 2; reasons.unshift("Came through your website contact form"); }
   const company = !FREE_MAIL.has(domainOf(email)) ? companyFrom(domainOf(email)) : "";
-  if (company && !viaForm) { score += 1; brand += 1; reasons.push(`Company email · ${domainOf(email)}`); }
-  if (labels.includes("IMPORTANT")) { score += 1; reasons.push("Gmail marked it important"); }
-  if (labels.includes("CATEGORY_UPDATES")) score -= 1;
-  if (h("list-unsubscribe")) { score -= 2; reasons.push("− Sent with a mass-mail tool"); }
-  // A reply in an existing thread is rarely someone reaching out first.
+  if (company && category !== "creator_management") { score += 1; reasons.push(`Company email · ${domainOf(email)}`); }
+  if (category === "creator_management" && LINK.test(text)) { score += 1; reasons.push("Links their channel"); }
+  if (category === "brand_needs_creators" && BUDGET.test(text)) { score += 1; reasons.push("Mentions budget or pay"); }
+  if (input.labels.includes("IMPORTANT")) score += 1;
+  if (input.labels.includes("CATEGORY_UPDATES")) score -= 1;
+  if (h("list-unsubscribe")) { score -= 3; reasons.push("− Sent with a mass-mail tool"); }
   if (/^re:/i.test(subject) && (h("in-reply-to") || h("references"))) { score -= 3; reasons.push("− Reply in an older thread"); }
   if (score < LEAD_THRESHOLD) return null;
 
-  const kind = brand > creator ? "brand" : creator > brand ? "creator" : FREE_MAIL.has(domainOf(email)) ? "creator" : "brand";
-  return { email, name, company, kind, score, reasons: reasons.slice(0, 6), viaForm };
+  const kind = category === "creator_management" ? "creator" : category === "agency_partnership" ? "agency" : "brand";
+  return { email, name, company, kind, category, score, reasons: reasons.slice(0, 6), viaForm: pre.viaForm };
 }
+
+export const CATEGORY_LABEL: Record<LeadCategory, string> = {
+  creator_management: "Creator wants management",
+  brand_needs_creators: "Brand wants creators",
+  agency_partnership: "Agency partnership",
+};

@@ -22,9 +22,11 @@ export type KitData = {
   agency: string;
   contact_email: string;
   updated_at: string;
+  /** Only numbers proven by a media kit or analytics screenshot. */
+  audience?: { top_countries: { country: string; pct: number }[]; age_ranges: { range: string; pct: number }[]; gender_female_pct: number; source: string };
 };
 
-export type KitOptions = { about: string; showRates: boolean; showContact: boolean; contactEmail: string };
+export type KitOptions = { about: string; showRates: boolean; showContact: boolean; contactEmail: string; showAudience?: boolean };
 
 const SLUG_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
 export const newSlug = (length = 14) => Array.from(crypto.getRandomValues(new Uint8Array(length)), (b) => SLUG_CHARS[b % SLUG_CHARS.length]).join("");
@@ -43,7 +45,11 @@ export const snapshot = (creator: Creator, options: KitOptions, ctx: { currency:
   followers: (creator.socials || []).reduce((sum, s) => sum + (s.followers || 0), 0),
   avg_views: creator.avg_views || 0,
   engagement_rate: creator.engagement_rate || 0,
-  rates: options.showRates ? RATE_FIELDS.filter((f) => (creator.rates?.[f.key] || 0) > 0).map((f) => ({ label: f.label, value: creator.rates[f.key], addon: f.group === "addon" })) : [],
+  // Brands see the creator's list price — never what you negotiated.
+  rates: options.showRates ? RATE_FIELDS.filter((f) => (creator.rates?.[f.key] || 0) > 0).map((f) => ({ label: f.label, value: creator.rate_meta?.[f.key]?.list || creator.rates[f.key], addon: f.group === "addon" })) : [],
+  audience: options.showAudience !== false && creator.audience?.verified && (creator.audience.verified.top_countries.length || creator.audience.verified.age_ranges.length || creator.audience.verified.gender_female_pct)
+    ? { top_countries: creator.audience.verified.top_countries.slice(0, 5), age_ranges: creator.audience.verified.age_ranges.slice(0, 6), gender_female_pct: creator.audience.verified.gender_female_pct, source: creator.audience.verified.kind === "stats_screenshot" ? "platform analytics" : "the creator's media kit" }
+    : undefined,
   currency: ctx.currency,
   agency: ctx.agency,
   contact_email: options.showContact && validEmail(options.contactEmail) ? options.contactEmail.trim() : "",

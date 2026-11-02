@@ -1,6 +1,6 @@
 import { Mail, MapPin, Printer } from "lucide-react";
 import { useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useLocation, useParams } from "react-router-dom";
 import { SocialBadge } from "../components/SocialIcon";
 import { LogoMark } from "../components/ui";
 import { fetchPublicKit, type KitData } from "../lib/mediaKit";
@@ -28,9 +28,12 @@ export default function MediaKitPage() {
       alive = false;
     };
   }, [slug]);
+  const location = useLocation();
   useEffect(() => {
     if (kit) document.title = `${kit.name} · Media kit`;
-  }, [kit]);
+    // "Download PDF" from the CRM opens the kit with ?print=1.
+    if (kit && new URLSearchParams(location.search).get("print") === "1") window.setTimeout(() => window.print(), 500);
+  }, [kit, location.search]);
 
   if (kit === undefined) return <div className="kit-page kit-loading"><LogoMark size={36} /></div>;
   if (!kit) return <div className="kit-page kit-missing"><LogoMark size={36} /><h1>This media kit isn't available</h1><p>The link may have been taken offline. Ask the agency for a fresh one.</p></div>;
@@ -58,6 +61,12 @@ export default function MediaKitPage() {
       {kit.engagement_rate > 0 && <div><strong>{kit.engagement_rate}%</strong><span>Engagement rate</span></div>}
       {kit.socials.length > 0 && <div><strong>{kit.socials.length}</strong><span>Platform{kit.socials.length === 1 ? "" : "s"}</span></div>}
     </section>
+
+    {kit.audience && <section className="kit-block"><h2>Audience <small className="kit-verified">Verified from {kit.audience.source}</small></h2><div className="kit-audience">
+      {kit.audience.top_countries.length > 0 && <div className="kit-aud-col"><span>Top countries</span>{kit.audience.top_countries.map((c) => <div key={c.country} className="kit-bar"><em>{c.country}</em><i><b style={{ width: `${Math.min(100, c.pct)}%` }} /></i><strong>{Math.round(c.pct)}%</strong></div>)}</div>}
+      {kit.audience.age_ranges.length > 0 && <div className="kit-aud-col"><span>Age</span>{kit.audience.age_ranges.map((a) => <div key={a.range} className="kit-bar"><em>{a.range}</em><i><b style={{ width: `${Math.min(100, a.pct)}%` }} /></i><strong>{Math.round(a.pct)}%</strong></div>)}</div>}
+      {kit.audience.gender_female_pct > 0 && <div className="kit-aud-col"><span>Gender</span><div className="kit-gender"><i><b style={{ width: `${kit.audience.gender_female_pct}%` }} /></i><small><em>Female {Math.round(kit.audience.gender_female_pct)}%</em><em>Male {Math.round(100 - kit.audience.gender_female_pct)}%</em></small></div></div>}
+    </div></section>}
 
     {kit.about && <section className="kit-block"><h2>About</h2><p className="kit-about">{kit.about}</p></section>}
 

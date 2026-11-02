@@ -1,4 +1,4 @@
-import { ArrowRight, Building2, Check, ExternalLink, Inbox, Mail, RotateCcw, ScanSearch, ShieldCheck, Sparkles, UserRound, X } from "lucide-react";
+import { ArrowRight, Building2, Check, ExternalLink, Handshake, Inbox, Mail, RotateCcw, ScanSearch, ShieldCheck, Sparkles, UserRound, X } from "lucide-react";
 import { useMemo } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { blankBrand, brandValue } from "../components/BrandForm";
@@ -14,7 +14,8 @@ import type { InboundLead } from "../types";
 // People who wrote to one of your mailboxes first and look like a real brand
 // or creator enquiry. The scanner explains every pick; you decide.
 
-const strength = (score: number) => (score >= 9 ? { label: "Strong", tone: "strong" } : score >= 6 ? { label: "Likely", tone: "good" } : { label: "Possible", tone: "maybe" });
+const strength = (score: number) => (score >= 9 ? { label: "Strong", tone: "strong" } : score >= 7 ? { label: "Likely", tone: "good" } : { label: "Possible", tone: "maybe" });
+const CATEGORY: Record<string, string> = { creator_management: "Creator wants management", brand_needs_creators: "Brand wants creators", agency_partnership: "Agency partnership" };
 const threadUrl = (lead: InboundLead) => `https://mail.google.com/mail/?authuser=${encodeURIComponent(lead.mailbox)}#all/${encodeURIComponent(lead.thread_id)}`;
 const nameFor = (lead: InboundLead) => lead.name || (lead.kind === "brand" && lead.company) || lead.email.split("@")[0].replace(/[._-]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 
@@ -38,12 +39,12 @@ export default function LeadsPage() {
   };
 
   const note = (lead: InboundLead) => `Inbound email${lead.via_form ? " via your website form" : ""} to ${lead.mailbox} on ${dateLabel(lead.first_at)}: “${lead.subject || "(no subject)"}” — ${lead.snippet}`.slice(0, 1000);
-  const add = async (lead: InboundLead, type: "creator" | "brand") => {
+  const add = async (lead: InboundLead, type: "creator" | "brand", partner = false) => {
     const day = (lead.first_at || new Date().toISOString()).slice(0, 10);
     const name = nameFor(lead);
     const record = type === "creator"
       ? data.addCreator(draftToCreator({ ...emptyDraft, name, contact_email: lead.email, pipeline_status: "inbound", date_contacted: day, notes: note(lead), next_action: "Reply to their inbound email" }))
-      : data.addBrand(brandValue({ ...blankBrand, name: lead.company || name, domain: lead.company ? lead.email.split("@")[1] : "", contact_email: lead.email, pipeline_status: "inbound", date_contacted: day, notes: note(lead), next_action: "Reply to their inbound email" }));
+      : data.addBrand(brandValue({ ...blankBrand, name: lead.company || name, domain: lead.company ? lead.email.split("@")[1] : "", brand_type: partner ? "Agency partner" : blankBrand.brand_type, contact_email: lead.email, pipeline_status: "inbound", date_contacted: day, notes: note(lead), next_action: partner ? "Reply about the agency partnership" : "Reply to their inbound email" }));
     const ok = await gmail.resolveLead(lead.id, { status: "added", entity_type: type, entity_id: record.id });
     toast(`${record.name} added as ${type === "creator" ? "an influencer" : "a brand"} · Inbound${ok ? "" : " (couldn't update the lead list)"}`);
     navigate(type === "creator" ? `/app/influencers/${record.id}` : `/app/brands/${record.id}`);
@@ -64,7 +65,7 @@ export default function LeadsPage() {
     if (ok) toast("Back in your new leads");
   };
 
-  const header = <PageHeader eyebrow="Gmail scanner" title="Inbound leads" description="Brands and creators who emailed you first and aren't in your CRM yet. Newsletters, warm-up mail, sales pitches and personal email are filtered out — every pick says why." actions={gmail.connected ? <Button variant="secondary" onClick={() => void gmail.syncNow(true).then((r) => { void gmail.refreshLeads(); toast(r.ok ? "Inboxes scanned" : r.message || "Scan failed", r.ok ? "success" : "error"); })} loading={gmail.syncing}><ScanSearch size={15} /> Scan now</Button> : undefined} />;
+  const header = <PageHeader eyebrow="Gmail scanner" title="Inbound leads" description="Only three things count: a creator asking for management, a brand asking you to find creators, or an influencer agency proposing a partnership. Warm-up mail, sales pitches, newsletters and personal email are filtered out — every pick says why." actions={gmail.connected ? <Button variant="secondary" onClick={() => void gmail.syncNow(true).then((r) => { void gmail.refreshLeads(); toast(r.ok ? "Inboxes scanned" : r.message || "Scan failed", r.ok ? "success" : "error"); })} loading={gmail.syncing}><ScanSearch size={15} /> Scan now</Button> : undefined} />;
 
   if (gmail.loaded && !gmail.connected) return <div className="leads-page">{header}<div className="leads-connect"><span className="leads-connect-icon"><Inbox /></span><h2>Let your inbox find your next deals</h2><p>Connect Gmail and InfluenceFlow reads the sender, subject and preview of new mail — never bodies — to spot real sponsorship, collab and management enquiries.</p><Link className="btn btn-primary" to="/app/settings#gmail"><Mail size={15} /> Connect Gmail</Link><small><ShieldCheck size={13} /> Tokens are encrypted and never reach your browser.</small></div></div>;
 
@@ -79,7 +80,7 @@ export default function LeadsPage() {
         <div className="lead-top">
           <Avatar name={nameFor(lead)} />
           <div className="lead-who"><strong>{nameFor(lead)}{lead.company && lead.name ? <span> · {lead.company}</span> : null}</strong><small>{lead.email}</small></div>
-          <span className={`lead-kind kind-${lead.kind}`}>{lead.kind === "creator" ? <UserRound size={12} /> : <Building2 size={12} />}{lead.kind === "creator" ? "Creator" : lead.kind === "brand" ? "Brand" : "Unsure"}</span>
+          <span className={`lead-kind kind-${lead.kind}`}>{lead.kind === "creator" ? <UserRound size={12} /> : lead.kind === "agency" ? <Handshake size={12} /> : <Building2 size={12} />}{CATEGORY[lead.category] || (lead.kind === "creator" ? "Creator" : lead.kind === "agency" ? "Agency" : "Brand")}</span>
           <span className={`lead-strength s-${s.tone}`} title={`Score ${lead.score}`}><i /><i /><i />{s.label}</span>
         </div>
         <div className="lead-msg"><b>{lead.subject || "(no subject)"}</b><p>{lead.snippet}</p></div>
@@ -91,8 +92,10 @@ export default function LeadsPage() {
             {tab === "new" && <>
               <Button size="sm" variant="ghost" onClick={() => void dismiss(lead)}><X size={14} /> Not a lead</Button>
               {match ? <Button size="sm" onClick={() => void link(lead, match)}><Check size={14} /> Link to {match.name}{match.archived ? " (archived)" : ""}</Button> : <>
-                <Button size="sm" variant="secondary" onClick={() => void add(lead, primary === "brand" ? "creator" : "brand")}>{primary === "brand" ? "Add as influencer" : "Add as brand"}</Button>
-                <Button size="sm" onClick={() => void add(lead, primary)}>{primary === "brand" ? "Add as brand" : "Add as influencer"} <ArrowRight size={14} /></Button>
+                {lead.kind === "agency" ? <Button size="sm" onClick={() => void add(lead, "brand", true)}>Add as partner <ArrowRight size={14} /></Button> : <>
+                  <Button size="sm" variant="secondary" onClick={() => void add(lead, primary === "brand" ? "creator" : "brand")}>{primary === "brand" ? "Add as influencer" : "Add as brand"}</Button>
+                  <Button size="sm" onClick={() => void add(lead, primary)}>{primary === "brand" ? "Add as brand" : "Add as influencer"} <ArrowRight size={14} /></Button>
+                </>}
               </>}
             </>}
             {tab === "added" && lead.entity_id && <Link className="btn btn-secondary btn-sm" to={lead.entity_type === "creator" ? `/app/influencers/${lead.entity_id}` : `/app/brands/${lead.entity_id}`}>Open record <ArrowRight size={14} /></Link>}

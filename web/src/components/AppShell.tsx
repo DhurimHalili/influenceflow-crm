@@ -12,6 +12,7 @@ import { useGmail } from "../contexts/GmailContext";
 import { useToast } from "../contexts/ToastContext";
 import { Avatar, Button, Logo, LogoMark, Modal } from "./ui";
 import { useChase } from "../hooks/useChase";
+import { CoachLayer, CoachRing } from "./Coach";
 import { isPastDay, isTodayDay, LOSS_REASONS } from "../lib/utils";
 import type { SearchResult, ThemeName } from "../types";
 
@@ -279,6 +280,7 @@ export default function AppShell() {
           <button className="menu-btn" onClick={() => setMobileOpen(true)} aria-label="Open menu"><Menu size={20} /></button>
           <button className="global-search" onClick={() => { setQuery(""); setSearchOpen(true); requestAnimationFrame(() => searchRef.current?.focus()); }}><Search size={16} /><span>Search your workspace</span><kbd>/</kbd></button>
           <div className="topbar-actions">
+            <CoachRing />
             <button className={`sync-pill sync-${sync}`} onClick={() => data.syncNow()} title={sync === "synced" ? "All changes saved to the cloud" : sync === "saving" ? "Saving your latest changes…" : sync === "offline" ? "Your latest changes haven't reached the cloud yet. They are kept on this device and retried automatically. Click to retry now." : sync === "loading" ? "Loading your workspace…" : "Local workspace"}>{sync === "offline" ? <CloudOff size={14} /> : sync === "saving" || sync === "loading" ? <LoaderCircle size={14} className="spin" /> : <Cloud size={14} />}<span>{sync === "synced" ? "Saved" : sync === "saving" ? "Saving…" : sync === "offline" ? (navigator.onLine ? "Not saved · retrying" : "Offline · retrying") : sync === "loading" ? "Syncing…" : "Local"}</span></button>
             <button className="command-trigger" onClick={() => setCommandOpen(true)}><Command size={15} /><span>Quick actions</span><kbd>Ctrl K</kbd></button>
             <button className="top-add" onClick={() => navigate("/app/influencers?new=1")}><Plus size={17} /><span>Add new</span></button>
@@ -360,6 +362,7 @@ export default function AppShell() {
         {onboardingStep === 2 && <div className="setup-step"><span className="setup-icon"><Palette /></span><h3>Choose your atmosphere</h3><p>You can switch themes instantly at any time.</p><div className="theme-mini-grid">{themeOptions.map((item) => <button key={item.value} className={theme === item.value ? "selected" : ""} onClick={() => { setTheme(item.value); document.documentElement.dataset.theme = item.value; }}><i className={`theme-swatch swatch-${item.value}`} />{item.label}{theme === item.value && <Check size={14} />}</button>)}</div></div>}
         <div className="modal-actions">{onboardingStep > 0 && <Button variant="ghost" onClick={() => setOnboardingStep((step) => step - 1)}>Back</Button>}<Button onClick={() => onboardingStep < 2 ? setOnboardingStep((step) => step + 1) : completeOnboarding()} disabled={onboardingStep === 1 && !displayName.trim()}>{onboardingStep === 2 ? "Open my workspace" : onboardingStep === 0 ? "Let's build it" : "Continue"}<ChevronRight size={16} /></Button></div>
       </Modal>
+    <CoachLayer />
     </div>
   );
 }

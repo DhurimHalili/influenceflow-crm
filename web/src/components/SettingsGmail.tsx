@@ -1,4 +1,4 @@
-import { AlertTriangle, CalendarDays, Check, LoaderCircle, Mail, Plus, RefreshCcw, ShieldCheck, Trophy, Unplug } from "lucide-react";
+import { AlertTriangle, CalendarDays, Target, Check, LoaderCircle, Mail, Plus, RefreshCcw, ShieldCheck, Sparkles, Trophy, Unplug } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useData } from "../contexts/DataContext";
@@ -105,7 +105,8 @@ export function GmailSettings() {
         <Button onClick={() => void connect()} loading={busy === "connect"} disabled={gmail.loaded && !gmail.configured && !!gmail.error}><Mail size={15} /> Connect Gmail</Button>
         {!gmail.configured && gmail.loaded && <p className="field-hint">If connecting fails, Gmail isn't set up on the server yet — see the README “Gmail sync” section.</p>}
       </div>}
-    <p className="privacy-note gmail-privacy"><ShieldCheck size={15} /><span><strong>What InfluenceFlow keeps:</strong> for people in your CRM — who, when, the subject and Gmail's short preview. For possible new leads — the same, only for messages that look like a real enquiry. Message bodies, attachments and the rest of your inbox are never stored. Google tokens are encrypted, never reach your browser, and access can be removed any time here or in your Google Account.</span></p>
+    {gmail.loaded && <div className={`ai-status ${gmail.ai ? "on" : "off"}`}><Sparkles size={15} /><div><strong>AI reading {gmail.ai ? "is on" : "is off"}</strong><small>{gmail.ai ? "Media kits, rate cards and stats screenshots creators email you are checked and filed; prices they agree to by email update their rate card; inbound leads get a second opinion." : "Turn it on to read media kits and screenshots, pick up negotiated prices from emails and double-check inbound leads: add an ANTHROPIC_API_KEY secret in Supabase → Edge Functions → Secrets. Attachments are still saved without it."}</small></div></div>}
+    <p className="privacy-note gmail-privacy"><ShieldCheck size={15} /><span><strong>What InfluenceFlow keeps:</strong> for people in your CRM — who, when, the subject and Gmail's short preview, plus PDF/image attachments influencers send (media kits, rate cards, stats) in your private file storage. For possible new leads — the same metadata, only for messages that pass the strict scanner. Message bodies are read in memory to understand them and are never stored; the rest of your inbox is never stored. Google tokens are encrypted, never reach your browser, and access can be removed any time here or in your Google Account.</span></p>
   </div></section>;
 }
 
@@ -147,5 +148,17 @@ export function FollowupRulesSettings() {
       </div>
     </div>
     <div className="modal-actions rules-actions"><Button variant="ghost" onClick={() => setRules(DEFAULT_FOLLOWUP_RULES)} disabled={JSON.stringify(rules) === JSON.stringify(DEFAULT_FOLLOWUP_RULES)}>Agency default</Button><Button variant="ghost" onClick={() => setRules(saved)} disabled={!dirty}>Cancel</Button><Button onClick={save} disabled={!dirty || !rules.workdays.length}>Save rules</Button></div>
+  </div></section>;
+}
+
+export function CoachSettings() {
+  const data = useData();
+  const { toast } = useToast();
+  const prefs = data.profile.preferences;
+  const goal = prefs.daily_email_goal || 50;
+  const set = (patch: Partial<typeof prefs>) => data.updateProfile({ preferences: { ...prefs, ...patch } });
+  return <section id="coach" className="settings-section"><div className="settings-heading"><span><Target /></span><div><h2>Daily goal & coach</h2><p>Your outreach target, and the nudges that keep you on it.</p></div></div><div className="settings-body">
+    <div className="rule-step"><span className="rule-label">Emails & follow-ups per day</span><span className="day-stepper" role="group" aria-label="Daily goal"><button type="button" onClick={() => set({ daily_email_goal: Math.max(5, goal - 5) })} aria-label="Lower the goal">−</button><b>{goal}</b><button type="button" onClick={() => set({ daily_email_goal: Math.min(500, goal + 5) })} aria-label="Raise the goal">+</button></span><small>Counted from Gmail (each email once), follow-ups you log, and first contacts you mark.</small></div>
+    <label className="switch-row coach-switch"><input type="checkbox" checked={prefs.coach !== false} onChange={(event) => { set({ coach: event.target.checked }); toast(event.target.checked ? "Coach on" : "Coach off — no nudges or celebrations"); }} /><span className="switch" aria-hidden="true" /> Show the coach — a daily challenge, a progress ring and a celebration when you hit the goal</label>
   </div></section>;
 }

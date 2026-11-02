@@ -11,8 +11,8 @@ import { creatorScore, money, dateLabel, DEFAULT_RATING_WEIGHTS, today, download
 import { Stars, Textarea } from "../components/ui";
 import type { EmailTemplate, ThemeName, WorkspaceData } from "../types";
 import { columnKeys } from "../lib/exportFormats";
-import { FollowupRulesSettings, GmailSettings } from "../components/SettingsGmail";
-import { CalendarDays, Mail } from "lucide-react";
+import { CoachSettings, FollowupRulesSettings, GmailSettings } from "../components/SettingsGmail";
+import { CalendarDays, Mail, Target } from "lucide-react";
 import { APP_BUILT_AT, APP_VERSION, liveVersion, reloadInto } from "../lib/appUpdate";
 import { pwnedCount, pwnedMessage } from "../lib/pwned";
 
@@ -69,6 +69,7 @@ const SECTIONS = [
   { id: "workspace", label: "Workspace", icon: Building },
   { id: "gmail", label: "Gmail", icon: Mail },
   { id: "followups", label: "Follow-up rules", icon: CalendarDays },
+  { id: "coach", label: "Daily goal & coach", icon: Target },
   { id: "reminders", label: "Notifications", icon: Bell },
   { id: "scoring", label: "Creator scoring", icon: Gauge },
   { id: "templates", label: "Email templates", icon: FileText },
@@ -294,6 +295,7 @@ export function SettingsPage() {
       <WorkspaceSettings />
       <GmailSettings />
       <FollowupRulesSettings />
+      <CoachSettings />
       <NotificationSettings />
       <ScoringSettings />
       <TemplateSettings />
