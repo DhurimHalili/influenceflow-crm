@@ -1,9 +1,10 @@
 import { motion, AnimatePresence } from "framer-motion";
-import { ArrowRight, Check, Flame, Target, Trophy, X, Zap } from "lucide-react";
+import { ArrowRight, CalendarClock, Check, Flame, Target, Trophy, X, Zap } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useData } from "../contexts/DataContext";
 import { useChase } from "../hooks/useChase";
+import { useOutreach } from "../hooks/useOutreach";
 import { coachStats, pickNudge, type CoachStats, type Nudge } from "../lib/coach";
 
 // The coach lives in three places: a card on the dashboard, a small progress
@@ -16,19 +17,22 @@ const todayKey = () => new Date().toDateString();
 const store = {
   get: (k: string) => { try { return localStorage.getItem(k); } catch { return null; } },
   set: (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* private mode */ } },
-  sget: (k: string) => { try { return sessionStorage.getItem(k); } catch { return null; } },
-  sset: (k: string, v: string) => { try { sessionStorage.setItem(k, v); } catch { /* private mode */ } },
 };
+const NUDGE_KEY = "if.coach.nudge-at";
+const NUDGE_GAP_MS = 12 * 3600_000;
+const nudgeDue = () => Date.now() - (Number(store.get(NUDGE_KEY)) || 0) > NUDGE_GAP_MS;
+const markSeen = () => store.set(NUDGE_KEY, String(Date.now()));
 
 export function useCoach(): { stats: CoachStats; nudge: Nudge; enabled: boolean } {
   const data = useData();
   const chase = useChase();
   const prefs = data.profile.preferences;
   const goal = prefs.daily_email_goal || 50;
+  const log = useOutreach();
   const stats = useMemo(() => {
     const overdueList = chase.due.map((c) => (c.state.kind === "due" ? c.state.overdueDays : 0));
-    return coachStats({ events: data.emailEvents || [], followups: data.followups, creators: data.creators, brands: data.brands, goal, overdue: chase.due.length, oldestOverdueDays: overdueList.length ? Math.max(...overdueList) : 0, replyNeeded: chase.reply.length });
-  }, [data.emailEvents, data.followups, data.creators, data.brands, goal, chase.due, chase.reply]);
+    return coachStats({ log, goal, overdue: chase.due.length, oldestOverdueDays: overdueList.length ? Math.max(...overdueList) : 0, replyNeeded: chase.reply.length });
+  }, [log, goal, chase.due, chase.reply]);
   const nudge = useMemo(() => pickNudge(stats), [stats]);
   return { stats, nudge, enabled: prefs.coach !== false };
 }
@@ -53,7 +57,7 @@ export function CoachCard() {
       {ch && <div className="coach-progress"><i><b style={{ width: `${Math.min(100, (ch.current / Math.max(1, ch.target)) * 100)}%` }} /></i><small>{ch.label}: {ch.current}/{ch.target}</small></div>}
     </div>
     <div className="coach-side">
-      <div className="coach-mini">{stats.streak > 0 && <span title="Weekdays in a row you hit the goal"><Flame size={12} /> {stats.streak}-day streak</span>}<span>Yesterday {stats.yesterday}</span>{stats.weekAvg > 0 && <span>7-day avg {stats.weekAvg}</span>}</div>
+      <div className="coach-mini">{stats.streak > 0 && <span title="Weekdays in a row you hit the goal"><Flame size={12} /> {stats.streak}-day streak</span>}<span>Yesterday {stats.yesterday}</span>{stats.weekAvg > 0 && <span>7-day avg {stats.weekAvg}</span>}{stats.scheduled > 0 && <span className="coach-sched" title="Waiting in Gmail's Scheduled folder — they count once they go out"><CalendarClock size={12} /> {stats.scheduled} scheduled</span>}</div>
       {nudge.cta && <Link className="btn btn-primary btn-sm" to={nudge.cta.to}>{nudge.cta.label} <ArrowRight size={14} /></Link>}
     </div>
   </section>;
@@ -65,7 +69,7 @@ export function CoachRing() {
   const navigate = useNavigate();
   if (!enabled) return null;
   return <div className="coach-top">
-    <button type="button" className={`coach-top-btn${stats.sentToday >= stats.goal ? " done" : ""}`} onClick={() => setOpen((v) => !v)} aria-expanded={open} title={`${stats.sentToday} of ${stats.goal} emails today`}><Ring value={stats.sentToday} goal={stats.goal} size={28} /><span>{stats.sentToday}<small>/{stats.goal}</small></span></button>
+    <button type="button" className={`coach-top-btn${stats.sentToday >= stats.goal ? " done" : ""}`} onClick={() => setOpen((v) => !v)} aria-expanded={open} title={`${stats.sentToday} of ${stats.goal} emails today${stats.scheduled ? ` · ${stats.scheduled} scheduled` : ""}`}><Ring value={stats.sentToday} goal={stats.goal} size={28} /><span>{stats.sentToday}<small>/{stats.goal}</small></span></button>
     <AnimatePresence>{open && <motion.div className="coach-pop" initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }}>
       <strong>{nudge.title}</strong><p>{nudge.body}</p>
       {nudge.cta && <button type="button" className="btn btn-primary btn-sm" onClick={() => { setOpen(false); navigate(nudge.cta!.to); }}>{nudge.cta.label} <ArrowRight size={14} /></button>}
@@ -89,20 +93,34 @@ export function CoachLayer() {
   const latest = useRef(nudge);
   latest.current = nudge;
 
-  // Opening the CRM (once per session per day) and coming back after 2+ hours.
+  // The slide-in is rare on purpose: at most once every 12 hours across every
+  // tab and window (localStorage, not per tab), never over a profile you're
+  // working in, and never on the dashboard — the coach card is right there, so
+  // seeing it there counts too.
+  const { pathname } = useLocation();
+  const onDashboard = /^\/app\/?$/.test(pathname);
+  const quietHere = onDashboard || /^\/app\/(influencers|brands)\/[^/]+/.test(pathname);
+  const quietRef = useRef(quietHere);
+  quietRef.current = quietHere;
   useEffect(() => {
     if (!enabled || !data.ready) return;
-    const key = `if.coach.seen.${todayKey()}`;
-    if (store.sget(key)) return;
-    store.sset(key, "1");
-    // Not cancelled on re-render: the shell stays mounted, and the nudge read at fire time is the freshest.
-    window.setTimeout(() => setToast(latest.current), 1600);
-  }, [enabled, data.ready]);
+    if (onDashboard) { markSeen(); return; }
+    if (quietHere || !nudgeDue()) return;
+    const t = window.setTimeout(() => {
+      if (quietRef.current || !nudgeDue()) return;
+      markSeen();
+      setToast(latest.current);
+    }, 1600);
+    return () => window.clearTimeout(t);
+  }, [enabled, data.ready, onDashboard, quietHere]);
   useEffect(() => {
     if (!enabled) return;
     const onVis = () => {
       if (document.visibilityState === "hidden") hiddenAt.current = Date.now();
-      else if (hiddenAt.current && Date.now() - hiddenAt.current > 2 * 3600_000) setToast(latest.current);
+      else if (hiddenAt.current && Date.now() - hiddenAt.current > 2 * 3600_000 && !quietRef.current && nudgeDue()) {
+        markSeen();
+        setToast(latest.current);
+      }
     };
     document.addEventListener("visibilitychange", onVis);
     return () => document.removeEventListener("visibilitychange", onVis);

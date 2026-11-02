@@ -1,7 +1,7 @@
 import { AlertTriangle, Bell, Building, Check, ChevronRight, LogOut, MonitorX, FileText, Gauge, Pencil, Plus, Database, Download, FileJson, HardDriveDownload, LockKeyhole, RefreshCcw, RotateCcw, Save, ShieldCheck, Sparkles, Trash2, Upload, UserRound, X, Users } from "lucide-react";
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { Avatar, Button, EmptyState, Input, Modal, PageHeader, Select, Tabs } from "../components/ui";
+import { Button, EmptyState, Input, Modal, PageHeader, Select, Tabs } from "../components/ui";
 import { useAuth } from "../contexts/AuthContext";
 import { useData } from "../contexts/DataContext";
 import { useToast } from "../contexts/ToastContext";
@@ -13,6 +13,7 @@ import type { EmailTemplate, ThemeName, WorkspaceData } from "../types";
 import { columnKeys } from "../lib/exportFormats";
 import { CoachSettings, FollowupRulesSettings, GmailSettings } from "../components/SettingsGmail";
 import { TeamSettings } from "../components/Team";
+import { AvatarButton } from "../components/AvatarEditor";
 import { CalendarDays, Mail, Target } from "lucide-react";
 import { APP_BUILT_AT, APP_VERSION, liveVersion, reloadInto } from "../lib/appUpdate";
 import { pwnedCount, pwnedMessage } from "../lib/pwned";
@@ -110,7 +111,7 @@ function ProfileSettings() {
   const save = () => { data.updateProfile({ display_name: name.trim(), preferences: { ...prefs, agency_name: agency.trim(), email_signature: signature } }); toast("Profile saved"); };
   const suggested = `Best,\n${name.trim() || "Your name"}\n${agency.trim() || "Your agency"}${user?.email ? `\n${user.email}` : ""}`;
   return <section id="profile" className="settings-section"><div className="settings-heading"><span><UserRound /></span><div><h2>Profile & agency</h2><p>How you appear inside the workspace and in the emails you send.</p></div></div><div className="settings-body">
-    <div className="profile-card"><Avatar name={name || user?.email || "IF"} size="lg" /><div><strong>{name || "Add your name"}</strong><span>{agency || "Add your agency name"}</span><small>{user?.email}</small></div></div>
+    <div className="profile-card"><AvatarButton name={name || user?.email || "IF"} path={data.profile.avatar_path} kind="me" onSave={(avatar_path) => data.updateProfile({ avatar_path })} label="Change your picture" /><div><strong>{name || "Add your name"}</strong><span>{agency || "Add your agency name"}</span><small>{user?.email}</small></div></div>
     <div className="form-grid"><Input label="Your name" value={name} onChange={(event) => setName(event.target.value)} placeholder="Alex Morgan" hint="Fills {my_name} in email templates" /><Input label="Agency name" value={agency} onChange={(event) => setAgency(event.target.value)} placeholder="Northstar Talent" hint="Fills {agency} in email templates" /></div>
     <Textarea label="Email signature" rows={4} value={signature} onChange={(event) => setSignature(event.target.value)} placeholder={suggested} hint="Use {signature} in a draft or template to drop it in." />
     {!signature.trim() && <button type="button" className="text-link" onClick={() => setSignature(suggested)}>Use a suggested signature</button>}

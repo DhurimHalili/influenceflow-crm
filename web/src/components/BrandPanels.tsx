@@ -137,7 +137,7 @@ function MatchRow({ creator, score, reasons, brand, onCampaign }: { creator: Cre
   const tier = tierOf(reach);
   return <div className={`match-row tone-${matchTone(score)}`}>
     <span className="match-score" style={{ ["--p" as string]: `${score}%` }}><b>{score}</b><small>%</small></span>
-    <Link to={`/app/influencers/${creator.id}`} className="match-who"><Avatar name={creator.name} size="sm" /><span><strong>{creator.name}</strong><small>{[creator.niche, creator.platform, reach ? `${compact(reach)}${tier ? ` · ${TIERS.find((t) => t.value === tier)?.label}` : ""}` : "", STATUS_LABELS[creator.pipeline_status]].filter(Boolean).join(" · ")}</small></span></Link>
+    <Link to={`/app/influencers/${creator.id}`} className="match-who"><Avatar name={creator.name} path={creator.avatar_path} size="sm" /><span><strong>{creator.name}</strong><small>{[creator.niche, creator.platform, reach ? `${compact(reach)}${tier ? ` · ${TIERS.find((t) => t.value === tier)?.label}` : ""}` : "", STATUS_LABELS[creator.pipeline_status]].filter(Boolean).join(" · ")}</small></span></Link>
     <div className="match-reasons">{reasons.map((r) => <span key={r.label} className={`reason ${r.ok === true ? "ok" : r.ok === null ? "near" : "no"}`}>{r.ok === true ? <Check size={10} /> : r.ok === null ? <CircleDashed size={10} /> : <X size={10} />}{r.label}</span>)}{onCampaign && <span className="reason linked">On a {brand.name} campaign</span>}</div>
     <div className="match-actions"><Link className="btn btn-secondary btn-sm" to={`/app/campaigns?new=1&brand=${brand.id}&creator=${creator.id}`} title={`Start a ${brand.name} campaign with ${creator.name}`}><Plus size={13} /> Campaign</Link><Link className="match-open" to={`/app/influencers/${creator.id}`} aria-label={`Open ${creator.name}`}><ArrowRight size={15} /></Link></div>
   </div>;
@@ -152,7 +152,7 @@ export function CreatorBrandMatches({ creator }: { creator: Creator }) {
   const matches = useMemo(() => brandsForCreator(data.brands, creator, creatorScore(creator, data.profile.rating_weights)), [data.brands, creator, data.profile.rating_weights]);
   if (!data.brands.some((b) => !b.archived_at && !briefIsEmpty(b.brief))) return null;
   return <section className="detail-side-section brand-matches"><span>Opportunities</span><h2>Brands looking for this</h2>
-    {matches.length ? <div className="bm-list">{matches.slice(0, 4).map(({ brand, match }) => <Link to={`/app/brands/${brand.id}`} key={brand.id} className={`bm-row tone-${matchTone(match.score)}`}><Avatar name={brand.name} size="sm" /><span><strong>{brand.name}</strong><small>{[budgetLabel(brand.brief), match.reasons.filter((r) => r.ok).map((r) => r.label).slice(0, 2).join(" · ")].filter(Boolean).join(" · ")}</small></span><b>{match.score}%</b></Link>)}</div>
+    {matches.length ? <div className="bm-list">{matches.slice(0, 4).map(({ brand, match }) => <Link to={`/app/brands/${brand.id}`} key={brand.id} className={`bm-row tone-${matchTone(match.score)}`}><Avatar name={brand.name} path={brand.avatar_path} size="sm" /><span><strong>{brand.name}</strong><small>{[budgetLabel(brand.brief), match.reasons.filter((r) => r.ok).map((r) => r.label).slice(0, 2).join(" · ")].filter(Boolean).join(" · ")}</small></span><b>{match.score}%</b></Link>)}</div>
       : <p className="muted-copy">No brand brief matches {creator.name.split(" ")[0]} yet. Briefs that want their niche, platform or size will show up here.</p>}
   </section>;
 }

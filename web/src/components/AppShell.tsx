@@ -264,7 +264,7 @@ export default function AppShell() {
         ))}
       </nav>
       <div className="user-footer">
-        <Avatar name={data.profile.display_name || user?.email || "IF"} size="sm" />
+        <Avatar name={data.profile.display_name || user?.email || "IF"} path={data.profile.avatar_path} size="sm" />
         <div><strong>{accountName}</strong><span><i /> {agencyName || "Private workspace"}</span></div>
         <NavLink to="/app/settings" aria-label="Settings" title="Settings"><Settings size={16} /></NavLink>
         <button onClick={() => setSignOutOpen(true)} aria-label="Sign out" title="Sign out"><LogOut size={16} /></button>
@@ -289,9 +289,9 @@ export default function AppShell() {
             <button className="command-trigger" onClick={() => setCommandOpen(true)}><Command size={15} /><span>Quick actions</span><kbd>Ctrl K</kbd></button>
             <button className="top-add" onClick={() => navigate("/app/influencers?new=1")}><Plus size={17} /><span>Add new</span></button>
             <div className="account-menu" ref={accountRef}>
-              <button className={`account-trigger${accountOpen ? " open" : ""}`} onClick={() => setAccountOpen((open) => !open)} aria-haspopup="menu" aria-expanded={accountOpen} aria-label="Account menu"><Avatar name={accountName} size="sm" /><ChevronRight size={14} className="account-caret" /></button>
+              <button className={`account-trigger${accountOpen ? " open" : ""}`} onClick={() => setAccountOpen((open) => !open)} aria-haspopup="menu" aria-expanded={accountOpen} aria-label="Account menu"><Avatar name={accountName} path={data.profile.avatar_path} size="sm" /><ChevronRight size={14} className="account-caret" /></button>
               <AnimatePresence>{accountOpen && <motion.div className="account-dropdown" role="menu" initial={{ opacity: 0, y: -6, scale: .98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -6, scale: .98 }} transition={{ duration: .14 }}>
-                <div className="account-head"><Avatar name={accountName} /><div><strong>{accountName}</strong><span>{user?.email}</span>{agencyName && <em>{agencyName}</em>}</div></div>
+                <div className="account-head"><Avatar name={accountName} path={data.profile.avatar_path} /><div><strong>{accountName}</strong><span>{user?.email}</span>{agencyName && <em>{agencyName}</em>}</div></div>
                 <div className="account-group">
                   <NavLink role="menuitem" to="/app/settings"><Settings size={15} /> Settings</NavLink>
                   <NavLink role="menuitem" to="/app/settings#security"><LockIcon /> Account & security</NavLink>

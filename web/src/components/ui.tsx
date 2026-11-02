@@ -3,6 +3,7 @@ import { Archive, Check, ChevronDown, Inbox, LoaderCircle, Merge, Search, Star, 
 import { forwardRef, useEffect, useId, useRef, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from "react";
 import { cn } from "../utils/cn";
 import { initials } from "../lib/utils";
+import { useAvatarUrl } from "../lib/avatars";
 import { STATUS_LABELS, type CampaignStatus, type EntityStatus } from "../types";
 
 // The InfluenceFlow mark: a creator (the node) sending a wave of influence
@@ -118,9 +119,12 @@ export function StatusBadge({ status }: { status: EntityStatus | CampaignStatus 
   return <span className={cn("status-badge", `status-${status}`)}><i />{STATUS_LABELS[status]}</span>;
 }
 
-export function Avatar({ name, size = "md" }: { name: string; size?: "sm" | "md" | "lg" }) {
+export function Avatar({ name, size = "md", path }: { name: string; size?: "sm" | "md" | "lg" | "xl"; path?: string }) {
   const shades = ["av-purple", "av-blue", "av-mint", "av-orange", "av-pink"];
-  const shade = shades[name.charCodeAt(0) % shades.length];
+  const shade = shades[(name.charCodeAt(0) || 0) % shades.length];
+  const url = useAvatarUrl(path);
+  const [broken, setBroken] = useState("");
+  if (url && broken !== url) return <span className={cn("avatar", "avatar-photo", `avatar-${size}`, shade)}><img src={url} alt="" loading="lazy" decoding="async" draggable={false} onError={() => setBroken(url)} /></span>;
   return <span className={cn("avatar", `avatar-${size}`, shade)}>{initials(name)}</span>;
 }
 

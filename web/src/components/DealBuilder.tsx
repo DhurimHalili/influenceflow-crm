@@ -81,7 +81,7 @@ export function DealBuilder({ draft, onChange, creatorIds, platform }: { draft: 
       {creators.length ? creators.map((creator) => {
         const options = ratesFor(creator.rates as unknown as Record<string, number>, platform);
         return <div className="deal-fee-row" key={creator.id}>
-          <Avatar name={creator.name} size="sm" />
+          <Avatar name={creator.name} path={creator.avatar_path} size="sm" />
           <span className="deal-fee-who"><strong>{creator.name}</strong><small>{creator.platform}{creator.niche ? ` · ${creator.niche}` : ""}</small></span>
           {options.length > 0 && <span className="deal-fee-rates" aria-label="Fill from rate card">{options.slice(0, 3).map((o) => <button type="button" key={o.key} className={Number(draft.creator_fees[creator.id]) === o.value ? "on" : ""} onClick={() => setFee(creator.id, String(o.value))} title={`Use their ${o.label.toLowerCase()} rate`}>{o.label} {money(o.value)}</button>)}</span>}
           <label className="money-input deal-fee-input"><span>{currencySymbol()}</span><input type="number" min="0" inputMode="numeric" value={draft.creator_fees[creator.id] || ""} onChange={(event) => setFee(creator.id, event.target.value)} placeholder="Fee" aria-label={`Fee for ${creator.name}`} /></label>

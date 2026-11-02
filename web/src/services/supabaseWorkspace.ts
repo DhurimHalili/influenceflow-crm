@@ -94,6 +94,7 @@ const normalizeCreator = (row: Record<string, unknown>, userId: string): Creator
   id: String(row.id ?? ""),
   user_id: typeof row.user_id === "string" ? row.user_id : userId,
   name: text(row.name),
+  avatar_path: text(row.avatar_path),
   contact_email: text(row.contact_email),
   secondary_email: text(row.secondary_email),
   secondary_email_label: text(row.secondary_email_label),
@@ -169,12 +170,14 @@ const normalizeEmailEvent = (row: Record<string, unknown>): EmailEvent => ({
   snippet: text(row.snippet),
   at: typeof row.at === "string" && row.at ? row.at : new Date().toISOString(),
   mailbox: text(row.mailbox).toLowerCase(),
+  scheduled: row.scheduled === true,
 });
 
 const normalizeBrand = (row: Record<string, unknown>, userId: string): Brand => ({
   id: String(row.id ?? ""),
   user_id: typeof row.user_id === "string" ? row.user_id : userId,
   name: text(row.name),
+  avatar_path: text(row.avatar_path),
   domain: text(row.domain),
   brand_type: text(row.brand_type),
   contact_email: text(row.contact_email),
@@ -368,6 +371,7 @@ export async function loadCloudWorkspace(userId: string): Promise<WorkspaceData 
       ? {
           id: userId,
           display_name: text(storedProfile.display_name),
+          avatar_path: text(storedProfile.avatar_path),
           theme: (["agency", "light", "dark", "honey", "ocean"] as const).includes(storedProfile.theme as Profile["theme"])
             ? (storedProfile.theme as Profile["theme"])
             : "agency",
@@ -406,7 +410,7 @@ export async function loadCloudWorkspace(userId: string): Promise<WorkspaceData 
 // PostgREST rejects the upsert with an unknown-column error: strip exactly
 // the column it names and retry, so one missing column never blocks the
 // whole save (and never drops the columns that do exist).
-const OPTIONAL_COLUMNS = ["engagement_rate", "next_action", "deliverables_items", "entity_type", "entity_id", "updated_at", "followup_count", "last_followup_at", "lost_reason", "lost_at", "stars", "stars_consistency", "stars_demographics", "stars_niche", "stars_engagement", "priority", "next_action_date", "kind", "done", "draft_subject", "draft_body", "status_updated_at", "email_templates", "rating_weights", "preferences", "rates", "payment_status", "invoice_due", "paid_at", "payout_status", "socials", "brief", "country", "secondary_email", "secondary_email_label", "payout_model", "creator_fees", "followup_snooze_until", "status_source", "brand_id", "kind", "channel", "brand_terms", "rate_meta", "rate_history", "audience", "contract"];
+const OPTIONAL_COLUMNS = ["engagement_rate", "next_action", "deliverables_items", "entity_type", "entity_id", "updated_at", "followup_count", "last_followup_at", "lost_reason", "lost_at", "stars", "stars_consistency", "stars_demographics", "stars_niche", "stars_engagement", "priority", "next_action_date", "kind", "done", "draft_subject", "draft_body", "status_updated_at", "email_templates", "rating_weights", "preferences", "rates", "payment_status", "invoice_due", "paid_at", "payout_status", "socials", "brief", "country", "secondary_email", "secondary_email_label", "payout_model", "creator_fees", "followup_snooze_until", "status_source", "brand_id", "kind", "channel", "brand_terms", "rate_meta", "rate_history", "audience", "contract", "avatar_path"];
 
 const missingColumn = (error: { message?: string; details?: string; hint?: string; code?: string }) => {
   const msg = `${error.message || ""} ${error.details || ""} ${error.hint || ""}`;

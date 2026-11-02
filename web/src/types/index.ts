@@ -32,6 +32,8 @@ export type MeetingKind = "meeting" | "task" | "reminder";
 export interface Profile {
   id: string;
   display_name: string;
+  /** Your picture: a path in the private "avatars" bucket (or a data: URL in local-only mode). */
+  avatar_path?: string;
   theme: ThemeName;
   reminder_prefs: "browser" | "email" | "both" | "off";
   onboarding_done: boolean;
@@ -167,6 +169,8 @@ export interface Creator {
   id: string;
   user_id: string;
   name: string;
+  /** Profile picture: a path in the private "avatars" bucket ("" = initials). */
+  avatar_path?: string;
   contact_email: string;
   /** Optional second address (manager, agent, assistant…). */
   secondary_email: string;
@@ -248,6 +252,8 @@ export interface Brand {
   id: string;
   user_id: string;
   name: string;
+  /** Logo / picture: a path in the private "avatars" bucket ("" = initials). */
+  avatar_path?: string;
   domain: string;
   brand_type: string;
   contact_email: string;
@@ -384,6 +390,8 @@ export interface EmailEvent {
   at: string;
   /** Which of your connected mailboxes it went through ('' for older rows). */
   mailbox?: string;
+  /** Waiting in Gmail's Scheduled folder (not sent yet); `at` may be the send time. */
+  scheduled?: boolean;
 }
 
 /** Someone outside the CRM who wrote to one of your mailboxes and looks like a real enquiry. */
