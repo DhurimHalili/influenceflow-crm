@@ -105,7 +105,7 @@ export function GmailSettings() {
         <Button onClick={() => void connect()} loading={busy === "connect"} disabled={gmail.loaded && !gmail.configured && !!gmail.error}><Mail size={15} /> Connect Gmail</Button>
         {!gmail.configured && gmail.loaded && <p className="field-hint">If connecting fails, Gmail isn't set up on the server yet — see the README “Gmail sync” section.</p>}
       </div>}
-    {gmail.loaded && <div className={`ai-status ${gmail.ai ? "on" : "off"}`}><Sparkles size={15} /><div><strong>AI reading {gmail.ai ? "is on" : "is off"}</strong><small>{gmail.ai ? "Media kits, rate cards and stats screenshots creators email you are checked and filed; prices they agree to by email update their rate card; inbound leads get a second opinion." : "Turn it on to read media kits and screenshots, pick up negotiated prices from emails and double-check inbound leads: add an ANTHROPIC_API_KEY secret in Supabase → Edge Functions → Secrets. Attachments are still saved without it."}</small></div></div>}
+    {gmail.loaded && <AiStatus />}
     <p className="privacy-note gmail-privacy"><ShieldCheck size={15} /><span><strong>What InfluenceFlow keeps:</strong> for people in your CRM — who, when, the subject and Gmail's short preview, plus PDF/image attachments influencers send (media kits, rate cards, stats) in your private file storage. For possible new leads — the same metadata, only for messages that pass the strict scanner. Message bodies are read in memory to understand them and are never stored; the rest of your inbox is never stored. Google tokens are encrypted, never reach your browser, and access can be removed any time here or in your Google Account.</span></p>
   </div></section>;
 }
@@ -161,4 +161,25 @@ export function CoachSettings() {
     <div className="rule-step"><span className="rule-label">Emails & follow-ups per day</span><span className="day-stepper" role="group" aria-label="Daily goal"><button type="button" onClick={() => set({ daily_email_goal: Math.max(5, goal - 5) })} aria-label="Lower the goal">−</button><b>{goal}</b><button type="button" onClick={() => set({ daily_email_goal: Math.min(500, goal + 5) })} aria-label="Raise the goal">+</button></span><small>Counted from Gmail (each email once), follow-ups you log, and first contacts you mark.</small></div>
     <label className="switch-row coach-switch"><input type="checkbox" checked={prefs.coach !== false} onChange={(event) => { set({ coach: event.target.checked }); toast(event.target.checked ? "Coach on" : "Coach off — no nudges or celebrations"); }} /><span className="switch" aria-hidden="true" /> Show the coach — a daily challenge, a progress ring and a celebration when you hit the goal</label>
   </div></section>;
+}
+
+/** Which AI reads media kits, how many keys it has, and how to switch it on. */
+function AiStatus() {
+  const gmail = useGmail();
+  const resting = gmail.aiReadyAt && new Date(gmail.aiReadyAt).getTime() > Date.now();
+  if (gmail.ai) {
+    const who = gmail.aiProvider === "gemini" ? `Gemini (${gmail.aiModel || "gemini-3.8-flash"}) · ${gmail.aiKeys} key${gmail.aiKeys === 1 ? "" : "s"}` : `Claude (${gmail.aiModel})`;
+    return <div className={`ai-status ${resting ? "rest" : "on"}`}><Sparkles size={15} /><div><strong>AI reading is on — {who}</strong>
+      <small>{resting ? `Every key has used its free quota for now. Files keep saving and wait in line; they're read automatically from ${new Date(gmail.aiReadyAt!).toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit" })}.` : "Media kits, rate cards and stats screenshots creators email you are read and filed; their audience goes to the Verified panel; prices they send or agree to update the rate card. When a key runs out, the next one takes over with the same model."}</small>
+      {gmail.aiProvider === "gemini" && <small className="ai-note">Free-tier Gemini may use what it reads to improve Google's products. Only attachments and the creator's own words are sent — never your whole inbox.</small>}
+    </div></div>;
+  }
+  return <div className="ai-status off"><Sparkles size={15} /><div><strong>AI reading is off</strong>
+    <small>Without it, kits and stats screenshots are still saved and downloadable, and prices are read from emails by strict rules (“Integration: $1,500”, “$2,500 for the integration works for me”). The AI adds the audience numbers inside the files.</small>
+    <details className="ai-setup"><summary>Switch it on with free Gemini keys</summary><ol>
+      <li>Open <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer">aistudio.google.com/apikey</a> → <b>Create API key</b>.</li>
+      <li>Supabase → Edge Functions → <b>Secrets</b> → add <code>GEMINI_API_KEYS</code> with your key (several keys: separate them with commas).</li>
+      <li>Done. The next sync reads every saved kit, media kits first.</li>
+    </ol><p>Free quota is counted per Google Cloud <b>project</b>, not per key — several keys from one project share one quota.</p></details>
+  </div></div>;
 }

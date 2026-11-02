@@ -1,9 +1,9 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { isSealed, openToken, sealToken } from "../_shared/googleTokens.ts";
-import { aiEnabled, classifyLead } from "../_shared/ai.ts";
+import { aiEnabled, aiKeyCount, aiModel, aiProvider, aiReadyAt, classifyLead, useKeyStore } from "../_shared/ai.ts";
 import { decodeEntities, precheck, scanForLead, type Lead, type ScanInput } from "../_shared/leadScanner.ts";
-import { analyzeStoredFile, bodyOf, processCreatorMail, type FullMessage } from "./intel.ts";
+import { analyzeStoredFile, bodyOf, drainQueue, gmailAttachment, processCreatorMail, sniff, type Fetcher, type FullMessage } from "./intel.ts";
 
 // Gmail ⇄ CRM sync, for every mailbox a user connected (an agency often runs
 // two or three).
@@ -13,6 +13,9 @@ import { analyzeStoredFile, bodyOf, processCreatorMail, type FullMessage } from 
 //   sync        — pull new mail for all of this user's mailboxes now (rate-limited)
 //   send        — send an email from one mailbox (optionally as a reply in a thread)
 //   disconnect  — revoke Google access for one mailbox and forget its tokens
+//   analyze_file  — read one saved file with AI now
+//   download_file — a big attachment kept in Gmail (not in storage), streamed to you
+//   rescan_creator — go through one influencer's emails again for kits and prices
 //   cron        — background sync for everyone (x-cron-secret header only)
 //   health      — no auth; only says whether the server is configured
 //
@@ -150,6 +153,8 @@ async function addressBook(admin: Admin, userId: string, own: Set<string>) {
   return map;
 }
 
+const DRIVE_SHARE = /drive-shares-(dm-)?noreply@google\.com/i;
+const DRIVE_SHARES_DONE = "__drive_shares_v1";
 const isOutgoing = (meta: Meta, own: Set<string>) => (meta.labelIds || []).includes("SENT") || addresses(header(meta, "From")).some((e) => own.has(e));
 const sentAt = (meta: Meta) => (meta.internalDate ? new Date(Number(meta.internalDate)) : new Date(header(meta, "Date") || Date.now())).toISOString();
 
@@ -157,7 +162,9 @@ function eventsFor(meta: Meta, userId: string, book: Map<string, Entity[]>, own:
   const labels = meta.labelIds || [];
   if (labels.some((l) => l === "DRAFT" || l === "SPAM" || l === "TRASH" || l === "CHAT")) return [];
   const out = isOutgoing(meta, own);
-  const counterparts = (out ? [...addresses(header(meta, "To")), ...addresses(header(meta, "Cc"))] : addresses(header(meta, "From"))).filter((e) => !own.has(e));
+  // "X shared a file with you" comes from Google; the person who shared it is in Reply-To.
+  const sender = DRIVE_SHARE.test(header(meta, "From")) ? addresses(header(meta, "Reply-To")) : addresses(header(meta, "From"));
+  const counterparts = (out ? [...addresses(header(meta, "To")), ...addresses(header(meta, "Cc"))] : sender).filter((e) => !own.has(e));
   const at = sentAt(meta);
   const rows: EventRow[] = [];
   const seen = new Set<string>();
@@ -237,7 +244,8 @@ async function findLeads(admin: Admin, userId: string, token: string, metas: Met
     const body = full ? bodyOf(full).text : "";
     const lead = scanForLead({ ...input, body });
     if (!lead || book.has(lead.email)) continue;
-    if (aiEnabled()) {
+    // Second opinion only with Claude; on Gemini's free quota every call goes to media kits.
+    if (aiProvider() === "claude") {
       const { data: allowed } = await admin.rpc("ai_take", { p_user: userId, p_limit: 150 });
       if (allowed === true) {
         const verdict = await classifyLead({ from: input.from, subject: input.subject, body: body || input.snippet }).catch(() => null);
@@ -329,6 +337,55 @@ async function applyStatuses(admin: Admin, userId: string, entityIds: string[]) 
   return changed;
 }
 
+// ----- creators' older mail --------------------------------------------------------
+
+// Claim one email for checking, so two syncs at once (a cron run and "Sync now")
+// never read it twice. A claim is stamped 100 years in the past; finishing writes
+// the real time. A claim older than 30 minutes (the run crashed) is picked up again.
+const CLAIM_MS = 100 * 365 * 86400000;
+const claimStamp = () => new Date(Date.now() - CLAIM_MS).toISOString();
+const staleClaim = () => new Date(Date.now() - CLAIM_MS - 30 * 60_000).toISOString();
+async function claim(admin: Admin, userId: string, gmailId: string) {
+  const { data } = await admin.from("email_events").update({ intel_at: claimStamp() }).eq("user_id", userId).eq("gmail_id", gmailId).or(`intel_at.is.null,intel_at.lt.${staleClaim()}`).select("id");
+  return (data || []).length > 0;
+}
+const unclaim = (admin: Admin, userId: string, gmailId: string) => admin.from("email_events").update({ intel_at: null }).eq("user_id", userId).eq("gmail_id", gmailId);
+
+const STATUS_RANK: Record<string, number> = { roster: 0, signed: 0, negotiating: 1, replied: 2, inbound: 3 };
+
+async function backfillCreatorMail(ctx: { admin: Admin; userId: string; mailbox: string; currency: string; get: Fetcher; budget: { files: number; ai: number; bytes?: number }; deadline: number; checked: string[]; creatorId?: string; max?: number }) {
+  if (Date.now() > ctx.deadline) return 0;
+  let q = ctx.admin.from("email_events").select("gmail_id, entity_id, at").eq("user_id", ctx.userId).eq("mailbox", ctx.mailbox).eq("direction", "in").eq("entity_type", "creator").or(`intel_at.is.null,intel_at.lt.${staleClaim()}`);
+  if (ctx.creatorId) q = q.eq("entity_id", ctx.creatorId);
+  const { data: todo } = await q.order("at", { ascending: true }).limit(400);
+  const events = (todo || []).filter((e) => !ctx.checked.includes(e.gmail_id));
+  if (!events.length) return 0;
+  const rank = new Map<string, number>();
+  for (const ids of chunk(Array.from(new Set(events.map((e) => e.entity_id))), 100)) {
+    const { data } = await ctx.admin.from("creators").select("id, pipeline_status, archived_at").eq("user_id", ctx.userId).in("id", ids);
+    for (const c of data || []) rank.set(c.id, c.archived_at ? 9 : STATUS_RANK[c.pipeline_status] ?? 4);
+  }
+  const ordered = events.filter((e) => rank.has(e.entity_id)).sort((a, b) => rank.get(a.entity_id)! - rank.get(b.entity_id)! || a.entity_id.localeCompare(b.entity_id) || a.at.localeCompare(b.at));
+  let files = 0;
+  const seen = new Set<string>();
+  for (const ev of ordered) {
+    if (Date.now() > ctx.deadline || seen.size >= (ctx.max ?? 12)) break;
+    if (seen.has(ev.gmail_id)) continue;
+    seen.add(ev.gmail_id);
+    if (!(await claim(ctx.admin, ctx.userId, ev.gmail_id))) continue; // another sync has it
+    const message = await ctx.get<FullMessage>(`/messages/${ev.gmail_id}?format=full`).catch((e) => (e instanceof GmailError && e.status === 404 ? "gone" : null));
+    if (message === null) { await unclaim(ctx.admin, ctx.userId, ev.gmail_id); continue; } // temporary trouble: try again next run
+    if (message !== "gone") {
+      // A message that fails to process is still marked done, so it can't block the queue forever.
+      const res = await processCreatorMail({ admin: ctx.admin, userId: ctx.userId, mailbox: ctx.mailbox, currency: ctx.currency, message, creatorId: ev.entity_id, get: ctx.get, budget: ctx.budget, historical: true }).catch(() => null);
+      files += res?.files || 0;
+      if (res?.deferred) { await unclaim(ctx.admin, ctx.userId, ev.gmail_id); continue; } // attachments left for the next run
+    }
+    ctx.checked.push(ev.gmail_id);
+  }
+  return files;
+}
+
 // ----- one mailbox's sync -------------------------------------------------------
 
 async function syncMailbox(admin: Admin, row: TokenRow, own: Set<string>, book: Map<string, Entity[]>, deadline: number) {
@@ -347,6 +404,12 @@ async function syncMailbox(admin: Admin, row: TokenRow, own: Set<string>, book: 
     if (Date.now() > deadline) { complete = false; break; }
     (await listIds(token, searchFor(group, BACKFILL_DAYS), 5)).forEach((id) => ids.add(id));
     backfilled.push(...group);
+  }
+
+  // 1b. Once per mailbox: files creators shared through Google Drive (sent by Google, not by them).
+  if (!done.has(DRIVE_SHARES_DONE) && Date.now() < deadline) {
+    (await listIds(token, `from:(drive-shares-dm-noreply@google.com OR drive-shares-noreply@google.com) newer_than:${BACKFILL_DAYS}d`, 2)).forEach((id) => ids.add(id));
+    backfilled.push(DRIVE_SHARES_DONE);
   }
 
   // 2. First time: look through the last month of the primary inbox for people
@@ -405,18 +468,31 @@ async function syncMailbox(admin: Admin, row: TokenRow, own: Set<string>, book: 
   const leads = await storeLeads(admin, row.user_id, mailbox, found).catch(() => 0);
 
   // 5b. New mail from creators in the CRM: media kits, prices, agreed rates (newest first, capped per run).
-  const budget = { files: 10, ai: 12 };
+  const budget = { files: 8, ai: 12, bytes: 24 * 1024 * 1024 };
+  const get: Fetcher = (path) => gmail(token, path);
+  const { data: prof } = await admin.from("profiles").select("preferences").eq("id", row.user_id).maybeSingle();
+  const currency = String(((prof?.preferences || {}) as { currency?: string }).currency || "USD").toUpperCase();
   const creatorMail = Array.from(new Map(rows.filter((r) => r.direction === "in" && r.entity_type === "creator").sort((a, b) => b.at.localeCompare(a.at)).map((r) => [r.gmail_id, r])).values()).slice(0, 15);
   let filesSaved = 0;
-  const { data: prof } = creatorMail.length ? await admin.from("profiles").select("preferences").eq("id", row.user_id).maybeSingle() : { data: null };
-  const currency = String(((prof?.preferences || {}) as { currency?: string }).currency || "USD").toUpperCase();
+  const checked: string[] = [];
   for (const ev of creatorMail) {
     if (Date.now() > deadline) break;
+    if (!(await claim(admin, row.user_id, ev.gmail_id))) continue; // another sync has it
     const message = await gmail<FullMessage>(token, `/messages/${ev.gmail_id}?format=full`).catch(() => null);
-    if (!message) continue;
-    const res = await processCreatorMail({ admin, userId: row.user_id, mailbox, currency, message, creatorId: ev.entity_id, get: (path) => gmail(token, path), budget }).catch(() => ({ files: 0, changes: 0 }));
+    if (!message) { await unclaim(admin, row.user_id, ev.gmail_id); continue; } // picked up again by the backfill
+    const res = await processCreatorMail({ admin, userId: row.user_id, mailbox, currency, message, creatorId: ev.entity_id, get, budget }).catch(() => ({ files: 0, changes: 0, deferred: false }));
     filesSaved += res.files;
+    if (res.deferred) await unclaim(admin, row.user_id, ev.gmail_id);
+    else checked.push(ev.gmail_id);
   }
+
+  // 5c. Older mail from creators that was never checked (kits sent before this
+  //     existed): roster and live deals first, each creator's mail oldest → newest.
+  filesSaved += await backfillCreatorMail({ admin, userId: row.user_id, mailbox, currency, get, budget, deadline: deadline - 15_000, checked });
+  for (const part of chunk(checked, 200)) await admin.from("email_events").update({ intel_at: new Date().toISOString() }).eq("user_id", row.user_id).in("gmail_id", part);
+
+  // 5d. Files waiting for the AI (it was off or out of quota when they arrived).
+  const aiRead = budget.ai > 0 && (await aiReadyAt()) === 0 ? await drainQueue({ admin, userId: row.user_id, currency, mailbox, get, max: Math.min(4, budget.ai), deadline: deadline - 10_000 }).catch(() => 0) : 0;
 
   // 6. Move statuses (self-healing: also re-checks anything with recent mail).
   const { data: recent } = await admin.from("email_events").select("entity_id").eq("user_id", row.user_id).gte("at", new Date(Date.now() - 14 * 86400000).toISOString()).limit(2000);
@@ -432,7 +508,7 @@ async function syncMailbox(admin: Admin, row: TokenRow, own: Set<string>, book: 
     if (complete || !historyId) patch.history_id = profile.historyId || historyId;
   }
   await admin.from("gmail_tokens").update(patch).eq("id", row.id);
-  return { mailbox, messages: metas.length, events: rows.length, leads, files: filesSaved, statusChanges: changed, complete };
+  return { mailbox, messages: metas.length, events: rows.length, leads, files: filesSaved, aiRead, statusChanges: changed, complete };
 }
 
 async function recordError(admin: Admin, row: TokenRow, e: unknown) {
@@ -543,6 +619,7 @@ Deno.serve(async (req) => {
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const admin = createClient(supabaseUrl, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+  useKeyStore(admin);
   const configured = !!(Deno.env.get("GOOGLE_CLIENT_ID") && Deno.env.get("GOOGLE_CLIENT_SECRET") && Deno.env.get("GMAIL_OAUTH_REDIRECT_URI"));
   let input: Record<string, unknown> = {};
   try {
@@ -596,19 +673,64 @@ Deno.serve(async (req) => {
   const rows = (data || []) as TokenRow[];
   const first = rows[0];
 
-  if (action === "analyze_file") {
-    if (typeof input.id !== "string" || !/^[0-9a-f-]{36}$/i.test(input.id)) return json({ error: "Invalid file" }, 400);
+  const fetcherFor = (mailbox: string): Fetcher | null => {
+    const row = rows.find((r) => mailboxOf(r) === mailbox);
+    return row ? async <T,>(path: string) => gmail<T>(await accessToken(admin, row), path) : null;
+  };
+  const currencyOf = async () => {
     const { data: prof } = await admin.from("profiles").select("preferences").eq("id", userId).maybeSingle();
-    const currency = String(((prof?.preferences || {}) as { currency?: string }).currency || "USD").toUpperCase();
-    const result = await analyzeStoredFile(admin, userId, input.id, currency).catch(() => ({ error: "Couldn't check the file." }));
-    return json(result, "error" in result && result.error ? 422 : 200);
+    return String(((prof?.preferences || {}) as { currency?: string }).currency || "USD").toUpperCase();
+  };
+  const validId = (v: unknown): v is string => typeof v === "string" && /^[0-9a-f-]{36}$/i.test(v);
+
+  if (action === "analyze_file") {
+    if (!validId(input.id)) return json({ error: "Invalid file" }, 400);
+    const result = await analyzeStoredFile(admin, userId, input.id, await currencyOf(), fetcherFor).catch(() => ({ error: "Couldn't check the file." }));
+    return json(result, "error" in result && result.error && !("queued" in result) ? 422 : 200);
+  }
+
+  if (action === "download_file") {
+    if (!validId(input.id)) return json({ error: "Invalid file" }, 400);
+    const { data: file } = await admin.from("creator_files").select("filename, mime, storage, gmail_id, part_id, mailbox").eq("id", input.id).eq("user_id", userId).maybeSingle();
+    if (!file || file.storage !== "gmail") return json({ error: "File not found." }, 404);
+    const get = fetcherFor(file.mailbox);
+    if (!get) return json({ error: `Reconnect ${file.mailbox} to download this file.` }, 409);
+    const bytes = await gmailAttachment(get, file.gmail_id, file.part_id).catch(() => null);
+    const mime = bytes ? sniff(bytes) : null;
+    if (!bytes || mime !== file.mime) return json({ error: "The email or attachment is no longer in Gmail." }, 410);
+    return new Response(bytes as Uint8Array<ArrayBuffer>, { headers: { ...cors, "Content-Type": file.mime, "Content-Disposition": `attachment; filename="${String(file.filename).replace(/[^\w.\- ()]/g, "_")}"`, "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" } });
+  }
+
+  if (action === "rescan_creator") {
+    if (!validId(input.id)) return json({ error: "Invalid influencer" }, 400);
+    const { data: creator } = await admin.from("creators").select("id").eq("id", input.id).eq("user_id", userId).maybeSingle();
+    if (!creator) return json({ error: "Influencer not found." }, 404);
+    if (!rows.length) return json({ error: "Connect Gmail first.", code: "not_connected" }, 409);
+    await admin.from("email_events").update({ intel_at: null }).eq("user_id", userId).eq("entity_id", input.id).eq("direction", "in");
+    const currency = await currencyOf();
+    const budget = { files: 10, ai: 6, bytes: 30 * 1024 * 1024 };
+    const deadline = Date.now() + 80_000;
+    let files = 0;
+    let left = 0;
+    for (const row of rows) {
+      const get = fetcherFor(mailboxOf(row))!;
+      const checked: string[] = [];
+      files += await backfillCreatorMail({ admin, userId, mailbox: mailboxOf(row), currency, get, budget, deadline, checked, creatorId: input.id, max: 15 }).catch(() => 0);
+      for (const part of chunk(checked, 200)) await admin.from("email_events").update({ intel_at: new Date().toISOString() }).eq("user_id", userId).in("gmail_id", part);
+    }
+    const { count } = await admin.from("email_events").select("id", { count: "exact", head: true }).eq("user_id", userId).eq("entity_id", input.id).eq("direction", "in").is("intel_at", null);
+    left = count || 0;
+    const { count: total } = await admin.from("email_events").select("id", { count: "exact", head: true }).eq("user_id", userId).eq("entity_id", input.id).eq("direction", "in");
+    return json({ ok: true, files, emails: total || 0, left });
   }
 
   if (action === "status") {
     const mailboxes = rows.map(publicMailbox);
-    if (!first) return json({ configured, connected: false, mailboxes, ai: aiEnabled() });
+    const readyAt = await aiReadyAt().catch(() => 0);
+    const ai = { ai: aiEnabled(), aiProvider: aiProvider(), aiModel: aiModel(), aiKeys: aiKeyCount(), aiReadyAt: readyAt ? new Date(readyAt).toISOString() : null };
+    if (!first) return json({ configured, connected: false, mailboxes, ...ai });
     // Top-level fields describe the first mailbox (older app versions read them).
-    return json({ configured, connected: true, ...publicMailbox(first), mailboxes, maxMailboxes: MAX_MAILBOXES, ai: aiEnabled() });
+    return json({ configured, connected: true, ...publicMailbox(first), mailboxes, maxMailboxes: MAX_MAILBOXES, ...ai });
   }
 
   if (action === "disconnect") {

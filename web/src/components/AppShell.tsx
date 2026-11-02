@@ -3,7 +3,9 @@ import {
   Archive, BarChart3, Building2, CalendarDays, Check, ChevronRight, CircleDollarSign, Clock3, Cloud, CloudOff, Command, HelpCircle, Inbox, LoaderCircle,
   Keyboard, LayoutDashboard, LifeBuoy, LogOut, Menu, MessageCircle, MonitorX, Moon, Palette, Plus, Search, SearchX, Settings, ShieldCheck, Sun,
   Sparkles, TrendingUp, UserX, Users, Wallet, X,
+  Receipt,
 } from "lucide-react";
+import { useInvoicesToChase } from "./Money";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
@@ -32,6 +34,7 @@ const navSections = [
     { to: "/app/brands", label: "Brands", icon: Building2 },
     { to: "/app/leads", label: "Inbound leads", icon: Inbox },
     { to: "/app/campaigns", label: "Campaigns", icon: BarChart3 },
+    { to: "/app/invoices", label: "Invoices", icon: Receipt },
     { to: "/app/calendar", label: "Calendar", icon: CalendarDays },
   ] },
   { label: "Workspace", items: [
@@ -55,6 +58,7 @@ export default function AppShell() {
   const chase = useChase();
   const gmail = useGmail();
   const newLeads = gmail.leads.filter((l) => l.status === "new").length;
+  const invoicesDue = useInvoicesToChase().length;
   const { toast } = useToast();
   const navigate = useNavigate();
   const location = useLocation();
@@ -256,7 +260,7 @@ export default function AppShell() {
       <div className="sidebar-top"><Logo /><button className="mobile-close" onClick={() => setMobileOpen(false)}><X size={19} /></button></div>
       <nav className="side-nav">
         {navSections.map((section) => (
-          <div className="nav-section" key={section.label}><span className="nav-label">{section.label}</span>{section.items.map((item) => <NavLink key={item.to} to={item.to} end={"end" in item ? item.end : false} className={({ isActive }) => isActive ? "active" : ""}><item.icon size={17} strokeWidth={1.8} /><span>{item.label}</span>{item.label === "Calendar" && dueToday > 0 && <b className="nav-due" title={`${dueToday} due today or overdue`}>{dueToday}</b>}{(item.label === "Influencers" || item.label === "Brands") && (() => { const kind = item.label === "Influencers" ? "creator" : "brand"; const n = chase.due.filter((c) => c.type === kind).length + chase.reply.filter((c) => c.type === kind).length; return n > 0 ? <b className="nav-due nav-follow" title={`${n} need a follow-up or a reply`}>{n}</b> : null; })()}{item.label === "Inbound leads" && newLeads > 0 && <b className="nav-due nav-leads" title={`${newLeads} new inbound lead${newLeads === 1 ? "" : "s"} to review`}>{newLeads}</b>}{item.label === "Archive" && <b>{data.creators.filter((x) => x.archived_at).length + data.brands.filter((x) => x.archived_at).length + data.campaigns.filter((x) => x.archived_at).length || ""}</b>}</NavLink>)}</div>
+          <div className="nav-section" key={section.label}><span className="nav-label">{section.label}</span>{section.items.map((item) => <NavLink key={item.to} to={item.to} end={"end" in item ? item.end : false} className={({ isActive }) => isActive ? "active" : ""}><item.icon size={17} strokeWidth={1.8} /><span>{item.label}</span>{item.label === "Calendar" && dueToday > 0 && <b className="nav-due" title={`${dueToday} due today or overdue`}>{dueToday}</b>}{(item.label === "Influencers" || item.label === "Brands") && (() => { const kind = item.label === "Influencers" ? "creator" : "brand"; const n = chase.due.filter((c) => c.type === kind).length + chase.reply.filter((c) => c.type === kind).length; return n > 0 ? <b className="nav-due nav-follow" title={`${n} need a follow-up or a reply`}>{n}</b> : null; })()}{item.label === "Invoices" && invoicesDue > 0 && <b className="nav-due" title={`${invoicesDue} invoice${invoicesDue === 1 ? "" : "s"} to chase today`}>{invoicesDue}</b>}{item.label === "Inbound leads" && newLeads > 0 && <b className="nav-due nav-leads" title={`${newLeads} new inbound lead${newLeads === 1 ? "" : "s"} to review`}>{newLeads}</b>}{item.label === "Archive" && <b>{data.creators.filter((x) => x.archived_at).length + data.brands.filter((x) => x.archived_at).length + data.campaigns.filter((x) => x.archived_at).length || ""}</b>}</NavLink>)}</div>
         ))}
       </nav>
       <div className="user-footer">
