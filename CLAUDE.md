@@ -21,3 +21,7 @@ These are standing instructions from the owner (Dhurim). Follow them in every se
 - Google tokens are encrypted (`_shared/googleTokens.ts`, key in Vault via `gmail_token_key()`); never store or log them in plain text.
 - Inbound lead scanner: `_shared/leadScanner.ts` + its test file — run the tests after any change to the rules.
 - Influencer profiles have no email draft (users write in Gmail; sync tracks it). Brands keep the composer.
+- Inbound leads are strict: only creator-wants-management, brand-wants-creators, influencer-agency partnership. Warm-up (TrulyInbox "Phone_N0:"), pitches and personal mail never count.
+- Negotiation rules: `_shared/negotiation.ts` (shared by app + server via `web/src/lib/negotiation.ts`). Integrated ⇄ dedicated cascade by the same %; nothing else is inferred. Run its tests after any change.
+- AI reading (`_shared/ai.ts`) treats emails/files as untrusted data: structured output only, values re-validated, nothing applied unless confident and about the right creator. Never trust a creator's typed audience claims as verified.
+- Deal models: `web/src/lib/dealTerms.ts`; `agreed_payment` is derived from `brand_terms` for non-flat deals.

@@ -1,7 +1,9 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { isSealed, openToken, sealToken } from "../_shared/googleTokens.ts";
-import { scanForLead, type Lead } from "../_shared/leadScanner.ts";
+import { aiEnabled, classifyLead } from "../_shared/ai.ts";
+import { decodeEntities, precheck, scanForLead, type Lead, type ScanInput } from "../_shared/leadScanner.ts";
+import { analyzeStoredFile, bodyOf, processCreatorMail, type FullMessage } from "./intel.ts";
 
 // Gmail ⇄ CRM sync, for every mailbox a user connected (an agency often runs
 // two or three).
@@ -163,7 +165,7 @@ function eventsFor(meta: Meta, userId: string, book: Map<string, Entity[]>, own:
     for (const entity of book.get(email) || []) {
       if (seen.has(entity.id)) continue;
       seen.add(entity.id);
-      rows.push({ user_id: userId, gmail_id: meta.id, thread_id: meta.threadId || "", direction: out ? "out" : "in", entity_type: entity.type, entity_id: entity.id, counterpart: email, subject: header(meta, "Subject").slice(0, 300), snippet: (meta.snippet || "").slice(0, 240), at, mailbox, message_key: messageKey(meta) });
+      rows.push({ user_id: userId, gmail_id: meta.id, thread_id: meta.threadId || "", direction: out ? "out" : "in", entity_type: entity.type, entity_id: entity.id, counterpart: email, subject: decodeEntities(header(meta, "Subject")).slice(0, 300), snippet: decodeEntities(meta.snippet || "").slice(0, 240), at, mailbox, message_key: messageKey(meta) });
     }
   }
   return rows;
@@ -219,13 +221,33 @@ async function dropCrossMailboxDuplicates(admin: Admin, userId: string, rows: Ev
 
 // ----- inbound leads -------------------------------------------------------------
 
-function leadFrom(meta: Meta, own: Set<string>, book: Map<string, Entity[]>): Lead | null {
-  if (isOutgoing(meta, own)) return null;
+const scanInput = (meta: Meta, own: Set<string>): ScanInput => {
   const headers: Record<string, string> = {};
   for (const h of meta.payload?.headers || []) headers[h.name.toLowerCase()] = h.value;
-  const lead = scanForLead({ from: header(meta, "From"), replyTo: header(meta, "Reply-To"), to: header(meta, "To"), subject: header(meta, "Subject"), snippet: meta.snippet || "", labels: meta.labelIds || [], headers, own: Array.from(own) });
-  if (!lead || book.has(lead.email)) return null;
-  return lead;
+  return { from: header(meta, "From"), replyTo: header(meta, "Reply-To"), to: header(meta, "To"), subject: header(meta, "Subject"), snippet: meta.snippet || "", labels: meta.labelIds || [], headers, own: Array.from(own) };
+};
+
+/** Strict scan: headers first, then the full body (in memory), then — when AI is on — Claude must agree. */
+async function findLeads(admin: Admin, userId: string, token: string, metas: Meta[], own: Set<string>, book: Map<string, Entity[]>, deadline: number) {
+  const found: { lead: Lead; meta: Meta }[] = [];
+  const candidates = metas.filter((m) => !isOutgoing(m, own)).map((meta) => ({ meta, input: scanInput(meta, own) })).filter((c) => precheck(c.input).ok).slice(0, 40);
+  for (const { meta, input } of candidates) {
+    if (Date.now() > deadline) break;
+    const full = await gmail<FullMessage>(token, `/messages/${meta.id}?format=full`).catch(() => null);
+    const body = full ? bodyOf(full).text : "";
+    const lead = scanForLead({ ...input, body });
+    if (!lead || book.has(lead.email)) continue;
+    if (aiEnabled()) {
+      const { data: allowed } = await admin.rpc("ai_take", { p_user: userId, p_limit: 150 });
+      if (allowed === true) {
+        const verdict = await classifyLead({ from: input.from, subject: input.subject, body: body || input.snippet }).catch(() => null);
+        if (verdict && (verdict.category === "not_a_lead" || verdict.automated || verdict.pitch || verdict.confidence < 0.7)) continue;
+        if (verdict?.why) lead.reasons = [...lead.reasons.slice(0, 5), `Double-checked: ${verdict.why}`];
+      }
+    }
+    found.push({ lead, meta });
+  }
+  return found;
 }
 
 async function storeLeads(admin: Admin, userId: string, mailbox: string, found: { lead: Lead; meta: Meta }[]) {
@@ -243,7 +265,7 @@ async function storeLeads(admin: Admin, userId: string, mailbox: string, found: 
   for (const [email, { lead, meta, count }] of latest) {
     const at = sentAt(meta);
     const row = byEmail.get(email);
-    const fields = { name: lead.name, company: lead.company, mailbox, kind: lead.kind, reasons: lead.reasons, subject: header(meta, "Subject").slice(0, 300), snippet: (meta.snippet || "").slice(0, 240), gmail_id: meta.id, thread_id: meta.threadId || "", via_form: lead.viaForm };
+    const fields = { name: lead.name, company: lead.company, mailbox, kind: lead.kind, category: lead.category, reasons: lead.reasons, subject: decodeEntities(header(meta, "Subject")).slice(0, 300), snippet: decodeEntities(meta.snippet || "").slice(0, 240), gmail_id: meta.id, thread_id: meta.threadId || "", via_form: lead.viaForm };
     if (!row) {
       const { error } = await admin.from("inbound_leads").insert({ user_id: userId, email, ...fields, score: lead.score, messages: count, first_at: at, last_at: at });
       if (!error) added++;
@@ -379,8 +401,22 @@ async function syncMailbox(admin: Admin, row: TokenRow, own: Set<string>, book: 
 
   // 5. Mail from people who aren't in the CRM: is it a real enquiry?
   const matchedIds = new Set(matched.map((r) => r.gmail_id));
-  const found = metas.filter((m) => !matchedIds.has(m.id)).map((meta) => ({ meta, lead: leadFrom(meta, own, book) })).filter((f): f is { meta: Meta; lead: Lead } => !!f.lead);
+  const found = await findLeads(admin, row.user_id, token, metas.filter((m) => !matchedIds.has(m.id)), own, book, deadline).catch(() => []);
   const leads = await storeLeads(admin, row.user_id, mailbox, found).catch(() => 0);
+
+  // 5b. New mail from creators in the CRM: media kits, prices, agreed rates (newest first, capped per run).
+  const budget = { files: 10, ai: 12 };
+  const creatorMail = Array.from(new Map(rows.filter((r) => r.direction === "in" && r.entity_type === "creator").sort((a, b) => b.at.localeCompare(a.at)).map((r) => [r.gmail_id, r])).values()).slice(0, 15);
+  let filesSaved = 0;
+  const { data: prof } = creatorMail.length ? await admin.from("profiles").select("preferences").eq("id", row.user_id).maybeSingle() : { data: null };
+  const currency = String(((prof?.preferences || {}) as { currency?: string }).currency || "USD").toUpperCase();
+  for (const ev of creatorMail) {
+    if (Date.now() > deadline) break;
+    const message = await gmail<FullMessage>(token, `/messages/${ev.gmail_id}?format=full`).catch(() => null);
+    if (!message) continue;
+    const res = await processCreatorMail({ admin, userId: row.user_id, mailbox, currency, message, creatorId: ev.entity_id, get: (path) => gmail(token, path), budget }).catch(() => ({ files: 0, changes: 0 }));
+    filesSaved += res.files;
+  }
 
   // 6. Move statuses (self-healing: also re-checks anything with recent mail).
   const { data: recent } = await admin.from("email_events").select("entity_id").eq("user_id", row.user_id).gte("at", new Date(Date.now() - 14 * 86400000).toISOString()).limit(2000);
@@ -396,7 +432,7 @@ async function syncMailbox(admin: Admin, row: TokenRow, own: Set<string>, book: 
     if (complete || !historyId) patch.history_id = profile.historyId || historyId;
   }
   await admin.from("gmail_tokens").update(patch).eq("id", row.id);
-  return { mailbox, messages: metas.length, events: rows.length, leads, statusChanges: changed, complete };
+  return { mailbox, messages: metas.length, events: rows.length, leads, files: filesSaved, statusChanges: changed, complete };
 }
 
 async function recordError(admin: Admin, row: TokenRow, e: unknown) {
@@ -560,11 +596,19 @@ Deno.serve(async (req) => {
   const rows = (data || []) as TokenRow[];
   const first = rows[0];
 
+  if (action === "analyze_file") {
+    if (typeof input.id !== "string" || !/^[0-9a-f-]{36}$/i.test(input.id)) return json({ error: "Invalid file" }, 400);
+    const { data: prof } = await admin.from("profiles").select("preferences").eq("id", userId).maybeSingle();
+    const currency = String(((prof?.preferences || {}) as { currency?: string }).currency || "USD").toUpperCase();
+    const result = await analyzeStoredFile(admin, userId, input.id, currency).catch(() => ({ error: "Couldn't check the file." }));
+    return json(result, "error" in result && result.error ? 422 : 200);
+  }
+
   if (action === "status") {
     const mailboxes = rows.map(publicMailbox);
-    if (!first) return json({ configured, connected: false, mailboxes });
+    if (!first) return json({ configured, connected: false, mailboxes, ai: aiEnabled() });
     // Top-level fields describe the first mailbox (older app versions read them).
-    return json({ configured, connected: true, ...publicMailbox(first), mailboxes, maxMailboxes: MAX_MAILBOXES });
+    return json({ configured, connected: true, ...publicMailbox(first), mailboxes, maxMailboxes: MAX_MAILBOXES, ai: aiEnabled() });
   }
 
   if (action === "disconnect") {
@@ -593,7 +637,7 @@ Deno.serve(async (req) => {
     const sum = (key: string) => results.reduce((s, r) => s + Number(r[key] || 0), 0);
     if (!results.length && !errors.length) return json({ skipped: true });
     const failed = errors.length > 0 && !results.length;
-    return json({ ok: errors.length === 0, events: sum("events"), leads: sum("leads"), statusChanges: sum("statusChanges"), mailboxes: results.length, errors, ...(failed ? { error: errors[0].error, reconnect: errors[0].reconnect } : {}) }, failed ? (errors[0].reconnect ? 409 : 502) : 200);
+    return json({ ok: errors.length === 0, events: sum("events"), leads: sum("leads"), files: sum("files"), statusChanges: sum("statusChanges"), mailboxes: results.length, errors, ...(failed ? { error: errors[0].error, reconnect: errors[0].reconnect } : {}) }, failed ? (errors[0].reconnect ? 409 : 502) : 200);
   }
 
   if (action === "send") {

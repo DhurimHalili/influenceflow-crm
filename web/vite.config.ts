@@ -1,7 +1,7 @@
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import react from '@vitejs/plugin-react'
-import { defineConfig, type Plugin } from 'vite'
+import { defineConfig, searchForWorkspaceRoot, type Plugin } from 'vite'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -35,6 +35,8 @@ function versionFile(): Plugin {
 export default defineConfig({
   plugins: [react(), versionFile()],
   base: '/influenceflow-crm/',
+  // Pure modules shared with the edge functions (negotiation rules) live in supabase/functions/_shared.
+  server: { fs: { allow: [searchForWorkspaceRoot(process.cwd()), path.resolve(__dirname, '../supabase/functions/_shared')] } },
   define: {
     __APP_VERSION__: JSON.stringify(BUILD_ID),
     __APP_BUILT_AT__: JSON.stringify(BUILT_AT),

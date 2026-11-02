@@ -1,3 +1,5 @@
+import type { RateEvent, RateMetaMap } from "../lib/negotiation";
+import type { BrandTerms } from "../lib/dealTerms";
 export type EntityStatus =
   | "new"
   /** They reached out to you first (website form, DM, inbound email). */
@@ -52,6 +54,10 @@ export interface WorkspacePreferences {
   /** When to follow up with people who haven't replied. */
   followup_rules: FollowupRules;
   start_page: "dashboard" | "influencers" | "calendar";
+  /** Daily outreach goal (emails + follow-ups) the coach tracks. */
+  daily_email_goal: number;
+  /** Show the coach's nudges and celebrations. */
+  coach: boolean;
 }
 
 /** Creator's prices per deliverable, in the workspace currency. 0 = not offered / unknown. */
@@ -114,6 +120,44 @@ export interface RatingWeights {
   consistency: number;
 }
 
+/** Audience numbers, kept apart by how much we can trust them. */
+export interface AudienceSnapshot {
+  top_countries: { country: string; pct: number }[];
+  age_ranges: { range: string; pct: number }[];
+  gender_female_pct: number;
+  avg_views: number;
+  followers: { platform: string; count: number }[];
+  engagement_rate: number;
+  at: string;
+  /** Verified: the file it came from. */
+  file_id?: string;
+  filename?: string;
+  kind?: string;
+  /** Their words: the email subject it came from. */
+  subject?: string;
+}
+export interface CreatorAudience {
+  /** Read from a media kit or stats screenshot they sent. */
+  verified?: AudienceSnapshot;
+  /** Only stated in an email — not proven. */
+  claimed?: AudienceSnapshot;
+}
+
+export interface CreatorFile {
+  id: string;
+  creator_id: string;
+  path: string;
+  filename: string;
+  mime: string;
+  size: number;
+  source: "gmail" | "upload";
+  mailbox: string;
+  received_at: string;
+  kind: "media_kit" | "rate_card" | "stats_screenshot" | "other" | "unknown";
+  status: "stored" | "analyzed" | "rejected";
+  verdict: string;
+}
+
 export interface Creator {
   id: string;
   user_id: string;
@@ -137,6 +181,11 @@ export interface Creator {
   stars_niche: number;
   stars_engagement: number;
   rates: RateCard;
+  /** List price + negotiation status per rate (see negotiation.ts). */
+  rate_meta?: RateMetaMap;
+  /** Every price change, newest first (undoable). */
+  rate_history?: RateEvent[];
+  audience?: CreatorAudience;
   draft_subject: string;
   draft_body: string;
   platform: Platform;
@@ -244,6 +293,8 @@ export interface Deliverable {
 }
 
 export interface Campaign {
+  /** How the brand pays (flat, CPM with a window, CPA, hybrid…). */
+  brand_terms?: BrandTerms;
   id: string;
   user_id: string;
   name: string;
@@ -335,7 +386,9 @@ export interface InboundLead {
   name: string;
   company: string;
   mailbox: string;
-  kind: "brand" | "creator" | "unknown";
+  kind: "brand" | "creator" | "agency" | "unknown";
+  /** creator_management · brand_needs_creators · agency_partnership */
+  category: string;
   score: number;
   reasons: string[];
   subject: string;
