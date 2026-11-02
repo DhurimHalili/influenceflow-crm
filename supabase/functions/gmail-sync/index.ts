@@ -153,6 +153,8 @@ async function addressBook(admin: Admin, userId: string, own: Set<string>) {
   return map;
 }
 
+const DRIVE_SHARE = /drive-shares-(dm-)?noreply@google\.com/i;
+const DRIVE_SHARES_DONE = "__drive_shares_v1";
 const isOutgoing = (meta: Meta, own: Set<string>) => (meta.labelIds || []).includes("SENT") || addresses(header(meta, "From")).some((e) => own.has(e));
 const sentAt = (meta: Meta) => (meta.internalDate ? new Date(Number(meta.internalDate)) : new Date(header(meta, "Date") || Date.now())).toISOString();
 
@@ -160,7 +162,9 @@ function eventsFor(meta: Meta, userId: string, book: Map<string, Entity[]>, own:
   const labels = meta.labelIds || [];
   if (labels.some((l) => l === "DRAFT" || l === "SPAM" || l === "TRASH" || l === "CHAT")) return [];
   const out = isOutgoing(meta, own);
-  const counterparts = (out ? [...addresses(header(meta, "To")), ...addresses(header(meta, "Cc"))] : addresses(header(meta, "From"))).filter((e) => !own.has(e));
+  // "X shared a file with you" comes from Google; the person who shared it is in Reply-To.
+  const sender = DRIVE_SHARE.test(header(meta, "From")) ? addresses(header(meta, "Reply-To")) : addresses(header(meta, "From"));
+  const counterparts = (out ? [...addresses(header(meta, "To")), ...addresses(header(meta, "Cc"))] : sender).filter((e) => !own.has(e));
   const at = sentAt(meta);
   const rows: EventRow[] = [];
   const seen = new Set<string>();
@@ -400,6 +404,12 @@ async function syncMailbox(admin: Admin, row: TokenRow, own: Set<string>, book: 
     if (Date.now() > deadline) { complete = false; break; }
     (await listIds(token, searchFor(group, BACKFILL_DAYS), 5)).forEach((id) => ids.add(id));
     backfilled.push(...group);
+  }
+
+  // 1b. Once per mailbox: files creators shared through Google Drive (sent by Google, not by them).
+  if (!done.has(DRIVE_SHARES_DONE) && Date.now() < deadline) {
+    (await listIds(token, `from:(drive-shares-dm-noreply@google.com OR drive-shares-noreply@google.com) newer_than:${BACKFILL_DAYS}d`, 2)).forEach((id) => ids.add(id));
+    backfilled.push(DRIVE_SHARES_DONE);
   }
 
   // 2. First time: look through the last month of the primary inbox for people

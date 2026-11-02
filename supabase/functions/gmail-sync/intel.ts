@@ -209,16 +209,19 @@ async function readFile(admin: Admin, p: Profile, file: FileRow, bytes: Uint8Arr
 
 type KitLink = { url: string; label: string; download: string | null };
 const LINK_RE = /https:\/\/[^\s<>"'()\]]+/gi;
-function kitLinks(text: string, subject: string): KitLink[] {
+const SOCIAL_HOST = /(^|\.)(youtube\.com|youtu\.be|instagram\.com|tiktok\.com|twitter\.com|x\.com|twitch\.tv|kick\.com|facebook\.com|linkedin\.com|threads\.net|snapchat\.com|pinterest\.com|discord\.(gg|com)|patreon\.com|spotify\.com|apple\.com|amazon\.[a-z.]+|google\.com\/maps|calendly\.com)$/;
+const safeDecode = (v: string) => { try { return decodeURIComponent(v); } catch { return v; } };
+const KIT_ANCHOR = /media[\s_-]?kit|rate[\s_-]?card|press[\s_-]?kit|one[\s_-]?pager|sponsorship deck|rates/i;
+function kitLinks(text: string, subject: string, fromDriveShare = false): KitLink[] {
   const out = new Map<string, KitLink>();
-  const subjectSaysKit = KIT_WORDS.test(subject);
+  const subjectSaysKit = KIT_WORDS.test(subject) || fromDriveShare;
   for (const m of text.matchAll(LINK_RE)) {
     const url = m[0].replace(/[.,;:!]+$/, "");
     let u: URL;
     try { u = new URL(url); } catch { continue; }
     const host = u.hostname.toLowerCase();
     const near = text.slice(Math.max(0, (m.index || 0) - 160), (m.index || 0) + url.length + 40);
-    const context = subjectSaysKit || KIT_WORDS.test(near) || KIT_WORDS.test(decodeURIComponent(u.pathname));
+    const context = subjectSaysKit || KIT_WORDS.test(near) || KIT_WORDS.test(safeDecode(u.pathname));
     let link: KitLink | null = null;
     const id = (re: RegExp) => (u.pathname.match(re) || u.search.match(/[?&]id=([\w-]{20,})/))?.[1] || "";
     if (/(^|\.)canva\.com$/.test(host) && /^\/design\//.test(u.pathname)) link = { url: `https://www.canva.com${u.pathname}`, label: "Canva media kit", download: null };
@@ -228,6 +231,13 @@ function kitLinks(text: string, subject: string): KitLink[] {
       if (kind) link = { url: `https://docs.google.com/${kind[1]}/d/${kind[2]}/view`, label: kind[1] === "presentation" ? "Google Slides media kit" : "Google Docs media kit", download: kind[1] === "presentation" ? `https://docs.google.com/presentation/d/${kind[2]}/export/pdf` : `https://docs.google.com/document/d/${kind[2]}/export?format=pdf` };
     } else if (/(^|\.)dropbox\.com$/.test(host) && context && /^\/(s|scl)\//.test(u.pathname)) { const d = new URL(url); d.searchParams.set("dl", "1"); link = { url, label: "Dropbox media kit", download: d.toString() }; }
     else if ((/(^|\.)(1drv\.ms|onedrive\.live\.com|notion\.site|beacons\.ai|figma\.com|behance\.net|issuu\.com|flipsnack\.com|wetransfer\.com|we\.tl|box\.com)$/.test(host)) && context) link = { url, label: "Media kit link", download: null };
+    // Any other site, only when the words right next to the link say it's the kit ("Full Media Kit", "Rate card: …").
+    if (!link && !SOCIAL_HOST.test(host) && !/(^|\.)(google\.com|dropbox\.com|canva\.com)$/.test(host)) {
+      const start = m.index || 0;
+      const before = text.slice(Math.max(0, start - 45), start);
+      const after = text.slice(start + url.length, start + url.length + 35);
+      if (KIT_ANCHOR.test(after) || KIT_ANCHOR.test(before) || KIT_ANCHOR.test(safeDecode(u.pathname))) link = { url, label: "Media kit link", download: null };
+    }
     if (link && link.url.length <= 600) out.set(link.url, link);
   }
   return Array.from(out.values()).slice(0, 5);
@@ -349,7 +359,8 @@ export async function processCreatorMail(ctx: MailCtx & { message: FullMessage; 
   }
 
   // ---- links to a kit (Canva, Drive, Dropbox…) ----
-  for (const link of kitLinks(text, subject)) {
+  const from = message.payload?.headers?.find((h) => h.name.toLowerCase() === "from")?.value || "";
+  for (const link of kitLinks(text, subject, /drive-shares-(dm-)?noreply@google\.com/i.test(from))) {
     if (ctx.budget.files <= 0) break;
     const hash = await sha256(new TextEncoder().encode(link.url));
     const [{ data: byHash }, { data: byUrl }] = await Promise.all([
