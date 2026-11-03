@@ -12,6 +12,11 @@ import type { LeadCategory } from "./leadScanner.ts";
 //               or GEMINI_API_KEY is set. One model only (GEMINI_MODEL, default
 //               gemini-3.8-flash): when a key hits its quota the next key is
 //               used with the SAME model — quality never drops to a lite model.
+//               Default is gemini-3.5-flash: 3.8 is better on paper but was
+//               returning 503 (overloaded) for every call in Nov 2026. Override
+//               with GEMINI_MODEL when the newer model is stable.
+//               Both key formats are accepted: legacy AIza… traffic keys and
+//               the newer AQ.… authentication keys (the dot is valid).
 //               When every key is out, the work waits in a queue for the next
 //               run (QuotaExhausted is thrown so callers stop cleanly).
 //               Keys are only ever identified by a SHA-256 prefix in the database.
@@ -28,11 +33,16 @@ import type { LeadCategory } from "./leadScanner.ts";
 // Per-user daily cap in the caller (ai_usage table).
 
 const CLAUDE_MODEL = "claude-opus-5-5";
-const GEMINI_MODEL = () => (Deno.env.get("GEMINI_MODEL") || "gemini-3.8-flash").replace(/[^\w.-]/g, "");
+const GEMINI_MODEL = () => (Deno.env.get("GEMINI_MODEL") || "gemini-3.5-flash").replace(/[^\w.-]/g, "");
 let client: Anthropic | null = null;
 const api = () => (client ??= new Anthropic({ apiKey: Deno.env.get("ANTHROPIC_API_KEY")!, maxRetries: 2, timeout: 60_000 }));
 
-const geminiKeys = () => Array.from(new Set(`${Deno.env.get("GEMINI_API_KEYS") || ""} ${Deno.env.get("GEMINI_API_KEY") || ""}`.split(/[\s,;]+/).map((k) => k.trim()).filter((k) => /^[\w-]{20,120}$/.test(k)))).slice(0, 20);
+const geminiKeys = () => Array.from(new Set(`${Deno.env.get("GEMINI_API_KEYS") || ""} ${Deno.env.get("GEMINI_API_KEY") || ""}`
+  .split(/[\s,;]+/)
+  .map((k) => k.trim().replace(/^["']+|["']+$/g, ""))
+  // AQ. keys contain a dot; AIza keys do not. Accept both, plus a little room
+  // for future formats, while still rejecting empty/absurd values.
+  .filter((k) => /^[\w.-]{20,200}$/.test(k)))).slice(0, 20);
 export type AiProvider = "claude" | "gemini" | null;
 export const aiProvider = (): AiProvider => (Deno.env.get("ANTHROPIC_API_KEY") ? "claude" : geminiKeys().length ? "gemini" : null);
 export const aiEnabled = () => aiProvider() !== null;
@@ -103,7 +113,7 @@ async function askGemini(parts: GeminiPart[], schema: Json, maxTokens: number, t
     const hash = await keyHash(key);
     const until = cooldown.get(hash) || 0;
     if (until > Date.now()) { soonest = Math.min(soonest, until); continue; }
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL()}:generateContent`, {
+    const send = () => fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL()}:generateContent`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-goog-api-key": key },
       body: JSON.stringify({
@@ -111,8 +121,15 @@ async function askGemini(parts: GeminiPart[], schema: Json, maxTokens: number, t
         contents: [{ role: "user", parts }],
         generationConfig: { responseMimeType: "application/json", responseJsonSchema: forGemini(schema), maxOutputTokens: maxTokens + 6000, temperature: 0, thinkingConfig: { thinkingLevel: thinking } },
       }),
-      signal: AbortSignal.timeout(90_000),
+      signal: AbortSignal.timeout(30_000),
     }).catch(() => null);
+    let res = await send();
+    // 503 is common on a newly released model: one quick retry, then let the
+    // caller fall back to rules rather than stalling the whole sync.
+    if (res && (res.status === 503 || res.status >= 500)) {
+      await new Promise((r) => setTimeout(r, 1000));
+      res = await send();
+    }
     if (!res) continue;
     if (res.status === 429 || res.status === 403 || res.status === 401) {
       // Out of quota (per minute or per day), or a bad/disabled key: park it and try the next one.
@@ -179,6 +196,48 @@ const num = (v: unknown, max: number) => {
 };
 const str = (v: unknown, max = 200) => (typeof v === "string" ? v.replace(/[\u0000-\u001f]/g, " ").trim().slice(0, max) : "");
 const obj = (props: Json, required = Object.keys(props)) => ({ type: "object", additionalProperties: false, properties: props, required });
+
+/** One tiny direct call — proves the configured key can actually reach the model. */
+export async function testAi(modelOverride?: string, structured = false): Promise<{ ok: boolean; provider: AiProvider; model: string; ms: number; status?: number; error?: string }> {
+  const provider = aiProvider();
+  const model = modelOverride && /^[\w.-]{2,60}$/.test(modelOverride) ? modelOverride : aiModel();
+  if (provider !== "gemini") return { ok: false, provider, model, ms: 0, error: provider ? "Test currently supports Gemini only." : "No AI key configured." };
+  const key = geminiKeys()[0];
+  if (!key) return { ok: false, provider, model, ms: 0, error: "No AI key configured." };
+  if (structured) {
+    const started = Date.now();
+    try {
+      const out = await ask(
+        [{ type: "text", text: 'Return exactly {"ok":true} as JSON. Do not add any other field.' }],
+        obj({ ok: { type: "boolean" } }),
+        50,
+      );
+      return out?.ok === true
+        ? { ok: true, provider, model: aiModel(), ms: Date.now() - started }
+        : { ok: false, provider, model: aiModel(), ms: Date.now() - started, error: "The model did not return the expected JSON." };
+    } catch (e) {
+      return {
+        ok: false, provider, model: aiModel(), ms: Date.now() - started,
+        error: e instanceof QuotaExhausted ? "All keys are cooling down." : e instanceof Error ? e.message.slice(0, 200) : "AI call failed.",
+      };
+    }
+  }
+  const started = Date.now();
+  try {
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-goog-api-key": key },
+      body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: "Reply with OK" }] }] }),
+      signal: AbortSignal.timeout(30_000),
+    });
+    const text = await res.text();
+    return res.ok
+      ? { ok: true, provider, model, ms: Date.now() - started, status: res.status }
+      : { ok: false, provider, model, ms: Date.now() - started, status: res.status, error: text.replace(/\s+/g, " ").slice(0, 300) };
+  } catch (e) {
+    return { ok: false, provider, model, ms: Date.now() - started, error: e instanceof Error ? `${e.name}: ${e.message}`.slice(0, 200) : "AI call failed." };
+  }
+}
 const RATE_ITEM = obj({ key: { type: "string", enum: RATE_KEYS }, amount: { type: "number" }, currency: { type: "string" } });
 const rateList = (v: unknown) =>
   (Array.isArray(v) ? v : [])

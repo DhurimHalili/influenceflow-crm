@@ -1,7 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { isSealed, openToken, sealToken } from "../_shared/googleTokens.ts";
-import { aiEnabled, aiKeyCount, aiModel, aiProvider, aiReadyAt, classifyLead, useKeyStore } from "../_shared/ai.ts";
+import { aiEnabled, aiKeyCount, aiModel, aiProvider, aiReadyAt, classifyLead, testAi, useKeyStore } from "../_shared/ai.ts";
 import { decodeEntities, precheck, scanForLead, type Lead, type ScanInput } from "../_shared/leadScanner.ts";
 import { analyzeStoredFile, bodyOf, drainQueue, gmailAttachment, processCreatorMail, sniff, type Fetcher, type FullMessage } from "./intel.ts";
 
@@ -55,19 +55,19 @@ const EMAIL_RE = /[A-Z0-9._%+'-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
 const VALID_EMAIL = /^[^\s@<>(),;:"]+@[^\s@<>(),;:"]+\.[^\s@<>(),;:"]+$/;
 const BACKFILL_DAYS = 180;
 const LEAD_LOOKBACK_DAYS = 30;
-const USER_MIN_INTERVAL_MS = 20_000;
+const USER_MIN_INTERVAL_MS = 60_000;
 const RUN_BUDGET_MS = 110_000;
 const SENDS_PER_DAY = 400; // per mailbox, well under Gmail's own limits
 const MAX_MAILBOXES = 5;
 
 type Admin = SupabaseClient;
-type TokenRow = { id: string; user_id: string; access_token: string | null; refresh_token: string; expiry: string | null; email: string | null; scopes: string; history_id: string | null; last_sync_at: string | null; backfilled: string[] | null; sync_error?: string; connected_at?: string | null; send_day?: string | null; send_count?: number; leads_scanned_at?: string | null };
+type TokenRow = { id: string; user_id: string; access_token: string | null; refresh_token: string; expiry: string | null; email: string | null; scopes: string; history_id: string | null; last_sync_at: string | null; backfilled: string[] | null; sync_error?: string; connected_at?: string | null; updated_at?: string | null; send_day?: string | null; send_count?: number; leads_scanned_at?: string | null };
 type Entity = { type: "creator" | "brand"; id: string };
 type Meta = { id: string; threadId: string; labelIds?: string[]; snippet?: string; internalDate?: string; payload?: { headers?: { name: string; value: string }[] } };
 type EventRow = { user_id: string; gmail_id: string; thread_id: string; direction: "out" | "in"; entity_type: "creator" | "brand"; entity_id: string; counterpart: string; subject: string; snippet: string; at: string; mailbox: string; message_key: string; scheduled: boolean };
 
 class GmailError extends Error {
-  constructor(message: string, public status = 0, public reconnect = false) {
+  constructor(message: string, public status = 0, public reconnect = false, public retryable = false) {
     super(message);
   }
 }
@@ -121,15 +121,42 @@ async function accessToken(admin: Admin, row: TokenRow): Promise<string> {
 
 async function gmail<T>(token: string, path: string, init?: RequestInit, attempt = 0): Promise<T> {
   const res = await fetch(`${GMAIL}${path}`, { ...init, headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", ...(init?.headers || {}) } });
+
+  // Gmail is temporarily busy: back off and retry. A 403 below is different —
+  // it can be a per-minute quota, so it gets its own, shorter retry path.
   if (res.status === 429 || res.status >= 500) {
     if (attempt < 3) {
       await sleep(400 * 2 ** attempt + Math.random() * 200);
       return gmail(token, path, init, attempt + 1);
     }
+    throw new GmailError("Gmail is temporarily unavailable — it will retry automatically.", res.status, false, true);
   }
+
+  if (res.status === 403) {
+    const text = await res.text().catch(() => "");
+    const rate = /(rateLimitExceeded|userRateLimitExceeded|quotaExceeded)/i.test(text);
+    const daily = /dailyLimitExceeded/i.test(text);
+    if (rate && !daily && attempt < 2) {
+      await sleep(1_500 * 2 ** attempt + Math.random() * 300);
+      return gmail(token, path, init, attempt + 1);
+    }
+    const reconnect = /insufficientPermissions|invalid_grant/i.test(text);
+    const message = daily
+      ? "Gmail's daily limit for this mailbox is reached — it will resume tomorrow."
+      : rate
+        ? "Gmail is rate-limiting this mailbox right now — it will retry automatically."
+        : reconnect
+          ? "Gmail access is missing a permission — reconnect this mailbox in Settings."
+          : "Gmail couldn't complete this request (403).";
+    throw new GmailError(message, 403, reconnect, rate || daily);
+  }
+
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    throw new GmailError(`Gmail ${res.status}: ${text.slice(0, 200)}`, res.status, res.status === 401);
+    const message = res.status === 401
+      ? "Gmail access expired — reconnect this mailbox in Settings."
+      : `Gmail ${res.status}: ${text.replace(/\s+/g, " ").slice(0, 180)}`;
+    throw new GmailError(message, res.status, res.status === 401);
   }
   return res.json() as Promise<T>;
 }
@@ -519,7 +546,14 @@ async function syncMailbox(admin: Admin, row: TokenRow, own: Set<string>, book: 
     const { data } = await admin.from("email_events").select("gmail_id").eq("user_id", row.user_id).in("gmail_id", part);
     (data || []).forEach((r) => known.add(r.gmail_id));
   }
-  const todo = list.filter((id) => !known.has(id));
+  // A long history (or a mailbox that was offline for a while) can contain
+  // thousands of messages. Gmail's per-minute query quota is shared by every
+  // mailbox of the user, so process a bounded batch: the stored ids are
+  // skipped next run, which makes the backlog drain without re-fetching it.
+  const MAX_NEW_PER_RUN = 300;
+  const todoAll = list.filter((id) => !known.has(id));
+  const todo = todoAll.slice(0, MAX_NEW_PER_RUN);
+  if (todoAll.length > todo.length) complete = false;
   const metas = await fetchMetas(token, todo, deadline);
   if (metas.length < todo.length) complete = false;
   const matched = metas.flatMap((m) => eventsFor(m, row.user_id, book, own, mailbox));
@@ -570,7 +604,8 @@ async function syncMailbox(admin: Admin, row: TokenRow, own: Set<string>, book: 
 
   // 7. Remember where we got to. An unfinished run keeps the old history id so
   //    the next run picks up exactly where this one stopped.
-  const patch: Record<string, unknown> = { last_sync_at: new Date().toISOString(), sync_error: "", backfilled: Array.from(new Set([...done, ...backfilled])).slice(-5000) };
+  const now = new Date().toISOString();
+  const patch: Record<string, unknown> = { last_sync_at: now, updated_at: now, sync_error: "", backfilled: Array.from(new Set([...done, ...backfilled])).slice(-5000) };
   if (leadsScanned && !row.leads_scanned_at && complete) patch.leads_scanned_at = new Date().toISOString();
   if (complete || !row.history_id) {
     const profile = await gmail<{ historyId?: string; emailAddress?: string }>(token, "/profile");
@@ -582,7 +617,10 @@ async function syncMailbox(admin: Admin, row: TokenRow, own: Set<string>, book: 
 
 async function recordError(admin: Admin, row: TokenRow, e: unknown) {
   const message = e instanceof Error ? e.message : String(e);
-  await admin.from("gmail_tokens").update({ sync_error: message.slice(0, 300), last_sync_at: new Date().toISOString() }).eq("id", row.id);
+  // last_sync_at means "last successful sync" — leave it alone on failure so
+  // the UI shows the truth. updated_at is the last attempt, so a mailbox that
+  // failed moves to the back of the queue instead of starving the others.
+  await admin.from("gmail_tokens").update({ sync_error: message.slice(0, 300), updated_at: new Date().toISOString() }).eq("id", row.id);
   return message;
 }
 
@@ -590,17 +628,27 @@ async function syncUser(admin: Admin, rows: TokenRow[], allRows: TokenRow[], dea
   const own = new Set(allRows.map(mailboxOf).filter(Boolean));
   const book = await addressBook(admin, allRows[0].user_id, own);
   const results: Record<string, unknown>[] = [];
-  const errors: { mailbox: string; error: string; reconnect: boolean }[] = [];
-  for (const row of rows) {
-    if (Date.now() > deadline - 5_000) break;
+  const errors: { mailbox: string; error: string; reconnect: boolean; status: number; retryable: boolean }[] = [];
+  // Gmail's query quota is per user, not per mailbox. An agency with two or
+  // three mailboxes will exhaust it if they sync back-to-back, so do one per
+  // quota window; the next run picks the mailbox touched least recently.
+  const started = Date.now();
+  let attempted = 0;
+  let deferred = 0;
+  const queue = [...rows].sort((a, b) => (a.updated_at || a.last_sync_at || a.connected_at || "").localeCompare(b.updated_at || b.last_sync_at || b.connected_at || ""));
+  for (let i = 0; i < queue.length; i++) {
+    const row = queue[i];
+    if (Date.now() > deadline - 5_000) { deferred = queue.length - i; break; }
     if (!force && row.last_sync_at && Date.now() - new Date(row.last_sync_at).getTime() < USER_MIN_INTERVAL_MS) continue;
+    if (attempted > 0 && Date.now() - started < 60_000) { deferred = queue.length - i; break; }
+    attempted++;
     try {
       results.push(await syncMailbox(admin, row, own, book, deadline));
     } catch (e) {
-      errors.push({ mailbox: mailboxOf(row), error: await recordError(admin, row, e), reconnect: e instanceof GmailError && e.reconnect });
+      errors.push({ mailbox: mailboxOf(row), error: await recordError(admin, row, e), reconnect: e instanceof GmailError && e.reconnect, status: e instanceof GmailError ? e.status : 0, retryable: e instanceof GmailError && e.retryable });
     }
   }
-  return { results, errors };
+  return { results, errors, deferred };
 }
 
 // ----- sending ------------------------------------------------------------------
@@ -715,13 +763,13 @@ Deno.serve(async (req) => {
     if (!allowed) return json({ error: "Unauthorized" }, 401);
     if (!configured) return json({ skipped: "not configured" });
     const deadline = Date.now() + RUN_BUDGET_MS;
-    const { data } = await admin.from("gmail_tokens").select("*").order("last_sync_at", { ascending: true, nullsFirst: true }).limit(500);
+    const { data } = await admin.from("gmail_tokens").select("*").order("updated_at", { ascending: true, nullsFirst: true }).limit(500);
     const byUser = new Map<string, TokenRow[]>();
     for (const row of (data || []) as TokenRow[]) byUser.set(row.user_id, [...(byUser.get(row.user_id) || []), row]);
     let mailboxes = 0;
     for (const rows of byUser.values()) {
       if (Date.now() > deadline - 10_000) break;
-      const due = rows.filter((r) => !r.last_sync_at || Date.now() - new Date(r.last_sync_at).getTime() >= 4 * 60_000);
+      const due = rows.filter((r) => !r.updated_at || Date.now() - new Date(r.updated_at).getTime() >= 4 * 60_000);
       if (!due.length) continue;
       try {
         const { results } = await syncUser(admin, due, rows, Math.min(deadline, Date.now() + 45_000), true);
@@ -802,6 +850,11 @@ Deno.serve(async (req) => {
     return json({ configured, connected: true, ...publicMailbox(first), mailboxes, maxMailboxes: MAX_MAILBOXES, ...ai });
   }
 
+  if (action === "ai_test") {
+    const result = await testAi(typeof input.model === "string" ? input.model : undefined, input.structured === true);
+    return json(result, result.ok ? 200 : 502);
+  }
+
   if (action === "disconnect") {
     const targets = input.all === true ? rows : rows.filter((r) => r.id === input.id || (!input.id && rows.length === 1));
     if (!targets.length && rows.length) return json({ error: "Pick which mailbox to disconnect." }, 400);
@@ -824,11 +877,14 @@ Deno.serve(async (req) => {
   if (!first) return json({ error: "Connect Gmail first.", code: "not_connected" }, 409);
 
   if (action === "sync") {
-    const { results, errors } = await syncUser(admin, rows, rows, Date.now() + RUN_BUDGET_MS, input.force === true);
+    const { results, errors, deferred } = await syncUser(admin, rows, rows, Date.now() + RUN_BUDGET_MS, input.force === true);
     const sum = (key: string) => results.reduce((s, r) => s + Number(r[key] || 0), 0);
-    if (!results.length && !errors.length) return json({ skipped: true });
+    if (!results.length && !errors.length) return json({ skipped: true, deferred });
     const failed = errors.length > 0 && !results.length;
-    return json({ ok: errors.length === 0, events: sum("events"), leads: sum("leads"), files: sum("files"), statusChanges: sum("statusChanges"), scheduledChanges: sum("scheduledChanges"), mailboxes: results.length, errors, ...(failed ? { error: errors[0].error, reconnect: errors[0].reconnect } : {}) }, failed ? (errors[0].reconnect ? 409 : 502) : 200);
+    // A rate limit is a temporary, retryable condition, not a server fault:
+    // return 429 so the UI and logs describe it correctly.
+    const status = !failed ? 200 : errors[0].reconnect ? 409 : errors[0].retryable ? 429 : 502;
+    return json({ ok: errors.length === 0, events: sum("events"), leads: sum("leads"), files: sum("files"), statusChanges: sum("statusChanges"), scheduledChanges: sum("scheduledChanges"), mailboxes: results.length, deferred, errors, ...(failed ? { error: errors[0].error, reconnect: errors[0].reconnect } : {}) }, status);
   }
 
   if (action === "send") {

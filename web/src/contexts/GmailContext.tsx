@@ -132,19 +132,23 @@ export function GmailProvider({ children }: { children: ReactNode }) {
     busy.current = true;
     setSyncing(true);
     try {
-      const res = await invoke<{ ok?: boolean; skipped?: boolean; events?: number; leads?: number; statusChanges?: number; scheduledChanges?: number; errors?: { mailbox: string; error: string }[] }>("gmail-sync", { action: "sync", force });
+      const res = await invoke<{ ok?: boolean; skipped?: boolean; events?: number; leads?: number; statusChanges?: number; scheduledChanges?: number; mailboxes?: number; deferred?: number; errors?: { mailbox: string; error: string }[] }>("gmail-sync", { action: "sync", force });
       lastSync.current = Date.now();
       if (res.error) {
         await refreshStatus();
         return { ok: false, message: res.error };
       }
-      if (res.data?.skipped) return { ok: true };
+      const deferred = res.data?.deferred || 0;
+      const waiting = deferred > 0
+        ? `${deferred} more mailbox${deferred === 1 ? "" : "es"} will sync automatically in the next window — Gmail limits how much one account can read at a time.`
+        : "";
+      if (res.data?.skipped) return { ok: true, message: waiting || undefined };
       await refreshStatus();
       // New mail or a moved status: bring the fresh rows in right away.
       if (res.data && ((res.data.events || 0) > 0 || (res.data.statusChanges || 0) > 0 || (res.data.scheduledChanges || 0) > 0)) refresh.current();
       if (res.data && (res.data.leads || 0) > 0) void refreshLeads();
       const partial = res.data?.errors?.[0];
-      return partial ? { ok: false, message: `${partial.mailbox}: ${partial.error}` } : { ok: true };
+      return partial ? { ok: false, message: `${partial.mailbox}: ${partial.error}` } : { ok: true, message: waiting || undefined };
     } finally {
       busy.current = false;
       setSyncing(false);
