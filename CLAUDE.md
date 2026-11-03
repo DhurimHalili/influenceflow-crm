@@ -12,8 +12,47 @@ These are standing instructions from the owner (Dhurim). Follow them in every se
 - Every change must work on **phone (≈390px), tablet (≈820px) and desktop** — check all three, not just desktop.
 - No regressions: run `npm run build` (includes `tsc -b`) and `npx oxlint` in `web/` before pushing.
 - **Security is non-negotiable**: RLS on every table, server-only secrets, escape anything rendered as HTML, validate input at the edge, never trust client-provided ids for authorization.
-- Design: not generic — considered, polished, consistent with the existing theme variables (all five themes, including dark).
+- Design: see **Craft standard** below — never generic, never the minimum.
 - The app must never lose a user's work: unsaved edits survive reloads, updates and offline periods.
+
+## Craft standard — a sensitive CRM, not a demo
+
+This product holds real relationships, negotiated money, contracts and personal data. "Works" is the floor, not the bar. Every change ships at the level below, or it doesn't ship.
+
+**Design like the screen matters**
+- Compose every screen deliberately: hierarchy, spacing, type scale, alignment, one obvious primary action. If it reads as a default component library, it isn't done.
+- Reuse the existing patterns and tokens across all five themes (including dark). A new pattern needs a reason; novelty is not a feature. No one-off colors, no unstyled native controls.
+- Design the full state matrix, not the happy path: first run, empty, loading, slow, offline, error, permission-denied, 1 record, 10,000 records, 200-character names, missing avatars, long amounts, phone width.
+- Motion is quiet and purposeful (≈150 ms, ease-out) and respects `prefers-reduced-motion`.
+- Copy is interface, not filler: specific, sentence case, says what happened and what to do next. No "Oops", "Something went wrong", "Lorem ipsum" or placeholder labels in shipped UI.
+
+**Build the whole job**
+- Done means the real task works end to end — undo, retry, cancel, edit, bulk actions, keyboard flow, and what happens after a reload.
+- If you can't describe the flow in three sentences, it isn't designed yet.
+- No dead ends: every button works or is removed. No fake toggles, inert tabs or "coming soon" in production.
+- One excellent flow beats three half-made ones. Simplicity is the constraint: progressive disclosure, smart defaults, the common path first, advanced controls behind "More".
+- Anticipate the next click: show the number they need, prefill what can be inferred, remember the last choice, never ask twice for data the app already has.
+- Empty states point to the next action; errors explain the fix; success is visible without a modal.
+
+**Creativity without clutter**
+- Be inventive where it removes work: a sharper summary, a better shortcut, a calmer inbox, one screen that replaces a wizard. Never add a tab, badge, setting or panel unless it earns its place.
+- Every new control must be worth its pixels. If removing it loses nothing, remove it.
+- The product should feel deep when the user needs it and quiet when they don't. When in doubt, choose the simpler surface and the more considered interaction.
+
+**Sensitive-data precision**
+- Money, dates, statuses and contract terms are exact: no floating-point currency drift, no timezone surprises, no silent truncation.
+- Never silently drop, overwrite or reorder a record. Optimistic UI rolls back visibly on failure; destructive actions get a real confirmation and undo where the data allows it.
+- Personal data stays behind RLS and least privilege. Never log emails, tokens, prices or contract text. Never widen access to make a screen easier.
+- A blocked sync is shown, not hidden. The user always knows if their last change is saved, syncing or failed.
+
+**The finish check — all must be true before pushing**
+- Phone ≈390 px, tablet ≈820 px and desktop checked by hand: no horizontal scroll, no clipped controls, no hover-only actions.
+- All five themes checked; contrast ≥ WCAG AA; visible focus; full keyboard path; labels on icon-only buttons.
+- Reload mid-edit, go offline, return, double-submit: nothing lost, nothing duplicated.
+- `npm run build` and `npx oxlint` pass; relevant `node --experimental-strip-types` tests pass; console clean.
+- Click every control and read the copy aloud. If a screen feels generic or a flow feels like the minimum, redesign it before shipping.
+
+This standard overrides convenience and speed. Do the harder, more considered version.
 
 ## Product notes
 - Follow-up engine: `web/src/lib/followupEngine.ts` (business-day cadence, configurable in Settings → Follow-up rules). Denied, Signed and Roster are never chased.
