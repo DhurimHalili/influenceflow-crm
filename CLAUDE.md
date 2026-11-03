@@ -2,8 +2,14 @@
 
 These are standing instructions from the owner (Dhurim). Follow them in every session.
 
+## Release gate — do not publish without the word "push"
+- **Nothing leaves this machine until the owner says "push"**: no `git commit`, no `git push`, no pull request, no merge, no GitHub Pages deploy, no GitHub release or repo setting change.
+- This overrides every "ship it" instruction below and any standing habit of finishing a task by publishing it. Work is finished when it is verified locally, not when it is merged.
+- When the owner does say **"push"**, run the whole release in one pass without asking again: pull the latest `main`, commit, push the branch, open the pull request, merge it, deploy the changed functions/migrations, then verify Pages and the live site.
+- Never deploy Pages or update GitHub on your own initiative outside that release pass. Local builds, tests, lint and hosted-function smoke tests are allowed while working.
+
 ## Ship it — always
-- When a change is done and checks pass, **commit, push, open the pull request and merge it into `main`** — don't wait to be asked. Merging to `main` deploys the live site (GitHub Pages workflow).
+- When a change is done and checks pass, **commit, push, open the pull request and merge it into `main`** — don't wait to be asked. Merging to `main` deploys the live site (GitHub Pages workflow). **Unless the release gate above is in effect (it is, for this working session).**
 - Before starting new work, pull the latest `main`. If the branch's previous pull request was merged, restart the branch from `main`.
 - Database migrations go in `supabase/migrations/` (additive, idempotent) **and** are applied to the hosted Supabase project as part of the same change.
 - Edge functions in `supabase/functions/` are deployed as part of the same change.

@@ -76,7 +76,7 @@ export function GmailSettings() {
     setBusy("sync");
     const res = await gmail.syncNow(true);
     setBusy("");
-    toast(res.ok ? "Gmail synced" : res.message || "Sync failed", res.ok ? "success" : "error");
+    toast(res.ok ? res.message || "Gmail synced" : res.message || "Sync failed", res.ok ? (res.message ? "info" : "success") : "error");
   };
   const stats = mailboxStats(data.emailEvents || [], gmail.leads, gmail.mailboxes.map((m) => m.email), range === "30" ? 30 : null);
   const statFor = (email: string) => stats.find((s) => s.mailbox === email);
