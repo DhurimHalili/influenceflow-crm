@@ -1,0 +1,89 @@
+// Run (from web/): node --experimental-strip-types --import ./scripts/ts-hooks.mjs src/lib/followupEngine.test.ts
+import type { EmailEvent, Followup } from "../types";
+import { DEFAULT_FOLLOWUP_RULES } from "./prefs";
+import { flagFor, followupState } from "./followupEngine";
+import { outreachLog, emailsIn, sentIn } from "./outreach";
+
+let fail = 0;
+const check = (name: string, got: unknown, want: unknown) => {
+  const ok = JSON.stringify(got) === JSON.stringify(want);
+  if (!ok) fail++;
+  console.log(ok ? "ok  " : "FAIL", name, ok ? "" : `→ got ${JSON.stringify(got)}, want ${JSON.stringify(want)}`);
+};
+const rules = DEFAULT_FOLLOWUP_RULES;
+let n = 0;
+const ev = (dir: "in" | "out", at: string, extra: Partial<EmailEvent> = {}): EmailEvent => ({ id: `e${++n}`, gmail_id: `g${n}`, thread_id: "t1", direction: dir, entity_type: "creator", entity_id: "c1", counterpart: "weenie@x.com", subject: "A real clash?", snippet: "", at, mailbox: "dhurimi@mimibridge.com", ...extra });
+const record = (extra: Record<string, unknown> = {}) => ({ type: "creator" as const, record: { id: "c1", pipeline_status: "contacted" as const, date_contacted: "2026-10-29", archived_at: null, ...extra } });
+
+// 1. Image 1: a follow-up scheduled before they replied, still waiting → cancel it.
+{
+  const first = ev("out", "2026-10-29T21:28:00", { message_key: "m1@mail" });
+  const reply = ev("in", "2026-11-02T15:52:00", { in_reply_to: "m1@mail" });
+  const answer = ev("out", "2026-11-02T16:16:00", { in_reply_to: "m2@mail" });
+  const bump = ev("out", "2026-11-02T23:00:00", { scheduled: true, in_reply_to: "m1@mail" });
+  const now = new Date("2026-11-02T18:00:00");
+  const s = followupState(record(), [], [first, reply, answer, bump], rules, now);
+  check("pending crossed bump is flagged to cancel", flagFor(s)?.short, "Cancel scheduled email");
+  check("…and the clock follows your real answer", s.kind === "waiting" ? s.last.at : s.kind, answer.at);
+  // Sent anyway (old row, no In-Reply-To): recognised from the quote, not counted as a 1st follow-up.
+  const sent = ev("out", "2026-11-02T23:00:00", { snippet: "Hi Weenie, You might have missed my email On Thu, Oct 29, 2026 at 9:28 PM Dhurim Halili <dhurimi@mimibridge.com> wrote: Hey" });
+  const s2 = followupState(record(), [], [first, reply, answer, sent], rules, new Date("2026-11-03T10:00:00"));
+  check("sent crossed bump doesn't open a follow-up round", s2.kind === "waiting" || s2.kind === "due" ? s2.round : s2.kind, 1);
+  check("sent crossed bump is labelled", s2.touches.find((t) => t.at === sent.at)?.label, "Follow-up sent after they replied");
+}
+
+// 2. Image 4/5: their management auto-declines from another address → managed, not replied/denied.
+{
+  const first = ev("out", "2026-10-23T21:39:00");
+  const declined = ev("in", "2026-10-23T21:40:00", { counterpart: "creatorcollabs@toptechtubers.com", reply_kind: "managed_no" });
+  const s = followupState(record(), [], [first, declined], rules, new Date("2026-11-03T10:00:00"));
+  check("management decline → managed", s.kind, "managed");
+  check("managed flag", flagFor(s)?.short, "Managed · DM them");
+  const dm: Followup = { id: "f1", user_id: "u", creator_id: "c1", brand_id: null, kind: "followup", channel: "dm", note: "", at: "2026-11-03T12:00:00" };
+  const s2 = followupState(record(), [dm], [first, declined], rules, new Date("2026-11-04T10:00:00"));
+  check("an Instagram DM after it restarts the follow-ups", s2.kind === "waiting" ? s2.last.channel : s2.kind, "dm");
+}
+
+// 3. Out-of-office isn't a reply.
+{
+  const first = ev("out", "2026-11-02T10:00:00");
+  const ooo = ev("in", "2026-11-02T10:01:00", { reply_kind: "auto" });
+  const s = followupState(record(), [], [first, ooo], rules, new Date("2026-11-05T10:00:00"));
+  check("auto-reply keeps the follow-up due", s.kind, "due");
+}
+
+// 4. WhatsApp with email reminders off: emails don't set the clock, WhatsApp does.
+{
+  const first = ev("out", "2026-11-02T10:00:00");
+  const wa: Followup = { id: "f2", user_id: "u", creator_id: "c1", brand_id: null, kind: "followup", channel: "whatsapp", note: "", at: "2026-11-03T09:00:00" };
+  const later = ev("out", "2026-11-04T10:00:00");
+  const s = followupState(record({ contact_channel: "whatsapp", email_followups: false }), [wa], [first, later], rules, new Date("2026-11-04T12:00:00"));
+  check("email off: WhatsApp follow-up drives the clock", s.kind === "waiting" || s.kind === "due" ? s.last.channel : s.kind, "whatsapp");
+  const reply = ev("in", "2026-11-04T13:00:00");
+  const s2 = followupState(record({ contact_channel: "whatsapp", email_followups: false }), [wa], [first, later, reply], rules, new Date("2026-11-04T14:00:00"));
+  check("email off: their email reply still counts", s2.kind, "reply-needed");
+}
+
+// 5. Denied: quiet for a month, then reach back.
+{
+  const rec = record({ pipeline_status: "denied", lost_at: "2026-10-01T10:00:00", lost_reason: "Price too high" });
+  check("denied recently → closed", followupState(rec, [], [], rules, new Date("2026-10-20T10:00:00")).kind, "idle");
+  const s = followupState(rec, [], [], rules, new Date("2026-11-02T10:00:00"));
+  check("denied a month ago → reach back", s.kind, "reach-back");
+}
+
+// 6. Counting: emails = every email, follow-ups = only chasers; DMs aren't emails.
+{
+  const events = [ev("out", "2026-11-04T09:00:00"), ev("out", "2026-11-04T10:00:00"), ev("in", "2026-11-04T11:00:00"), ev("out", "2026-11-04T12:00:00")];
+  const dm: Followup = { id: "f3", user_id: "u", creator_id: "c1", brand_id: null, kind: "followup", channel: "dm", note: "", at: "2026-11-04T13:00:00" };
+  const creator = { id: "c1", name: "W", pipeline_status: "replied", date_contacted: "2026-11-04", archived_at: null } as never;
+  const lead = { id: "l1", mailbox: "a@b.com", my_replies: [{ id: "x1", at: "2026-11-04T14:00:00" }] } as never;
+  const log = outreachLog({ creators: [creator], brands: [], followups: [dm], events, leads: [lead] });
+  const s = new Date("2026-11-04T00:00:00").getTime();
+  const e = s + 86400000;
+  check("emails sent counts every email incl. follow-ups and lead answers", emailsIn(log, s, e), 4);
+  check("follow-ups counts only chasers (email + DM)", sentIn(log, s, e, "followup"), 2);
+}
+
+console.log(fail ? `${fail} failed` : "all passed");
+if (fail) throw new Error(`${fail} failed`);

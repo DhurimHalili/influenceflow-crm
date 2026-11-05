@@ -1,4 +1,4 @@
-import type { Brand, BrandContact, Creator, EmailEvent, Followup } from "../types";
+import type { Brand, BrandContact, Creator, EmailEvent, Followup, InboundLead } from "../types";
 import { timeline, type Touch } from "./followupEngine";
 import { parseDay } from "./utils";
 
@@ -11,7 +11,11 @@ import { parseDay } from "./utils";
 // A message you send right after your own last one (no reply in between) is
 // a follow-up; anything else — a first email, an answer — is an email.
 // Emails waiting in Gmail's Scheduled folder are kept apart: they count once
-// they actually go out.
+// they actually go out. Your answers to people who emailed you first (inbound
+// leads not in the CRM yet) are emails too.
+// "Emails sent" = every email (first emails, answers, negotiation, follow-ups);
+// "Follow-ups" = only the chasers. A DM or WhatsApp follow-up is a follow-up,
+// not an email.
 
 export type Sent = {
   key: string;
@@ -19,13 +23,15 @@ export type Sent = {
   kind: "email" | "followup";
   scheduled: boolean;
   entityId: string;
-  entityType: "creator" | "brand" | "contact";
+  entityType: "creator" | "brand" | "contact" | "lead";
   mailbox: string;
+  /** "email", "whatsapp", "dm"… */
+  channel: string;
 };
 
-type Input = { creators: Creator[]; brands: Brand[]; contacts?: BrandContact[]; followups: Followup[]; events: EmailEvent[] };
+type Input = { creators: Creator[]; brands: Brand[]; contacts?: BrandContact[]; followups: Followup[]; events: EmailEvent[]; leads?: InboundLead[]; now?: Date };
 
-export function outreachLog({ creators, brands, contacts = [], followups, events }: Input): Sent[] {
+export function outreachLog({ creators, brands, contacts = [], followups, events, leads = [], now = new Date() }: Input): Sent[] {
   const mail = new Map<string, EmailEvent[]>();
   for (const e of events) mail.set(e.entity_id, [...(mail.get(e.entity_id) || []), e]);
   const logged = new Map<string, Followup[]>();
@@ -40,13 +46,15 @@ export function outreachLog({ creators, brands, contacts = [], followups, events
     const touches = timeline({ type, record: record as Creator }, logged.get(record.id) || [], mail.get(record.id) || []);
     let prev: Touch | undefined;
     for (const t of touches) {
+      // An out-of-office between two of your emails doesn't make the second one an answer.
+      if (t.dir === "in" && t.kind === "auto") continue;
       // A stamped contact date only counts while the record is still live outreach.
       const stale = t.source === "legacy" && (!!record.archived_at || record.pipeline_status === "new");
       if (t.dir === "out" && !stale) {
         const key = t.source === "gmail" ? t.id : `${record.id}:${t.id}`;
         if (!seen.has(key)) {
           seen.add(key);
-          out.push({ key, at: t.at, kind: prev?.dir === "out" ? "followup" : "email", scheduled: !!t.scheduled, entityId: record.id, entityType: type, mailbox: t.mailbox || "" });
+          out.push({ key, at: t.at, kind: prev?.dir === "out" ? "followup" : "email", scheduled: !!t.scheduled, entityId: record.id, entityType: type, mailbox: t.mailbox || "", channel: t.source === "gmail" ? "email" : t.channel || (t.source === "legacy" ? record.contact_channel || "email" : "email") });
           const days = outDays.get(record.id) || new Set<string>();
           days.add(new Date(t.at).toDateString());
           outDays.set(record.id, days);
@@ -61,7 +69,16 @@ export function outreachLog({ creators, brands, contacts = [], followups, events
   for (const c of contacts) {
     const day = parseDay(c.date_contacted);
     if (!day || c.pipeline_status === "new" || outDays.get(c.brand_id)?.has(day.toDateString())) continue;
-    out.push({ key: `contact:${c.id}`, at: day.toISOString(), kind: "email", scheduled: false, entityId: c.id, entityType: "contact", mailbox: "" });
+    out.push({ key: `contact:${c.id}`, at: day.toISOString(), kind: "email", scheduled: false, entityId: c.id, entityType: "contact", mailbox: "", channel: "email" });
+  }
+  // Your answers to inbound leads (once they're added, the same Gmail message is already counted above).
+  for (const lead of leads) {
+    for (const r of lead.my_replies || []) {
+      const key = `g-${r.id}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ key, at: r.at, kind: "email", scheduled: !!r.scheduled && new Date(r.at) > now, entityId: lead.id, entityType: "lead", mailbox: lead.mailbox, channel: "email" });
+    }
   }
   return out.sort((a, b) => a.at.localeCompare(b.at));
 }
@@ -73,6 +90,9 @@ const inRange = (iso: string, start: number, end: number) => {
 
 /** Sent (not scheduled) in [start, end), optionally one kind only. */
 export const sentIn = (log: Sent[], start: number, end: number, kind?: Sent["kind"]) => log.filter((s) => !s.scheduled && (!kind || s.kind === kind) && inRange(s.at, start, end)).length;
+
+/** Every email that went out in [start, end) — first emails, answers and follow-ups alike. */
+export const emailsIn = (log: Sent[], start: number, end: number) => log.filter((s) => !s.scheduled && s.channel === "email" && inRange(s.at, start, end)).length;
 
 /** Waiting in Gmail's Scheduled folder right now, soonest first. */
 export const scheduledNow = (log: Sent[], kind?: Sent["kind"]) => log.filter((s) => s.scheduled && (!kind || s.kind === kind));

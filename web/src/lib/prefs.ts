@@ -11,7 +11,8 @@ export const CURRENCIES: { value: Currency; label: string }[] = [
 
 // Agency standard: follow up after one business day, three times; then every
 // two business days, with no limit.
-export const DEFAULT_FOLLOWUP_RULES: FollowupRules = { gaps: [1, 1, 1], then: 2, stop_after: 0, workdays: [1, 2, 3, 4, 5], holidays: [] };
+// Someone who said no gets a "reach back" reminder a month later.
+export const DEFAULT_FOLLOWUP_RULES: FollowupRules = { gaps: [1, 1, 1], then: 2, stop_after: 0, workdays: [1, 2, 3, 4, 5], holidays: [], reach_back_days: 30 };
 
 const clampDays = (v: unknown, fallback: number) => {
   const n = Math.round(Number(v));
@@ -29,6 +30,7 @@ export const normalizeFollowupRules = (value: unknown): FollowupRules => {
     stop_after: clampDays(v.stop_after, 0),
     workdays: workdays.length ? workdays : DEFAULT_FOLLOWUP_RULES.workdays,
     holidays,
+    reach_back_days: v.reach_back_days === undefined ? 30 : Math.max(0, Math.min(365, Math.round(Number(v.reach_back_days)) || 0)),
   };
 };
 

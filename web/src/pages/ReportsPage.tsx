@@ -56,7 +56,8 @@ export default function ReportsPage() {
       ...data.brands.filter((b) => !b.archived_at).map((b) => ({ type: "brand" as const, record: b, niche: b.brand_type || "No industry", country: (b.brief?.markets || [])[0] || "Not set" })),
     ];
     const people = items.map((item) => {
-      const touches = timeline({ type: item.type, record: item.record as Creator }, data.followups, events);
+      // An out-of-office or a management auto-decline isn't a reply.
+      const touches = timeline({ type: item.type, record: item.record as Creator }, data.followups, events).filter((t) => !(t.dir === "in" && (t.kind === "auto" || t.kind === "managed_no")));
       const first = touches[0];
       const inbound = item.record.pipeline_status === "inbound" || first?.dir === "in";
       const firstOut = touches.find((t) => t.dir === "out");
@@ -64,7 +65,11 @@ export default function ReportsPage() {
       const outsBefore = firstIn && firstOut && !inbound ? touches.filter((t) => t.dir === "out" && t.at <= firstIn.at).length : 0;
       const history = acts.get(item.record.id) || [];
       let rank = RANK[item.record.pipeline_status] || (first ? 1 : 0);
-      for (const a of history) rank = Math.max(rank, rankFromText(a.text));
+      // A live record is where it is now: moving someone back from Negotiating
+      // to Replied is a correction, not a deal that got further. Only records
+      // that ended (Denied, No reply) keep the furthest stage they reached.
+      const ended = item.record.pipeline_status === "denied" || item.record.pipeline_status === "no_reply";
+      if (ended) for (const a of history) rank = Math.max(rank, rankFromText(a.text));
       if (firstIn) rank = Math.max(rank, 2);
       if (item.record.lost_at) rank = Math.max(rank, 2); // a loss is only stamped after a reply
       if (item.type === "brand" && wonByCampaign.has(item.record.id)) rank = 4;
@@ -81,10 +86,10 @@ export default function ReportsPage() {
     const cohort = side(outreach);
     const stage = (n: number) => cohort.filter((p) => p.rank >= n).length;
     const funnel = [
-      { key: "reached", label: "Reached out", value: cohort.length, icon: Send },
-      { key: "replied", label: "Replied", value: stage(2), icon: Reply },
-      { key: "negotiating", label: "Negotiating", value: stage(3), icon: HandCoins },
-      { key: "won", label: who === "creator" ? "Roster" : "Signed", value: stage(4), icon: Trophy },
+      { key: "reached", label: "Reached out", value: cohort.length, icon: Send, now: "" },
+      { key: "replied", label: "Replied", value: stage(2), icon: Reply, now: "" },
+      { key: "negotiating", label: "Got to negotiating", value: stage(3), icon: HandCoins, now: `${cohort.filter((p) => p.record.pipeline_status === "negotiating").length} negotiating now` },
+      { key: "won", label: who === "creator" ? "Roster" : "Signed", value: stage(4), icon: Trophy, now: "" },
     ];
     const inboundSide = side(inbound);
     const closeDays = side(people).filter((p) => p.wonAt && p.startAt).map((p) => Math.max(0, (new Date(p.wonAt!).getTime() - new Date(p.startAt!).getTime()) / 86400000));
@@ -178,7 +183,7 @@ export default function ReportsPage() {
       </div>
       <ol className="funnel-steps">{report.funnel.map((step, i) => { const prev = i ? report.funnel[i - 1].value : 0; return <li key={step.key} className={`fs-${step.key}`}>
         {i > 0 && <span className="fs-conv" title={`From ${report.funnel[i - 1].label.toLowerCase()}`}>{pct(step.value, prev)}%</span>}
-        <div className="fs-card"><span className="fs-icon"><step.icon size={15} /></span><b>{step.value}</b><small>{step.label}</small><i className="fs-bar"><em style={{ width: `${top ? Math.max(step.value ? 4 : 0, (step.value / top) * 100) : 0}%` }} /></i></div>
+        <div className="fs-card"><span className="fs-icon"><step.icon size={15} /></span><b>{step.value}</b><small>{step.label}</small>{step.now && step.value !== Number.parseInt(step.now, 10) && <em className="fs-now" title="Counts everyone who reached this stage, including those who went on to sign or ended later">{step.now}</em>}<i className="fs-bar"><em style={{ width: `${top ? Math.max(step.value ? 4 : 0, (step.value / top) * 100) : 0}%` }} /></i></div>
       </li>; })}</ol>
       <p className="funnel-note">{report.contacted ? <>Out of every <b>10</b> {who === "creator" ? "influencers" : "brands"} you contact, about <b>{Math.round((report.repliedCount / report.contacted) * 10)}</b> reply and <b>{Math.round((report.wonCount / report.contacted) * 100) / 10}</b> {who === "creator" ? "join your roster" : "sign"}.{report.closedCount ? <> It takes about <b>{report.closeDays} day{report.closeDays === 1 ? "" : "s"}</b> from first contact to {wonWord}.</> : null}</> : "Your funnel appears as soon as your first outreach is logged or synced from Gmail."}</p>
     </section>

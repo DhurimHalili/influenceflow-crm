@@ -14,6 +14,7 @@ import { useGmail } from "../contexts/GmailContext";
 import { useToast } from "../contexts/ToastContext";
 import { Avatar, Button, Logo, LogoMark, Modal } from "./ui";
 import { useChase } from "../hooks/useChase";
+import { useLeadActions } from "../hooks/useLeadActions";
 import { CoachLayer, CoachRing } from "./Coach";
 import { isPastDay, isTodayDay, LOSS_REASONS } from "../lib/utils";
 import type { SearchResult, ThemeName } from "../types";
@@ -71,9 +72,14 @@ export default function AppShell() {
   const [onboardingStep, setOnboardingStep] = useState(0);
   const [displayName, setDisplayName] = useState(data.profile.display_name);
   const [theme, setTheme] = useState<ThemeName>(data.profile.theme);
-  // First visit: open the welcome right away (once per session), not just a banner.
+  // Only someone who really hasn't set up gets the welcome: wait for the cloud
+  // copy (after sign-in the local snapshot is blank, so it would read "not done"
+  // on every login), and never for a workspace that already has records.
+  const setupDone = data.profile.onboarding_done || data.creators.length > 0 || data.brands.length > 0;
+  const setupKnown = data.ready && (data.cloudLive || data.syncState === "local");
   useEffect(() => {
-    if (!data.ready || data.profile.onboarding_done) return;
+    if (setupDone) setOnboardingOpen(false);
+    if (!setupKnown || setupDone) return;
     try {
       if (sessionStorage.getItem("if.welcomed")) return;
       sessionStorage.setItem("if.welcomed", "1");
@@ -82,7 +88,26 @@ export default function AppShell() {
     }
     setOnboardingStep(0);
     setOnboardingOpen(true);
-  }, [data.ready, data.profile.onboarding_done]);
+  }, [setupKnown, setupDone]);
+  // You said yes to an inbound lead in Gmail ("sure", "send your media kit"):
+  // add them for you, once, on whichever tab or device sees it first.
+  const leadActions = useLeadActions();
+  const autoAdding = useRef(new Set<string>());
+  useEffect(() => {
+    if (!data.cloudLive) return;
+    for (const lead of gmail.leads) {
+      if (lead.status !== "new" || lead.my_intent !== "yes" || autoAdding.current.has(lead.id)) continue;
+      autoAdding.current.add(lead.id);
+      void (async () => {
+        if (!(await leadActions.claim(lead.id))) return;
+        const match = leadActions.existing(lead.email);
+        const type = match?.type || leadActions.primaryType(lead);
+        const record = match || leadActions.create(lead, type, lead.kind === "agency", true);
+        await leadActions.resolve(lead.id, { status: "added", entity_type: type, entity_id: record.id });
+        toast(`${record.name} added to your ${type === "creator" ? "influencers" : "brands"} — you said yes in Gmail`);
+      })();
+    }
+  }, [gmail.leads, data.cloudLive, leadActions, toast]);
   // Loss-reason picker: opens automatically only when a live deal just died.
   const lossIds = data.pendingLoss.map((l) => `${l.kind}:${l.id}`).join(",");
   const [lossReason, setLossReason] = useState("");
@@ -307,7 +332,7 @@ export default function AppShell() {
             </div>
           </div>
         </header>
-        {!data.profile.onboarding_done && bannerVisible && (
+        {setupKnown && !setupDone && bannerVisible && (
           <div className="onboarding-banner"><div><Sparkles size={16} /><span><strong>Your workspace is almost ready.</strong> Take the 30-second setup and start with your real workspace.</span></div><div><Button size="sm" onClick={() => { setOnboardingStep(0); setOnboardingOpen(true); }}>Finish setup</Button><button onClick={() => setBannerVisible(false)} aria-label="Dismiss"><X size={16} /></button></div></div>
         )}
         <main className="app-main"><motion.div key={location.pathname} initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.22 }}><Outlet /></motion.div></main>
@@ -361,7 +386,7 @@ export default function AppShell() {
 
       <Modal open={onboardingOpen} onClose={() => setOnboardingOpen(false)} title={onboardingStep === 0 ? "Welcome to InfluenceFlow" : "Set up your workspace"} description={onboardingStep === 0 ? "Your agency's new home base" : `Step ${onboardingStep} of 2 / About 30 seconds`}>
         <div className="setup-progress"><span className="done" /><span className={onboardingStep >= 1 ? "done" : ""} /><span className={onboardingStep >= 2 ? "done" : ""} /></div>
-        {onboardingStep === 0 && <div className="setup-step welcome-step"><span className="welcome-mark"><LogoMark size={44} /></span><h3>Every signed creator starts with one email.</h3><p>The agencies that win aren't the ones with the biggest lists — they're the ones that follow up, every time. InfluenceFlow makes sure you never drop one.</p><ul className="welcome-promises"><li><b>1</b><span><strong>Reach out</strong>Add influencers and brands, write in Gmail — the pipeline moves by itself.</span></li><li><b>2</b><span><strong>Follow up</strong>A yellow flag tells you exactly who to chase, and when.</span></li><li><b>3</b><span><strong>Close</strong>Track deals, your margin and your roster growing week by week.</span></li></ul><p className="welcome-quote">“The fortune is in the follow-up.” Most people stop after one email — you won't.</p></div>}
+        {onboardingStep === 0 && <div className="setup-step welcome-step"><span className="welcome-mark"><LogoMark size={44} /></span><h3>Every signed creator starts with one email.</h3><p>The agencies that win aren't the ones with the biggest lists — they're the ones that follow up, every time. InfluenceFlow makes sure you never drop one.</p><ul className="welcome-promises"><li><b>1</b><span><strong>Reach out</strong>Add influencers and brands, write in Gmail — the pipeline moves by itself.</span></li><li><b>2</b><span><strong>Follow up</strong>A yellow flag tells you exactly who to chase, and when.</span></li><li><b>3</b><span><strong>Close</strong>Track deals, your margin and your roster growing week by week.</span></li></ul></div>}
         {onboardingStep === 1 && <div className="setup-step"><span className="setup-icon"><Users /></span><h3>What should we call you?</h3><p>This name is only visible inside your private workspace.</p><label className="field-wrap"><span className="field-label">Display name</span><input className="field" autoFocus value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="Alex Morgan" /></label></div>}
         {onboardingStep === 2 && <div className="setup-step"><span className="setup-icon"><Palette /></span><h3>Choose your atmosphere</h3><p>You can switch themes instantly at any time.</p><div className="theme-mini-grid">{themeOptions.map((item) => <button key={item.value} className={theme === item.value ? "selected" : ""} onClick={() => { setTheme(item.value); document.documentElement.dataset.theme = item.value; }}><i className={`theme-swatch swatch-${item.value}`} />{item.label}{theme === item.value && <Check size={14} />}</button>)}</div></div>}
         <div className="modal-actions">{onboardingStep > 0 && <Button variant="ghost" onClick={() => setOnboardingStep((step) => step - 1)}>Back</Button>}<Button onClick={() => onboardingStep < 2 ? setOnboardingStep((step) => step + 1) : completeOnboarding()} disabled={onboardingStep === 1 && !displayName.trim()}>{onboardingStep === 2 ? "Open my workspace" : onboardingStep === 0 ? "Let's build it" : "Continue"}<ChevronRight size={16} /></Button></div>

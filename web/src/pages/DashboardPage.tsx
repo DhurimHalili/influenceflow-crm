@@ -9,15 +9,16 @@ import { useGmail } from "../contexts/GmailContext";
 import { CoachCard } from "../components/Coach";
 import { TeamBoard } from "../components/Team";
 import { flagFor, sendsAt } from "../lib/followupEngine";
-import { scheduledNow, sentIn } from "../lib/outreach";
+import { emailsIn, scheduledNow, sentIn } from "../lib/outreach";
 import { useOutreach } from "../hooks/useOutreach";
+import { leadName, leadWaitingHours } from "../hooks/useLeadActions";
 import { currencySymbol, dateLabel, daysAgoLabel, daysSince, dayKey, dueLabel, isOverdue, isPastDay, isTodayDay, money, relativeTime, timeLabel } from "../lib/utils";
 import { ENTITY_STATUSES, STATUS_LABELS } from "../types";
 
 // One line a day, so the dashboard greets you with something to aim at.
 const NUDGES = [
   "Five emails today beat fifty next week.",
-  "The fortune is in the follow-up — check your yellow flags first.",
+  "Check your yellow flags first — they're the replies you'd otherwise miss.",
   "Every roster creator started as a cold email. Send one more.",
   "Reply to inbound leads while they're warm — speed wins deals.",
   "A no today is often a yes next quarter. Log it, move on.",
@@ -173,11 +174,12 @@ export default function DashboardPage() {
       prevLabel = `vs prior ${days} days`;
     }
     const pEnd = start;
-    // "Today" compares with the same hours of yesterday, "this week" with the
-    // same elapsed part of last week — like-for-like, never a partial vs full.
+    // Every range compares with the whole period before it: today vs all of
+    // yesterday (4 yesterday, 2 so far today → −2), this week vs all of last week.
     const span = momentumRange === "today" || momentumRange === "yesterday" ? day : momentumRange === "week" || momentumRange === "lastweek" ? 7 * day : end - start;
     const pStart = start - span;
-    const pFinish = momentumRange === "today" || momentumRange === "week" ? pStart + (end - start) : pEnd;
+    const pFinish = pEnd;
+    if (momentumRange === "week") prevLabel = "vs last week";
     const inR = (iso: string | null, s = start, e = end) => {
       if (!iso) return false;
       const t = new Date(iso).getTime();
@@ -195,8 +197,11 @@ export default function DashboardPage() {
     // Emails and follow-ups come from one log (lib/outreach): Gmail from every
     // connected mailbox, follow-ups logged by hand and stamped contact dates,
     // each counted once. Scheduled sends count when they actually go out.
-    const emails = (s = start, e = end) => sentIn(log, s, e, "email");
+    // Emails sent = every email (first emails, answers, follow-ups, replies to
+    // inbound leads); follow-ups = only the chasers, on any channel.
+    const emails = (s = start, e = end) => emailsIn(log, s, e);
     const followups = (s = start, e = end) => sentIn(log, s, e, "followup");
+    const firstAndAnswers = (s: number, e: number) => sentIn(log, s, e, "email");
     // The first moment each record reached a "won" status, counted once:
     // a campaign that goes active and later completes is one closed deal.
     // Records created straight into that status count from creation.
@@ -246,7 +251,7 @@ export default function DashboardPage() {
       return {
         key: dayKey(new Date(s)),
         label: new Date(s).toLocaleDateString("en-US", { weekday: "short", day: "numeric" }),
-        Emails: emails(s, e),
+        Emails: firstAndAnswers(s, e),
         "Follow-ups": followups(s, e),
         Replies: statusIn("replied", s, e),
       };
@@ -280,7 +285,10 @@ export default function DashboardPage() {
       .sort((a, b) => (a.date_contacted || a.status_updated_at || "").localeCompare(b.date_contacted || b.status_updated_at || ""))
       .forEach((item) => { const waited = daysSince(item.date_contacted || item.status_updated_at) || 0; push({ id: `in-${item.id}`, type: `Inbound ${item.kind.toLowerCase()} · ${waited ? `waiting ${daysAgoLabel(item.date_contacted || item.status_updated_at).replace(" ago", "")}` : "came in today"}`, title: item.name, detail: item.next_action || "Reached out to you — reply while they're warm", to: item.to, urgent: waited >= 1, rank: 0 }); });
     // New people who emailed you first (spotted by the Gmail scanner).
-    const freshLeads = gmail.leads.filter((l) => l.status === "new");
+    // Waiting a day or more on your answer: its own, louder line.
+    const stale = gmail.leads.filter((l) => leadWaitingHours(l) >= 24).sort((a, b) => a.last_at.localeCompare(b.last_at));
+    if (stale.length) push({ id: "leads-waiting", type: `Gmail · waiting on your answer · ${Math.round(leadWaitingHours(stale[0]) / 24)}+ day${Math.round(leadWaitingHours(stale[0]) / 24) === 1 ? "" : "s"}`, title: stale.length === 1 ? leadName(stale[0]) : `${stale.length} inbound leads haven't heard back`, detail: `${stale.slice(0, 3).map((l) => l.company || leadName(l)).join(", ")} — answer in Gmail: a yes adds them, a no dismisses them`, to: "/app/leads", urgent: true, rank: 0 });
+    const freshLeads = gmail.leads.filter((l) => l.status === "new" && !stale.includes(l));
     if (freshLeads.length) push({ id: "leads", type: `Gmail · ${freshLeads.length === 1 ? `new inbound ${freshLeads[0].kind === "creator" ? "creator" : "brand"}` : "new inbound leads"} · ${relativeTime(freshLeads[0].last_at)}`, title: freshLeads.length === 1 ? freshLeads[0].name || freshLeads[0].company || freshLeads[0].email : `${freshLeads.length} people emailed you first`, detail: freshLeads.length === 1 ? `“${freshLeads[0].subject || "(no subject)"}” — review and add to your CRM` : freshLeads.slice(0, 3).map((l) => l.company || l.name || l.email).join(", ") + " — review and add them", to: "/app/leads", urgent: true, rank: 0 });
     campaigns.filter((item) => item.status === "active" && isOverdue(item.due_date)).forEach((item) => push({ id: item.id, type: "Campaign overdue", title: item.name, detail: `Was due ${dateLabel(item.due_date)}`, to: `/app/campaigns?id=${item.id}`, urgent: true, rank: 0 }));
     const actionables = [
@@ -292,7 +300,10 @@ export default function DashboardPage() {
     actionables.filter((item) => item.next_action_date && isTodayDay(item.next_action_date)).forEach((item) => push({ id: item.id, type: `${item.kind} · Due today`, title: item.name, detail: item.next_action || "Action due today", to: item.to, urgent: false, rank: 2 }));
     // The follow-up engine: no reply after the business-day gap, or they wrote and you haven't answered.
     chase.due.sort((a, b) => (b.state.kind === "due" ? b.state.overdueDays : 0) - (a.state.kind === "due" ? a.state.overdueDays : 0)).forEach((item) => push({ id: `fu-${item.id}`, type: `${item.type === "creator" ? "Influencer" : "Brand"} · ${flagFor(item.state)?.short || "Follow up"}`, title: item.name, detail: flagFor(item.state)?.long || "", to: item.type === "creator" ? `/app/influencers/${item.id}` : `/app/brands/${item.id}`, urgent: item.state.kind === "due" && item.state.overdueDays > 0, rank: 0.5 }));
+    chase.cancel.forEach((item) => push({ id: `cx-${item.id}`, type: `${item.type === "creator" ? "Influencer" : "Brand"} · Cancel scheduled email`, title: item.name, detail: flagFor(item.state)?.long || "", to: item.type === "creator" ? `/app/influencers/${item.id}` : `/app/brands/${item.id}`, urgent: true, rank: 0 }));
     chase.reply.forEach((item) => push({ id: `re-${item.id}`, type: `${item.type === "creator" ? "Influencer" : "Brand"} · Reply needed`, title: item.name, detail: flagFor(item.state)?.long || "", to: item.type === "creator" ? `/app/influencers/${item.id}` : `/app/brands/${item.id}`, urgent: item.state.kind === "reply-needed" && item.state.days >= 1, rank: 0.6 }));
+    chase.managed.forEach((item) => push({ id: `mg-${item.id}`, type: `${item.type === "creator" ? "Influencer" : "Brand"} · Managed — DM them`, title: item.name, detail: flagFor(item.state)?.long || "", to: item.type === "creator" ? `/app/influencers/${item.id}` : `/app/brands/${item.id}`, urgent: false, rank: 2.5 }));
+    chase.reach.forEach((item) => push({ id: `rb-${item.id}`, type: `${item.type === "creator" ? "Influencer" : "Brand"} · Reach back`, title: item.name, detail: flagFor(item.state)?.long || "", to: item.type === "creator" ? `/app/influencers/${item.id}` : `/app/brands/${item.id}`, urgent: false, rank: 2.6 }));
     actionables.filter((item) => item.next_action && !item.next_action_date && !["signed", "denied"].includes(item.pipeline_status) && Date.now() - new Date(item.status_updated_at || item.created_at).getTime() > 7 * 86400000).forEach((item) => push({ id: item.id, type: `${item.kind} · No movement 7+ days`, title: item.name, detail: item.next_action!, to: item.to, urgent: false, rank: 3 }));
     return out.sort((a, b) => a.rank - b.rank);
   })();
@@ -320,11 +331,11 @@ export default function DashboardPage() {
           const prev = momentum.prev[tile.key];
           const diff = curr - prev;
           const good = tile.invert ? diff < 0 : diff > 0;
-          const waiting = tile.key === "emails" ? scheduledNow(log, "email") : tile.key === "followups" ? scheduledNow(log, "followup") : [];
+          const waiting = tile.key === "emails" ? scheduledNow(log).filter((x) => x.channel === "email") : tile.key === "followups" ? scheduledNow(log, "followup") : [];
           const next = waiting.map((s) => sendsAt(s.at)).find(Boolean);
           return <div className="momentum-tile" key={tile.key}><span className="momentum-icon"><tile.icon size={15} /></span><strong>{curr}</strong><small>{tile.label}</small>{waiting.length > 0 && <span className="momentum-sched" title={`Waiting in Gmail's Scheduled folder${next ? ` — next sends ${next}` : ""}. They count here once they go out.`}><CalendarClock size={11} /> {waiting.length}<span className="ms-word"> scheduled</span></span>}<em className={diff === 0 ? "delta-flat" : good ? "delta-up" : "delta-down"} title={momentum.prevLabel}>{diff === 0 ? `— ${momentum.prevLabel}` : `${diff > 0 ? "+" : ""}${diff} ${momentum.prevLabel}`}</em></div>;
         })}</div>
-        <div className="daily-strip"><div className="daily-strip-head"><span>Daily outreach · last 14 days</span><span className="daily-legend"><i className="lg-emails" /> Emails <i className="lg-followups" /> Follow-ups <i className="lg-replies" /> Replies</span></div><div className="daily-chart"><ResponsiveContainer width="100%" height="100%"><BarChart data={momentum.daily} margin={{ top: 6, right: 4, left: -18, bottom: 0 }} barCategoryGap="22%"><CartesianGrid stroke="var(--line)" vertical={false} /><XAxis dataKey="label" axisLine={false} tickLine={false} interval="preserveStartEnd" minTickGap={8} tick={{ fill: "var(--muted)", fontSize: 10 }} /><YAxis allowDecimals={false} axisLine={false} tickLine={false} width={34} tick={{ fill: "var(--muted)", fontSize: 11 }} /><Tooltip cursor={{ fill: "rgba(var(--accent-rgb),.06)" }} contentStyle={{ background: "var(--surface-solid)", border: "1px solid var(--line)", borderRadius: 10, fontSize: 13 }} /><Bar dataKey="Emails" stackId="o" fill="var(--accent)" radius={[0, 0, 0, 0]} /><Bar dataKey="Follow-ups" stackId="o" fill="#24a6a1" /><Bar dataKey="Replies" stackId="o" fill="#d59b48" radius={[3, 3, 0, 0]} /></BarChart></ResponsiveContainer></div></div>
+        <div className="daily-strip"><div className="daily-strip-head"><span>Daily outreach · last 14 days</span><span className="daily-legend"><i className="lg-emails" /> New emails & answers <i className="lg-followups" /> Follow-ups <i className="lg-replies" /> Replies</span></div><div className="daily-chart"><ResponsiveContainer width="100%" height="100%"><BarChart data={momentum.daily} margin={{ top: 6, right: 4, left: -18, bottom: 0 }} barCategoryGap="22%"><CartesianGrid stroke="var(--line)" vertical={false} /><XAxis dataKey="label" axisLine={false} tickLine={false} interval="preserveStartEnd" minTickGap={8} tick={{ fill: "var(--muted)", fontSize: 10 }} /><YAxis allowDecimals={false} axisLine={false} tickLine={false} width={34} tick={{ fill: "var(--muted)", fontSize: 11 }} /><Tooltip cursor={{ fill: "rgba(var(--accent-rgb),.06)" }} contentStyle={{ background: "var(--surface-solid)", border: "1px solid var(--line)", borderRadius: 10, fontSize: 13 }} /><Bar dataKey="Emails" stackId="o" fill="var(--accent)" radius={[0, 0, 0, 0]} /><Bar dataKey="Follow-ups" stackId="o" fill="#24a6a1" /><Bar dataKey="Replies" stackId="o" fill="#d59b48" radius={[3, 3, 0, 0]} /></BarChart></ResponsiveContainer></div></div>
       </section>
 
       <section className="dashboard-primary-grid">

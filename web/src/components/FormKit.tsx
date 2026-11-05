@@ -19,7 +19,7 @@ export const socialRowError = (row: SocialDraft) => {
   if (!row.text.trim()) return "";
   if (/\s/.test(row.text.trim())) return "Handles have no spaces";
   if (row.followers.trim() && !parseFollowers(row.followers)) return "Followers: use 12000, 12k or 1.2m";
-  return resolveSocial(row.text, row.platform) ? "" : row.platform === "Website" ? "Enter a web address" : `Enter a ${SOCIAL_META[row.platform].label} handle or link`;
+  return resolveSocial(row.text, row.platform) ? "" : row.platform === "Website" ? "Enter a web address" : row.platform === "WhatsApp" ? "Enter a phone number with country code, or a wa.me link" : `Enter a ${SOCIAL_META[row.platform].label} handle or link`;
 };
 
 /** Resolved links in order (first = main), skipping empty and repeated rows. */

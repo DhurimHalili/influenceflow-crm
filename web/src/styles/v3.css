@@ -685,7 +685,6 @@ body:has(.kit-page) { background: #fbfaf7; }
 .welcome-promises b { flex: none; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 8px; background: var(--accent); color: #fff; font-size: 12px; }
 .welcome-promises span { font-size: 13px; color: var(--text-soft); line-height: 1.45; }
 .welcome-promises strong { display: block; color: var(--text); font-size: 13.5px; }
-.welcome-quote { margin: 14px 0 0 !important; padding-left: 12px; border-left: 3px solid var(--accent); font-style: italic; color: var(--text-soft) !important; }
 .setup-progress span { flex: 1; }
 .first-wins { margin-bottom: 16px; }
 .fw-head { display: flex; align-items: center; gap: 14px; }
