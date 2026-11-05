@@ -6,7 +6,7 @@ import { SocialBadge } from "../components/SocialIcon";
 import { LogoMark } from "../components/ui";
 import { useData } from "../contexts/DataContext";
 import { RATE_FIELDS } from "../lib/prefs";
-import { compact, initials, money } from "../lib/utils";
+import { compact, initials, malePct, money, pctText } from "../lib/utils";
 import type { Creator, RateCard } from "../types";
 
 // A brand-ready pitch: pick creators (Influencers → select → "Pitch PDF"),
@@ -66,12 +66,12 @@ export default function PitchPage() {
           <div className="pitch-stats">
             {avg > 0 && <div><b>{compact(avg)}</b><span>avg views</span></div>}
             {(v?.engagement_rate || c.engagement_rate) > 0 && <div><b>{v?.engagement_rate || c.engagement_rate}%</b><span>engagement</span></div>}
-            {v?.top_countries?.[0] && <div><b>{Math.round(v.top_countries[0].pct)}%</b><span>{v.top_countries[0].country}</span></div>}
-            {v && v.gender_female_pct > 0 && <div><b>{Math.round(100 - v.gender_female_pct)}/{Math.round(v.gender_female_pct)}</b><span>male / female</span></div>}
+            {v?.top_countries?.[0] && <div><b>{pctText(v.top_countries[0].pct)}%</b><span>{v.top_countries[0].country}</span></div>}
+            {v && v.gender_female_pct > 0 && <div><b>{pctText(malePct(v))}/{pctText(v.gender_female_pct)}</b><span>male / female</span></div>}
           </div>
           {v && (v.top_countries.length > 0 || v.age_ranges.length > 0) && <div className="pitch-aud"><span className="pitch-verified"><BadgeCheck size={12} /> Verified audience</span>
-            {v.top_countries.length > 0 && <p><em>Countries</em>{v.top_countries.slice(0, 3).map((x) => `${x.country} ${Math.round(x.pct)}%`).join(" · ")}</p>}
-            {v.age_ranges.length > 0 && <p><em>Ages</em>{[...v.age_ranges].sort((a, b) => b.pct - a.pct).slice(0, 3).map((x) => `${x.range} ${Math.round(x.pct)}%`).join(" · ")}</p>}
+            {v.top_countries.length > 0 && <p><em>Countries</em>{v.top_countries.slice(0, 3).map((x) => `${x.country} ${pctText(x.pct)}%`).join(" · ")}</p>}
+            {v.age_ranges.length > 0 && <p><em>Ages</em>{[...v.age_ranges].sort((a, b) => b.pct - a.pct).slice(0, 3).map((x) => `${x.range} ${pctText(x.pct)}%`).join(" · ")}</p>}
           </div>}
           {shown.some((f) => price(c, f.key) > 0) && <div className="pitch-prices">{shown.filter((f) => price(c, f.key) > 0).map((f) => <div key={f.key}><span>{f.label}</span><b>{money(price(c, f.key))}</b>{avg > 0 && f.group === "video" && <small>{money((price(c, f.key) / avg) * 1000)} CPM</small>}</div>)}</div>}
         </section>;

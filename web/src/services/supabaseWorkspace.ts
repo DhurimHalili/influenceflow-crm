@@ -75,6 +75,7 @@ const snapshot = (v: unknown): AudienceSnapshot | undefined => {
     top_countries: list(a.top_countries, (i) => (text(i.country) ? { country: text(i.country).slice(0, 60), pct: num(i.pct) } : null)).slice(0, 8),
     age_ranges: list(a.age_ranges, (i) => (text(i.range) ? { range: text(i.range).slice(0, 12), pct: num(i.pct) } : null)).slice(0, 8),
     gender_female_pct: num(a.gender_female_pct),
+    gender_male_pct: num(a.gender_male_pct),
     avg_views: num(a.avg_views),
     followers: list(a.followers, (i) => (text(i.platform) ? { platform: text(i.platform).slice(0, 30), count: num(i.count) } : null)).slice(0, 10),
     engagement_rate: num(a.engagement_rate),
@@ -129,6 +130,9 @@ const normalizeCreator = (row: Record<string, unknown>, userId: string): Creator
   status_source: row.status_source === "gmail" ? "gmail" : "manual",
   contact_channel: CHANNEL_SET.has(text(row.contact_channel)) ? text(row.contact_channel) : "email",
   email_followups: row.email_followups !== false,
+  primary_thread: text(row.primary_thread),
+  primary_thread_at: typeof row.primary_thread_at === "string" ? row.primary_thread_at : null,
+  new_thread_gap: row.new_thread_gap === null || row.new_thread_gap === undefined || row.new_thread_gap === "" ? null : Math.max(0, Math.min(30, Math.round(Number(row.new_thread_gap)) || 0)),
   lost_reason: text(row.lost_reason),
   lost_at: dateOrNull(row.lost_at),
   archived_at: dateOrNull(row.archived_at),
@@ -209,6 +213,9 @@ const normalizeBrand = (row: Record<string, unknown>, userId: string): Brand => 
   status_source: row.status_source === "gmail" ? "gmail" : "manual",
   contact_channel: CHANNEL_SET.has(text(row.contact_channel)) ? text(row.contact_channel) : "email",
   email_followups: row.email_followups !== false,
+  primary_thread: text(row.primary_thread),
+  primary_thread_at: typeof row.primary_thread_at === "string" ? row.primary_thread_at : null,
+  new_thread_gap: row.new_thread_gap === null || row.new_thread_gap === undefined || row.new_thread_gap === "" ? null : Math.max(0, Math.min(30, Math.round(Number(row.new_thread_gap)) || 0)),
   lost_reason: text(row.lost_reason),
   lost_at: dateOrNull(row.lost_at),
   archived_at: dateOrNull(row.archived_at),
@@ -418,7 +425,7 @@ export async function loadCloudWorkspace(userId: string): Promise<WorkspaceData 
 // PostgREST rejects the upsert with an unknown-column error: strip exactly
 // the column it names and retry, so one missing column never blocks the
 // whole save (and never drops the columns that do exist).
-const OPTIONAL_COLUMNS = ["engagement_rate", "next_action", "deliverables_items", "entity_type", "entity_id", "updated_at", "followup_count", "last_followup_at", "lost_reason", "lost_at", "stars", "stars_consistency", "stars_demographics", "stars_niche", "stars_engagement", "priority", "next_action_date", "kind", "done", "draft_subject", "draft_body", "status_updated_at", "email_templates", "rating_weights", "preferences", "rates", "payment_status", "invoice_due", "paid_at", "payout_status", "socials", "brief", "country", "secondary_email", "secondary_email_label", "payout_model", "creator_fees", "followup_snooze_until", "status_source", "brand_id", "kind", "channel", "brand_terms", "rate_meta", "rate_history", "audience", "contract", "avatar_path", "contact_channel", "email_followups"];
+const OPTIONAL_COLUMNS = ["engagement_rate", "next_action", "deliverables_items", "entity_type", "entity_id", "updated_at", "followup_count", "last_followup_at", "lost_reason", "lost_at", "stars", "stars_consistency", "stars_demographics", "stars_niche", "stars_engagement", "priority", "next_action_date", "kind", "done", "draft_subject", "draft_body", "status_updated_at", "email_templates", "rating_weights", "preferences", "rates", "payment_status", "invoice_due", "paid_at", "payout_status", "socials", "brief", "country", "secondary_email", "secondary_email_label", "payout_model", "creator_fees", "followup_snooze_until", "status_source", "brand_id", "kind", "channel", "brand_terms", "rate_meta", "rate_history", "audience", "contract", "avatar_path", "contact_channel", "email_followups", "primary_thread", "primary_thread_at", "new_thread_gap"];
 
 const missingColumn = (error: { message?: string; details?: string; hint?: string; code?: string }) => {
   const msg = `${error.message || ""} ${error.details || ""} ${error.hint || ""}`;

@@ -45,7 +45,11 @@ export function outreachLog({ creators, brands, contacts = [], followups, events
   const walk = (type: "creator" | "brand", record: Creator | Brand) => {
     const touches = timeline({ type, record: record as Creator }, logged.get(record.id) || [], mail.get(record.id) || []);
     let prev: Touch | undefined;
+    const threads = new Set<string>();
     for (const t of touches) {
+      // The first email of a fresh thread is a new reach, not a follow-up.
+      const freshThread = t.source === "gmail" && t.dir === "out" && !!t.threadId && !threads.has(t.threadId);
+      if (t.threadId) threads.add(t.threadId);
       // An out-of-office between two of your emails doesn't make the second one an answer.
       if (t.dir === "in" && t.kind === "auto") continue;
       // A stamped contact date only counts while the record is still live outreach.
@@ -54,7 +58,7 @@ export function outreachLog({ creators, brands, contacts = [], followups, events
         const key = t.source === "gmail" ? t.id : `${record.id}:${t.id}`;
         if (!seen.has(key)) {
           seen.add(key);
-          out.push({ key, at: t.at, kind: prev?.dir === "out" ? "followup" : "email", scheduled: !!t.scheduled, entityId: record.id, entityType: type, mailbox: t.mailbox || "", channel: t.source === "gmail" ? "email" : t.channel || (t.source === "legacy" ? record.contact_channel || "email" : "email") });
+          out.push({ key, at: t.at, kind: prev?.dir === "out" && !freshThread ? "followup" : "email", scheduled: !!t.scheduled, entityId: record.id, entityType: type, mailbox: t.mailbox || "", channel: t.source === "gmail" ? "email" : t.channel || (t.source === "legacy" ? record.contact_channel || "email" : "email") });
           const days = outDays.get(record.id) || new Set<string>();
           days.add(new Date(t.at).toDateString());
           outDays.set(record.id, days);

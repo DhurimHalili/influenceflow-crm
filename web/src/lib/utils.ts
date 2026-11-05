@@ -331,3 +331,8 @@ export const parsePriorityCell = (value: string) => {
   if (v === "soon" || v === "follow up soon") return "soon";
   return v;
 };
+
+/** A share exactly as the source printed it: 58.6 stays 58.6, 41 stays 41 (never rounded to look tidier). */
+export const pctText = (n: number) => (Number.isFinite(n) ? String(Math.round(n * 100) / 100) : "0");
+/** Male share of an audience: what the source printed, else 100 − female. */
+export const malePct = (a: { gender_female_pct: number; gender_male_pct?: number }) => a.gender_male_pct || Math.round((100 - a.gender_female_pct) * 100) / 100;

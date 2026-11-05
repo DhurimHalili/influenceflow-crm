@@ -4,7 +4,7 @@ import { isSealed, openToken, sealToken } from "../_shared/googleTokens.ts";
 import { aiEnabled, aiKeyCount, aiModel, aiProvider, aiReadyAt, classifyLead, testAi, useKeyStore } from "../_shared/ai.ts";
 import { decodeEntities, precheck, scanForLead, type Lead, type ScanInput } from "../_shared/leadScanner.ts";
 import { classifyIncoming, myReplyIntent, type IncomingKind } from "../_shared/replyReader.ts";
-import { analyzeStoredFile, bodyOf, drainQueue, gmailAttachment, processCreatorMail, sniff, type Fetcher, type FullMessage } from "./intel.ts";
+import { analyzeStoredFile, bodyOf, drainQueue, gmailAttachment, processCreatorMail, processMyMail, sniff, type Fetcher, type FullMessage } from "./intel.ts";
 
 // Gmail ⇄ CRM sync, for every mailbox a user connected (an agency often runs
 // two or three).
@@ -17,6 +17,7 @@ import { analyzeStoredFile, bodyOf, drainQueue, gmailAttachment, processCreatorM
 //   analyze_file  — read one saved file with AI now
 //   download_file — a big attachment kept in Gmail (not in storage), streamed to you
 //   rescan_creator — go through one influencer's emails again for kits and prices
+//   cancel_scheduled — cancel one of your scheduled sends (moves it to Gmail's Trash; needs gmail.modify)
 //   cron        — background sync for everyone (x-cron-secret header only)
 //   health      — no auth; only says whether the server is configured
 //
@@ -135,14 +136,30 @@ async function accessToken(admin: Admin, row: TokenRow): Promise<string> {
   return body.access_token as string;
 }
 
+// Gmail allows each mailbox 250 quota units a second and a handful of requests
+// at once. Every call is paced per mailbox to ~100 units/s (a message read is 5,
+// a thread 10, a send 100), so a sync never trips the limit instead of
+// tripping it and backing off.
+const pacing = new Map<string, number>();
+const unitsFor = (path: string, init?: RequestInit) => (init?.method === "POST" ? (path.includes("/send") ? 100 : 5) : path.startsWith("/threads/") ? 10 : path.startsWith("/history") ? 2 : 5);
+async function pace(token: string, units: number) {
+  const now = Date.now();
+  const at = Math.max(now, pacing.get(token) || 0);
+  pacing.set(token, at + units * 10);
+  if (pacing.size > 50) for (const [k, v] of pacing) if (v < now) pacing.delete(k);
+  if (at > now) await sleep(at - now);
+}
+
 async function gmail<T>(token: string, path: string, init?: RequestInit, attempt = 0): Promise<T> {
+  await pace(token, unitsFor(path, init));
   const res = await fetch(`${GMAIL}${path}`, { ...init, headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", ...(init?.headers || {}) } });
 
   // Gmail is temporarily busy: back off and retry. A 403 below is different —
   // it can be a per-minute quota, so it gets its own, shorter retry path.
   if (res.status === 429 || res.status >= 500) {
-    if (attempt < 3) {
-      await sleep(400 * 2 ** attempt + Math.random() * 200);
+    if (attempt < 4) {
+      const wait = Number(res.headers.get("retry-after")) * 1000 || 500 * 2 ** attempt;
+      await sleep(Math.min(8_000, wait) + Math.random() * 250);
       return gmail(token, path, init, attempt + 1);
     }
     throw new GmailError("Gmail is temporarily unavailable — it will retry automatically.", res.status, false, true);
@@ -152,7 +169,9 @@ async function gmail<T>(token: string, path: string, init?: RequestInit, attempt
     const text = await res.text().catch(() => "");
     const rate = /(rateLimitExceeded|userRateLimitExceeded|quotaExceeded)/i.test(text);
     const daily = /dailyLimitExceeded/i.test(text);
-    if (rate && !daily && attempt < 2) {
+    if (rate && !daily && attempt < 3) {
+      // Slow this mailbox down for the rest of the run, then try again.
+      pacing.set(token, Math.max(pacing.get(token) || 0, Date.now()) + 1_000);
       await sleep(1_500 * 2 ** attempt + Math.random() * 300);
       return gmail(token, path, init, attempt + 1);
     }
@@ -298,10 +317,16 @@ const META_PATH = (id: string) => `/messages/${id}?format=metadata&${META_HEADER
 
 async function fetchMetas(token: string, ids: string[], deadline: number) {
   const metas: Meta[] = [];
-  for (let i = 0; i < ids.length; i += 10) {
+  for (let i = 0; i < ids.length; i += 5) {
     if (Date.now() > deadline) break;
-    const batch = await Promise.all(ids.slice(i, i + 10).map((id) => gmail<Meta>(token, META_PATH(id)).catch((e) => (e instanceof GmailError && e.status === 404 ? null : Promise.reject(e)))));
-    metas.push(...(batch.filter(Boolean) as Meta[]));
+    try {
+      const batch = await Promise.all(ids.slice(i, i + 5).map((id) => gmail<Meta>(token, META_PATH(id)).catch((e) => (e instanceof GmailError && e.status === 404 ? null : Promise.reject(e)))));
+      metas.push(...(batch.filter(Boolean) as Meta[]));
+    } catch (e) {
+      // Still limited after the retries: keep what was read; the rest comes next run.
+      if (e instanceof GmailError && e.retryable) break;
+      throw e;
+    }
   }
   return metas;
 }
@@ -465,7 +490,8 @@ const STATUS_RANK: Record<string, number> = { roster: 0, signed: 0, negotiating:
 
 async function backfillCreatorMail(ctx: { admin: Admin; userId: string; mailbox: string; currency: string; get: Fetcher; budget: { files: number; ai: number; bytes?: number }; deadline: number; checked: string[]; creatorId?: string; max?: number }) {
   if (Date.now() > ctx.deadline) return 0;
-  let q = ctx.admin.from("email_events").select("gmail_id, entity_id, at").eq("user_id", ctx.userId).eq("mailbox", ctx.mailbox).eq("direction", "in").eq("entity_type", "creator").or(`intel_at.is.null,intel_at.lt.${staleClaim()}`);
+  // Both ways: their mail (kits, prices) and yours (offers, a yes to their price).
+  let q = ctx.admin.from("email_events").select("gmail_id, entity_id, at, direction").eq("user_id", ctx.userId).eq("mailbox", ctx.mailbox).eq("entity_type", "creator").eq("scheduled", false).or(`intel_at.is.null,intel_at.lt.${staleClaim()}`);
   if (ctx.creatorId) q = q.eq("entity_id", ctx.creatorId);
   const { data: todo } = await q.order("at", { ascending: true }).limit(400);
   const events = (todo || []).filter((e) => !ctx.checked.includes(e.gmail_id));
@@ -487,7 +513,8 @@ async function backfillCreatorMail(ctx: { admin: Admin; userId: string; mailbox:
     if (message === null) { await unclaim(ctx.admin, ctx.userId, ev.gmail_id); continue; } // temporary trouble: try again next run
     if (message !== "gone") {
       // A message that fails to process is still marked done, so it can't block the queue forever.
-      const res = await processCreatorMail({ admin: ctx.admin, userId: ctx.userId, mailbox: ctx.mailbox, currency: ctx.currency, message, creatorId: ev.entity_id, get: ctx.get, budget: ctx.budget, historical: true }).catch(() => null);
+      const read = ev.direction === "out" ? processMyMail : processCreatorMail;
+      const res = await read({ admin: ctx.admin, userId: ctx.userId, mailbox: ctx.mailbox, currency: ctx.currency, message, creatorId: ev.entity_id, get: ctx.get, budget: ctx.budget, historical: true }).catch(() => null);
       files += res?.files || 0;
       if (res?.deferred) { await unclaim(ctx.admin, ctx.userId, ev.gmail_id); continue; } // attachments left for the next run
     }
@@ -605,6 +632,7 @@ async function scanOldThreads(admin: Admin, row: TokenRow, token: string, own: S
 // is added to the CRM by the app, a clear no dismisses it, anything else waits
 // for you. Once per mailbox, the last 60 days of answers are looked up too.
 const LEAD_REPLIES_DONE = "__lead_replies_v1";
+const REREAD_DONE = "__reread_prices_v2";
 type LeadRow = { id: string; email: string; thread_id: string; mailbox: string; status: string; my_replies: { id: string; at: string; scheduled?: boolean; intent?: string }[] | null; my_intent: string | null };
 
 async function trackLeadReplies(admin: Admin, userId: string, token: string, metas: Meta[], own: Set<string>, mailbox: string, backfilledAlready: boolean, deadline: number) {
@@ -704,12 +732,16 @@ async function syncMailbox(admin: Admin, row: TokenRow, own: Set<string>, book: 
         if (Date.now() > deadline) { complete = false; break; }
       }
     } catch (e) {
+      // Limited mid-way: keep what came in; the old history id stays, so nothing is skipped.
+      if (e instanceof GmailError && e.retryable) complete = false;
       // History too old (or reset): fall back to a short search on every address.
-      if (!(e instanceof GmailError) || e.status !== 404) throw e;
+      else if (!(e instanceof GmailError) || e.status !== 404) throw e;
+      else {
       historyId = null;
       for (const group of chunk(all, 15)) {
         if (Date.now() > deadline) { complete = false; break; }
         (await listIds(token, searchFor(group, 10), 3)).forEach((id) => ids.add(id));
+      }
       }
     }
   }
@@ -750,12 +782,21 @@ async function syncMailbox(admin: Admin, row: TokenRow, own: Set<string>, book: 
   const found = await findLeads(admin, row.user_id, token, metas.filter((m) => !matchedIds.has(m.id)), own, book, deadline).catch(() => []);
   const leads = await storeLeads(admin, row.user_id, mailbox, found).catch(() => 0);
 
+  // 5a. Once per mailbox: read every creator email again with the better price
+  //     rules (durations, bundles, extended integrations) and your own replies.
+  //     The backfill below works through them, a slice per run.
+  if (!done.has(REREAD_DONE)) {
+    const { error: reset } = await admin.from("email_events").update({ intel_at: null }).eq("user_id", row.user_id).eq("mailbox", mailbox).eq("entity_type", "creator");
+    if (!reset) backfilled.push(REREAD_DONE);
+  }
+
   // 5b. New mail from creators in the CRM: media kits, prices, agreed rates (newest first, capped per run).
   const budget = { files: 8, ai: 12, bytes: 24 * 1024 * 1024 };
   const get: Fetcher = (path) => gmail(token, path);
   const { data: prof } = await admin.from("profiles").select("preferences").eq("id", row.user_id).maybeSingle();
   const currency = String(((prof?.preferences || {}) as { currency?: string }).currency || "USD").toUpperCase();
-  const creatorMail = Array.from(new Map(rows.filter((r) => r.direction === "in" && r.entity_type === "creator").sort((a, b) => b.at.localeCompare(a.at)).map((r) => [r.gmail_id, r])).values()).slice(0, 15);
+  // Newest 15, then read oldest first: their price list before your "looks good".
+  const creatorMail = Array.from(new Map(rows.filter((r) => r.entity_type === "creator" && !r.scheduled).sort((a, b) => b.at.localeCompare(a.at)).map((r) => [r.gmail_id, r])).values()).slice(0, 15).reverse();
   let filesSaved = 0;
   const checked: string[] = [];
   for (const ev of creatorMail) {
@@ -763,7 +804,8 @@ async function syncMailbox(admin: Admin, row: TokenRow, own: Set<string>, book: 
     if (!(await claim(admin, row.user_id, ev.gmail_id))) continue; // another sync has it
     const message = await gmail<FullMessage>(token, `/messages/${ev.gmail_id}?format=full`).catch(() => null);
     if (!message) { await unclaim(admin, row.user_id, ev.gmail_id); continue; } // picked up again by the backfill
-    const res = await processCreatorMail({ admin, userId: row.user_id, mailbox, currency, message, creatorId: ev.entity_id, get, budget }).catch(() => ({ files: 0, changes: 0, deferred: false }));
+    const read = ev.direction === "out" ? processMyMail : processCreatorMail;
+    const res = await read({ admin, userId: row.user_id, mailbox, currency, message, creatorId: ev.entity_id, get, budget }).catch(() => ({ files: 0, changes: 0, deferred: false }));
     filesSaved += res.files;
     if (res.deferred) await unclaim(admin, row.user_id, ev.gmail_id);
     else checked.push(ev.gmail_id);
@@ -811,19 +853,15 @@ async function syncUser(admin: Admin, rows: TokenRow[], allRows: TokenRow[], dea
   const book = await addressBook(admin, allRows[0].user_id, own);
   const results: Record<string, unknown>[] = [];
   const errors: { mailbox: string; error: string; reconnect: boolean; status: number; retryable: boolean }[] = [];
-  // Gmail's query quota is per user, not per mailbox. An agency with two or
-  // three mailboxes will exhaust it if they sync back-to-back, so do one per
-  // quota window; the next run picks the mailbox touched least recently.
-  const started = Date.now();
-  let attempted = 0;
+  // Each connected mailbox is its own Google account with its own quota, and
+  // every call is paced (see pace()), so mailboxes sync one after another in
+  // the same run; the one touched least recently goes first.
   let deferred = 0;
   const queue = [...rows].sort((a, b) => (a.updated_at || a.last_sync_at || a.connected_at || "").localeCompare(b.updated_at || b.last_sync_at || b.connected_at || ""));
   for (let i = 0; i < queue.length; i++) {
     const row = queue[i];
     if (Date.now() > deadline - 5_000) { deferred = queue.length - i; break; }
     if (!force && row.last_sync_at && Date.now() - new Date(row.last_sync_at).getTime() < USER_MIN_INTERVAL_MS) continue;
-    if (attempted > 0 && Date.now() - started < 60_000) { deferred = queue.length - i; break; }
-    attempted++;
     try {
       results.push(await syncMailbox(admin, row, own, book, deadline));
     } catch (e) {
@@ -909,7 +947,7 @@ async function send(admin: Admin, rows: TokenRow[], input: Record<string, unknow
 
 // ----- entry -----------------------------------------------------------------------
 
-const publicMailbox = (r: TokenRow) => ({ id: r.id, email: r.email, canRead: (r.scopes || "").includes("gmail.readonly"), canSend: (r.scopes || "").includes("gmail.send"), lastSyncAt: r.last_sync_at, error: r.sync_error || "", connectedAt: r.connected_at || null, sentToday: r.send_day === new Date().toISOString().slice(0, 10) ? r.send_count || 0 : 0 });
+const publicMailbox = (r: TokenRow) => ({ id: r.id, email: r.email, canRead: (r.scopes || "").includes("gmail.readonly"), canSend: (r.scopes || "").includes("gmail.send"), canModify: (r.scopes || "").includes("gmail.modify"), lastSyncAt: r.last_sync_at, error: r.sync_error || "", connectedAt: r.connected_at || null, sentToday: r.send_day === new Date().toISOString().slice(0, 10) ? r.send_count || 0 : 0 });
 
 Deno.serve(async (req) => {
   const cors = corsFor(req);
@@ -1005,7 +1043,7 @@ Deno.serve(async (req) => {
     const { data: creator } = await admin.from("creators").select("id").eq("id", input.id).eq("user_id", userId).maybeSingle();
     if (!creator) return json({ error: "Influencer not found." }, 404);
     if (!rows.length) return json({ error: "Connect Gmail first.", code: "not_connected" }, 409);
-    await admin.from("email_events").update({ intel_at: null }).eq("user_id", userId).eq("entity_id", input.id).eq("direction", "in");
+    await admin.from("email_events").update({ intel_at: null }).eq("user_id", userId).eq("entity_id", input.id);
     const currency = await currencyOf();
     const budget = { files: 10, ai: 6, bytes: 30 * 1024 * 1024 };
     const deadline = Date.now() + 80_000;
@@ -1067,6 +1105,34 @@ Deno.serve(async (req) => {
     // return 429 so the UI and logs describe it correctly.
     const status = !failed ? 200 : errors[0].reconnect ? 409 : errors[0].retryable ? 429 : 502;
     return json({ ok: errors.length === 0, events: sum("events"), leads: sum("leads"), files: sum("files"), statusChanges: sum("statusChanges"), scheduledChanges: sum("scheduledChanges"), mailboxes: results.length, deferred, errors, ...(failed ? { error: errors[0].error, reconnect: errors[0].reconnect } : {}) }, status);
+  }
+
+  if (action === "cancel_scheduled") {
+    // Only a row of YOURS that is still scheduled, in a mailbox of yours that
+    // granted gmail.modify. Gmail cancels a scheduled send when it is trashed;
+    // it stays in Trash for 30 days (nothing is deleted forever).
+    const gmailId = typeof input.gmailId === "string" && /^[0-9a-f]{6,40}$/i.test(input.gmailId) ? input.gmailId : "";
+    if (!gmailId) return json({ error: "Invalid email" }, 400);
+    const { data: ev } = await admin.from("email_events").select("gmail_id, mailbox, scheduled, direction, entity_id, entity_type").eq("user_id", userId).eq("gmail_id", gmailId).eq("direction", "out").limit(1).maybeSingle();
+    if (!ev) return json({ error: "That email isn't in your CRM." }, 404);
+    if (!ev.scheduled) return json({ error: "That email has already gone out." }, 409);
+    const row = rows.find((r) => mailboxOf(r) === ev.mailbox);
+    if (!row) return json({ error: `Reconnect ${ev.mailbox} to cancel it from here.` }, 409);
+    if (!(row.scopes || "").includes("gmail.modify")) return json({ error: `Reconnect ${ev.mailbox} and allow “Manage drafts and send” to cancel from the CRM.`, code: "needs_modify" }, 403);
+    try {
+      const token = await accessToken(admin, row);
+      const meta = await gmail<Meta>(token, META_PATH(gmailId)).catch(() => null);
+      const labels = meta?.labelIds || [];
+      if (meta && !(labels.includes("SCHEDULED") && !labels.includes("SENT"))) return json({ error: "That email has already gone out." }, 409);
+      if (meta) await gmail(token, `/messages/${gmailId}/trash`, { method: "POST" });
+      await admin.from("email_events").delete().eq("user_id", userId).eq("gmail_id", gmailId);
+      await undoScheduledStatus(admin, userId, ev.entity_type, ev.entity_id);
+      await admin.from("activities").insert({ user_id: userId, text: `Cancelled a scheduled email (it's in Gmail's Trash for 30 days)`, at: new Date().toISOString(), entity_type: ev.entity_type, entity_id: ev.entity_id });
+      return json({ ok: true });
+    } catch (e) {
+      const status = e instanceof GmailError && e.status >= 400 && e.status < 500 ? e.status : 502;
+      return json({ error: e instanceof Error ? e.message : "Couldn't cancel it" }, status);
+    }
   }
 
   if (action === "send") {

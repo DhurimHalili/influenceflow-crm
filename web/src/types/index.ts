@@ -67,8 +67,12 @@ export interface WorkspacePreferences {
 export interface RateCard {
   /** YouTube integration — a 60-90 s sponsored segment inside a video. */
   video: number;
+  /** A longer integration (2–3 min) inside a video. */
+  extended: number;
   /** A whole video about the brand. */
   dedicated: number;
+  /** A package of formats for one price (e.g. integration + short). */
+  bundle: number;
   short: number;
   post: number;
   carousel: number;
@@ -106,6 +110,10 @@ export interface FollowupRules {
   holidays: string[];
   /** Days after a Denied before the "reach back" reminder (0 = never). */
   reach_back_days?: number;
+  /** Follow-ups in one email thread before a new thread is due (0 = no cap). */
+  thread_cap?: number;
+  /** Business days to wait after the last allowed follow-up before "start a new thread". */
+  new_thread_gap?: number;
 }
 
 export type PaymentStatus = "unpaid" | "invoiced" | "paid";
@@ -130,6 +138,8 @@ export interface AudienceSnapshot {
   top_countries: { country: string; pct: number }[];
   age_ranges: { range: string; pct: number }[];
   gender_female_pct: number;
+  /** Shown separately when the source printed it; otherwise 100 − female. */
+  gender_male_pct?: number;
   avg_views: number;
   followers: { platform: string; count: number }[];
   engagement_rate: number;
@@ -220,6 +230,11 @@ export interface Creator {
   contact_channel?: string;
   /** false = no email follow-up reminders (you're on another channel); their emails still count. */
   email_followups?: boolean;
+  /** The Gmail thread reminders follow ('' = the one with the latest activity) and when you chose it. */
+  primary_thread?: string;
+  primary_thread_at?: string | null;
+  /** Business days before the "start a new thread" reminder (null = follow-up rules). */
+  new_thread_gap?: number | null;
   archived_at: string | null;
   created_at: string;
 }
@@ -282,6 +297,11 @@ export interface Brand {
   contact_channel?: string;
   /** false = no email follow-up reminders (you're on another channel); their emails still count. */
   email_followups?: boolean;
+  /** The Gmail thread reminders follow ('' = the one with the latest activity) and when you chose it. */
+  primary_thread?: string;
+  primary_thread_at?: string | null;
+  /** Business days before the "start a new thread" reminder (null = follow-up rules). */
+  new_thread_gap?: number | null;
   followup_count?: number;
   last_followup_at?: string | null;
   lost_reason: string;

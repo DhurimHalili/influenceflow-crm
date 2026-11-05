@@ -26,6 +26,9 @@ const SCOPES = [
   "email",
   "https://www.googleapis.com/auth/gmail.readonly",
   "https://www.googleapis.com/auth/gmail.send",
+  // Lets the CRM cancel a scheduled send (moves it to Trash) when they already
+  // replied. Never used to delete forever, read anything new, or change labels.
+  "https://www.googleapis.com/auth/gmail.modify",
 ];
 
 const b64url = (bytes: Uint8Array) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");

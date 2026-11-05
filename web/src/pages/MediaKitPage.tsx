@@ -5,7 +5,7 @@ import { SocialBadge } from "../components/SocialIcon";
 import { LogoMark } from "../components/ui";
 import { fetchPublicKit, type KitData } from "../lib/mediaKit";
 import { SOCIAL_META, socialLabel } from "../lib/socials";
-import { compact, initials } from "../lib/utils";
+import { compact, initials, malePct, pctText } from "../lib/utils";
 
 // The public media kit brands open. Read-only, no login, no CRM data beyond
 // the snapshot the agency published.
@@ -63,9 +63,9 @@ export default function MediaKitPage() {
     </section>
 
     {kit.audience && <section className="kit-block"><h2>Audience <small className="kit-verified">Verified from {kit.audience.source}</small></h2><div className="kit-audience">
-      {kit.audience.top_countries.length > 0 && <div className="kit-aud-col"><span>Top countries</span>{kit.audience.top_countries.map((c) => <div key={c.country} className="kit-bar"><em>{c.country}</em><i><b style={{ width: `${Math.min(100, c.pct)}%` }} /></i><strong>{Math.round(c.pct)}%</strong></div>)}</div>}
-      {kit.audience.age_ranges.length > 0 && <div className="kit-aud-col"><span>Age</span>{kit.audience.age_ranges.map((a) => <div key={a.range} className="kit-bar"><em>{a.range}</em><i><b style={{ width: `${Math.min(100, a.pct)}%` }} /></i><strong>{Math.round(a.pct)}%</strong></div>)}</div>}
-      {kit.audience.gender_female_pct > 0 && <div className="kit-aud-col"><span>Gender</span><div className="kit-gender"><i><b style={{ width: `${kit.audience.gender_female_pct}%` }} /></i><small><em>Female {Math.round(kit.audience.gender_female_pct)}%</em><em>Male {Math.round(100 - kit.audience.gender_female_pct)}%</em></small></div></div>}
+      {kit.audience.top_countries.length > 0 && <div className="kit-aud-col"><span>Top countries</span>{kit.audience.top_countries.map((c) => <div key={c.country} className="kit-bar"><em>{c.country}</em><i><b style={{ width: `${Math.min(100, c.pct)}%` }} /></i><strong>{pctText(c.pct)}%</strong></div>)}</div>}
+      {kit.audience.age_ranges.length > 0 && <div className="kit-aud-col"><span>Age</span>{kit.audience.age_ranges.map((a) => <div key={a.range} className="kit-bar"><em>{a.range}</em><i><b style={{ width: `${Math.min(100, a.pct)}%` }} /></i><strong>{pctText(a.pct)}%</strong></div>)}</div>}
+      {kit.audience.gender_female_pct > 0 && <div className="kit-aud-col"><span>Gender</span><div className="kit-gender"><i><b style={{ width: `${kit.audience.gender_female_pct}%` }} /></i><small><em>Female {pctText(kit.audience.gender_female_pct)}%</em><em>Male {pctText(malePct(kit.audience))}%</em></small></div></div>}
     </div></section>}
 
     {kit.about && <section className="kit-block"><h2>About</h2><p className="kit-about">{kit.about}</p></section>}

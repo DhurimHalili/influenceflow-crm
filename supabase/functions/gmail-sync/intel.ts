@@ -2,7 +2,8 @@ import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { aiEnabled, hasAudience, QuotaExhausted, readAttachment, readCreatorEmail, type AudienceFacts, type FileReading } from "../_shared/ai.ts";
 import { decodeEntities } from "../_shared/leadScanner.ts";
 import { negotiate, normalizeRateHistory, normalizeRateMeta, setListPrices, type RateEvent, type RateKey, type RateMetaMap, type Rates } from "../_shared/negotiation.ts";
-import { isPlainYes, mentionsMoneyOrAudience, ownText, readOffer, readPrices } from "../_shared/priceReader.ts";
+import { isPlainYes, mentionsMoneyOrAudience, ownText, readMine, readOffer, readPrices, type PriceHit } from "../_shared/priceReader.ts";
+import { listPrice } from "../_shared/negotiation.ts";
 
 // What a creator's email adds to their CRM profile:
 //   • attachments that are a media kit / rate card / stats screenshot: PDF or
@@ -18,6 +19,11 @@ import { isPlainYes, mentionsMoneyOrAudience, ownText, readOffer, readPrices } f
 //     A creator's plain "sounds good" to the ONE price you offered is an agreement.
 //   • Older mail (sent before this existed) is gone through too, oldest first per
 //     creator — and it never overwrites a price you typed or changed later.
+//   • YOUR emails to a creator are read too: a price of your own is an offer
+//     (→ Negotiating); a yes to one of their prices ("the $500 looks good") is an
+//     agreement (→ the price is marked negotiated and they move to Roster).
+//   • Status only moves forward (Negotiating, then Roster), only from a live
+//     stage, and only for mail newer than the status you last set by hand.
 // Email bodies are read in memory and never stored.
 
 type Admin = SupabaseClient;
@@ -101,7 +107,7 @@ export async function aiAllowed(admin: Admin, userId: string) {
 }
 
 const audienceBlock = (facts: AudienceFacts, extra: Record<string, unknown>) => ({
-  top_countries: facts.topCountries, age_ranges: facts.ageRanges, gender_female_pct: facts.genderFemalePct, avg_views: facts.avgViews,
+  top_countries: facts.topCountries, age_ranges: facts.ageRanges, gender_female_pct: facts.genderFemalePct, gender_male_pct: facts.genderMalePct, avg_views: facts.avgViews,
   followers: facts.followers, engagement_rate: facts.engagementRate, ...extra,
 });
 
@@ -114,6 +120,8 @@ class Profile {
   audience: Record<string, unknown>;
   activities: string[] = [];
   touched = false;
+  /** The furthest stage this mail proves: Negotiating (prices on the table) or Roster (a price agreed). */
+  stage: { status: "negotiating" | "roster"; at: string; why: string } | null = null;
   private manual: Set<RateKey>;
   constructor(public c: CreatorRow, private admin: Admin, private userId: string, private currency: string) {
     this.rates = { ...(c.rates || {}) };
@@ -129,7 +137,8 @@ class Profile {
       const key = k as RateKey;
       if (historical && this.manual.has(key)) return false;
       const changed = this.meta[key]?.at;
-      return !changed || changed < at;
+      // The same email read again (rules got better) may correct what it said.
+      return !changed || changed <= at;
     })) as Partial<Record<RateKey, number>>;
   }
   private money(list: { key: RateKey; amount: number; currency: string }[]) {
@@ -153,6 +162,22 @@ class Profile {
     this.activities.push(`${label} ${this.c.name}: ${done.event.summary}`);
     return true;
   }
+  reach(status: "negotiating" | "roster", at: string, why: string) {
+    const rank = { negotiating: 1, roster: 2 };
+    if (!this.stage || rank[status] > rank[this.stage.status] || (rank[status] === rank[this.stage.status] && at > this.stage.at)) this.stage = { status, at, why };
+  }
+  /** Prices this same email set before but no longer says (a misread, e.g. a bundle read as a dedicated video): put them back. */
+  forget(at: string, keep: RateKey[]) {
+    // Only what the rules read from this very email (the AI's readings are left alone).
+    const byRules = new Set(this.history.filter((e) => e.at === at && (e.evidence || "").startsWith("Read by rules")).flatMap((e) => e.changes.map((c) => c.key)));
+    const wrong = (Object.keys(this.meta) as RateKey[]).filter((k) => byRules.has(k) && this.meta[k]?.at === at && this.meta[k]?.source === "email" && this.meta[k]?.status === "list" && !keep.includes(k));
+    if (!wrong.length) return;
+    const changes = wrong.map((k) => ({ key: k, from: Number(this.rates[k]) || 0, to: 0, list: Number(this.rates[k]) || 0, kind: "list" as const, note: "Corrected: read wrongly before", prev: this.meta[k] || null }));
+    for (const k of wrong) { this.rates[k] = 0; delete this.meta[k]; }
+    this.history.unshift({ id: `r${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`, at: new Date().toISOString(), source: "email", summary: `Corrected after re-reading the email: removed ${wrong.join(", ")}`, changes });
+    this.touched = true;
+    this.activities.push(`${this.c.name}: corrected prices read wrongly from an older email`);
+  }
   setAudience(slot: "verified" | "claimed", block: Record<string, unknown>, at: string) {
     const prev = this.audience[slot] as { at?: string } | undefined;
     if (prev?.at && prev.at > at) return false; // a newer kit/claim already there
@@ -160,10 +185,26 @@ class Profile {
     return true;
   }
   async save() {
+    if (this.stage) await this.moveStatus(this.stage);
     if (this.touched) await this.admin.from("creators").update({ rates: this.rates, rate_meta: this.meta, rate_history: this.history.slice(0, 60), audience: this.audience }).eq("id", this.c.id).eq("user_id", this.userId);
     if (this.activities.length) await this.admin.from("activities").insert(this.activities.slice(0, 8).map((t) => ({ user_id: this.userId, text: t.slice(0, 500), at: new Date().toISOString(), entity_type: "creator", entity_id: this.c.id })));
     this.activities = [];
     this.touched = false;
+    this.stage = null;
+  }
+  private async moveStatus(stage: NonNullable<Profile["stage"]>) {
+    const { data: row } = await this.admin.from("creators").select("pipeline_status, status_updated_at, archived_at").eq("id", this.c.id).eq("user_id", this.userId).maybeSingle();
+    if (!row || row.archived_at) return;
+    const RANK: Record<string, number> = { new: 0, contacted: 1, no_reply: 1, inbound: 1, replied: 2, negotiating: 3, roster: 4 };
+    const now = RANK[row.pipeline_status as string];
+    // Signed and Denied are yours; a status you set by hand wins over older mail.
+    if (now === undefined || RANK[stage.status] <= now) return;
+    if (row.status_updated_at && stage.at <= row.status_updated_at) return;
+    const at = stage.at > new Date().toISOString() ? new Date().toISOString() : stage.at;
+    const patch: Record<string, unknown> = { pipeline_status: stage.status, status_updated_at: at, status_source: "gmail" };
+    if (stage.status === "roster") patch.on_roster = true;
+    const { error } = await this.admin.from("creators").update(patch).eq("id", this.c.id).eq("user_id", this.userId).eq("pipeline_status", row.pipeline_status);
+    if (!error) this.activities.push(`Gmail: ${this.c.name} moved to ${stage.status === "roster" ? "Roster" : "Negotiating"} — ${stage.why}`);
   }
 }
 
@@ -381,42 +422,70 @@ export async function processCreatorMail(ctx: MailCtx & { message: FullMessage; 
     if (!error) { saved++; ctx.budget.files--; p.activities.push(`Saved the ${link.label.toLowerCase()} link from ${p.c.name}'s email`); }
   }
 
-  // ---- what the email itself says: AI when it can, strict rules otherwise ----
-  let readByAi = false;
+  // ---- what the email itself says: strict rules always, AI on top when it can ----
+  // Rules are exact when they fire (a price list, "$2,500 for the integration
+  // works for me"); the AI fills what rules can't read. On the same format the
+  // rules win, so a bundle is never turned into a dedicated video.
+  const rules = text.length > 5 ? readPrices(text) : { agreed: [] as PriceHit[], stated: [] as PriceHit[] };
+  let stated: { key: RateKey; amount: number; currency: string }[] = [...rules.stated];
+  let agreed: { key: RateKey; amount: number; currency: string }[] = [...rules.agreed];
+  let evidence = rules.agreed[0]?.quote || rules.stated[0]?.quote || "";
+  let fromAi = false;
   if (text.length > 20 && mentionsMoneyOrAudience(text) && (await tryAi(ctx))) {
     ctx.budget.ai--;
     try {
       const claims = await readCreatorEmail({ creator: p.c.name, subject, body: ownText(text) || text, currentRates: p.rates });
-      if (claims) {
-        readByAi = true;
-        if (!claims.suspicious && claims.confidence >= 0.7) {
-          if (claims.agreement) p.agree(claims.agreement.items, at, claims.agreement.quote || subject, historical, "Negotiated with");
-          else if (claims.statedRates.length) p.listPrices(claims.statedRates, at, "email", subject, historical, "sent their prices — ");
-          if (hasAudience(claims.audience) && p.setAudience("claimed", audienceBlock(claims.audience, { at, subject }), at)) p.activities.push(`${p.c.name} described their audience by email (not proven)`);
-        }
+      if (claims && !claims.suspicious && claims.confidence >= 0.7) {
+        const add = <T extends { key: RateKey }>(base: T[], extra: T[]) => [...base, ...extra.filter((x) => !base.some((b) => b.key === x.key))];
+        if (claims.agreement) { agreed = add(agreed, claims.agreement.items); evidence = evidence || claims.agreement.quote; fromAi = fromAi || !rules.agreed.length; }
+        if (claims.statedRates.length) { stated = add(stated, claims.statedRates); evidence = evidence || subject; fromAi = fromAi || !rules.stated.length; }
+        if (hasAudience(claims.audience) && p.setAudience("claimed", audienceBlock(claims.audience, { at, subject }), at)) p.activities.push(`${p.c.name} described their audience by email (not proven)`);
       }
     } catch (e) {
       if (e instanceof QuotaExhausted) ctx.budget.ai = 0;
     }
   }
-  if (!readByAi && text.length > 5) {
-    const rules = readPrices(text);
-    if (rules.agreed.length) p.agree(rules.agreed, at, `Read by rules: “${rules.agreed[0].quote}”`, historical, "Agreed by email with");
-    if (rules.stated.length) p.listPrices(rules.stated, at, "email", `Read by rules: “${rules.stated[0].quote}”`, historical, "sent their prices (read by rules) — ");
-    // "Sounds good!" to the one price you offered in this thread = agreed.
-    if (!rules.agreed.length && !rules.stated.length && isPlainYes(text) && message.threadId) {
-      const thread = await ctx.get<{ messages?: FullMessage[] }>(`/threads/${message.threadId}?format=full`).catch(() => null);
-      const before = (thread?.messages || []).filter((m) => Number(m.internalDate || 0) < Number(message.internalDate || 0));
-      const last = before[before.length - 1];
-      if (last && (last.labelIds || []).includes("SENT")) {
-        const offer = readOffer(bodyOf(last).text);
-        if (offer) p.agree([offer], at, `They said yes to your offer: “${offer.quote}”`, historical, "Agreed by email with");
+  const label = fromAi ? "" : "Read by rules: ";
+  if (agreed.length && p.agree(agreed, at, `${label}“${evidence}”`, historical, "Agreed by email with")) p.reach("roster", at, `they agreed ${agreed.map((a) => `${a.amount.toLocaleString("en-US")} for ${a.key}`).join(", ")} by email`);
+  else if (agreed.length) p.reach("roster", at, "they agreed a price by email");
+  if (stated.length) {
+    p.listPrices(stated, at, "email", `${label}“${evidence}”`, historical, `sent their prices${fromAi ? "" : " (read by rules)"} — `);
+    p.reach("negotiating", at, "they sent their prices");
+  }
+  if (!fromAi) p.forget(at, [...stated, ...agreed].map((x) => x.key));
+  // "Sounds good, let's do it" to the one price you offered just before = agreed.
+  if (!agreed.length && !stated.length && isPlainYes(text) && message.threadId) {
+    const thread = await ctx.get<{ messages?: FullMessage[] }>(`/threads/${message.threadId}?format=full`).catch(() => null);
+    const before = (thread?.messages || []).filter((m) => Number(m.internalDate || 0) < Number(message.internalDate || 0));
+    const last = before[before.length - 1];
+    if (last && (last.labelIds || []).includes("SENT")) {
+      const offer = readOffer(bodyOf(last).text);
+      if (offer) {
+        p.agree([offer], at, `They said yes to your offer: “${offer.quote}”`, historical, "Agreed by email with");
+        p.reach("roster", at, `they said yes to your ${offer.amount.toLocaleString("en-US")} offer`);
       }
     }
   }
 
   await p.save();
   return { files: saved, changes: p.touched ? 1 : 0, deferred };
+}
+
+/** One of YOUR emails to a creator: an offer (→ Negotiating) or a yes to their price (→ agreed, Roster). */
+export async function processMyMail(ctx: MailCtx & { message: FullMessage; creatorId: string }) {
+  const p = await loadProfile(ctx.admin, ctx.userId, ctx.creatorId, ctx.currency);
+  if (!p) return { files: 0, changes: 0, deferred: false };
+  const { text } = bodyOf(ctx.message);
+  const at = ctx.message.internalDate ? new Date(Number(ctx.message.internalDate)).toISOString() : new Date().toISOString();
+  // Their asking prices: what they listed (not what was already negotiated down).
+  const theirs = Object.fromEntries((Object.keys(p.rates) as RateKey[]).filter((k) => Number(p.rates[k]) > 0).map((k) => [k, listPrice(p.rates, p.meta, k)])) as Partial<Record<RateKey, number>>;
+  const mine = readMine(text, theirs);
+  if (mine.accepted) {
+    p.agree([mine.accepted], at, `You agreed: “${mine.accepted.quote}”`, !!ctx.historical, "Agreed by email with");
+    p.reach("roster", at, `you agreed ${mine.accepted.amount.toLocaleString("en-US")} by email`);
+  } else if (mine.offer) p.reach("negotiating", at, `you offered ${mine.offer.amount.toLocaleString("en-US")} by email`);
+  await p.save();
+  return { files: 0, changes: mine.accepted ? 1 : 0, deferred: false };
 }
 
 // ---- files waiting for the AI (saved while it was off or out of quota) ----------------

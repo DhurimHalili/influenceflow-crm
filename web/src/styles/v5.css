@@ -153,3 +153,35 @@ span.avatar.avatar-photo img { display: block; width: 100%; height: 100%; object
 .fs-card .fs-now { display: block; margin-top: 2px; color: var(--muted); font-size: 11px; font-style: normal; }
 .fu-channel-link { display: inline-flex; align-items: center; gap: 4px; color: var(--accent); font-weight: 700; text-decoration: none; } .fu-channel-link:hover { text-decoration: underline; }
 .chase-banner strong { overflow-wrap: anywhere; }
+.follow-flag.tone-thread { color: #8a3d00; background: color-mix(in srgb, #f08a24 15%, var(--surface-solid)); box-shadow: inset 0 0 0 1px color-mix(in srgb, #f08a24 40%, transparent); }
+[data-theme="dark"] .follow-flag.tone-thread { color: #ffb36b; }
+.detail-section-head .follow-flag.tone-thread { color: #8a3d00; }
+[data-theme="dark"] .detail-section-head .follow-flag.tone-thread { color: #ffb36b; }
+.chase-banner.tone-thread { border-color: color-mix(in srgb, #f08a24 45%, var(--line)); background: color-mix(in srgb, #f08a24 8%, var(--surface-solid)); }
+.chase-banner.tone-thread .chase-icon { background: #f08a24; color: #fff; border-color: transparent; }
+.gap-pick { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); }
+.gap-pick button { min-width: 36px; min-height: 30px; padding: 2px 8px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface-solid); color: var(--text); font: inherit; font-size: 12px; cursor: pointer; }
+.gap-pick button.on { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); font-weight: 700; }
+.gap-pick button:focus-visible, .thread-pick button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.thread-pick { display: grid; gap: 8px; margin-bottom: 8px; }
+.thread-pick button { display: grid; gap: 3px; text-align: left; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-solid); color: var(--text); font: inherit; cursor: pointer; transition: border-color .15s ease-out; }
+.thread-pick button:hover { border-color: rgba(var(--accent-rgb), .5); }
+.thread-pick button.on { border-color: var(--accent); background: var(--accent-soft); }
+.thread-pick strong { font-size: 14px; overflow-wrap: anywhere; }
+.thread-pick small { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.thread-pick em { color: var(--accent); font-size: 11.5px; font-style: normal; font-weight: 700; }
+.src-chip.other-thread { color: var(--muted); background: var(--surface-alt); }
+@media (prefers-reduced-motion: reduce) { .thread-pick button { transition: none; } }
+.quality-tiles { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; margin-bottom: 12px; }
+.q-tile { display: grid; gap: 2px; padding: 11px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-alt); min-width: 0; }
+.q-tile svg { color: var(--muted); }
+.q-tile strong { font-size: 22px; line-height: 1.1; }
+.q-tile small { font-size: 12px; font-weight: 700; color: var(--text); }
+.q-tile em { font-size: 11px; font-style: normal; color: var(--muted); overflow-wrap: anywhere; }
+.q-tile.q-yes svg { color: var(--success); }
+.q-tile.q-no svg { color: #d9534f; }
+.q-tile.q-managed svg { color: #14a39a; }
+.q-tile.q-ghost svg { color: var(--muted); }
+@media (max-width: 1100px) { .quality-tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 560px) { .quality-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.chase-cta-note { align-self: center; font-size: 12px; color: var(--accent); font-weight: 600; }
