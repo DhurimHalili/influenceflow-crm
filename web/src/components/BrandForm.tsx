@@ -138,7 +138,7 @@ export function BrandFields({ draft, setDraft, mode, focus }: Props) {
     <Fold id="looking" icon={<Target size={14} />} title="What they're looking for" open={open.includes("looking")} onToggle={toggle} filled={brief.niches.length > 0 || brief.platforms.length > 0 || brief.tiers.length > 0} summary={lookingBits.join(" · ") || "Creator niches, platforms, size, formats"}>
       <div className="brief-grid">
         <TagInput label="Creator niches" hint="who fits their product" value={brief.niches} onChange={(niches) => setBrief({ niches })} suggestions={creatorNiches} placeholder="Type and press Enter — Tech, Gaming…" />
-        <ChipGroup<SocialPlatform> label="Platforms" value={brief.platforms} onChange={(platforms) => setBrief({ platforms })} options={SOCIAL_ORDER.filter((p) => p !== "Website").map((p) => ({ value: p, label: SOCIAL_META[p].label.replace(" (Twitter)", ""), icon: <SocialGlyph platform={p} size={12} />, tone: SOCIAL_META[p].color }))} />
+        <ChipGroup<SocialPlatform> label="Platforms" value={brief.platforms} onChange={(platforms) => setBrief({ platforms })} options={SOCIAL_ORDER.filter((p) => p !== "Website" && p !== "WhatsApp").map((p) => ({ value: p, label: SOCIAL_META[p].label.replace(" (Twitter)", ""), icon: <SocialGlyph platform={p} size={12} />, tone: SOCIAL_META[p].color }))} />
         <ChipGroup<CreatorTier> label="Creator size" value={brief.tiers} onChange={(tiers) => setBrief({ tiers })} options={TIERS.map((t) => ({ value: t.value, label: t.label, hint: t.range }))} />
         <ChipGroup<string> label="Content formats" value={brief.formats} onChange={(formats) => setBrief({ formats })} options={FORMATS.map((f) => ({ value: f, label: f }))} />
       </div>

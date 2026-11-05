@@ -111,3 +111,45 @@ span.avatar.avatar-photo img { display: block; width: 100%; height: 100%; object
 .archived-hits li button { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 9px; border: 0; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-size: 11.5px; font-weight: 750; cursor: pointer; }
 .archived-hits li button:hover { background: var(--accent); color: #fff; }
 .empty-state .archived-hits { justify-content: center; margin: 14px auto 0; max-width: 560px; }
+
+/* ----- conversation: management replies, reach back, channel ------------------- */
+.follow-flag.tone-managed { color: #0f6b66; background: color-mix(in srgb, #14a39a 13%, var(--surface-solid)); box-shadow: inset 0 0 0 1px color-mix(in srgb, #14a39a 34%, transparent); }
+.follow-flag.tone-reach { color: #2d6b2f; background: color-mix(in srgb, #3fa046 13%, var(--surface-solid)); box-shadow: inset 0 0 0 1px color-mix(in srgb, #3fa046 34%, transparent); }
+[data-theme="dark"] .follow-flag.tone-managed { color: #6fe0d6; }
+[data-theme="dark"] .follow-flag.tone-reach { color: #8fdc8f; }
+.detail-section-head .follow-flag.tone-managed { color: #0f6b66; }
+.detail-section-head .follow-flag.tone-reach { color: #2d6b2f; }
+[data-theme="dark"] .detail-section-head .follow-flag.tone-managed { color: #6fe0d6; }
+[data-theme="dark"] .detail-section-head .follow-flag.tone-reach { color: #8fdc8f; }
+.chase-banner.tone-managed { border-color: color-mix(in srgb, #14a39a 40%, var(--line)); background: color-mix(in srgb, #14a39a 7%, var(--surface-solid)); }
+.chase-banner.tone-managed .chase-icon { background: #14a39a; color: #fff; border-color: transparent; }
+.chase-banner.tone-reach { border-color: color-mix(in srgb, #3fa046 40%, var(--line)); background: color-mix(in srgb, #3fa046 7%, var(--surface-solid)); }
+.chase-banner.tone-reach .chase-icon { background: #3fa046; color: #fff; border-color: transparent; }
+.chase-cta { display: flex; flex-wrap: wrap; gap: 8px; margin: -4px 0 12px; }
+.chase-cta .btn { min-height: 34px; }
+.fu-channel { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin: -4px 0 12px; font-size: 12px; color: var(--muted); }
+.fu-channel .menu-anchor { position: relative; }
+.fu-channel-pick { display: inline-flex; align-items: center; gap: 6px; min-height: 30px; padding: 4px 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface-solid); color: var(--text); font: inherit; font-size: 12px; cursor: pointer; transition: border-color .15s ease-out, background .15s ease-out; }
+.fu-channel-pick:hover { border-color: rgba(var(--accent-rgb), .45); }
+.fu-channel-pick:focus-visible, .fu-channel-note button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.fu-channel-pick b { font-weight: 700; }
+.fu-channel-note { display: inline-flex; align-items: center; gap: 6px; overflow-wrap: anywhere; }
+.fu-channel-note button { padding: 2px 4px; border: 0; background: none; color: var(--accent); font: inherit; font-weight: 700; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+.channel-ask p { margin: 0 0 10px; font-weight: 600; }
+.channel-ask ul { margin: 0 0 6px; padding-left: 18px; display: grid; gap: 8px; color: var(--muted); font-size: 13px; line-height: 1.5; }
+.channel-ask b { color: var(--text); }
+.lead-state { display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px; border-radius: 9px; font-size: 11px; font-weight: 700; }
+.lead-state.s-waiting { color: #8a5a00; background: #fff1c2; box-shadow: inset 0 0 0 1px #f2d06b; }
+.lead-state.s-replied { color: var(--accent); background: var(--accent-soft); }
+[data-theme="dark"] .lead-state.s-waiting { color: #ffd56b; background: rgba(255, 196, 0, .14); box-shadow: inset 0 0 0 1px rgba(255, 196, 0, .35); }
+@media (prefers-reduced-motion: reduce) { .fu-channel-pick { transition: none; } }
+.qchip-managed svg { color: #14a39a; }
+.qchip-managed.on { border-color: #14a39a; background: color-mix(in srgb, #14a39a 12%, var(--surface-solid)); }
+.qchip-managed.on b { background: #14a39a; }
+.qchip-reach svg { color: #3fa046; }
+.qchip-reach.on { border-color: #3fa046; background: color-mix(in srgb, #3fa046 12%, var(--surface-solid)); }
+.qchip-reach.on b { background: #3fa046; }
+.lead-states { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 0; }
+.fs-card .fs-now { display: block; margin-top: 2px; color: var(--muted); font-size: 11px; font-style: normal; }
+.fu-channel-link { display: inline-flex; align-items: center; gap: 4px; color: var(--accent); font-weight: 700; text-decoration: none; } .fu-channel-link:hover { text-decoration: underline; }
+.chase-banner strong { overflow-wrap: anywhere; }

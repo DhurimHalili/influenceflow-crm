@@ -170,7 +170,7 @@ export function CreatorFields({ draft, setDraft, mode }: Props) {
         />
         {pasteText.trim() && <button type="button" onClick={() => applyPaste(pasteText)}><ClipboardPaste size={14} /> Fill</button>}
       </label>
-      {handleChoice && <div className="cf-handle-choice"><span>Which network is <b>@{handleChoice}</b> on?</span>{SOCIAL_ORDER.filter((p) => p !== "Website").slice(0, 8).map((p) => <button type="button" key={p} onClick={() => chooseHandle(p)} style={{ ["--tone" as string]: SOCIAL_META[p].color }}><SocialBadge platform={p} size={18} /> {SOCIAL_META[p].label}</button>)}</div>}
+      {handleChoice && <div className="cf-handle-choice"><span>Which network is <b>@{handleChoice}</b> on?</span>{SOCIAL_ORDER.filter((p) => p !== "Website" && p !== "WhatsApp").slice(0, 8).map((p) => <button type="button" key={p} onClick={() => chooseHandle(p)} style={{ ["--tone" as string]: SOCIAL_META[p].color }}><SocialBadge platform={p} size={18} /> {SOCIAL_META[p].label}</button>)}</div>}
       {pasteNote && <p className={`cf-paste-note ${pasteNote.ok ? "ok" : "warn"}`}>{pasteNote.ok && <Check size={13} />}{pasteNote.text}</p>}
     </div>}
 

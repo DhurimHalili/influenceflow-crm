@@ -34,11 +34,12 @@ export const SOCIAL_META: Record<SocialPlatform, SocialMeta> = {
   Snapchat: { label: "Snapchat", color: "#e5b800", hosts: ["snapchat.com"], url: (h) => `https://snapchat.com/add/${h}`, handleFrom: (p) => { const parts = p.split(/[/?#]/).filter(Boolean); return parts[0] === "add" ? parts[1] || "" : ""; }, placeholder: "@username or snapchat.com/add/…" },
   Pinterest: { label: "Pinterest", color: "#e60023", hosts: ["pinterest.com", "pin.it"], url: (h) => `https://pinterest.com/${h}`, handleFrom: firstSegment, placeholder: "@handle or pinterest.com/…" },
   Threads: { label: "Threads", color: "#3d3d3d", hosts: ["threads.net", "threads.com"], url: (h) => `https://threads.net/@${h}`, handleFrom: atSegment, placeholder: "@handle or threads.net/@…" },
+  WhatsApp: { label: "WhatsApp", color: "#25d366", hosts: ["wa.me", "whatsapp.com"], url: (h) => `https://wa.me/${h}`, handleFrom: (p) => (/phone=\+?(\d{7,15})/.exec(p)?.[1] || (/^\+?(\d{7,15})$/.exec(firstSegment(p))?.[1] ?? "")), placeholder: "+44 7700 900123 or wa.me/…" },
   Website: { label: "Website", color: "#6b7280", hosts: [], url: (h) => `https://${h}`, handleFrom: () => "", placeholder: "site.com, linktr.ee/…, shop…" },
 };
 
 /** Most-used first: the quick-add chips show these, the rest sit under "More". */
-export const SOCIAL_ORDER: SocialPlatform[] = ["Instagram", "TikTok", "YouTube", "X", "Twitch", "LinkedIn", "Facebook", "Snapchat", "Pinterest", "Threads", "Kick", "Website"];
+export const SOCIAL_ORDER: SocialPlatform[] = ["Instagram", "TikTok", "YouTube", "X", "Twitch", "WhatsApp", "LinkedIn", "Facebook", "Snapchat", "Pinterest", "Threads", "Kick", "Website"];
 export const QUICK_SOCIALS: SocialPlatform[] = ["Instagram", "TikTok", "YouTube", "X", "Twitch"];
 
 const HANDLE = /^[\w.\-À-ɏ]{1,60}$/;
@@ -75,6 +76,11 @@ export const detectPlatform = (value: string): SocialPlatform | null => {
  */
 export const resolveSocial = (input: string, platform: SocialPlatform): Omit<SocialLink, "followers"> | null => {
   const raw = input.trim();
+  // A phone number for WhatsApp: "+44 7700 900-123" → wa.me/447700900123.
+  if (platform === "WhatsApp" && /^\+?[\d\s().-]{7,24}$/.test(raw)) {
+    const digits = raw.replace(/\D/g, "");
+    return digits.length >= 7 && digits.length <= 15 ? { platform, url: SOCIAL_META.WhatsApp.url(digits), handle: digits } : null;
+  }
   if (!raw || /\s/.test(raw)) return null;
   const parsedUrl = !raw.startsWith("@") && looksLikeUrl(raw) ? hostOf(raw) : null;
   // "maya.chen" in an Instagram row is a handle, not a website: only treat it
@@ -112,10 +118,10 @@ export const parseFollowers = (value: string | number) => {
 export const socialKey = (url: string) => url.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/^(www|m|mobile)\./, "").replace(/^twitter\.com/, "x.com").replace(/^threads\.com/, "threads.net").replace(/[?#].*$/, "").replace(/\/+$/, "");
 
 /** Primary platform for the record ("Website" has no platform of its own). */
-export const asPlatform = (platform: SocialPlatform | undefined): Platform => (!platform || platform === "Website" ? "Other" : platform);
+export const asPlatform = (platform: SocialPlatform | undefined): Platform => (!platform || platform === "Website" || platform === "WhatsApp" ? "Other" : platform);
 
 export const socialLabel = (social: Pick<SocialLink, "platform" | "handle" | "url">) =>
-  social.handle ? `@${social.handle}` : social.url.replace(/^https?:\/\//, "").replace(/^www\./, "");
+  social.platform === "WhatsApp" && social.handle ? `+${social.handle}` : social.handle ? `@${social.handle}` : social.url.replace(/^https?:\/\//, "").replace(/^www\./, "");
 
 /**
  * Everything useful in a pasted blob: profile links (in order), an email and

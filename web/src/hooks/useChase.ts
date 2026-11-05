@@ -26,7 +26,13 @@ export function useChase() {
     const byId = new Map<string, Chase>(list.map((c) => [c.id, c]));
     const due = list.filter((c) => c.state.kind === "due");
     const reply = list.filter((c) => c.state.kind === "reply-needed");
-    return { list, byId, due, reply, rules };
+    /** A scheduled follow-up would go out after their reply: cancel it in Gmail. */
+    const cancel = list.filter((c) => !!c.state.cancel);
+    /** Management / an autoresponder declined by email: reach them on another channel. */
+    const managed = list.filter((c) => c.state.kind === "managed");
+    /** Said no a while ago: time to try again. */
+    const reach = list.filter((c) => c.state.kind === "reach-back");
+    return { list, byId, due, reply, cancel, managed, reach, rules };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data.creators, data.brands, data.followups, data.emailEvents, rules, day]);
 }

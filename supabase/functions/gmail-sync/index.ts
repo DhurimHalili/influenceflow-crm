@@ -3,6 +3,7 @@ import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { isSealed, openToken, sealToken } from "../_shared/googleTokens.ts";
 import { aiEnabled, aiKeyCount, aiModel, aiProvider, aiReadyAt, classifyLead, testAi, useKeyStore } from "../_shared/ai.ts";
 import { decodeEntities, precheck, scanForLead, type Lead, type ScanInput } from "../_shared/leadScanner.ts";
+import { classifyIncoming, myReplyIntent, type IncomingKind } from "../_shared/replyReader.ts";
 import { analyzeStoredFile, bodyOf, drainQueue, gmailAttachment, processCreatorMail, sniff, type Fetcher, type FullMessage } from "./intel.ts";
 
 // Gmail ⇄ CRM sync, for every mailbox a user connected (an agency often runs
@@ -64,7 +65,11 @@ type Admin = SupabaseClient;
 type TokenRow = { id: string; user_id: string; access_token: string | null; refresh_token: string; expiry: string | null; email: string | null; scopes: string; history_id: string | null; last_sync_at: string | null; backfilled: string[] | null; sync_error?: string; connected_at?: string | null; updated_at?: string | null; send_day?: string | null; send_count?: number; leads_scanned_at?: string | null };
 type Entity = { type: "creator" | "brand"; id: string };
 type Meta = { id: string; threadId: string; labelIds?: string[]; snippet?: string; internalDate?: string; payload?: { headers?: { name: string; value: string }[] } };
-type EventRow = { user_id: string; gmail_id: string; thread_id: string; direction: "out" | "in"; entity_type: "creator" | "brand"; entity_id: string; counterpart: string; subject: string; snippet: string; at: string; mailbox: string; message_key: string; scheduled: boolean };
+type EventRow = { user_id: string; gmail_id: string; thread_id: string; direction: "out" | "in"; entity_type: "creator" | "brand"; entity_id: string; counterpart: string; subject: string; snippet: string; at: string; mailbox: string; message_key: string; scheduled: boolean; reply_kind: IncomingKind; in_reply_to: string };
+/** Gmail thread → the CRM records already in it (per mailbox: thread ids belong to one). */
+type ThreadBook = Map<string, Entity[]>;
+// Columns added by later migrations: a database without them still gets the mail.
+const LATE_COLUMNS = ["reply_kind", "in_reply_to", "scheduled"] as const;
 
 class GmailError extends Error {
   constructor(message: string, public status = 0, public reconnect = false, public retryable = false) {
@@ -82,7 +87,18 @@ const timingSafeEqual = (a: string, b: string) => {
 const addresses = (value: string | undefined) => Array.from(new Set((value || "").match(EMAIL_RE)?.map((e) => e.toLowerCase()) || []));
 const header = (meta: Meta, name: string) => meta.payload?.headers?.find((h) => h.name.toLowerCase() === name.toLowerCase())?.value || "";
 const mailboxOf = (row: TokenRow) => (row.email || "").toLowerCase();
-const messageKey = (meta: Meta) => header(meta, "Message-ID").trim().replace(/^<|>$/g, "").toLowerCase().slice(0, 300);
+const normKey = (value: string) => value.trim().replace(/^<|>$/g, "").toLowerCase().slice(0, 300);
+const messageKey = (meta: Meta) => normKey(header(meta, "Message-ID"));
+/** The Message-ID this email answers (the first one when several are listed). */
+const replyToKey = (meta: Meta) => normKey((header(meta, "In-Reply-To").match(/<[^>]+>/) || [header(meta, "In-Reply-To")])[0] || "");
+const headersOf = (meta: Meta) => {
+  const out: Record<string, string> = {};
+  for (const h of meta.payload?.headers || []) out[h.name.toLowerCase()] = h.value;
+  return out;
+};
+// Free-mail domains are shared by strangers; a company domain you send from is your team.
+const PUBLIC_MAIL = /^(gmail|googlemail|outlook|hotmail|live|yahoo|icloud|me|aol|proton|protonmail|gmx|mail|yandex)\./i;
+const ownDomains = (own: Set<string>) => new Set(Array.from(own).map((e) => e.split("@")[1] || "").filter((d) => d && !PUBLIC_MAIL.test(d)));
 const chunk = <T,>(list: T[], size: number) => Array.from({ length: Math.ceil(list.length / size) }, (_, i) => list.slice(i * size, i * size + size));
 
 // ----- tokens ----------------------------------------------------------------
@@ -189,7 +205,7 @@ const DRIVE_SHARES_DONE = "__drive_shares_v1";
 const isOutgoing = (meta: Meta, own: Set<string>) => (meta.labelIds || []).includes("SENT") || addresses(header(meta, "From")).some((e) => own.has(e));
 const sentAt = (meta: Meta) => (meta.internalDate ? new Date(Number(meta.internalDate)) : new Date(header(meta, "Date") || Date.now())).toISOString();
 
-function eventsFor(meta: Meta, userId: string, book: Map<string, Entity[]>, own: Set<string>, mailbox: string): EventRow[] {
+function eventsFor(meta: Meta, userId: string, book: Map<string, Entity[]>, own: Set<string>, mailbox: string, threads?: ThreadBook): EventRow[] {
   const labels = meta.labelIds || [];
   if (labels.some((l) => l === "DRAFT" || l === "SPAM" || l === "TRASH" || l === "CHAT")) return [];
   const out = isOutgoing(meta, own);
@@ -199,16 +215,68 @@ function eventsFor(meta: Meta, userId: string, book: Map<string, Entity[]>, own:
   const sender = DRIVE_SHARE.test(header(meta, "From")) ? addresses(header(meta, "Reply-To")) : addresses(header(meta, "From"));
   const counterparts = (out ? [...addresses(header(meta, "To")), ...addresses(header(meta, "Cc"))] : sender).filter((e) => !own.has(e));
   const at = sentAt(meta);
+  const subject = decodeEntities(header(meta, "Subject")).slice(0, 300);
+  const snippet = decodeEntities(meta.snippet || "").slice(0, 240);
   const rows: EventRow[] = [];
   const seen = new Set<string>();
-  for (const email of counterparts) {
-    for (const entity of book.get(email) || []) {
-      if (seen.has(entity.id)) continue;
-      seen.add(entity.id);
-      rows.push({ user_id: userId, gmail_id: meta.id, thread_id: meta.threadId || "", direction: out ? "out" : "in", entity_type: entity.type, entity_id: entity.id, counterpart: email, subject: decodeEntities(header(meta, "Subject")).slice(0, 300), snippet: decodeEntities(meta.snippet || "").slice(0, 240), at, mailbox, message_key: messageKey(meta), scheduled });
-    }
+  const push = (entity: Entity, email: string, fromOther: boolean) => {
+    if (seen.has(entity.id)) return;
+    seen.add(entity.id);
+    const reply_kind: IncomingKind = out ? "" : classifyIncoming({ headers: headersOf(meta), subject, text: snippet, fromOther });
+    rows.push({ user_id: userId, gmail_id: meta.id, thread_id: meta.threadId || "", direction: out ? "out" : "in", entity_type: entity.type, entity_id: entity.id, counterpart: email, subject, snippet, at, mailbox, message_key: messageKey(meta), scheduled, reply_kind, in_reply_to: replyToKey(meta) });
+  };
+  for (const email of counterparts) for (const entity of book.get(email) || []) push(entity, email, false);
+  // Nobody known on it, but it belongs to a conversation you're tracking: their
+  // manager, agency or team answered from another address (or you wrote to them).
+  // Your own colleagues (same company domain) are never "their side".
+  if (!rows.length && meta.threadId && threads?.has(meta.threadId)) {
+    const team = ownDomains(own);
+    const other = counterparts.find((e) => !team.has(e.split("@")[1] || "") && !/(^|[.@])(mailer-daemon|postmaster)/i.test(e));
+    if (other) for (const entity of threads.get(meta.threadId) || []) push(entity, other, true);
   }
   return rows;
+}
+
+/** Records already tracked in these threads of this mailbox. */
+async function threadBook(admin: Admin, userId: string, mailbox: string, threadIds: string[]): Promise<ThreadBook> {
+  const map: ThreadBook = new Map();
+  for (const part of chunk(Array.from(new Set(threadIds.filter(Boolean))), 200)) {
+    const { data } = await admin.from("email_events").select("thread_id, entity_type, entity_id").eq("user_id", userId).eq("mailbox", mailbox).in("thread_id", part).limit(2000);
+    for (const r of data || []) {
+      const list = map.get(r.thread_id) || [];
+      if (!list.some((e) => e.id === r.entity_id)) list.push({ type: r.entity_type, id: r.entity_id });
+      map.set(r.thread_id, list);
+    }
+  }
+  return map;
+}
+
+/** Match a batch: people you know first, then the rest of their threads (a manager answering for a creator). */
+async function matchAll(admin: Admin, userId: string, metas: Meta[], book: Map<string, Entity[]>, own: Set<string>, mailbox: string) {
+  const direct = metas.flatMap((m) => eventsFor(m, userId, book, own, mailbox));
+  const threads = await threadBook(admin, userId, mailbox, metas.map((m) => m.threadId));
+  for (const r of direct) {
+    const list = threads.get(r.thread_id) || [];
+    if (!list.some((e) => e.id === r.entity_id)) list.push({ type: r.entity_type, id: r.entity_id });
+    if (r.thread_id) threads.set(r.thread_id, list);
+  }
+  const hit = new Set(direct.map((r) => r.gmail_id));
+  const viaThread = metas.filter((m) => !hit.has(m.id)).flatMap((m) => eventsFor({ ...m }, userId, new Map(), own, mailbox, threads));
+  return [...direct, ...viaThread];
+}
+
+async function storeEvents(admin: Admin, rows: EventRow[]) {
+  for (const part of chunk(rows, 200)) {
+    let payload: Record<string, unknown>[] = part;
+    let { error } = await admin.from("email_events").upsert(payload, { onConflict: "user_id,gmail_id,entity_id", ignoreDuplicates: true });
+    // A database that hasn't run a later migration yet still gets the mail.
+    for (const col of LATE_COLUMNS) {
+      if (!error || !new RegExp(col).test(error.message)) continue;
+      payload = payload.map(({ [col]: _drop, ...r }) => r);
+      ({ error } = await admin.from("email_events").upsert(payload, { onConflict: "user_id,gmail_id,entity_id", ignoreDuplicates: true }));
+    }
+    if (error) throw new GmailError(`Couldn't store email activity: ${error.message}`);
+  }
 }
 
 async function listIds(token: string, q: string, maxPages: number) {
@@ -327,6 +395,8 @@ const NEXT: Record<string, { out?: string; in?: string }> = {
   inbound: { out: "replied" },
 };
 const LABEL: Record<string, string> = { contacted: "Contacted", inbound: "Inbound", replied: "Replied" };
+/** A new email this long after you marked them Denied reopens the conversation. */
+const REOPEN_AFTER_MS = 14 * 86400000;
 
 async function applyStatuses(admin: Admin, userId: string, entityIds: string[]) {
   if (!entityIds.length) return 0;
@@ -335,7 +405,7 @@ async function applyStatuses(admin: Admin, userId: string, entityIds: string[]) 
   for (const ids of chunk(entityIds, 100)) {
     const since = new Date(Date.now() - BACKFILL_DAYS * 86400000).toISOString();
     const [{ data: events }, { data: creators }, { data: brands }] = await Promise.all([
-      admin.from("email_events").select("entity_id, entity_type, direction, at, subject, mailbox").eq("user_id", userId).in("entity_id", ids).gte("at", since).order("at", { ascending: true }),
+      admin.from("email_events").select("*").eq("user_id", userId).in("entity_id", ids).gte("at", since).order("at", { ascending: true }),
       admin.from("creators").select("id, name, pipeline_status, status_updated_at, date_contacted, archived_at").eq("user_id", userId).in("id", ids),
       admin.from("brands").select("id, name, pipeline_status, status_updated_at, date_contacted, archived_at").eq("user_id", userId).in("id", ids),
     ]);
@@ -351,13 +421,18 @@ async function applyStatuses(admin: Admin, userId: string, entityIds: string[]) 
         first = first || ev.at;
         // Only mail newer than your last status change can move it.
         if (new Date(ev.at).getTime() <= changedAt) continue;
-        const next = NEXT[status]?.[ev.direction as "out" | "in"];
+        // An out-of-office, or their management turning it down for them, is not a reply.
+        if (ev.direction === "in" && (ev.reply_kind === "auto" || ev.reply_kind === "managed_no")) continue;
+        // Writing again to someone who passed, weeks later (not a quick "thanks
+        // anyway"), reopens the conversation: the follow-ups start over.
+        const reopen = status === "denied" && ev.direction === "out" && !ev.scheduled && new Date(ev.at).getTime() - changedAt >= REOPEN_AFTER_MS ? "contacted" : "";
+        const next = reopen || NEXT[status]?.[ev.direction as "out" | "in"];
         if (next) {
           status = next;
           // A scheduled email carries its future send time; a status change is never dated ahead.
           at = ev.at > nowIso ? nowIso : ev.at;
           const via = ev.mailbox ? ` (${ev.mailbox})` : "";
-          why = ev.direction === "out" ? `you emailed “${ev.subject || "(no subject)"}”${via}` : `they emailed “${ev.subject || "(no subject)"}”${via}`;
+          why = reopen ? `you emailed again after they passed — “${ev.subject || "(no subject)"}”${via}` : ev.direction === "out" ? `you emailed “${ev.subject || "(no subject)"}”${via}` : `they emailed “${ev.subject || "(no subject)"}”${via}`;
         }
       }
       if (!at || status === record.pipeline_status) continue;
@@ -444,7 +519,8 @@ async function recheckScheduled(admin: Admin, userId: string, token: string, mai
       const labels = meta?.labelIds || [];
       if (!meta || labels.some((l) => l === "DRAFT" || l === "TRASH" || l === "SPAM")) { gone.push(id); return; }
       const stillScheduled = labels.includes("SCHEDULED") && !labels.includes("SENT");
-      const { error: upd } = await admin.from("email_events").update({ scheduled: stillScheduled, at: sentAt(meta) }).eq("user_id", userId).eq("gmail_id", id);
+      let { error: upd } = await admin.from("email_events").update({ scheduled: stillScheduled, at: sentAt(meta), in_reply_to: replyToKey(meta) }).eq("user_id", userId).eq("gmail_id", id);
+      if (upd && /in_reply_to/.test(upd.message)) ({ error: upd } = await admin.from("email_events").update({ scheduled: stillScheduled, at: sentAt(meta) }).eq("user_id", userId).eq("gmail_id", id));
       if (!upd && !stillScheduled) sent++;
     }));
   }
@@ -462,11 +538,11 @@ async function undoScheduledStatus(admin: Admin, userId: string, type: "creator"
   const { data: record } = await admin.from(table).select("id, name, pipeline_status, status_source, archived_at").eq("id", id).eq("user_id", userId).maybeSingle();
   if (!record || record.archived_at || record.status_source !== "gmail") return;
   const [{ data: mail }, { data: logged }] = await Promise.all([
-    admin.from("email_events").select("direction").eq("user_id", userId).eq("entity_id", id).limit(200),
+    admin.from("email_events").select("*").eq("user_id", userId).eq("entity_id", id).limit(200),
     admin.from("followups").select("kind").eq("user_id", userId).eq(type === "creator" ? "creator_id" : "brand_id", id).limit(200),
   ]);
   const outs = (mail || []).filter((m) => m.direction === "out").length + (logged || []).filter((f) => f.kind !== "reply").length;
-  const ins = (mail || []).filter((m) => m.direction === "in").length + (logged || []).filter((f) => f.kind === "reply").length;
+  const ins = (mail || []).filter((m) => m.direction === "in" && m.reply_kind !== "auto" && m.reply_kind !== "managed_no").length + (logged || []).filter((f) => f.kind === "reply").length;
   if (outs > 0) return;
   const back = record.pipeline_status === "contacted" && ins === 0 ? "new" : record.pipeline_status === "replied" && ins > 0 ? "inbound" : "";
   if (!back) return;
@@ -475,6 +551,105 @@ async function undoScheduledStatus(admin: Admin, userId: string, type: "creator"
   const { error } = await admin.from(table).update(patch).eq("id", id).eq("user_id", userId).eq("pipeline_status", record.pipeline_status);
   if (error) return;
   await admin.from("activities").insert({ user_id: userId, text: `Gmail: the scheduled email to ${record.name} was cancelled — moved back to ${back === "new" ? "New" : "Inbound"}`.slice(0, 500), at: new Date().toISOString(), entity_type: type, entity_id: id });
+}
+
+// ----- replies from another address (older mail) -----------------------------------
+
+// Before threads were matched, a manager's or agency's answer from an address
+// that isn't the creator's was dropped (it wasn't in the CRM). Once per
+// mailbox, walk the threads you started in the last 60 days, newest first, a
+// slice per run; the cursor (epoch ms) is kept in `backfilled`.
+const THREAD_SCAN_DONE = "__thread_scan_v1";
+const THREAD_SCAN_AT = "__thread_scan_v1@";
+const THREAD_SCAN_DAYS = 60;
+const THREADS_PER_RUN = 60;
+
+async function scanOldThreads(admin: Admin, row: TokenRow, token: string, own: Set<string>, mailbox: string, done: Set<string>, deadline: number) {
+  const none = { rows: [] as EventRow[], marker: [] as string[] };
+  if (done.has(THREAD_SCAN_DONE) || Date.now() > deadline) return none;
+  const cursor = Number(Array.from(done).find((b) => b.startsWith(THREAD_SCAN_AT))?.slice(THREAD_SCAN_AT.length)) || Date.now() + 86400000;
+  const since = new Date(Date.now() - THREAD_SCAN_DAYS * 86400000).toISOString();
+  const { data, error } = await admin.from("email_events").select("thread_id, at").eq("user_id", row.user_id).eq("mailbox", mailbox).eq("direction", "out").neq("thread_id", "").gte("at", since).lt("at", new Date(cursor).toISOString()).order("at", { ascending: false }).limit(1500);
+  if (error) return none;
+  const newest = new Map<string, string>();
+  for (const r of data || []) if (!newest.has(r.thread_id)) newest.set(r.thread_id, r.at);
+  const slice = Array.from(newest.entries()).slice(0, THREADS_PER_RUN);
+  if (!slice.length) return { rows: [], marker: [THREAD_SCAN_DONE] };
+  const threads = await threadBook(admin, row.user_id, mailbox, slice.map(([id]) => id));
+  const metas: Meta[] = [];
+  let reached = cursor;
+  for (const group of chunk(slice, 5)) {
+    if (Date.now() > deadline) break;
+    const got = await Promise.all(group.map(([id]) => gmail<{ messages?: Meta[] }>(token, `/threads/${id}?format=metadata&${META_HEADERS.map((h) => `metadataHeaders=${h}`).join("&")}`).catch(() => null)));
+    for (const t of got) metas.push(...(t?.messages || []));
+    reached = Math.min(reached, ...group.map(([, at]) => new Date(at).getTime()));
+  }
+  // Only messages nobody stored yet, and only what the thread itself explains.
+  const known = new Set<string>();
+  for (const part of chunk(metas.map((m) => m.id), 300)) {
+    const { data: stored } = await admin.from("email_events").select("gmail_id").eq("user_id", row.user_id).in("gmail_id", part);
+    (stored || []).forEach((r) => known.add(r.gmail_id));
+  }
+  const fresh = metas.filter((m) => !known.has(m.id)).flatMap((m) => eventsFor(m, row.user_id, new Map(), own, mailbox, threads));
+  const rows = await dropCrossMailboxDuplicates(admin, row.user_id, fresh);
+  await storeEvents(admin, rows);
+  const finished = slice.length < THREADS_PER_RUN && reached <= Math.min(...slice.map(([, at]) => new Date(at).getTime()));
+  return { rows, marker: finished ? [THREAD_SCAN_DONE] : [`${THREAD_SCAN_AT}${reached}`] };
+}
+
+// ----- your replies to inbound leads -------------------------------------------------
+
+// People who emailed you first aren't in the CRM, so your answers to them were
+// invisible. Every answer is kept on the lead (it counts as an email sent), and
+// what it says decides the lead: a clear yes ("sure", "send your media kit")
+// is added to the CRM by the app, a clear no dismisses it, anything else waits
+// for you. Once per mailbox, the last 60 days of answers are looked up too.
+const LEAD_REPLIES_DONE = "__lead_replies_v1";
+type LeadRow = { id: string; email: string; thread_id: string; mailbox: string; status: string; my_replies: { id: string; at: string; scheduled?: boolean; intent?: string }[] | null; my_intent: string | null };
+
+async function trackLeadReplies(admin: Admin, userId: string, token: string, metas: Meta[], own: Set<string>, mailbox: string, backfilledAlready: boolean, deadline: number) {
+  const { data, error } = await admin.from("inbound_leads").select("id, email, thread_id, mailbox, status, my_replies, my_intent").eq("user_id", userId).limit(500);
+  if (error || !data?.length) return { updated: 0, backfilled: !error };
+  const leads = data as LeadRow[];
+  let candidates = metas.filter((m) => isOutgoing(m, own));
+  let backfilled = false;
+  if (!backfilledAlready && Date.now() < deadline) {
+    const recent = leads.filter((l) => l.status !== "added").map((l) => l.email);
+    const ids = new Set<string>();
+    for (const group of chunk(recent, 15)) {
+      if (Date.now() > deadline) break;
+      (await listIds(token, `in:sent {${group.map((e) => `to:${e}`).join(" ")}} newer_than:60d`, 2)).forEach((id) => ids.add(id));
+    }
+    const have = new Set(candidates.map((m) => m.id));
+    candidates = [...candidates, ...(await fetchMetas(token, Array.from(ids).filter((id) => !have.has(id)), deadline))];
+    backfilled = Date.now() < deadline;
+  }
+  const byEmail = new Map(leads.map((l) => [l.email.toLowerCase(), l]));
+  const byThread = new Map(leads.filter((l) => l.thread_id && (!l.mailbox || l.mailbox === mailbox)).map((l) => [l.thread_id, l]));
+  const touched = new Map<string, LeadRow>();
+  for (const meta of candidates) {
+    const labels = meta.labelIds || [];
+    if (labels.some((l) => l === "DRAFT" || l === "TRASH" || l === "SPAM")) continue;
+    const to = [...addresses(header(meta, "To")), ...addresses(header(meta, "Cc"))];
+    const lead = to.map((e) => byEmail.get(e)).find(Boolean) || (meta.threadId ? byThread.get(meta.threadId) : undefined);
+    if (!lead) continue;
+    const list = lead.my_replies || [];
+    if (list.some((r) => r.id === meta.id)) continue;
+    const scheduled = labels.includes("SCHEDULED") && !labels.includes("SENT");
+    lead.my_replies = [...list, { id: meta.id, at: sentAt(meta), scheduled, intent: myReplyIntent(decodeEntities(meta.snippet || "")) }].sort((a, b) => a.at.localeCompare(b.at)).slice(-50);
+    touched.set(lead.id, lead);
+  }
+  let updated = 0;
+  for (const lead of touched.values()) {
+    const replies = lead.my_replies || [];
+    // Your latest clear answer decides; "thanks, got it" never undoes a yes.
+    const intent = [...replies].reverse().find((r) => r.intent)?.intent || "";
+    const patch: Record<string, unknown> = { my_replies: replies, my_intent: intent, replied_at: replies[replies.length - 1]?.at || null, updated_at: new Date().toISOString() };
+    if (lead.status === "new" && intent === "no") patch.status = "dismissed";
+    const { error: upd } = await admin.from("inbound_leads").update(patch).eq("id", lead.id).eq("user_id", userId);
+    if (!upd) updated++;
+  }
+  return { updated, backfilled };
 }
 
 // ----- one mailbox's sync -------------------------------------------------------
@@ -556,14 +731,19 @@ async function syncMailbox(admin: Admin, row: TokenRow, own: Set<string>, book: 
   if (todoAll.length > todo.length) complete = false;
   const metas = await fetchMetas(token, todo, deadline);
   if (metas.length < todo.length) complete = false;
-  const matched = metas.flatMap((m) => eventsFor(m, row.user_id, book, own, mailbox));
+  const matched = await matchAll(admin, row.user_id, metas, book, own, mailbox);
   const rows = await dropCrossMailboxDuplicates(admin, row.user_id, matched);
-  for (const part of chunk(rows, 200)) {
-    let { error } = await admin.from("email_events").upsert(part, { onConflict: "user_id,gmail_id,entity_id", ignoreDuplicates: true });
-    // A database without the scheduled column yet still gets the mail.
-    if (error && /scheduled/.test(error.message)) ({ error } = await admin.from("email_events").upsert(part.map(({ scheduled: _s, ...r }) => r), { onConflict: "user_id,gmail_id,entity_id", ignoreDuplicates: true }));
-    if (error) throw new GmailError(`Couldn't store email activity: ${error.message}`);
-  }
+  await storeEvents(admin, rows);
+
+  // 4b. Once per mailbox: replies that came back from another address (a
+  //     manager or agency answering for a creator) before threads were matched.
+  const threadScan = await scanOldThreads(admin, row, token, own, mailbox, done, deadline - 40_000).catch(() => ({ rows: [] as EventRow[], marker: [] as string[] }));
+  rows.push(...threadScan.rows);
+  backfilled.push(...threadScan.marker);
+
+  // 4c. Your answers to people who emailed you first (inbound leads).
+  const leadReplies = await trackLeadReplies(admin, row.user_id, token, metas.filter((m) => !matched.some((r) => r.gmail_id === m.id)), own, mailbox, done.has(LEAD_REPLIES_DONE), deadline - 30_000).catch(() => ({ updated: 0, backfilled: false }));
+  if (leadReplies.backfilled) backfilled.push(LEAD_REPLIES_DONE);
 
   // 5. Mail from people who aren't in the CRM: is it a real enquiry?
   const matchedIds = new Set(matched.map((r) => r.gmail_id));
@@ -605,14 +785,16 @@ async function syncMailbox(admin: Admin, row: TokenRow, own: Set<string>, book: 
   // 7. Remember where we got to. An unfinished run keeps the old history id so
   //    the next run picks up exactly where this one stopped.
   const now = new Date().toISOString();
-  const patch: Record<string, unknown> = { last_sync_at: now, updated_at: now, sync_error: "", backfilled: Array.from(new Set([...done, ...backfilled])).slice(-5000) };
+  // A new thread-scan cursor replaces the old one.
+  const keep = backfilled.some((b) => b.startsWith(THREAD_SCAN_AT)) ? Array.from(done).filter((b) => !b.startsWith(THREAD_SCAN_AT)) : Array.from(done);
+  const patch: Record<string, unknown> = { last_sync_at: now, updated_at: now, sync_error: "", backfilled: Array.from(new Set([...keep, ...backfilled])).slice(-5000) };
   if (leadsScanned && !row.leads_scanned_at && complete) patch.leads_scanned_at = new Date().toISOString();
   if (complete || !row.history_id) {
     const profile = await gmail<{ historyId?: string; emailAddress?: string }>(token, "/profile");
     if (complete || !historyId) patch.history_id = profile.historyId || historyId;
   }
   await admin.from("gmail_tokens").update(patch).eq("id", row.id);
-  return { mailbox, messages: metas.length, events: rows.length, leads, files: filesSaved, aiRead, statusChanges: changed, scheduledChanges: scheduled.sent + scheduled.cancelled, complete };
+  return { mailbox, messages: metas.length, events: rows.length, leads: leads + leadReplies.updated, files: filesSaved, aiRead, statusChanges: changed, scheduledChanges: scheduled.sent + scheduled.cancelled, complete };
 }
 
 async function recordError(admin: Admin, row: TokenRow, e: unknown) {
@@ -719,8 +901,8 @@ async function send(admin: Admin, rows: TokenRow[], input: Record<string, unknow
   const own = new Set(rows.map(mailboxOf).filter(Boolean));
   const book = await addressBook(admin, row.user_id, own);
   const meta = await gmail<Meta>(token, META_PATH(sent.id)).catch(() => null);
-  const events = meta ? eventsFor({ ...meta, labelIds: Array.from(new Set([...(meta.labelIds || []), "SENT"])) }, row.user_id, book, own, mailboxOf(row)) : [];
-  if (events.length) await admin.from("email_events").upsert(events, { onConflict: "user_id,gmail_id,entity_id", ignoreDuplicates: true });
+  const events = meta ? await matchAll(admin, row.user_id, [{ ...meta, labelIds: Array.from(new Set([...(meta.labelIds || []), "SENT"])) }], book, own, mailboxOf(row)) : [];
+  if (events.length) await storeEvents(admin, events).catch(() => undefined);
   const changed = await applyStatuses(admin, row.user_id, events.map((r) => r.entity_id));
   return { id: sent.id, threadId: sent.threadId, from: row.email, events: events.length, statusChanges: changed };
 }

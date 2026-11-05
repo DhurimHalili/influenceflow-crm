@@ -12,6 +12,9 @@ const XMark = ({ size }: { size: number }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M17.75 3h3.07l-6.7 7.66L22 21h-6.17l-4.83-6.32L5.47 21H2.4l7.17-8.2L2 3h6.33l4.37 5.78L17.75 3Zm-1.08 16.18h1.7L7.4 4.73H5.58l11.1 14.45Z" /></svg>
 );
 const MONOGRAM: Partial<Record<SocialPlatform, string>> = { Snapchat: "S", Pinterest: "P", Threads: "@", Kick: "K" };
+const WhatsAppMark = ({ size }: { size: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a9.9 9.9 0 0 0-8.5 15l-1.4 5 5.2-1.4A10 10 0 1 0 12 2Zm0 18.2a8.2 8.2 0 0 1-4.2-1.2l-.3-.2-3.1.8.8-3-.2-.3A8.2 8.2 0 1 1 12 20.2Zm4.5-6.1c-.2-.1-1.5-.7-1.7-.8-.2-.1-.4-.1-.6.1l-.8 1c-.1.2-.3.2-.5.1a6.7 6.7 0 0 1-3.3-2.9c-.3-.4.2-.4.7-1.3.1-.2 0-.3 0-.4l-.8-1.8c-.2-.5-.4-.4-.6-.4h-.5a1 1 0 0 0-.7.3 3 3 0 0 0-.9 2.2 5.2 5.2 0 0 0 1.1 2.7 11.8 11.8 0 0 0 4.5 4c1.7.7 2.3.8 3.2.7a2.7 2.7 0 0 0 1.8-1.3 2.2 2.2 0 0 0 .1-1.3c0-.1-.2-.2-.5-.3Z" /></svg>
+);
 
 export function SocialGlyph({ platform, size = 14 }: { platform: SocialPlatform; size?: number }) {
   switch (platform) {
@@ -22,6 +25,7 @@ export function SocialGlyph({ platform, size = 14 }: { platform: SocialPlatform;
     case "Facebook": return <Facebook size={size} />;
     case "TikTok": return <TikTokMark size={size} />;
     case "X": return <XMark size={size} />;
+    case "WhatsApp": return <WhatsAppMark size={size} />;
     case "Website": return <Globe size={size} />;
     default: return <b className="social-mono" style={{ fontSize: Math.round(size * 0.8) }}>{MONOGRAM[platform] || platform[0]}</b>;
   }

@@ -17,7 +17,7 @@ export type CampaignStatus = "negotiating" | "active" | "completed" | "cancelled
 export type ThemeName = "agency" | "light" | "dark" | "honey" | "ocean";
 export type Platform = "YouTube" | "Instagram" | "TikTok" | "Twitch" | "LinkedIn" | "X" | "Facebook" | "Kick" | "Snapchat" | "Pinterest" | "Threads" | "Other";
 /** A profile on one network; "Website" covers link-in-bio pages, blogs, shops. */
-export type SocialPlatform = Exclude<Platform, "Other"> | "Website";
+export type SocialPlatform = Exclude<Platform, "Other"> | "Website" | "WhatsApp";
 export interface SocialLink {
   platform: SocialPlatform;
   url: string;
@@ -104,6 +104,8 @@ export interface FollowupRules {
   workdays: number[];
   /** Days off (YYYY-MM-DD) that don't count as business days. */
   holidays: string[];
+  /** Days after a Denied before the "reach back" reminder (0 = never). */
+  reach_back_days?: number;
 }
 
 export type PaymentStatus = "unpaid" | "invoiced" | "paid";
@@ -214,6 +216,10 @@ export interface Creator {
   followup_snooze_until?: string | null;
   /** Who set the current status: you, or Gmail. */
   status_source?: "manual" | "gmail";
+  /** Where you talk to them now: 'email' (default), 'whatsapp', 'dm'… */
+  contact_channel?: string;
+  /** false = no email follow-up reminders (you're on another channel); their emails still count. */
+  email_followups?: boolean;
   archived_at: string | null;
   created_at: string;
 }
@@ -272,6 +278,10 @@ export interface Brand {
   next_action_date: string | null;
   followup_snooze_until?: string | null;
   status_source?: "manual" | "gmail";
+  /** Where you talk to them now: 'email' (default), 'whatsapp', 'dm'… */
+  contact_channel?: string;
+  /** false = no email follow-up reminders (you're on another channel); their emails still count. */
+  email_followups?: boolean;
   followup_count?: number;
   last_followup_at?: string | null;
   lost_reason: string;
@@ -392,6 +402,11 @@ export interface EmailEvent {
   mailbox?: string;
   /** Waiting in Gmail's Scheduled folder (not sent yet); `at` may be the send time. */
   scheduled?: boolean;
+  /** From their side: '' reply · 'no' they passed · 'team' their manager/agency · 'auto' autoresponder · 'managed_no' management/auto declined. */
+  reply_kind?: "" | "no" | "team" | "auto" | "managed_no";
+  /** This email's Message-ID and the one it answers (lowercase, no <>). */
+  message_key?: string;
+  in_reply_to?: string;
 }
 
 /** Someone outside the CRM who wrote to one of your mailboxes and looks like a real enquiry. */
@@ -416,6 +431,11 @@ export interface InboundLead {
   status: "new" | "added" | "dismissed";
   entity_type: "creator" | "brand" | null;
   entity_id: string | null;
+  /** Your answers to them (each counts as an email sent). */
+  my_replies: { id: string; at: string; scheduled?: boolean }[];
+  /** What your latest clear answer said: 'yes' (add them), 'no' (dismissed) or ''. */
+  my_intent: "" | "yes" | "no";
+  replied_at: string | null;
 }
 
 export interface WorkspaceData {

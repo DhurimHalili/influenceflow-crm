@@ -192,6 +192,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
   // edit happened while it was in flight.
   const editVersion = useRef(0);
   const inFlight = useRef(false);
+  const pullQueued = useRef(false);
+  const pullRef = useRef<() => void>(() => {});
   const queued = useRef(false);
   const retryTimer = useRef<number | undefined>(undefined);
   const retryCount = useRef(0);
@@ -380,6 +382,10 @@ export function DataProvider({ children }: { children: ReactNode }) {
         if (queued.current) {
           queued.current = false;
           flush();
+        } else if (pullQueued.current) {
+          // A refresh asked for while this save ran (e.g. right after a Gmail sync).
+          pullQueued.current = false;
+          pullRef.current();
         }
       });
   }, [writePending, saveBase]);
@@ -388,7 +394,13 @@ export function DataProvider({ children }: { children: ReactNode }) {
   // this one is opened, refocused or reconnects, and every 45 s while it is
   // on screen. Local edits not yet pushed are kept record by record.
   const pull = useCallback(() => {
-    if (!hasSupabase || !hydratedRef.current || userRef.current === "guest" || inFlight.current) return;
+    if (!hasSupabase || !hydratedRef.current || userRef.current === "guest") return;
+    // Busy: run once the current save or load is done, never drop the request —
+    // a dropped refresh after a Gmail sync left new mail off the dashboard.
+    if (inFlight.current) {
+      pullQueued.current = true;
+      return;
+    }
     const owner = userRef.current;
     inFlight.current = true;
     void loadCloudWorkspace(owner)
@@ -412,10 +424,14 @@ export function DataProvider({ children }: { children: ReactNode }) {
         if (queued.current || readPending()) {
           queued.current = false;
           flush();
+        } else if (pullQueued.current) {
+          pullQueued.current = false;
+          pullRef.current();
         }
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [flush, readPending, saveBase]);
+  pullRef.current = pull;
 
   useEffect(() => {
     if (!hasSupabase || !hydrated || !user) return;

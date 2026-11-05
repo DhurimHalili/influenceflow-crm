@@ -127,6 +127,8 @@ const normalizeCreator = (row: Record<string, unknown>, userId: string): Creator
   next_action_date: dateOrNull(row.next_action_date),
   followup_snooze_until: dateOrNull(row.followup_snooze_until),
   status_source: row.status_source === "gmail" ? "gmail" : "manual",
+  contact_channel: CHANNEL_SET.has(text(row.contact_channel)) ? text(row.contact_channel) : "email",
+  email_followups: row.email_followups !== false,
   lost_reason: text(row.lost_reason),
   lost_at: dateOrNull(row.lost_at),
   archived_at: dateOrNull(row.archived_at),
@@ -158,6 +160,7 @@ const normalizeFollowup = (row: Record<string, unknown>, userId: string): Follow
   at: typeof row.at === "string" && row.at ? row.at : new Date().toISOString(),
 });
 
+const CHANNEL_SET = new Set(["email", "whatsapp", "dm", "tiktok", "call", "linkedin", "other"]);
 const normalizeEmailEvent = (row: Record<string, unknown>): EmailEvent => ({
   id: String(row.id ?? ""),
   gmail_id: text(row.gmail_id),
@@ -171,6 +174,9 @@ const normalizeEmailEvent = (row: Record<string, unknown>): EmailEvent => ({
   at: typeof row.at === "string" && row.at ? row.at : new Date().toISOString(),
   mailbox: text(row.mailbox).toLowerCase(),
   scheduled: row.scheduled === true,
+  reply_kind: (["no", "team", "auto", "managed_no"] as const).find((k) => k === row.reply_kind) || "",
+  message_key: text(row.message_key),
+  in_reply_to: text(row.in_reply_to),
 });
 
 const normalizeBrand = (row: Record<string, unknown>, userId: string): Brand => ({
@@ -201,6 +207,8 @@ const normalizeBrand = (row: Record<string, unknown>, userId: string): Brand => 
   next_action_date: dateOrNull(row.next_action_date),
   followup_snooze_until: dateOrNull(row.followup_snooze_until),
   status_source: row.status_source === "gmail" ? "gmail" : "manual",
+  contact_channel: CHANNEL_SET.has(text(row.contact_channel)) ? text(row.contact_channel) : "email",
+  email_followups: row.email_followups !== false,
   lost_reason: text(row.lost_reason),
   lost_at: dateOrNull(row.lost_at),
   archived_at: dateOrNull(row.archived_at),
@@ -410,7 +418,7 @@ export async function loadCloudWorkspace(userId: string): Promise<WorkspaceData 
 // PostgREST rejects the upsert with an unknown-column error: strip exactly
 // the column it names and retry, so one missing column never blocks the
 // whole save (and never drops the columns that do exist).
-const OPTIONAL_COLUMNS = ["engagement_rate", "next_action", "deliverables_items", "entity_type", "entity_id", "updated_at", "followup_count", "last_followup_at", "lost_reason", "lost_at", "stars", "stars_consistency", "stars_demographics", "stars_niche", "stars_engagement", "priority", "next_action_date", "kind", "done", "draft_subject", "draft_body", "status_updated_at", "email_templates", "rating_weights", "preferences", "rates", "payment_status", "invoice_due", "paid_at", "payout_status", "socials", "brief", "country", "secondary_email", "secondary_email_label", "payout_model", "creator_fees", "followup_snooze_until", "status_source", "brand_id", "kind", "channel", "brand_terms", "rate_meta", "rate_history", "audience", "contract", "avatar_path"];
+const OPTIONAL_COLUMNS = ["engagement_rate", "next_action", "deliverables_items", "entity_type", "entity_id", "updated_at", "followup_count", "last_followup_at", "lost_reason", "lost_at", "stars", "stars_consistency", "stars_demographics", "stars_niche", "stars_engagement", "priority", "next_action_date", "kind", "done", "draft_subject", "draft_body", "status_updated_at", "email_templates", "rating_weights", "preferences", "rates", "payment_status", "invoice_due", "paid_at", "payout_status", "socials", "brief", "country", "secondary_email", "secondary_email_label", "payout_model", "creator_fees", "followup_snooze_until", "status_source", "brand_id", "kind", "channel", "brand_terms", "rate_meta", "rate_history", "audience", "contract", "avatar_path", "contact_channel", "email_followups"];
 
 const missingColumn = (error: { message?: string; details?: string; hint?: string; code?: string }) => {
   const msg = `${error.message || ""} ${error.details || ""} ${error.hint || ""}`;

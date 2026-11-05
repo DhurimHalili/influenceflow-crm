@@ -54,6 +54,8 @@ type GmailValue = GmailStatus & {
   refreshStatus: () => Promise<void>;
   refreshLeads: () => Promise<void>;
   resolveLead: (id: string, patch: Pick<InboundLead, "status"> & Partial<Pick<InboundLead, "entity_type" | "entity_id">>) => Promise<boolean>;
+  /** Marks a still-new lead as added — false when another tab or device got there first. */
+  claimLead: (id: string) => Promise<boolean>;
 };
 
 const empty: GmailStatus = { loaded: false, configured: false, connected: false, mailboxes: [], maxMailboxes: 5, ai: false, canRead: false, canSend: false, lastSyncAt: null, error: "" };
@@ -88,6 +90,9 @@ const toLead = (r: Record<string, unknown>): InboundLead => ({
   reasons: Array.isArray(r.reasons) ? (r.reasons as unknown[]).map(String) : [], subject: decodeEntities(text(r.subject)), snippet: decodeEntities(text(r.snippet)),
   thread_id: text(r.thread_id), via_form: !!r.via_form, messages: Number(r.messages) || 1, first_at: text(r.first_at), last_at: text(r.last_at),
   status: r.status === "added" || r.status === "dismissed" ? r.status : "new", entity_type: r.entity_type === "creator" || r.entity_type === "brand" ? r.entity_type : null, entity_id: text(r.entity_id) || null,
+  my_replies: Array.isArray(r.my_replies) ? (r.my_replies as Record<string, unknown>[]).filter((x) => x && typeof x.id === "string" && typeof x.at === "string").map((x) => ({ id: String(x.id), at: String(x.at), scheduled: x.scheduled === true })) : [],
+  my_intent: r.my_intent === "yes" || r.my_intent === "no" ? r.my_intent : "",
+  replied_at: text(r.replied_at) || null,
 });
 
 function summarize(mailboxes: Mailbox[]) {
@@ -221,7 +226,14 @@ export function GmailProvider({ children }: { children: ReactNode }) {
     return true;
   }, [leads]);
 
-  const value = useMemo<GmailValue>(() => ({ ...status, syncing, leads, connect, disconnect, syncNow, send, refreshStatus, refreshLeads, resolveLead }), [status, syncing, leads, connect, disconnect, syncNow, send, refreshStatus, refreshLeads, resolveLead]);
+  const claimLead = useCallback<GmailValue["claimLead"]>(async (id) => {
+    const { data: rows, error } = await supabase.from("inbound_leads").update({ status: "added", updated_at: new Date().toISOString() }).eq("id", id).eq("status", "new").select("id");
+    if (error || !rows?.length) return false;
+    setLeads((list) => list.map((l) => (l.id === id ? { ...l, status: "added" } : l)));
+    return true;
+  }, []);
+
+  const value = useMemo<GmailValue>(() => ({ ...status, syncing, leads, connect, disconnect, syncNow, send, refreshStatus, refreshLeads, resolveLead, claimLead }), [status, syncing, leads, connect, disconnect, syncNow, send, refreshStatus, refreshLeads, resolveLead, claimLead]);
   return <GmailContext.Provider value={value}>{children}</GmailContext.Provider>;
 }
 
