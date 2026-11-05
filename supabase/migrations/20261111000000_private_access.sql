@@ -48,7 +48,8 @@ grant execute on function public.is_owner() to authenticated;
 create or replace function public.guard_profile_access() returns trigger
   language plpgsql security definer set search_path = public as $$
 begin
-  if coalesce(current_setting('app.access_change', true), '') = 'owner' or auth.role() = 'service_role' or auth.uid() is null then
+  -- The service role, the auth system (no user) and the owner may set it; nobody else.
+  if auth.role() = 'service_role' or auth.uid() is null or public.is_owner() then
     return new;
   end if;
   if tg_op = 'INSERT' then
@@ -72,18 +73,18 @@ begin
     where n.nspname = 'public' and c.relkind = 'r' and c.relrowsecurity and c.relname <> 'profiles'
   loop
     execute format('drop policy if exists approved_members_only on public.%I', t.relname);
-    execute format('create policy approved_members_only on public.%I as restrictive for all to authenticated using (public.is_approved()) with check (public.is_approved())', t.relname);
+    execute format('create policy approved_members_only on public.%I as restrictive for all to authenticated using ((select public.is_approved())) with check ((select public.is_approved()))', t.relname);
   end loop;
 end $$;
 drop policy if exists approved_members_only on public.profiles;
 create policy approved_members_only on public.profiles as restrictive for all to authenticated
-  using (public.is_approved() or id = auth.uid()) with check (public.is_approved() or id = auth.uid());
+  using ((select public.is_approved()) or id = (select auth.uid())) with check ((select public.is_approved()) or id = (select auth.uid()));
 
 -- Private files (avatars, media kits) follow the same rule.
 do $$
 begin
   execute 'drop policy if exists approved_members_only on storage.objects';
-  execute 'create policy approved_members_only on storage.objects as restrictive for all to authenticated using (public.is_approved()) with check (public.is_approved())';
+  execute 'create policy approved_members_only on storage.objects as restrictive for all to authenticated using ((select public.is_approved())) with check ((select public.is_approved()))';
 exception when insufficient_privilege then
   raise notice 'storage.objects policy needs the storage owner; files stay private to their owner either way';
 end $$;
@@ -111,7 +112,6 @@ begin
   if not public.is_owner() then raise exception 'Only the owner can change access' using errcode = '42501'; end if;
   if p_access not in ('approved', 'revoked', 'pending') then raise exception 'Unknown access level'; end if;
   if p_user = auth.uid() then raise exception 'You can''t change your own access'; end if;
-  perform set_config('app.access_change', 'owner', true);
   insert into public.profiles (id) values (p_user) on conflict (id) do nothing;
   update public.profiles set access = p_access, access_changed_at = now(), access_changed_by = auth.uid() where id = p_user and role <> 'owner';
   -- Revoked: their refresh token stops working at once; approved: lifted again.
