@@ -63,6 +63,9 @@ Deno.serve(async (req) => {
   const userId = userData.user.id;
 
   const admin = createClient(supabaseUrl, serviceKey);
+  // Private circle: only approved members can connect a mailbox.
+  const { data: member } = await admin.from("profiles").select("access").eq("id", userId).maybeSingle();
+  if (member && member.access && member.access !== "approved") return json({ error: "Your access is waiting for the owner's approval.", code: "not_approved" }, 403);
   const [{ count: mailboxes }, { count: pending }] = await Promise.all([
     admin.from("gmail_tokens").select("id", { count: "exact", head: true }).eq("user_id", userId),
     admin.from("oauth_states").select("nonce", { count: "exact", head: true }).eq("user_id", userId).gte("created_at", new Date(Date.now() - 15 * 60 * 1000).toISOString()),

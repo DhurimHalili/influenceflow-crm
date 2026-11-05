@@ -61,6 +61,8 @@ export interface WorkspacePreferences {
   daily_email_goal: number;
   /** Show the coach's nudges and celebrations. */
   coach: boolean;
+  /** Read YouTube numbers automatically (quick fill, on save, and every hour). */
+  youtube_auto: boolean;
 }
 
 /** Creator's prices per deliverable, in the workspace currency. 0 = not offered / unknown. */
@@ -177,7 +179,18 @@ export interface CreatorFile {
   ai_attempts?: number;
 }
 
+/** What the CRM last read from an influencer's YouTube channel (server: youtube-sync). */
+export interface YouTubeFacts {
+  channel_id?: string; handle?: string; title?: string; url?: string; country?: string;
+  subscribers?: number; hidden_subscribers?: boolean; video_count?: number; total_views?: number;
+  avg_views?: number; engagement_rate?: number; sampled?: number; uploads_90d?: number; last_upload_at?: string;
+  emails?: string[]; business_email_hidden?: boolean; at?: string;
+}
+
 export interface Creator {
+  /** Channel facts from YouTube and when they were read (empty until the first refresh). */
+  youtube?: YouTubeFacts;
+  youtube_synced_at?: string | null;
   id: string;
   user_id: string;
   name: string;

@@ -14,7 +14,7 @@ import { columnKeys } from "../lib/exportFormats";
 import { CoachSettings, FollowupRulesSettings, GmailSettings } from "../components/SettingsGmail";
 import { TeamSettings } from "../components/Team";
 import { AvatarButton } from "../components/AvatarEditor";
-import { CalendarDays, Mail, Target } from "lucide-react";
+import { CalendarDays, Mail, Target, Youtube } from "lucide-react";
 import { APP_BUILT_AT, APP_VERSION, liveVersion, reloadInto } from "../lib/appUpdate";
 import { pwnedCount, pwnedMessage } from "../lib/pwned";
 
@@ -70,6 +70,7 @@ const SECTIONS = [
   { id: "security", label: "Account & security", icon: LockKeyhole },
   { id: "workspace", label: "Workspace", icon: Building },
   { id: "gmail", label: "Gmail", icon: Mail },
+  { id: "youtube", label: "YouTube stats", icon: Youtube },
   { id: "followups", label: "Follow-up rules", icon: CalendarDays },
   { id: "coach", label: "Daily goal & coach", icon: Target },
   { id: "team", label: "Team", icon: Users },
@@ -164,6 +165,15 @@ function SecuritySettings() {
       <button onClick={() => void leave({ clearDevice: true })} disabled={!!busy}><MonitorX /><span><strong>{busy === "clear" ? "Signing out…" : "Sign out & clear this device"}</strong><small>Also removes the cached workspace from this browser.</small></span><ChevronRight /></button>
       <button className="danger" onClick={() => { if (confirm("Sign out on every device, including this one?")) void leave({ everywhere: true }); }} disabled={!!busy}><ShieldCheck /><span><strong>{busy === "everywhere" ? "Signing out…" : "Sign out everywhere"}</strong><small>Revokes every active session — use it if a device was lost.</small></span><ChevronRight /></button>
     </div></div>
+  </div></section>;
+}
+
+function YouTubeSettings() {
+  const data = useData(); const { toast } = useToast();
+  const prefs = data.profile.preferences;
+  const withChannel = data.creators.filter((c) => !c.archived_at && (c.socials || []).some((x) => x.platform === "YouTube")).length;
+  return <section id="youtube" className="settings-section"><div className="settings-heading"><span><Youtube /></span><div><h2>YouTube stats</h2><p>Average views, engagement and subscribers read straight from each influencer's channel.</p></div></div><div className="settings-body">
+    <label className="toggle-row"><span><strong>Keep YouTube stats fresh</strong><small>Pasting a channel in Quick fill fills the form (stars included). Saving a profile with a YouTube link reads it, and every hour all {withChannel} influencer{withChannel === 1 ? "" : "s"} with a channel are refreshed — never the stars you set. Average views use the latest 12 long videos without the highest and lowest.</small></span><input type="checkbox" role="switch" checked={prefs.youtube_auto !== false} onChange={(event) => { data.updateProfile({ preferences: { ...prefs, youtube_auto: event.target.checked } }); toast(event.target.checked ? "YouTube stats on — they refresh every hour" : "YouTube stats off — use Refresh on a profile when you want them"); }} /></label>
   </div></section>;
 }
 
@@ -297,6 +307,7 @@ export function SettingsPage() {
       <SecuritySettings />
       <WorkspaceSettings />
       <GmailSettings />
+      <YouTubeSettings />
       <FollowupRulesSettings />
       <CoachSettings />
       <TeamSettings />
