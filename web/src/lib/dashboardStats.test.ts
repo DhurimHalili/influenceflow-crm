@@ -1,0 +1,58 @@
+// Run: cd web && node --experimental-strip-types --import ./scripts/ts-hooks.mjs src/lib/dashboardStats.test.ts
+import { build } from "./outreach.ts";
+import { makeStats, rangeOf, statusOfActivity } from "./dashboardStats.ts";
+
+let fail = 0;
+const eq = (name: string, got: unknown, want: unknown) => {
+  const ok = JSON.stringify(got) === JSON.stringify(want);
+  if (!ok) fail++;
+  console.log(ok ? "ok  " : "FAIL", name, ok ? "" : `got ${JSON.stringify(got)} want ${JSON.stringify(want)}`);
+};
+
+const now = new Date("2026-11-05T20:00:00");
+const H = 3600e3, D = 86400e3;
+const iso = (ms: number) => new Date(ms).toISOString();
+const t = now.getTime();
+const rec = (id: string, extra = {}) => ({ id, name: id, pipeline_status: "contacted", date_contacted: null, archived_at: null, created_at: iso(t - 30 * D), lost_at: null, lost_reason: "", contact_channel: "email", email_followups: true, ...extra }) as never;
+let n = 0;
+const ev = (entity: string, type: "creator" | "brand", dir: "in" | "out", at: number, extra = {}) => ({ id: `e${++n}`, gmail_id: `g${n}`, thread_id: `t-${entity}`, direction: dir, entity_type: type, entity_id: entity, at: iso(at), mailbox: "me@agency.com", scheduled: false, reply_kind: "", subject: "", snippet: "", counterpart: "", message_key: "", in_reply_to: "", ...extra }) as never;
+
+const creators = [rec("c1"), rec("c2"), rec("c3", { lost_at: iso(t - 2 * H), pipeline_status: "denied" })];
+const brands = [rec("b1"), rec("b2", { lost_at: iso(t - 3 * H), pipeline_status: "denied" })];
+const events = [
+  ev("c1", "creator", "out", t - 3 * D), ev("c1", "creator", "out", t - 2 * H), // follow-up today
+  ev("c2", "creator", "out", t - 4 * H), // first email today
+  ev("c2", "creator", "in", t - 1 * H), // reply today
+  ev("c2", "creator", "in", t - 50 * 60e3, { reply_kind: "auto" }), // out-of-office: not a reply
+  ev("b1", "brand", "out", t - 5 * D), ev("b1", "brand", "in", t - 4 * D), ev("b1", "brand", "out", t - 3 * H), // answer today
+  ev("c1", "creator", "out", t + 2 * H, { scheduled: true }), // scheduled tonight
+  ev("b1", "brand", "out", t - 10 * 60e3, { scheduled: true }), // send time passed: counts as sent
+];
+const followups = [{ id: "f1", creator_id: "c1", brand_id: null, kind: "followup", channel: "whatsapp", note: "", at: iso(t - 1 * H) }] as never[];
+const { sent, received } = build({ creators, brands, contacts: [], followups, events, leads: [], now });
+const activities = [
+  { id: "a1", text: "Gmail: b1 moved to Negotiating — they emailed", at: iso(t - 2 * H), entity_type: "brand", entity_id: "b1" },
+  { id: "a2", text: "c2 updated to negotiating", at: iso(t - 30 * 60e3), entity_type: "creator", entity_id: "c2" },
+] as never[];
+const st = makeStats({ sent, received, creators, brands, contacts: [], campaigns: [], activities, leads: [] });
+const r = rangeOf("today", now);
+const c = (m: Parameters<typeof st.count>[0], v: Parameters<typeof st.count>[1] = "all") => st.count(m, v, r.start, r.end);
+
+eq("emails today: every email, scheduled ones only once their time passed", c("emails"), 4);
+eq("follow-ups on any channel", c("followups"), 3);
+eq("follow-ups split", st.followupChannels("all", r.start, r.end), { email: 2, other: 1 });
+eq("new conversations", c("first"), 1);
+eq("answers", c("answers"), 1);
+eq("replies: auto-replies never count", c("replies"), 1);
+eq("still scheduled", st.scheduled("all").length, 1);
+eq("influencers only: emails", c("emails", "creator"), 2);
+eq("brands only: emails", c("emails", "brand"), 2);
+eq("negotiations from Gmail moves and manual moves", [c("negotiations", "creator"), c("negotiations", "brand")], [1, 1]);
+eq("lost split: negotiations lost vs deals lost", [c("lost", "creator"), c("lost", "brand")], [1, 1]);
+eq("lists match the counts", st.rows("emails", "all", r.start, r.end).length, 4);
+eq("status words", [statusOfActivity("Gmail: X moved to Negotiating — y"), statusOfActivity("X updated to no_reply"), statusOfActivity("Gmail: X moved to No reply — z")], ["negotiating", "no_reply", "no_reply"]);
+eq("all time has no comparison", rangeOf("all", now).compare, false);
+eq("today compares with the whole of yesterday", [new Date(rangeOf("today", now).prevStart).getDate(), rangeOf("today", now).prevEnd === rangeOf("today", now).start], [4, true]);
+eq("reply rate: first contacts in range who answered", st.replyRate("all", r.start, r.end), { contacted: 1, replied: 1, pct: 100 });
+
+if (fail) { console.log(`${fail} failed`); (globalThis as { process?: { exit(n: number): void } }).process?.exit(1); } else console.log("all passed");

@@ -85,19 +85,34 @@ export function ConversationSection({ type, record }: { type: "creator" | "brand
     }
   };
 
-  const round = state && (state.kind === "due" || state.kind === "waiting" || state.kind === "exhausted") ? state.round : 0;
+  // Messages you sent since their last reply, on every channel: what the next
+  // one is ("Log 3rd follow-up"). Counted over the whole conversation, so
+  // switching channels or turning email reminders off never resets it.
+  const lastReplyAt = [...touches].reverse().find((t) => t.dir === "in" && t.kind !== "auto")?.at || "";
+  const sentSinceReply = touches.filter((t) => t.dir === "out" && t.at > lastReplyAt && !t.crossed).length;
+  const nextLabel = sentSinceReply ? nextFollowupLabel(sentSinceReply) : "first message";
+  const dataRef = useRef(data);
+  dataRef.current = data;
   const log = (via: string) => {
-    pickChannel(via);
-    data.logTouch(target, { kind: "followup", channel: via });
-    if (record.pipeline_status === "new") update({ pipeline_status: "contacted" });
     setMenu("");
-    toast(`${round ? nextFollowupLabel(round) : "Follow-up"} logged · ${CHANNEL_LABELS[via] || via} · ${dateLabel(new Date().toISOString())}`);
+    // Two taps on the same channel within minutes is almost always a double log.
+    const recent = [...touches].reverse().find((t) => t.source === "manual" && t.dir === "out" && t.channel === via && Date.now() - new Date(t.at).getTime() < 15 * 60_000);
+    if (recent) {
+      const mins = Math.max(1, Math.round((Date.now() - new Date(recent.at).getTime()) / 60_000));
+      if (!confirm(`You already logged a ${CHANNEL_LABELS[via] || via} follow-up ${mins === 1 ? "a minute" : `${mins} minutes`} ago. Log another one?`)) return;
+    }
+    pickChannel(via);
+    const id = data.logTouch(target, { kind: "followup", channel: via });
+    if (record.pipeline_status === "new") update({ pipeline_status: "contacted" });
+    toast(`${sentSinceReply ? nextFollowupLabel(sentSinceReply) : "First message"} logged · ${CHANNEL_LABELS[via] || via}`, "success", { label: "Undo", run: () => dataRef.current.removeTouch(target, id) });
   };
   const replied = (via: string) => {
-    data.logTouch(target, { kind: "reply", channel: via });
-    if (["contacted", "no_reply", "new"].includes(record.pipeline_status)) update({ pipeline_status: record.pipeline_status === "new" ? "inbound" : "replied" });
     setMenu("");
-    toast(`Reply logged · ${CHANNEL_LABELS[via] || via}`);
+    const recent = [...touches].reverse().find((t) => t.source === "manual" && t.dir === "in" && t.channel === via && Date.now() - new Date(t.at).getTime() < 15 * 60_000);
+    if (recent && !confirm(`You already logged a ${CHANNEL_LABELS[via] || via} reply a few minutes ago. Log another one?`)) return;
+    const id = data.logTouch(target, { kind: "reply", channel: via });
+    if (["contacted", "no_reply", "new"].includes(record.pipeline_status)) update({ pipeline_status: record.pipeline_status === "new" ? "inbound" : "replied" });
+    toast(`Reply logged · ${CHANNEL_LABELS[via] || via}`, "success", { label: "Undo", run: () => dataRef.current.removeTouch(target, id) });
   };
   // Where you talk to them. Moving off email asks once whether email reminders
   // should keep running; their emails are tracked and counted either way.
@@ -186,7 +201,7 @@ export function ConversationSection({ type, record }: { type: "creator" | "brand
       <span className="chase-icon"><BannerIcon size={18} /></span>
       <div>
         <strong>{flag ? flag.long : paused ? state.kind === "idle" && state.until === SNOOZE_OFF ? "Follow-up reminders are off for this one" : `Reminders snoozed until ${dateLabel(state.kind === "idle" ? state.until : "")}` : closed ? record.pipeline_status === "denied" ? reachOn ? `They passed — you'll get a reminder to reach back on ${dateLabel(reachOn)}` : "Closed — denied, so no follow-ups" : `${record.pipeline_status === "signed" ? "Signed" : "On your roster"} — not chased for follow-ups` : "No conversation yet"}</strong>
-        <small>{cancel ? canCancel ? `“${cancel.detail.split(" — ")[0]}” is still scheduled in ${cancel.mailbox || "Gmail"}. Cancel it here and it never goes out.` : `Open the Scheduled folder${cancel.mailbox ? ` of ${cancel.mailbox}` : ""} and cancel “${cancel.detail.split(" — ")[0]}”. Once it's gone, this clears by itself.` : state?.kind === "managed" ? "This isn't a no from them, so they stay in your pipeline. Log the DM here and the follow-ups restart on that channel." : state?.kind === "reach-back" ? "Email them and they move back to Contacted by themselves — or log a DM and press Reached out again." : state?.kind === "waiting" && state.last.scheduled ? `Waiting in Gmail's Scheduled folder${state.last.mailbox ? ` (${state.last.mailbox})` : ""}. Once it goes out, the next follow-up is due ${dateLabel(state.due)} if they stay quiet.` : state?.kind === "due" || state?.kind === "waiting" ? `Your last message ${daysAgoLabel(state.last.at)} (${dateLabel(state.last.at)}) was ${roundLabel(state.round, state.last.channel)}.` : state?.kind === "reply-needed" ? `Their message: ${state.last.detail || state.last.label}` : !touches.length ? gmail.connected ? "Email them and it shows up here by itself." : "Log a follow-up below, or connect Gmail so emails fill this in by themselves." : `Last touch ${daysAgoLabel(touches[touches.length - 1].at)}.`}</small>
+        <small>{cancel ? canCancel ? `“${cancel.detail.split(" — ")[0]}” is still scheduled in ${cancel.mailbox || "Gmail"}. Cancel it here and it never goes out.` : `Open the Scheduled folder${cancel.mailbox ? ` of ${cancel.mailbox}` : ""} and cancel “${cancel.detail.split(" — ")[0]}”. Once it's gone, this clears by itself.` : state?.kind === "managed" ? "This isn't a no from them, so they stay in your pipeline. Log the DM here and the follow-ups restart on that channel." : state?.kind === "reach-back" ? "Email them and they move back to Contacted by themselves — or log a DM and press Reached out again." : state?.kind === "waiting" && state.last.scheduled ? `Waiting in Gmail's Scheduled folder${state.last.mailbox ? ` (${state.last.mailbox})` : ""}. Once it goes out, the next follow-up is due ${dateLabel(state.due)} if they stay quiet.` : state?.kind === "due" || state?.kind === "waiting" ? `Your last message ${daysAgoLabel(state.last.at)} (${dateLabel(state.last.at)}) was ${roundLabel(state.sent ?? state.round, state.last.channel)}.` : state?.kind === "reply-needed" ? `Their message: ${state.last.detail || state.last.label}` : !touches.length ? gmail.connected ? "Email them and it shows up here by itself." : "Log a follow-up below, or connect Gmail so emails fill this in by themselves." : `Last touch ${daysAgoLabel(touches[touches.length - 1].at)}.`}</small>
       </div>
     </div>
 
@@ -208,7 +223,7 @@ export function ConversationSection({ type, record }: { type: "creator" | "brand
     <div className="fu-summary">
       <div className="fu-stat"><small>Last from you</small><strong>{lastOut ? dateLabel(lastOut.at) : "—"}</strong><em>{lastOut?.scheduled ? sendsAt(lastOut.at) ? `scheduled · sends ${sendsAt(lastOut.at)}` : "scheduled in Gmail" : lastOut ? daysAgoLabel(lastOut.at) : "nothing sent"}</em></div>
       <div className="fu-stat"><small>Last from them</small><strong>{lastIn ? dateLabel(lastIn.at) : "—"}</strong><em>{lastIn ? daysAgoLabel(lastIn.at) : "no reply yet"}</em></div>
-      <div className={`fu-stat${state?.kind === "due" ? " is-due" : ""}`}><small>{nextStep === "new-thread" ? "Next step" : state?.kind === "due" || state?.kind === "waiting" ? "Next follow-up" : "Follow-ups sent"}</small><strong>{state?.kind === "due" ? "Today" : state?.kind === "waiting" ? dateLabel(state.due) : `${touches.filter((t) => t.dir === "out").length ? Math.max(0, touches.filter((t) => t.dir === "out").length - 1) : 0}`}</strong><em>{nextStep === "new-thread" && (state?.kind === "due" || state?.kind === "waiting") ? `new thread${state.kind === "due" && state.overdueDays ? ` · ${state.overdueDays} business day${state.overdueDays === 1 ? "" : "s"} late` : ` · after ${state.round - 1} follow-ups`}` : state?.kind === "due" ? `${nextFollowupLabel(state.round)}${state.overdueDays ? ` · ${state.overdueDays} business day${state.overdueDays === 1 ? "" : "s"} late` : ""}` : state?.kind === "waiting" ? nextFollowupLabel(state.round) : "in total"}</em></div>
+      <div className={`fu-stat${state?.kind === "due" ? " is-due" : ""}`}><small>{nextStep === "new-thread" ? "Next step" : state?.kind === "due" || state?.kind === "waiting" ? "Next follow-up" : "Follow-ups sent"}</small><strong>{state?.kind === "due" ? "Today" : state?.kind === "waiting" ? dateLabel(state.due) : `${touches.filter((t) => t.dir === "out").length ? Math.max(0, touches.filter((t) => t.dir === "out").length - 1) : 0}`}</strong><em>{nextStep === "new-thread" && (state?.kind === "due" || state?.kind === "waiting") ? `new thread${state.kind === "due" && state.overdueDays ? ` · ${state.overdueDays} business day${state.overdueDays === 1 ? "" : "s"} late` : ` · after ${state.round - 1} follow-ups`}` : state?.kind === "due" ? `${nextLabel}${state.overdueDays ? ` · ${state.overdueDays} business day${state.overdueDays === 1 ? "" : "s"} late` : ""}` : state?.kind === "waiting" ? nextLabel : "in total"}</em></div>
     </div>
 
     <div className="fu-channel">
@@ -226,7 +241,7 @@ export function ConversationSection({ type, record }: { type: "creator" | "brand
 
     <div className="followup-actions conversation-actions" ref={menuRef}>
       <div className="menu-anchor">
-        <Button onClick={() => setMenu(menu === "log" ? "" : "log")} aria-expanded={menu === "log"}><Send size={15} /> {nextStep === "new-thread" ? "Log new email" : round ? `Log ${nextFollowupLabel(round)}` : "Log follow-up"}</Button>
+        <Button onClick={() => setMenu(menu === "log" ? "" : "log")} aria-expanded={menu === "log"}><Send size={15} /> {nextStep === "new-thread" ? "Log new email" : touches.some((t) => t.dir === "out") ? `Log ${nextLabel}` : "Log first message"}</Button>
         {menu === "log" && <ChannelMenu title="How did you follow up?" current={channel} onPick={log} />}
       </div>
       <div className="menu-anchor">

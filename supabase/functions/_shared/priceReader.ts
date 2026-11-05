@@ -1,13 +1,23 @@
 import type { RateKey } from "./negotiation.ts";
 
-// Prices from a creator's email WITHOUT any AI — strict rules, so a wrong
-// number is far less likely than a missed one:
+// Prices from a creator's email WITHOUT any AI. Strict rules, so a wrong
+// number is far less likely than a missed one, but smart enough to read how
+// creators actually write their rates:
 //   • only the creator's own words count (quoted replies are cut off);
-//   • an amount needs a money marker ($ € £ USD EUR GBP dollars euros) — a bare
-//     "50k" is views, not a price; ranges ("1,500–2,000"), CPM / per-view
-//     prices and anything with a question mark are skipped;
-//   • one amount + one format in the same line/sentence, or it's skipped;
-//   • a sentence about YOUR budget/offer ("your 500 is too low") is skipped;
+//   • an amount needs money context: a marker on it ($ € £ USD EUR GBP dollars
+//     euros pounds) — or a price LIST ("My rates (USD):" then "Integration: 1,500"),
+//     where the email names its currency once and each line is "format: amount";
+//   • every amount must sit with exactly one format in its own clause:
+//     "Integration $1,500 / Dedicated $3,000" and "$1,000 for an integration and
+//     $300 for a short" are read as two prices; anything tangled is skipped;
+//   • never a price: ranges ("1,500–2,000"), CPM / per-view / revenue share,
+//     monthly retainers, questions, views / subscribers / followers, years,
+//     percentages, and a sentence about YOUR budget or offer;
+//   • durations are lengths, not ranges ("60–90 sec"); 2+ minutes of
+//     integration is an extended integration; "bundle", "A + B" or "2 videos
+//     for $3,000" is a package; "dedicated short" is a short;
+//   • "usually $2,500" / "(normally $2,500)" — the old price is dropped and the
+//     one they quote now is kept;
 //   • an AGREED price needs a clear yes in that same sentence ("2,500 for the
 //     integration works for me") and no counter words ("but", "instead",
 //     "minimum", "can't", "would need"…).
@@ -18,22 +28,23 @@ export type PriceHit = { key: RateKey; amount: number; currency: string; quote: 
 export type PriceReading = { stated: PriceHit[]; agreed: PriceHit[] };
 
 const FORMATS: [RateKey, RegExp][] = [
-  ["bundle", /\b(bundles?|packages?|combo)\b|\b(integration|video|short|reel|tiktok|post|story)s?\s*\+\s*\w/i],
-  ["dedicated", /\b(dedicated|full|whole|entire)\s+(youtube\s+)?(video|review|upload|episode)\b|\bdedicated\b/i],
-  ["video", /\b(integrat(ed|ion|ions)|sponsor(ed)?\s+(segment|spot|slot|read|mention)|ad\s+(read|spot|segment)|(60|90|30)\s*-?\s*s(ec(ond)?s?)?\s+(spot|segment|integration|mention)|mid-?roll|pre-?roll|shout-?out|mention)\b/i],
-  ["short", /\b(shorts?|reels?|tik\s?toks?|yt\s+short|vertical\s+video)\b/i],
-  ["story", /\b(stor(y|ies)|ig\s+story)\b/i],
+  ["bundle", /\b(bundles?|packages?|combo|package\s+deal)\b|\b(integration|video|short|reel|tiktok|post|story)s?\s*\+\s*\w|\b(2|3|4|5|two|three|four|five)\s*(?:x\s*)?(?:youtube\s+|yt\s+|ig\s+|instagram\s+)?(integrations|videos|shorts|reels|tiktoks|posts|stories)\b|\b(integrations|videos|shorts|reels|tiktoks|posts)\s*x\s*[2-5]\b/i],
+  ["dedicated", /\b(dedicated|full|whole|entire|standalone|stand-alone|solo)\s+(youtube\s+|yt\s+)?(video|review|upload|episode)\b|\bdedicated\b/i],
+  ["video", /\b(integrat(ed|ion|ions)|sponsor(ed)?\s+(segment|spot|slot|read|mention)|ad\s+(read|spot|segment)|(60|90|30)\s*-?\s*s(ec(ond)?s?)?\s+(spot|segment|integration|mention)|mid-?roll|pre-?roll|shout-?outs?|mentions?|product\s+placement)\b/i],
+  ["short", /\b(shorts?|reels?|tik\s?toks?|yt\s+short|vertical\s+videos?|short[- ]form)\b/i],
+  ["story", /\b(stor(y|ies)|ig\s+story|story\s+frames?)\b/i],
   ["carousel", /\bcarousels?\b/i],
   ["stream", /\b(live\s?streams?|streams?|twitch)\b/i],
   ["podcast", /\bpodcasts?\b/i],
   ["ugc", /\bugc\b|\buser[- ]generated\b/i],
   ["link_in_bio", /\blink\s+in\s+(the\s+)?bio\b/i],
-  ["usage_rights", /\b(usage|whitelisting|paid\s+usage|ad\s+rights|licen[cs]ing)\b/i],
+  ["usage_rights", /\b(usage(\s+rights)?|whitelisting|paid\s+usage|ad\s+rights|licen[cs]ing|spark\s+ads?|boosting)\b/i],
   ["exclusivity", /\bexclusiv(e|ity)\b/i],
-  ["post", /\b(feed\s+post|ig\s+post|instagram\s+post|static\s+post|posts?|tweets?)\b/i],
+  ["post", /\b(feed\s+post|ig\s+post|instagram\s+post|static\s+post|community\s+post|linkedin\s+post|x\s+post|posts?|tweets?)\b/i],
 ];
 
-const MONEY = /(?:(?<pre>[$€£]|\b(?:usd|eur|gbp|us\$)\s?)\s?(?<a>\d{1,3}(?:[,.\s]\d{3})+|\d+(?:[.,]\d{1,2})?)\s?(?<ka>k\b)?|(?<b>\d{1,3}(?:[,.\s]\d{3})+|\d+(?:[.,]\d{1,2})?)\s?(?<kb>k\b)?\s?(?<post>[$€£]|\b(?:usd|eur|gbp|dollars?|euros?|pounds?)\b))/gi;
+const NUM = String.raw`\d{1,3}(?:[,.\s]\d{3})+|\d+(?:[.,]\d{1,2})?`;
+const MONEY = new RegExp(String.raw`(?:(?<pre>[$€£]|\b(?:usd|eur|gbp|us\$)\s?)\s?(?<a>${NUM})\s?(?<ka>k\b)?|(?<b>${NUM})\s?(?<kb>k\b)?\s?(?<post>[$€£]|\b(?:usd|eur|gbp|dollars?|euros?|pounds?)\b))`, "gi");
 const RANGE = /(\d[\d,.\s]*k?)\s*(?:-|–|—|to)\s*[$€£]?\s*\d/i;
 // "60–90 sec", "(2-3 min)", "30s", "a 2 minute" — a length, not a price range.
 const DURATION = /\(?\s*(\d{1,3})(?:\s*(?:-|–|—|to)\s*(\d{1,3}))?\s*-?\s*(sec(?:ond)?s?|s|min(?:ute)?s?)\b\s*\)?/gi;
@@ -47,10 +58,21 @@ const secondsIn = (sentence: string) => {
   return longest;
 };
 const withoutDurations = (sentence: string) => sentence.replace(DURATION, " ");
-const PER_UNIT = /\b(cpm|cpv|cpc|cpa|per\s+(1,?000|thousand|view|click|sale|sign-?up|install)|\/\s?(view|click|1k)|rev(enue)?\s*share|commission|%)/i;
+// The old price next to the one quoted now: "(usually $2,500)", "normally €900", "down from $3k", "~~$2,500~~".
+const WAS = new RegExp(String.raw`\((?:[^()]*?\b(?:usually|normally|regularly|was|instead\s+of|reg\.?|list|retail|value|down\s+from|originally)\b[^()]*)\)|\b(?:usually|normally|regularly|instead\s+of|down\s+from|originally|was)\s*:?\s*(?:[$€£]|usd|eur|gbp)?\s*(?:${NUM})\s?k?\b\s*(?:usd|eur|gbp)?|~~[^~]+~~`, "gi");
+const withoutOld = (sentence: string) => sentence.replace(WAS, " ");
+const PER_UNIT = /\b(cpm|cpv|cpc|cpa|rpm|per\s+(1,?000|thousand|view|click|sale|sign-?up|install|month|week)|\/\s?(view|click|1k|mo|month|week|wk)\b|rev(enue)?\s*share|commission|retainer|monthly|%)/i;
 const THEIR_OFFER = /\b(your|you['’]?re|you\s+(offered|proposed|mentioned|said|quoted)|budget|offer(ed)?|too\s+low|below|lowball)\b/i;
 const YES = /\b(works?\s+for\s+(me|us)|that\s+works|(sounds|looks)\s+(good|great|fair|perfect|fine)|(it['’]?s\s+a\s+|we\s+have\s+a\s+)?deal\b|agreed|i\s+agree|we\s+agree|happy\s+(to|with)|(i|we)\s+(can|could|will)\s+(do|go\s+with|accept|work\s+with)|let['’]?s\s+(do|go|lock|proceed)|confirm(ed)?|accept(ed)?|fine\s+(by|with)\s+(me|us)|i['’]?m\s+(in|good\s+with|ok(ay)?\s+with)|ok(ay)?\s+(for|with|at))\b/i;
 const COUNTER = /\b(but|however|instead|unfortunately|minimum|at\s+least|lowest|can['’]?t|cannot|could\s+not|couldn['’]?t|won['’]?t|would\s+need|need\s+at|if\s+you|unless|counter|how\s+about|what\s+about|could\s+you|would\s+you|not\s+able|unable)\b/i;
+// Numbers that are never prices.
+const STATS = /\b(views?|subs|subscribers?|followers?|impressions?|reach|ctr|retention|watch\s*time|average|avg|engagement|likes?|comments?|plays?|downloads?|listeners?|countr(y|ies)|age[sd]?|years?\s+old|demographics?|male|female)\b|%/i;
+const MONTHS = /\b(jan(uary)?|feb(ruary)?|mar(ch)?|apr(il)?|may|june?|july?|aug(ust)?|sep(t(ember)?)?|oct(ober)?|nov(ember)?|dec(ember)?|q[1-4]|year)\b/i;
+// A price list heading ("My rates:", "Pricing (USD)", "Rate card").
+const LIST_HEAD = /\b(rates?|pricing|price\s*list|prices|rate\s*card|packages?|fees?|investment|cost)\b/i;
+const CURRENCY_WORD = /[$€£]|\b(usd|eur|gbp|us\$|dollars?|euros?|pounds?)\b/i;
+// "Integration: 1,500" / "Dedicated video — 4k" / "Shorts - 600 USD": a label, a separator, one amount.
+const LIST_LINE = new RegExp(String.raw`^[^\d$€£]{2,80}?[:\-–—=]\s*(?:[$€£]|usd|eur|gbp)?\s*(?<n>${NUM})\s?(?<k>k\b)?\s*(?:[$€£]|usd|eur|gbp|dollars?|euros?|pounds?)?\s*(?:(?:per|\/|each)\s*\w*)?\s*\.?\s*$`, "i");
 
 const CURRENCY = (marker: string) => {
   const m = marker.toLowerCase().trim();
@@ -81,39 +103,96 @@ export const ownText = (body: string) => {
 
 /**
  * The one format a sentence is about, or null. "Dedicated short-form" is a short;
- * an integration of 2+ minutes is an extended integration; "bundle" / "A + B" is a bundle.
+ * an integration of 2+ minutes is an extended integration; "bundle" / "A + B" /
+ * "2 videos" is a bundle.
  */
 const formatOf = (sentence: string): RateKey | null => {
   const plain = withoutDurations(sentence);
   const found = FORMATS.filter(([, re]) => re.test(plain)).map(([key]) => key);
   if (!found.length) return null;
   if (found.includes("bundle")) return "bundle";
-  if (found.includes("dedicated") && found.includes("short") && /dedicated\s+(yt\s+|youtube\s+)?(shorts?|short-form|reels?|tik\s?toks?|vertical)/i.test(plain)) return "short";
+  if (found.includes("dedicated") && found.includes("short") && /(dedicated|standalone|solo)\s+(yt\s+|youtube\s+)?(shorts?|short-form|short\s+form|reels?|tik\s?toks?|vertical)/i.test(plain)) return "short";
   if (found.includes("dedicated")) return "dedicated";
-  if (found.length !== 1) return null;
-  if (found[0] === "video" && (secondsIn(sentence) >= 120 || /\b(extended|long(er)?)\s+(youtube\s+)?integration/i.test(plain))) return "extended";
-  return found[0];
+  // "TikTok post" / "Instagram reel post": the short-form format wins over the generic word "post".
+  const specific = found.length > 1 && found.includes("post") ? found.filter((k) => k !== "post") : found;
+  if (specific.length !== 1) return null;
+  if (specific[0] === "video" && (secondsIn(sentence) >= 120 || /\b(extended|long(er)?)\s+(youtube\s+)?integration/i.test(plain))) return "extended";
+  return specific[0];
 };
 
 const sentences = (text: string) =>
   text.split(/\n+/).flatMap((line) => line.split(/(?<=[.!])\s+(?=[A-Z])/)).map((s) => s.trim()).filter((s) => s.length > 2 && s.length < 400);
 
+// Clause boundaries inside one sentence: "A $1 / B $2", "A $1; B $2", "A $1, B $2", "A $1 and B $2", "A $1 | B $2".
+const SPLIT = /\s+\/\s+|\s*[;|•·]\s*|,(?=\s+[A-Za-z])|\s+(?:and|&|plus)\s+(?=[^+]*?(?:[$€£]|\d))/i;
+
+type Clause = { key: RateKey; amount: number; currency: string };
+
+/** Every "one format + one amount" clause in a sentence; [] when it can't be read cleanly. */
+function clausesOf(sentence: string, ctxCurrency: string | null): Clause[] {
+  const plain = withoutDurations(withoutOld(sentence));
+  if (sentence.includes("?") || RANGE.test(plain) || PER_UNIT.test(plain)) return [];
+  const money = Array.from(plain.matchAll(MONEY));
+  const one = (text: string, m: RegExpMatchArray): Clause | null => {
+    const g = m.groups || {};
+    const amount = parseAmount(g.a || g.b || "", !!(g.ka || g.kb));
+    if (amount < 25 || amount > 1_000_000) return null;
+    const key = formatOf(text);
+    return key ? { key, amount, currency: CURRENCY(g.pre || g.post || "$") } : null;
+  };
+  if (money.length === 1) {
+    const hit = one(sentence, money[0]);
+    return hit ? [hit] : [];
+  }
+  if (money.length > 1) {
+    // Several prices: each must sit in its own clause with its own format.
+    const parts = plain.split(SPLIT).map((p) => p.trim()).filter(Boolean);
+    const out: Clause[] = [];
+    for (const part of parts) {
+      const m = Array.from(part.matchAll(MONEY));
+      if (m.length > 1) return [];
+      if (!m.length) continue;
+      const hit = one(part, m[0]);
+      if (!hit) return [];
+      out.push(hit);
+    }
+    return out.length === money.length ? out : [];
+  }
+  // No marker on the line: only inside a price list that named its currency.
+  if (!ctxCurrency) return [];
+  const line = LIST_LINE.exec(plain.trim());
+  if (!line || STATS.test(plain)) return [];
+  const amount = parseAmount(line.groups!.n, !!line.groups!.k);
+  if (amount < 25 || amount > 1_000_000) return [];
+  if (amount >= 1900 && amount <= 2100 && !/[,.]/.test(line.groups!.n) && MONTHS.test(plain)) return []; // a year
+  const key = formatOf(plain);
+  return key ? [{ key, amount, currency: ctxCurrency }] : [];
+}
+
+/** The currency of a price list: the email has a rates heading and names one currency. */
+function listCurrency(text: string): string | null {
+  if (!LIST_HEAD.test(text)) return null;
+  const found = new Set<string>();
+  for (const m of text.matchAll(new RegExp(CURRENCY_WORD.source, "gi"))) found.add(CURRENCY(m[0]));
+  return found.size === 1 ? [...found][0] : null;
+}
+
 export function readPrices(body: string): PriceReading {
   const stated: PriceHit[] = [];
   const agreed: PriceHit[] = [];
-  for (const sentence of sentences(ownText(body))) {
-    const plain = withoutDurations(sentence);
-    if (sentence.includes("?") || RANGE.test(plain) || PER_UNIT.test(plain)) continue;
-    const money = Array.from(plain.matchAll(MONEY));
-    if (money.length !== 1) continue;
-    const m = money[0].groups || {};
-    const amount = parseAmount(m.a || m.b || "", !!(m.ka || m.kb));
-    if (amount < 25 || amount > 1_000_000) continue;
-    const key = formatOf(sentence);
-    if (!key) continue;
-    const hit = { key, amount, currency: CURRENCY(m.pre || m.post || "$"), quote: sentence.slice(0, 300) };
-    if (YES.test(sentence) && !COUNTER.test(sentence)) agreed.push(hit);
-    else if (!THEIR_OFFER.test(sentence)) stated.push(hit);
+  const own = ownText(body);
+  const ctx = listCurrency(own);
+  for (const sentence of sentences(own)) {
+    const hits = clausesOf(sentence, ctx);
+    if (!hits.length) continue;
+    // "I can do 2 videos for $3,000" from them is their price, not a yes to yours.
+    const yes = YES.test(sentence.replace(/\b(i|we)\s+(can|could)\s+do\b/gi, " ")) && !COUNTER.test(sentence);
+    const theirs = THEIR_OFFER.test(sentence);
+    for (const h of hits) {
+      const hit = { ...h, quote: sentence.slice(0, 300) };
+      if (yes) agreed.push(hit);
+      else if (!theirs) stated.push(hit);
+    }
   }
   // One price per format: the first time it's mentioned wins; an agreement beats a statement.
   const once = (list: PriceHit[]) => list.filter((h, i) => list.findIndex((x) => x.key === h.key) === i);
@@ -134,7 +213,7 @@ export const isPlainYes = (body: string) => {
 export function readOffer(body: string): PriceHit | null {
   const hits: PriceHit[] = [];
   for (const sentence of sentences(ownText(body))) {
-    const plain = withoutDurations(sentence);
+    const plain = withoutDurations(withoutOld(sentence));
     if (RANGE.test(plain) || PER_UNIT.test(plain)) continue;
     const money = Array.from(plain.matchAll(MONEY));
     if (!money.length) continue;
@@ -158,7 +237,7 @@ export function readMine(body: string, theirPrices: Partial<Record<RateKey, numb
   let accepted: PriceHit | null = null;
   let offer: PriceHit | null = null;
   for (const sentence of sentences(ownText(body))) {
-    const plain = withoutDurations(sentence);
+    const plain = withoutDurations(withoutOld(sentence));
     if (RANGE.test(plain) || PER_UNIT.test(plain)) continue;
     const money = Array.from(plain.matchAll(MONEY));
     if (money.length !== 1) continue;

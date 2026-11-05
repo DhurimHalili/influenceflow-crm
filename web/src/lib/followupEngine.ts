@@ -63,9 +63,10 @@ export type NextStep = "followup" | "new-thread";
 export type FollowupState = ({ thread?: ThreadInfo }) & (
   | { kind: "idle"; reason: "no-contact" | "paused" | "closed" | "snoozed"; touches: Touch[]; until?: string; cancel?: Touch }
   | { kind: "reply-needed"; since: string; days: number; touches: Touch[]; last: Touch; cancel?: Touch }
-  | { kind: "waiting"; round: number; due: string; last: Touch; touches: Touch[]; cancel?: Touch; next?: NextStep }
-  | { kind: "due"; round: number; due: string; overdueDays: number; last: Touch; touches: Touch[]; cancel?: Touch; next?: NextStep }
-  | { kind: "exhausted"; round: number; last: Touch; touches: Touch[]; cancel?: Touch }
+  /** round = the cadence step (what sets the clock); sent = every message you sent since their last reply, on any channel (what the words say). */
+  | { kind: "waiting"; round: number; sent?: number; due: string; last: Touch; touches: Touch[]; cancel?: Touch; next?: NextStep }
+  | { kind: "due"; round: number; sent?: number; due: string; overdueDays: number; last: Touch; touches: Touch[]; cancel?: Touch; next?: NextStep }
+  | { kind: "exhausted"; round: number; sent?: number; last: Touch; touches: Touch[]; cancel?: Touch }
   /** Their management / an autoresponder declined by email: reach them on another channel. */
   | { kind: "managed"; since: string; last: Touch; touches: Touch[]; cancel?: Touch }
   /** They said no a while ago (Denied): time to try again. */
@@ -268,21 +269,25 @@ export function followupState(target: Target, followups: Followup[], events: Ema
   let round = 0;
   for (let i = live.length - 1; i >= 0 && live[i].dir === "out"; i--) round++;
   const followupsSent = round - 1;
+  // What to call it: every message since their last real reply, on any channel —
+  // so turning email reminders off (or switching to WhatsApp) never renumbers your follow-ups.
+  const lastReal = touches.map((t) => t.dir === "in" && t.kind !== "auto" && t.kind !== "managed_no").lastIndexOf(true);
+  const sent = Math.max(round, touches.slice(lastReal + 1).filter((t) => t.dir === "out" && !t.crossed).length);
   // After the cap (4 by default) of email follow-ups in one thread, the next
   // step is a fresh thread, not another follow-up — after its own wait.
   const cap = rules.thread_cap ?? 4;
   const byEmail = last.channel === "email" || last.source === "legacy";
   const next: NextStep = cap > 0 && byEmail && followupsSent >= cap ? "new-thread" : "followup";
-  if (next === "followup" && rules.stop_after > 0 && followupsSent >= rules.stop_after) return { kind: "exhausted", round, last, touches, cancel, thread };
+  if (next === "followup" && rules.stop_after > 0 && followupsSent >= rules.stop_after) return { kind: "exhausted", round, sent, last, touches, cancel, thread };
   // A scheduled email hasn't gone out yet: the clock starts once it does.
   const from = last.scheduled && new Date(last.at) < now ? now : new Date(last.at);
   const gap = target.record.new_thread_gap ?? rules.new_thread_gap ?? 1;
   const due = next === "new-thread" ? addBusinessDays(from, gap + 1, rules) : dueDate(from, round, rules);
-  if (last.scheduled) return { kind: "waiting", round, due: dayKey(due), last, touches, cancel, next, thread };
+  if (last.scheduled) return { kind: "waiting", round, sent, due: dayKey(due), last, touches, cancel, next, thread };
   const today = new Date(now);
   today.setHours(0, 0, 0, 0);
-  if (today >= due) return { kind: "due", round, due: dayKey(due), overdueDays: businessDaysBetween(due, today, rules), last, touches, cancel, next, thread };
-  return { kind: "waiting", round, due: dayKey(due), last, touches, cancel, next, thread };
+  if (today >= due) return { kind: "due", round, sent, due: dayKey(due), overdueDays: businessDaysBetween(due, today, rules), last, touches, cancel, next, thread };
+  return { kind: "waiting", round, sent, due: dayKey(due), last, touches, cancel, next, thread };
 }
 
 // ----- words ---------------------------------------------------------------------
@@ -343,7 +348,7 @@ export function flagFor(state: FollowupState): Flag | null {
       return { tone: "reach", short: "Reach back", long: `They passed ${agoWords(state.since)}${state.reason ? ` — ${state.reason.toLowerCase()}` : ""}. Their calendar may have room again: try them at the same price or better.` };
     case "due":
       if (state.next === "new-thread") return { tone: "thread", short: state.overdueDays > 0 ? `New thread · ${state.overdueDays}d late` : "Start a new thread", long: `${state.round - 1} follow-ups and no reply in this thread — start a fresh email with a new subject instead of another follow-up` };
-      return { tone: "due", short: state.overdueDays > 0 ? `Follow up · ${state.overdueDays}d late` : "Follow up today", long: `No reply to ${roundLabel(state.round, state.last.channel)} — send your ${nextFollowupLabel(state.round)}${state.overdueDays > 0 ? ` (due ${state.overdueDays} business day${state.overdueDays === 1 ? "" : "s"} ago)` : " today"}` };
+      return { tone: "due", short: state.overdueDays > 0 ? `Follow up · ${state.overdueDays}d late` : "Follow up today", long: `No reply to ${roundLabel(state.sent ?? state.round, state.last.channel)} — send your ${nextFollowupLabel(state.sent ?? state.round)}${state.overdueDays > 0 ? ` (due ${state.overdueDays} business day${state.overdueDays === 1 ? "" : "s"} ago)` : " today"}` };
     case "reply-needed":
       if (state.thread && (state.thread.otherReply || state.last.threadId !== state.thread.newest) && state.last.source === "gmail") return { tone: "reply", short: state.days > 0 ? `Old thread reply · ${state.days}d` : "Replied in old thread", long: `They answered in an older email thread${state.days > 0 ? ` ${state.days} business day${state.days === 1 ? "" : "s"} ago` : " today"}, not in your newest one — reply there, then choose which thread to continue in` };
       if (state.last.kind === "no") return { tone: "reply", short: "They passed", long: `They said no ${state.days > 0 ? `${state.days} business day${state.days === 1 ? "" : "s"} ago` : "today"} — thank them and mark them Denied; you'll get a reminder to reach back in a month` };
@@ -351,13 +356,13 @@ export function flagFor(state: FollowupState): Flag | null {
     case "waiting": {
       if (state.last.scheduled) {
         const when = sendsAt(state.last.at);
-        return { tone: "sched", short: when ? `Scheduled · ${when}` : "Scheduled", long: `${roundLabel(state.round, state.last.channel).replace(/^your/, "Your")} is scheduled in Gmail${when ? ` — it sends ${when}` : ""}. It counts as done; cancel it in Gmail and the reminder comes back.` };
+        return { tone: "sched", short: when ? `Scheduled · ${when}` : "Scheduled", long: `${roundLabel(state.sent ?? state.round, state.last.channel).replace(/^your/, "Your")} is scheduled in Gmail${when ? ` — it sends ${when}` : ""}. It counts as done; cancel it in Gmail and the reminder comes back.` };
       }
       if (state.next === "new-thread") return { tone: "wait", short: `New thread ${weekday(state.due)}`, long: `That was your ${ordinal(state.round - 1)} follow-up in this thread — no more follow-ups here. If they stay quiet, start a new thread ${weekday(state.due)}` };
-      return { tone: "wait", short: `Follow up ${weekday(state.due)}`, long: `Waiting for a reply to ${roundLabel(state.round, state.last.channel)}${state.thread && state.round === 1 && state.thread.active === state.thread.newest ? " in your new thread" : ""} — follow up ${weekday(state.due)} if they stay quiet` };
+      return { tone: "wait", short: `Follow up ${weekday(state.due)}`, long: `Waiting for a reply to ${roundLabel(state.sent ?? state.round, state.last.channel)}${state.thread && state.round === 1 && state.thread.active === state.thread.newest ? " in your new thread" : ""} — follow up ${weekday(state.due)} if they stay quiet` };
     }
     case "exhausted":
-      return { tone: "muted", short: "No reply", long: `No reply after ${state.round - 1} follow-ups — consider marking them No reply` };
+      return { tone: "muted", short: "No reply", long: `No reply after ${(state.sent ?? state.round) - 1} follow-ups — consider marking them No reply` };
     default:
       return null;
   }
