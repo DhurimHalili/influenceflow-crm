@@ -1204,7 +1204,7 @@ Deno.serve(async (req) => {
       // Not found = already gone in Gmail; any other trouble stops here so nothing is forgotten that would still send.
       const meta = await gmail<Meta>(token, META_PATH(gmailId)).catch((e) => (e instanceof GmailError && e.status === 404 ? null : Promise.reject(e)));
       const labels = meta?.labelIds || [];
-      if (meta && !(labels.includes("SCHEDULED") && !labels.includes("SENT"))) return json({ error: "That email has already gone out." }, 409);
+      if (meta && !(isFuture(meta) || (labels.includes("SCHEDULED") && !labels.includes("SENT")))) return json({ error: "That email has already gone out." }, 409);
       if (meta) await gmail(token, `/messages/${gmailId}/trash`, { method: "POST" });
       await admin.from("email_events").delete().eq("user_id", userId).eq("gmail_id", gmailId);
       await undoScheduledStatus(admin, userId, ev.entity_type, ev.entity_id);
