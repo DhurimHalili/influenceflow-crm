@@ -22,6 +22,21 @@ export type Mailbox = {
   error: string;
   connectedAt: string | null;
   sentToday: number;
+  /** Tracking check from the last sync: what you sent vs what the CRM tracks (null until a sync measured it). */
+  coverage: Coverage | null;
+};
+
+/** Emails in Gmail's Sent folder over the last `days` days vs what the CRM tracks. */
+export type Coverage = { at: string; days: number; sent: number; tracked: number; pending: number; untracked: { id: string; to: string[]; at: string; subject: string }[] };
+
+const toCoverage = (v: unknown): Coverage | null => {
+  if (!v || typeof v !== "object") return null;
+  const c = v as Record<string, unknown>;
+  if (typeof c.at !== "string" || !c.at) return null;
+  const untracked = (Array.isArray(c.untracked) ? c.untracked : [])
+    .filter((u): u is Record<string, unknown> => !!u && typeof u === "object" && typeof (u as { id?: unknown }).id === "string")
+    .map((u) => ({ id: String(u.id), to: (Array.isArray(u.to) ? u.to : []).map(String).slice(0, 5), at: String(u.at || ""), subject: decodeEntities(String(u.subject || "")) }));
+  return { at: c.at, days: Number(c.days) || 2, sent: Number(c.sent) || 0, tracked: Number(c.tracked) || 0, pending: Number(c.pending) || 0, untracked };
 };
 
 export type GmailStatus = {
@@ -87,7 +102,7 @@ async function invoke<T>(name: string, body: Record<string, unknown>): Promise<{
 }
 
 const text = (v: unknown) => (typeof v === "string" ? v : "");
-const toMailbox = (m: Record<string, unknown>): Mailbox => ({ id: text(m.id), email: text(m.email).toLowerCase(), canRead: !!m.canRead, canSend: !!m.canSend, canModify: !!m.canModify, lastSyncAt: text(m.lastSyncAt) || null, error: text(m.error), connectedAt: text(m.connectedAt) || null, sentToday: Number(m.sentToday) || 0 });
+const toMailbox = (m: Record<string, unknown>): Mailbox => ({ id: text(m.id), email: text(m.email).toLowerCase(), canRead: !!m.canRead, canSend: !!m.canSend, canModify: !!m.canModify, lastSyncAt: text(m.lastSyncAt) || null, error: text(m.error), connectedAt: text(m.connectedAt) || null, sentToday: Number(m.sentToday) || 0, coverage: toCoverage(m.coverage) });
 const toLead = (r: Record<string, unknown>): InboundLead => ({
   id: text(r.id), email: text(r.email), name: text(r.name), company: text(r.company), mailbox: text(r.mailbox),
   kind: r.kind === "brand" || r.kind === "creator" || r.kind === "agency" ? r.kind : "unknown", category: text(r.category), score: Number(r.score) || 0,

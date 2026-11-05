@@ -125,7 +125,11 @@ const linkedStatus = params.get("status");
   };
 
   // ?new=1 opens the form; ?new=inbound opens it already marked Inbound.
-  useEffect(() => { const mode = params.get("new"); if (!mode) return; if (mode === "inbound") setDraft((current) => ({ ...current, pipeline_status: "inbound", date_contacted: current.date_contacted || today() })); setCreateOpen(true); }, [params]);
+  useEffect(() => { const mode = params.get("new"); if (!mode) return; if (mode === "inbound") setDraft((current) => ({ ...current, pipeline_status: "inbound", date_contacted: current.date_contacted || today() }));
+    // From the tracking check: someone you already emailed — Gmail fills in the history once they're added.
+    const email = (params.get("email") || "").trim().toLowerCase();
+    if (email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) && email.length <= 254) setDraft((current) => ({ ...current, contact_email: email, pipeline_status: current.pipeline_status === "new" ? "contacted" : current.pipeline_status, date_contacted: current.date_contacted || today() }));
+    setCreateOpen(true); }, [params]);
   const closeCreate = () => { setCreateOpen(false); setParams((current) => { current.delete("new"); return current; }, { replace: true }); setDraft(emptyDraft); setDuplicateIds([]); };
 
   const weights = data.profile.rating_weights;

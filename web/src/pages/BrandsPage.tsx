@@ -38,7 +38,11 @@ const [market, setMarket] = useSessionState("brands.market", "all"); const [foll
   const narrowed = activeFilters > 0 || !!query || sort !== "newest";
   const [selected, setSelected] = useState<string[]>([]); const [open, setOpen] = useState(false); const [draft, setDraft] = useState<BrandDraft>(blankBrand); const [duplicates, setDuplicates] = useState<string[]>([]); const [importOpen, setImportOpen] = useState(false);
   // ?new=1 opens the form; ?new=inbound opens it already marked Inbound.
-  useEffect(() => { const mode = params.get("new"); if (!mode) return; if (mode === "inbound") setDraft((current) => ({ ...current, pipeline_status: "inbound", date_contacted: current.date_contacted || today() })); setOpen(true); }, [params]);
+  useEffect(() => { const mode = params.get("new"); if (!mode) return; if (mode === "inbound") setDraft((current) => ({ ...current, pipeline_status: "inbound", date_contacted: current.date_contacted || today() }));
+    // From the tracking check: someone you already emailed — Gmail fills in the history once they're added.
+    const email = (params.get("email") || "").trim().toLowerCase();
+    if (email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) && email.length <= 254) setDraft((current) => ({ ...current, contact_email: email, pipeline_status: current.pipeline_status === "new" ? "contacted" : current.pipeline_status, date_contacted: current.date_contacted || today() }));
+    setOpen(true); }, [params]);
   const close = () => { setOpen(false); setDraft(blankBrand); setDuplicates([]); setParams((current) => { current.delete("new"); return current; }, { replace: true }); };
   const types = Array.from(new Set(data.brands.filter((item) => !item.archived_at).map((item) => item.brand_type).filter(Boolean))).sort();
   const wantedNiches = Array.from(new Map(data.brands.filter((item) => !item.archived_at).flatMap((item) => item.brief?.niches || []).map((n) => [n.toLowerCase(), n])).values()).sort();

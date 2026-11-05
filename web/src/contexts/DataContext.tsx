@@ -72,7 +72,8 @@ type DataContextValue = WorkspaceData & {
   /** Removes one logged follow-up (the latest when no id is given). */
   removeFollowup: (creatorId: string, followupId?: string) => void;
   /** Logs a touch by hand on an influencer or a brand: a follow-up you sent, or a reply you got (DM, call…). */
-  logTouch: (target: TouchTarget, touch?: { kind?: "followup" | "reply"; channel?: string; note?: string; at?: string }) => void;
+  /** Logs a touch by hand and returns its id (for Undo). */
+  logTouch: (target: TouchTarget, touch?: { kind?: "followup" | "reply"; channel?: string; note?: string; at?: string }) => string;
   /** Removes one hand-logged touch (the latest follow-up when no id is given). */
   removeTouch: (target: TouchTarget, followupId?: string) => void;
   /** Reloads from the cloud now (e.g. right after a Gmail sync). */
@@ -1067,16 +1068,18 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const logTouch: DataContextValue["logTouch"] = (target, touch = {}) => {
     const stamp = touch.at || new Date().toISOString();
     const kind = touch.kind === "reply" ? "reply" : "followup";
+    const id = uid();
     setData((current) => {
       const list = target.type === "creator" ? current.creators : current.brands;
       const record = list.find((item) => item.id === target.id);
       if (!record) return current;
-      const row: Followup = { id: uid(), user_id: userId, creator_id: target.type === "creator" ? target.id : null, brand_id: target.type === "brand" ? target.id : null, kind, channel: touch.channel || "", note: sanitize(touch.note || ""), at: stamp };
+      const row: Followup = { id, user_id: userId, creator_id: target.type === "creator" ? target.id : null, brand_id: target.type === "brand" ? target.id : null, kind, channel: touch.channel || "", note: sanitize(touch.note || ""), at: stamp };
       const bump = <T extends { id: string; followup_count?: number; last_followup_at?: string | null }>(item: T): T => (item.id === target.id && kind === "followup" ? { ...item, followup_count: (item.followup_count || 0) + 1, last_followup_at: stamp } : item);
       const next = { ...current, followups: [row, ...current.followups].slice(0, 8000), ...(target.type === "creator" ? { creators: current.creators.map(bump) } : { brands: current.brands.map(bump) }) };
       const how = touch.channel ? ` (${touch.channel === "dm" ? "Instagram DM" : touch.channel})` : "";
       return addActivity(next, kind === "reply" ? `${record.name} replied${how}` : `Logged a follow-up with ${record.name}${how}`, target.type, target.id);
     });
+    return id;
   };
 
   const removeTouch: DataContextValue["removeTouch"] = (target, followupId) => {

@@ -63,7 +63,7 @@ const SENDS_PER_DAY = 400; // per mailbox, well under Gmail's own limits
 const MAX_MAILBOXES = 5;
 
 type Admin = SupabaseClient;
-type TokenRow = { id: string; user_id: string; access_token: string | null; refresh_token: string; expiry: string | null; email: string | null; scopes: string; history_id: string | null; last_sync_at: string | null; backfilled: string[] | null; sync_error?: string; connected_at?: string | null; updated_at?: string | null; send_day?: string | null; send_count?: number; leads_scanned_at?: string | null };
+type TokenRow = { id: string; user_id: string; access_token: string | null; refresh_token: string; expiry: string | null; email: string | null; scopes: string; history_id: string | null; last_sync_at: string | null; backfilled: string[] | null; sync_error?: string; connected_at?: string | null; updated_at?: string | null; send_day?: string | null; send_count?: number; leads_scanned_at?: string | null; coverage?: unknown };
 type Entity = { type: "creator" | "brand"; id: string };
 type Meta = { id: string; threadId: string; labelIds?: string[]; snippet?: string; internalDate?: string; payload?: { headers?: { name: string; value: string }[] } };
 type EventRow = { user_id: string; gmail_id: string; thread_id: string; direction: "out" | "in"; entity_type: "creator" | "brand"; entity_id: string; counterpart: string; subject: string; snippet: string; at: string; mailbox: string; message_key: string; scheduled: boolean; reply_kind: IncomingKind; in_reply_to: string };
@@ -223,13 +223,17 @@ const DRIVE_SHARE = /drive-shares-(dm-)?noreply@google\.com/i;
 const DRIVE_SHARES_DONE = "__drive_shares_v1";
 const isOutgoing = (meta: Meta, own: Set<string>) => (meta.labelIds || []).includes("SENT") || addresses(header(meta, "From")).some((e) => own.has(e));
 const sentAt = (meta: Meta) => (meta.internalDate ? new Date(Number(meta.internalDate)) : new Date(header(meta, "Date") || Date.now())).toISOString();
+/** Dated more than a minute ahead: a scheduled send that hasn't gone out. */
+const isFuture = (meta: Meta) => Number(meta.internalDate || 0) > Date.now() + 60_000;
 
 function eventsFor(meta: Meta, userId: string, book: Map<string, Entity[]>, own: Set<string>, mailbox: string, threads?: ThreadBook): EventRow[] {
   const labels = meta.labelIds || [];
   if (labels.some((l) => l === "DRAFT" || l === "SPAM" || l === "TRASH" || l === "CHAT")) return [];
   const out = isOutgoing(meta, own);
-  // Waiting in Gmail's Scheduled folder: your touch, but not sent yet.
-  const scheduled = out && labels.includes("SCHEDULED") && !labels.includes("SENT");
+  // Waiting in Gmail's Scheduled folder: your touch, but not sent yet. Gmail
+  // dates a scheduled email at its send time, so a date in the future means
+  // scheduled even when the label hasn't caught up yet.
+  const scheduled = out && (isFuture(meta) || (labels.includes("SCHEDULED") && !labels.includes("SENT")));
   // "X shared a file with you" comes from Google; the person who shared it is in Reply-To.
   const sender = DRIVE_SHARE.test(header(meta, "From")) ? addresses(header(meta, "Reply-To")) : addresses(header(meta, "From"));
   const counterparts = (out ? [...addresses(header(meta, "To")), ...addresses(header(meta, "Cc"))] : sender).filter((e) => !own.has(e));
@@ -532,7 +536,9 @@ async function backfillCreatorMail(ctx: { admin: Admin; userId: string; mailbox:
 async function recheckScheduled(admin: Admin, userId: string, token: string, mailbox: string, deadline: number) {
   // What Gmail says is waiting right now — also catches rows stored as sent
   // before scheduled sends were told apart.
-  const waiting = await listIds(token, "in:scheduled", 3).catch(() => [] as string[]);
+  const listed = await listIds(token, "in:scheduled", 3).then((ids) => ids, () => null);
+  const waiting = listed || [];
+  const waitingSet = new Set(waiting);
   for (const part of chunk(waiting, 200)) await admin.from("email_events").update({ scheduled: true }).eq("user_id", userId).eq("mailbox", mailbox).eq("direction", "out").eq("scheduled", false).in("gmail_id", part);
   const { data, error } = await admin.from("email_events").select("gmail_id, entity_id, entity_type, direction").eq("user_id", userId).eq("mailbox", mailbox).eq("scheduled", true).limit(300);
   if (error || !data?.length) return { sent: 0, cancelled: 0 };
@@ -545,7 +551,8 @@ async function recheckScheduled(admin: Admin, userId: string, token: string, mai
       if (meta === undefined) return; // Gmail hiccup: look again next run
       const labels = meta?.labelIds || [];
       if (!meta || labels.some((l) => l === "DRAFT" || l === "TRASH" || l === "SPAM")) { gone.push(id); return; }
-      const stillScheduled = labels.includes("SCHEDULED") && !labels.includes("SENT");
+      // Still waiting: Gmail lists it under Scheduled, or its send time is ahead.
+      const stillScheduled = (listed !== null && waitingSet.has(id)) || isFuture(meta) || (labels.includes("SCHEDULED") && !labels.includes("SENT"));
       let { error: upd } = await admin.from("email_events").update({ scheduled: stillScheduled, at: sentAt(meta), in_reply_to: replyToKey(meta) }).eq("user_id", userId).eq("gmail_id", id);
       if (upd && /in_reply_to/.test(upd.message)) ({ error: upd } = await admin.from("email_events").update({ scheduled: stillScheduled, at: sentAt(meta) }).eq("user_id", userId).eq("gmail_id", id));
       if (!upd && !stillScheduled) sent++;
@@ -632,7 +639,7 @@ async function scanOldThreads(admin: Admin, row: TokenRow, token: string, own: S
 // is added to the CRM by the app, a clear no dismisses it, anything else waits
 // for you. Once per mailbox, the last 60 days of answers are looked up too.
 const LEAD_REPLIES_DONE = "__lead_replies_v1";
-const REREAD_DONE = "__reread_prices_v2";
+const REREAD_DONE = "__reread_prices_v3";
 type LeadRow = { id: string; email: string; thread_id: string; mailbox: string; status: string; my_replies: { id: string; at: string; scheduled?: boolean; intent?: string }[] | null; my_intent: string | null };
 
 async function trackLeadReplies(admin: Admin, userId: string, token: string, metas: Meta[], own: Set<string>, mailbox: string, backfilledAlready: boolean, deadline: number) {
@@ -680,6 +687,59 @@ async function trackLeadReplies(admin: Admin, userId: string, token: string, met
   return { updated, backfilled };
 }
 
+// ----- tracking check ------------------------------------------------------------
+
+// How much of what you sent the CRM actually tracks, so its numbers can be
+// trusted. Kept per mailbox in gmail_tokens.coverage (server-only table; the
+// owner sees it through the status action). Over the last COVERAGE_DAYS days:
+//   sent      — emails in Gmail's Sent folder to someone outside your team
+//   tracked   — stored for someone in your CRM (or an answer to an inbound lead)
+//   untracked — sent to people the CRM doesn't know; listed so you can add them
+//               (adding one pulls in their whole history on the next sync)
+//   pending   — not read yet (a big backlog drains over the next runs)
+const COVERAGE_DAYS = 2;
+type Untracked = { id: string; to: string[]; at: string; subject: string };
+type Coverage = { at: string; days: number; sent: number; tracked: number; pending: number; untracked: Untracked[] };
+const readCoverage = (value: unknown): Coverage => {
+  const v = (value && typeof value === "object" ? value : {}) as Partial<Coverage>;
+  const untracked = (Array.isArray(v.untracked) ? v.untracked : [])
+    .filter((u): u is Untracked => !!u && typeof u.id === "string" && Array.isArray(u.to))
+    .map((u) => ({ id: u.id, to: u.to.filter((e) => typeof e === "string").slice(0, 5), at: String(u.at || ""), subject: String(u.subject || "").slice(0, 120) }));
+  return { at: String(v.at || ""), days: COVERAGE_DAYS, sent: Number(v.sent) || 0, tracked: Number(v.tracked) || 0, pending: Number(v.pending) || 0, untracked };
+};
+
+async function measureCoverage(admin: Admin, userId: string, sweep: string[], metas: Meta[], prev: Coverage, own: Set<string>, book: Map<string, Entity[]>): Promise<Coverage> {
+  const team = ownDomains(own);
+  const outside = (e: string) => !own.has(e) && !team.has(e.split("@")[1] || "");
+  const stored = new Set<string>();
+  for (const part of chunk(sweep, 300)) {
+    const { data } = await admin.from("email_events").select("gmail_id").eq("user_id", userId).in("gmail_id", part);
+    (data || []).forEach((r) => stored.add(r.gmail_id));
+  }
+  const { data: leadRows } = await admin.from("inbound_leads").select("email").eq("user_id", userId).limit(1000);
+  const leads = new Set((leadRows || []).map((l) => String(l.email).toLowerCase()));
+  const fetched = new Map(metas.map((m) => [m.id, m]));
+  const before = new Map(prev.untracked.map((u) => [u.id, u]));
+  let sent = 0, tracked = 0, pending = 0;
+  const untracked: Untracked[] = [];
+  for (const id of sweep) {
+    if (stored.has(id)) { sent++; tracked++; continue; }
+    const meta = fetched.get(id);
+    const known = meta
+      ? { id, to: [...addresses(header(meta, "To")), ...addresses(header(meta, "Cc"))].filter(outside).slice(0, 5), at: sentAt(meta), subject: decodeEntities(header(meta, "Subject")).slice(0, 120) }
+      : before.get(id);
+    if (!known) { pending++; sent++; continue; }
+    if (!known.to.length) continue; // only to yourself or your team: not outreach
+    sent++;
+    if (known.to.some((e) => leads.has(e))) { tracked++; continue; }
+    // In your CRM (just added — the next sync's backfill brings it in — or the
+    // same email already counted from your other mailbox).
+    if (known.to.some((e) => book.has(e))) { tracked++; continue; }
+    untracked.push(known);
+  }
+  return { at: new Date().toISOString(), days: COVERAGE_DAYS, sent, tracked, pending, untracked: untracked.sort((a, b) => b.at.localeCompare(a.at)).slice(0, 200) };
+}
+
 // ----- one mailbox's sync -------------------------------------------------------
 
 async function syncMailbox(admin: Admin, row: TokenRow, own: Set<string>, book: Map<string, Entity[]>, deadline: number) {
@@ -723,10 +783,17 @@ async function syncMailbox(admin: Admin, row: TokenRow, own: Set<string>, book: 
     try {
       let pageToken = "";
       for (let page = 0; page < 20; page++) {
-        const params = new URLSearchParams({ startHistoryId: historyId, historyTypes: "messageAdded", maxResults: "500" });
+        // messageAdded = new mail; labelAdded catches mail that only became
+        // "sent" later — a draft you sent, or a scheduled email going out.
+        const params = new URLSearchParams({ startHistoryId: historyId, maxResults: "500" });
+        params.append("historyTypes", "messageAdded");
+        params.append("historyTypes", "labelAdded");
         if (pageToken) params.set("pageToken", pageToken);
-        const res = await gmail<{ history?: { messagesAdded?: { message: { id: string } }[] }[]; nextPageToken?: string; historyId?: string }>(token, `/history?${params}`);
-        for (const h of res.history || []) for (const m of h.messagesAdded || []) ids.add(m.message.id);
+        const res = await gmail<{ history?: { messagesAdded?: { message: { id: string } }[]; labelsAdded?: { message: { id: string }; labelIds?: string[] }[] }[]; nextPageToken?: string; historyId?: string }>(token, `/history?${params}`);
+        for (const h of res.history || []) {
+          for (const m of h.messagesAdded || []) ids.add(m.message.id);
+          for (const l of h.labelsAdded || []) if ((l.labelIds || []).some((x) => x === "SENT" || x === "SCHEDULED" || x === "INBOX")) ids.add(l.message.id);
+        }
         if (!res.nextPageToken) break;
         pageToken = res.nextPageToken;
         if (Date.now() > deadline) { complete = false; break; }
@@ -745,6 +812,15 @@ async function syncMailbox(admin: Admin, row: TokenRow, own: Set<string>, book: 
       }
     }
   }
+
+  // 3b. Safety net, every run: everything you sent in the last 2 days. Anything
+  //     the history missed is picked up here. Emails already checked that
+  //     aren't to anyone in your CRM are skipped (they're listed in the
+  //     tracking check instead).
+  const prevCoverage = readCoverage(row.coverage);
+  const checkedBefore = new Set(prevCoverage.untracked.map((u) => u.id));
+  const sweep = Date.now() < deadline - 50_000 ? await listIds(token, `in:sent newer_than:${COVERAGE_DAYS}d`, 3).catch(() => null) : null;
+  for (const id of sweep || []) if (!checkedBefore.has(id)) ids.add(id);
 
   // 4. Skip messages already stored, read the rest (headers only), match them.
   const list = Array.from(ids);
@@ -830,6 +906,10 @@ async function syncMailbox(admin: Admin, row: TokenRow, own: Set<string>, book: 
   // A new thread-scan cursor replaces the old one.
   const keep = backfilled.some((b) => b.startsWith(THREAD_SCAN_AT)) ? Array.from(done).filter((b) => !b.startsWith(THREAD_SCAN_AT)) : Array.from(done);
   const patch: Record<string, unknown> = { last_sync_at: now, updated_at: now, sync_error: "", backfilled: Array.from(new Set([...keep, ...backfilled])).slice(-5000) };
+  if (sweep) {
+    const coverage = await measureCoverage(admin, row.user_id, sweep, metas, prevCoverage, own, book).catch(() => null);
+    if (coverage) patch.coverage = coverage;
+  }
   if (leadsScanned && !row.leads_scanned_at && complete) patch.leads_scanned_at = new Date().toISOString();
   if (complete || !row.history_id) {
     const profile = await gmail<{ historyId?: string; emailAddress?: string }>(token, "/profile");
@@ -947,7 +1027,7 @@ async function send(admin: Admin, rows: TokenRow[], input: Record<string, unknow
 
 // ----- entry -----------------------------------------------------------------------
 
-const publicMailbox = (r: TokenRow) => ({ id: r.id, email: r.email, canRead: (r.scopes || "").includes("gmail.readonly"), canSend: (r.scopes || "").includes("gmail.send"), canModify: (r.scopes || "").includes("gmail.modify"), lastSyncAt: r.last_sync_at, error: r.sync_error || "", connectedAt: r.connected_at || null, sentToday: r.send_day === new Date().toISOString().slice(0, 10) ? r.send_count || 0 : 0 });
+const publicMailbox = (r: TokenRow) => ({ id: r.id, email: r.email, canRead: (r.scopes || "").includes("gmail.readonly"), canSend: (r.scopes || "").includes("gmail.send"), canModify: (r.scopes || "").includes("gmail.modify"), lastSyncAt: r.last_sync_at, error: r.sync_error || "", connectedAt: r.connected_at || null, sentToday: r.send_day === new Date().toISOString().slice(0, 10) ? r.send_count || 0 : 0, coverage: r.coverage && (r.coverage as { at?: string }).at ? readCoverage(r.coverage) : null });
 
 Deno.serve(async (req) => {
   const cors = corsFor(req);

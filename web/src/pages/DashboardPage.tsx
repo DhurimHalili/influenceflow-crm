@@ -1,18 +1,17 @@
 import { useState } from "react";
-import { Area, AreaChart, Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { AlertCircle, ArrowRight, ArrowUpRight, BarChart3, Building2, CalendarClock, CalendarDays, CheckCircle2, Clock3, DollarSign, Handshake, Mail, Plus, Reply, Send, Sparkles, TrendingUp, Trophy, UserCheck, UserPlus, Users, XCircle, Zap } from "lucide-react";
+import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { AlertCircle, ArrowRight, ArrowUpRight, BarChart3, Building2, CalendarDays, CheckCircle2, Clock3, DollarSign, Plus, Sparkles, TrendingUp, Users, Zap } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { useData } from "../contexts/DataContext";
-import { Button, EmptyState, Metric, PageHeader, Tabs } from "../components/ui";
+import { Button, EmptyState, Metric, PageHeader } from "../components/ui";
 import { useChase } from "../hooks/useChase";
 import { useGmail } from "../contexts/GmailContext";
 import { CoachCard } from "../components/Coach";
+import { OutreachBoard } from "../components/OutreachBoard";
 import { TeamBoard } from "../components/Team";
-import { flagFor, sendsAt } from "../lib/followupEngine";
-import { emailsIn, scheduledNow, sentIn } from "../lib/outreach";
-import { useOutreach } from "../hooks/useOutreach";
+import { flagFor } from "../lib/followupEngine";
 import { leadName, leadWaitingHours } from "../hooks/useLeadActions";
-import { currencySymbol, dateLabel, daysAgoLabel, daysSince, dayKey, dueLabel, isOverdue, isPastDay, isTodayDay, money, relativeTime, timeLabel } from "../lib/utils";
+import { currencySymbol, dateLabel, daysAgoLabel, daysSince, dueLabel, isOverdue, isPastDay, isTodayDay, money, relativeTime, timeLabel } from "../lib/utils";
 import { ENTITY_STATUSES, STATUS_LABELS } from "../types";
 
 // One line a day, so the dashboard greets you with something to aim at.
@@ -78,7 +77,6 @@ export default function DashboardPage() {
   const navigate = useNavigate();
   const chase = useChase();
   const gmail = useGmail();
-  const log = useOutreach();
   const creators = data.creators.filter((item) => !item.archived_at);
   const brands = data.brands.filter((item) => !item.archived_at);
   const campaigns = data.campaigns.filter((item) => !item.archived_at);
@@ -121,153 +119,6 @@ export default function DashboardPage() {
     });
     return buckets.map(({ month, deals, total }) => ({ month, deals, value: Math.round(total / 1000) }));
   })();
-  // Outreach momentum: real events bucketed into a selectable time range.
-  // Emails and follow-ups = everything you sent (Gmail + logged by hand, see
-  // lib/outreach); replies/negotiations/lost = status-change events the app writes
-  // to the activity log. Deals closed = campaigns signed (active) or
-  // completed; roster signings = influencers moved onto the roster. Nothing
-  // is estimated or placeholder.
-  const [momentumRange, setMomentumRangeRaw] = useState(() => {
-    try {
-      return localStorage.getItem("if.momentum-range") || "week";
-    } catch {
-      return "week";
-    }
-  });
-  const setMomentumRange = (value: string) => {
-    setMomentumRangeRaw(value);
-    try {
-      localStorage.setItem("if.momentum-range", value);
-    } catch {
-      // private mode: range resets next visit
-    }
-  };
-  const momentum = (() => {
-    const now = Date.now();
-    const day = 86400000;
-    const d = new Date(now);
-    const monday = new Date(d.getFullYear(), d.getMonth(), d.getDate() - ((d.getDay() + 6) % 7)).getTime();
-    const dayLabel = (t: number) => new Date(t).toLocaleDateString("en-US", { day: "numeric", month: "short" });
-    const midnight = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-    let start = monday;
-    let end = now;
-    let label = `Week of ${dayLabel(start)}`;
-    let prevLabel = "vs last week so far";
-    if (momentumRange === "today") {
-      start = midnight;
-      label = `Today · ${new Date(now).toLocaleDateString("en-US", { weekday: "long", day: "numeric", month: "short" })}`;
-      prevLabel = "vs yesterday";
-    } else if (momentumRange === "yesterday") {
-      end = midnight;
-      start = midnight - day;
-      label = `Yesterday · ${new Date(start).toLocaleDateString("en-US", { weekday: "long", day: "numeric", month: "short" })}`;
-      prevLabel = "vs day before";
-    } else if (momentumRange === "lastweek") {
-      prevLabel = "vs week before";
-      end = monday;
-      start = monday - 7 * day;
-      label = `Week of ${dayLabel(start)}`;
-    } else if (momentumRange === "30" || momentumRange === "90") {
-      const days = momentumRange === "30" ? 30 : 90;
-      start = now - days * day;
-      label = `Last ${days} days`;
-      prevLabel = `vs prior ${days} days`;
-    }
-    const pEnd = start;
-    // Every range compares with the whole period before it: today vs all of
-    // yesterday (4 yesterday, 2 so far today → −2), this week vs all of last week.
-    const span = momentumRange === "today" || momentumRange === "yesterday" ? day : momentumRange === "week" || momentumRange === "lastweek" ? 7 * day : end - start;
-    const pStart = start - span;
-    const pFinish = pEnd;
-    if (momentumRange === "week") prevLabel = "vs last week";
-    const inR = (iso: string | null, s = start, e = end) => {
-      if (!iso) return false;
-      const t = new Date(iso).getTime();
-      return !Number.isNaN(t) && t >= s && t < e;
-    };
-    const statusIn = (status: string, s = start, e = end) =>
-      data.activities.filter((a) => a.text.endsWith(` updated to ${status}`) && inR(a.at, s, e)).length;
-    const createdCampaigns = (s = start, e = end) =>
-      data.activities.filter((a) => a.text.endsWith("campaign created") && inR(a.at, s, e)).length;
-    // A lost deal is stamped exactly when a replied-or-beyond record moves to
-    // denied (campaigns: cancelled). Early rejections carry no stamp and never
-    // inflate this number.
-    const lostIn = (s = start, e = end) =>
-      [...creators, ...brands, ...data.contacts, ...campaigns].filter((item) => item.lost_at && inR(item.lost_at, s, e)).length;
-    // Emails and follow-ups come from one log (lib/outreach): Gmail from every
-    // connected mailbox, follow-ups logged by hand and stamped contact dates,
-    // each counted once. Scheduled sends count when they actually go out.
-    // Emails sent = every email (first emails, answers, follow-ups, replies to
-    // inbound leads); follow-ups = only the chasers, on any channel.
-    const emails = (s = start, e = end) => emailsIn(log, s, e);
-    const followups = (s = start, e = end) => sentIn(log, s, e, "followup");
-    const firstAndAnswers = (s: number, e: number) => sentIn(log, s, e, "email");
-    // The first moment each record reached a "won" status, counted once:
-    // a campaign that goes active and later completes is one closed deal.
-    // Records created straight into that status count from creation.
-    const firstWin = (type: "campaign" | "creator", statuses: string[], records: { id: string; created_at: string }[], wonNow: (id: string) => boolean) => {
-      const ids = new Set(records.map((r) => r.id));
-      const first = new Map<string, number>();
-      data.activities.forEach((a) => {
-        if (a.entity_type !== type || !a.entity_id || !ids.has(a.entity_id) || !statuses.some((st) => a.text.endsWith(` updated to ${st}`))) return;
-        const t = new Date(a.at).getTime();
-        if (!Number.isNaN(t) && t < (first.get(a.entity_id) ?? Infinity)) first.set(a.entity_id, t);
-      });
-      records.forEach((r) => {
-        if (first.has(r.id) || !wonNow(r.id)) return;
-        const t = new Date(r.created_at).getTime();
-        if (!Number.isNaN(t)) first.set(r.id, t);
-      });
-      return [...first.values()];
-    };
-    const dealWins = firstWin("campaign", ["active", "completed"], campaigns, (id) => ["active", "completed"].includes(campaigns.find((c) => c.id === id)?.status || ""));
-    const rosterWins = firstWin("creator", ["roster", "signed"], creators, (id) => ["roster", "signed"].includes(creators.find((c) => c.id === id)?.pipeline_status || ""));
-    const winsIn = (wins: number[], s = start, e = end) => wins.filter((t) => t >= s && t < e).length;
-    const count = {
-      emails: emails(),
-      followups: followups(),
-      replies: statusIn("replied"),
-      negotiating: statusIn("negotiating") + createdCampaigns(),
-      closed: winsIn(dealWins),
-      roster: winsIn(rosterWins),
-      lost: lostIn(),
-      added: creators.filter((c) => inR(c.created_at)).length,
-    };
-    const prev = {
-      emails: emails(pStart, pFinish),
-      followups: followups(pStart, pFinish),
-      replies: statusIn("replied", pStart, pFinish),
-      negotiating: statusIn("negotiating", pStart, pFinish) + createdCampaigns(pStart, pFinish),
-      closed: winsIn(dealWins, pStart, pFinish),
-      roster: winsIn(rosterWins, pStart, pFinish),
-      lost: lostIn(pStart, pFinish),
-      added: creators.filter((c) => inR(c.created_at, pStart, pFinish)).length,
-    };
-    // Daily breakdown for the last 14 days: first contacts, follow-ups and
-    // replies per calendar day.
-    const daily = Array.from({ length: 14 }, (_, i) => {
-      const s = midnight - (13 - i) * day;
-      const e = s + day;
-      return {
-        key: dayKey(new Date(s)),
-        label: new Date(s).toLocaleDateString("en-US", { weekday: "short", day: "numeric" }),
-        Emails: firstAndAnswers(s, e),
-        "Follow-ups": followups(s, e),
-        Replies: statusIn("replied", s, e),
-      };
-    });
-    return { label, prevLabel, count, prev, daily };
-  })();
-  const momentumTiles = [
-    { key: "emails", label: "Emails sent", icon: Mail, invert: false },
-    { key: "followups", label: "Follow-ups sent", icon: Send, invert: false },
-    { key: "replies", label: "Replies received", icon: Reply, invert: false },
-    { key: "negotiating", label: "Negotiations started", icon: Handshake, invert: false },
-    { key: "closed", label: "Deals closed", icon: Trophy, invert: false },
-    { key: "lost", label: "Deals lost", icon: XCircle, invert: true },
-    { key: "roster", label: "Roster signings", icon: UserCheck, invert: false },
-    { key: "added", label: "New creators added", icon: UserPlus, invert: false },
-  ] as const;
   // One entry per record, most urgent reason first: overdue > due today >
   // stale lead (no movement in 7+ days with a next action set).
   const attention = (() => {
@@ -324,19 +175,7 @@ export default function DashboardPage() {
         <Metric label="Outstanding invoices" value={money(campaigns.filter((item) => item.status !== "cancelled" && item.payment_status !== "paid").reduce((sum, item) => sum + item.agreed_payment, 0))} detail={(() => { const late = campaigns.filter((item) => item.status !== "cancelled" && item.payment_status !== "paid" && item.invoice_due && isPastDay(item.invoice_due)).length; return late ? <span className="negative">{late} overdue</span> : `${campaigns.filter((item) => item.payment_status === "paid").length} paid campaigns`; })()} icon={<BarChart3 size={15} />} />
       </section>
 
-      <section className="dash-panel momentum-panel">
-        <div className="panel-heading"><div><span>Outreach momentum</span><h2>{momentum.label}</h2></div><Tabs active={momentumRange} onChange={setMomentumRange} tabs={[{ value: "today", label: "Today" }, { value: "yesterday", label: "Yesterday" }, { value: "week", label: "This week" }, { value: "lastweek", label: "Last week" }, { value: "30", label: "30 days" }, { value: "90", label: "90 days" }]} /></div>
-        <div className="momentum-grid">{momentumTiles.map((tile) => {
-          const curr = momentum.count[tile.key];
-          const prev = momentum.prev[tile.key];
-          const diff = curr - prev;
-          const good = tile.invert ? diff < 0 : diff > 0;
-          const waiting = tile.key === "emails" ? scheduledNow(log).filter((x) => x.channel === "email") : tile.key === "followups" ? scheduledNow(log, "followup") : [];
-          const next = waiting.map((s) => sendsAt(s.at)).find(Boolean);
-          return <div className="momentum-tile" key={tile.key}><span className="momentum-icon"><tile.icon size={15} /></span><strong>{curr}</strong><small>{tile.label}</small>{waiting.length > 0 && <span className="momentum-sched" title={`Waiting in Gmail's Scheduled folder${next ? ` — next sends ${next}` : ""}. They count here once they go out.`}><CalendarClock size={11} /> {waiting.length}<span className="ms-word"> scheduled</span></span>}<em className={diff === 0 ? "delta-flat" : good ? "delta-up" : "delta-down"} title={momentum.prevLabel}>{diff === 0 ? `— ${momentum.prevLabel}` : `${diff > 0 ? "+" : ""}${diff} ${momentum.prevLabel}`}</em></div>;
-        })}</div>
-        <div className="daily-strip"><div className="daily-strip-head"><span>Daily outreach · last 14 days</span><span className="daily-legend"><i className="lg-emails" /> New emails & answers <i className="lg-followups" /> Follow-ups <i className="lg-replies" /> Replies</span></div><div className="daily-chart"><ResponsiveContainer width="100%" height="100%"><BarChart data={momentum.daily} margin={{ top: 6, right: 4, left: -18, bottom: 0 }} barCategoryGap="22%"><CartesianGrid stroke="var(--line)" vertical={false} /><XAxis dataKey="label" axisLine={false} tickLine={false} interval="preserveStartEnd" minTickGap={8} tick={{ fill: "var(--muted)", fontSize: 10 }} /><YAxis allowDecimals={false} axisLine={false} tickLine={false} width={34} tick={{ fill: "var(--muted)", fontSize: 11 }} /><Tooltip cursor={{ fill: "rgba(var(--accent-rgb),.06)" }} contentStyle={{ background: "var(--surface-solid)", border: "1px solid var(--line)", borderRadius: 10, fontSize: 13 }} /><Bar dataKey="Emails" stackId="o" fill="var(--accent)" radius={[0, 0, 0, 0]} /><Bar dataKey="Follow-ups" stackId="o" fill="#24a6a1" /><Bar dataKey="Replies" stackId="o" fill="#d59b48" radius={[3, 3, 0, 0]} /></BarChart></ResponsiveContainer></div></div>
-      </section>
+      <OutreachBoard />
 
       <section className="dashboard-primary-grid">
         <div className="dash-panel pipeline-panel">
