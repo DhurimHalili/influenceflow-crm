@@ -1121,7 +1121,8 @@ Deno.serve(async (req) => {
     if (!(row.scopes || "").includes("gmail.modify")) return json({ error: `Reconnect ${ev.mailbox} and allow “Manage drafts and send” to cancel from the CRM.`, code: "needs_modify" }, 403);
     try {
       const token = await accessToken(admin, row);
-      const meta = await gmail<Meta>(token, META_PATH(gmailId)).catch(() => null);
+      // Not found = already gone in Gmail; any other trouble stops here so nothing is forgotten that would still send.
+      const meta = await gmail<Meta>(token, META_PATH(gmailId)).catch((e) => (e instanceof GmailError && e.status === 404 ? null : Promise.reject(e)));
       const labels = meta?.labelIds || [];
       if (meta && !(labels.includes("SCHEDULED") && !labels.includes("SENT"))) return json({ error: "That email has already gone out." }, 409);
       if (meta) await gmail(token, `/messages/${gmailId}/trash`, { method: "POST" });
