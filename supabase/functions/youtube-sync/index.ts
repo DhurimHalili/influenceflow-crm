@@ -31,6 +31,11 @@ export const youtubeOf = (socials: Social[] | null | undefined) => {
   return s ? s.url || `@${s.handle}` : "";
 };
 
+/** "US" → "United States" (the CRM stores country names). */
+const countryName = (code: string) => {
+  try { return new Intl.DisplayNames(["en"], { type: "region" }).of(code) || code; } catch { return code; }
+};
+
 /** What a refresh writes. Stars are never touched; name/country/email only fill blanks. */
 export function patchFor(c: Pick<CreatorRow, "name" | "country" | "contact_email" | "socials">, f: ChannelFacts) {
   // Only the first YouTube link (the one that was read) gets the subscriber count.
@@ -43,7 +48,7 @@ export function patchFor(c: Pick<CreatorRow, "name" | "country" | "contact_email
   };
   if (f.sampled) { patch.avg_views = f.avgViews; patch.engagement_rate = f.engagementRate; }
   if (!String(c.name || "").trim() && f.title) patch.name = f.title;
-  if (!String(c.country || "").trim() && f.country) patch.country = f.country;
+  if (!String(c.country || "").trim() && f.country) patch.country = countryName(f.country);
   if (!String(c.contact_email || "").trim() && f.emails[0]) patch.contact_email = f.emails[0];
   return patch;
 }
