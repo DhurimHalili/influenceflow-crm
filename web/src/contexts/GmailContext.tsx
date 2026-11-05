@@ -12,6 +12,8 @@ import { useData } from "./DataContext";
 // the server even when the app is closed.
 
 export type Mailbox = {
+  /** Granted "manage drafts and send": the CRM can cancel a scheduled send. */
+  canModify?: boolean;
   id: string;
   email: string;
   canRead: boolean;
@@ -51,6 +53,8 @@ type GmailValue = GmailStatus & {
   disconnect: (id: string, clearHistory?: boolean) => Promise<void>;
   syncNow: (force?: boolean) => Promise<{ ok: boolean; message?: string }>;
   send: (input: SendInput) => Promise<{ ok: boolean; message?: string; statusChanges?: number; from?: string }>;
+  /** Cancels one of your scheduled sends in Gmail (it goes to Trash). */
+  cancelScheduled: (gmailId: string) => Promise<{ ok: boolean; message?: string; needsModify?: boolean }>;
   refreshStatus: () => Promise<void>;
   refreshLeads: () => Promise<void>;
   resolveLead: (id: string, patch: Pick<InboundLead, "status"> & Partial<Pick<InboundLead, "entity_type" | "entity_id">>) => Promise<boolean>;
@@ -83,7 +87,7 @@ async function invoke<T>(name: string, body: Record<string, unknown>): Promise<{
 }
 
 const text = (v: unknown) => (typeof v === "string" ? v : "");
-const toMailbox = (m: Record<string, unknown>): Mailbox => ({ id: text(m.id), email: text(m.email).toLowerCase(), canRead: !!m.canRead, canSend: !!m.canSend, lastSyncAt: text(m.lastSyncAt) || null, error: text(m.error), connectedAt: text(m.connectedAt) || null, sentToday: Number(m.sentToday) || 0 });
+const toMailbox = (m: Record<string, unknown>): Mailbox => ({ id: text(m.id), email: text(m.email).toLowerCase(), canRead: !!m.canRead, canSend: !!m.canSend, canModify: !!m.canModify, lastSyncAt: text(m.lastSyncAt) || null, error: text(m.error), connectedAt: text(m.connectedAt) || null, sentToday: Number(m.sentToday) || 0 });
 const toLead = (r: Record<string, unknown>): InboundLead => ({
   id: text(r.id), email: text(r.email), name: text(r.name), company: text(r.company), mailbox: text(r.mailbox),
   kind: r.kind === "brand" || r.kind === "creator" || r.kind === "agency" ? r.kind : "unknown", category: text(r.category), score: Number(r.score) || 0,
@@ -214,6 +218,13 @@ export function GmailProvider({ children }: { children: ReactNode }) {
     return { ok: true, statusChanges: res.data?.statusChanges || 0, from: res.data?.from };
   }, []);
 
+  const cancelScheduled = useCallback<GmailValue["cancelScheduled"]>(async (gmailId) => {
+    const res = await invoke<{ ok?: boolean; code?: string }>("gmail-sync", { action: "cancel_scheduled", gmailId });
+    if (res.error) return { ok: false, message: res.error, needsModify: res.status === 403 };
+    refresh.current();
+    return { ok: true };
+  }, []);
+
   // The app may only record the decision (RLS + column grants enforce it).
   const resolveLead = useCallback<GmailValue["resolveLead"]>(async (id, patch) => {
     const before = leads;
@@ -233,7 +244,7 @@ export function GmailProvider({ children }: { children: ReactNode }) {
     return true;
   }, []);
 
-  const value = useMemo<GmailValue>(() => ({ ...status, syncing, leads, connect, disconnect, syncNow, send, refreshStatus, refreshLeads, resolveLead, claimLead }), [status, syncing, leads, connect, disconnect, syncNow, send, refreshStatus, refreshLeads, resolveLead, claimLead]);
+  const value = useMemo<GmailValue>(() => ({ ...status, syncing, leads, connect, disconnect, syncNow, send, refreshStatus, refreshLeads, resolveLead, claimLead, cancelScheduled }), [status, syncing, leads, connect, disconnect, syncNow, send, refreshStatus, refreshLeads, resolveLead, claimLead, cancelScheduled]);
   return <GmailContext.Provider value={value}>{children}</GmailContext.Provider>;
 }
 

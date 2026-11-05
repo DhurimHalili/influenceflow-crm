@@ -124,3 +124,13 @@ export function quotedOwnDate(text: string, own: string[]): Date | null {
   const d = new Date(`${m[1].replace(/^[A-Za-z]{3},? /, "")} ${m[2]}`);
   return Number.isNaN(d.getTime()) ? null : d;
 }
+
+/** How a reply reads, for reports: 'yes' (interested), 'no' (declined) or '' (neither is clear). */
+export function replyTone(text: string): "yes" | "no" | "" {
+  const body = stripQuoted(text);
+  if (!body) return "";
+  const parts = sentences(body);
+  if (parts.some((s) => !conditional(s) && DECLINE.some((re) => re.test(s)))) return "no";
+  if (parts.some((s) => YES.some((re) => re.test(s)))) return "yes";
+  return "";
+}

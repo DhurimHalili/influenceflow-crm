@@ -4,7 +4,7 @@ import { useAuth } from "../contexts/AuthContext";
 import { useGmail } from "../contexts/GmailContext";
 import { useToast } from "../contexts/ToastContext";
 import { hasSupabase, supabase } from "../lib/supabase";
-import { compact, dateLabel, relativeTime } from "../lib/utils";
+import { compact, dateLabel, malePct, pctText, relativeTime } from "../lib/utils";
 import type { AudienceSnapshot, Creator, CreatorFile } from "../types";
 import { Button } from "./ui";
 
@@ -27,7 +27,7 @@ const kb = (n: number) => (n > 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB
 function Bars({ items, label }: { items: { name: string; pct: number }[]; label: string }) {
   if (!items.length) return null;
   const max = Math.max(...items.map((i) => i.pct), 1);
-  return <div className="aud-bars"><span>{label}</span>{items.slice(0, 6).map((i) => <div key={i.name}><em>{i.name}</em><i><b style={{ width: `${(i.pct / max) * 100}%` }} /></i><strong>{Math.round(i.pct)}%</strong></div>)}</div>;
+  return <div className="aud-bars"><span>{label}</span>{items.slice(0, 6).map((i) => <div key={i.name}><em>{i.name}</em><i><b style={{ width: `${(i.pct / max) * 100}%` }} /></i><strong>{pctText(i.pct)}%</strong></div>)}</div>;
 }
 
 function AudienceCard({ snap, verified }: { snap: AudienceSnapshot; verified: boolean }) {
@@ -42,7 +42,7 @@ function AudienceCard({ snap, verified }: { snap: AudienceSnapshot; verified: bo
     </div>
     <Bars label="Top countries" items={snap.top_countries.map((c) => ({ name: c.country, pct: c.pct }))} />
     <Bars label="Ages" items={snap.age_ranges.map((a) => ({ name: a.range, pct: a.pct }))} />
-    {female > 0 && <div className="aud-gender"><span>Gender</span><i><b style={{ width: `${female}%` }} /></i><small><em className="f">Female {Math.round(female)}%</em><em className="m">Male {Math.round(100 - female)}%</em></small></div>}
+    {female > 0 && <div className="aud-gender"><span>Gender</span><i><b style={{ width: `${female}%` }} /></i><small><em className="f">Female {pctText(female)}%</em><em className="m">Male {pctText(malePct(snap))}%</em></small></div>}
   </div>;
 }
 

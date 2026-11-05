@@ -1,5 +1,5 @@
 // Run: node --experimental-strip-types supabase/functions/_shared/replyReader.test.ts
-import { classifyIncoming, myReplyIntent, quotedOwnDate, stripQuoted } from "./replyReader.ts";
+import { classifyIncoming, myReplyIntent, quotedOwnDate, replyTone, stripQuoted } from "./replyReader.ts";
 
 let fail = 0;
 const check = (name: string, got: unknown, want: unknown) => {
@@ -39,5 +39,9 @@ check("bump quotes own email", d ? [d.getFullYear(), d.getMonth(), d.getDate(), 
 check("quote of them is not own", quotedOwnDate("Thanks! On Mon, Nov 2, 2026 at 3:52 PM mitchell fane <aussietechbuilds@gmail.com> wrote: Yes", own), null);
 check("strip quoted", stripQuoted("Great. On Mon, Nov 2, 2026 at 3:52 PM X <x@y.com> wrote: old"), "Great.");
 
+check("tone: interested", replyTone("Yes, I would be interested. On Thu, Oct 29, 2026 at 4:28 PM X <x@y.com> wrote: hey"), "yes");
+check("tone: rates sent", replyTone("Yes I have attached my metrics. My rate is currently $500 for a 2-3 minute integration."), "yes");
+check("tone: declined", replyTone("Thanks but we're not interested right now."), "no");
+check("tone: neutral", replyTone("Got it, thanks."), "");
 console.log(fail ? `${fail} failed` : "all passed");
 if (typeof process !== "undefined") process.exit(fail ? 1 : 0);

@@ -18,6 +18,7 @@ export type PriceHit = { key: RateKey; amount: number; currency: string; quote: 
 export type PriceReading = { stated: PriceHit[]; agreed: PriceHit[] };
 
 const FORMATS: [RateKey, RegExp][] = [
+  ["bundle", /\b(bundles?|packages?|combo)\b|\b(integration|video|short|reel|tiktok|post|story)s?\s*\+\s*\w/i],
   ["dedicated", /\b(dedicated|full|whole|entire)\s+(youtube\s+)?(video|review|upload|episode)\b|\bdedicated\b/i],
   ["video", /\b(integrat(ed|ion|ions)|sponsor(ed)?\s+(segment|spot|slot|read|mention)|ad\s+(read|spot|segment)|(60|90|30)\s*-?\s*s(ec(ond)?s?)?\s+(spot|segment|integration|mention)|mid-?roll|pre-?roll|shout-?out|mention)\b/i],
   ["short", /\b(shorts?|reels?|tik\s?toks?|yt\s+short|vertical\s+video)\b/i],
@@ -34,9 +35,21 @@ const FORMATS: [RateKey, RegExp][] = [
 
 const MONEY = /(?:(?<pre>[$€£]|\b(?:usd|eur|gbp|us\$)\s?)\s?(?<a>\d{1,3}(?:[,.\s]\d{3})+|\d+(?:[.,]\d{1,2})?)\s?(?<ka>k\b)?|(?<b>\d{1,3}(?:[,.\s]\d{3})+|\d+(?:[.,]\d{1,2})?)\s?(?<kb>k\b)?\s?(?<post>[$€£]|\b(?:usd|eur|gbp|dollars?|euros?|pounds?)\b))/gi;
 const RANGE = /(\d[\d,.\s]*k?)\s*(?:-|–|—|to)\s*[$€£]?\s*\d/i;
+// "60–90 sec", "(2-3 min)", "30s", "a 2 minute" — a length, not a price range.
+const DURATION = /\(?\s*(\d{1,3})(?:\s*(?:-|–|—|to)\s*(\d{1,3}))?\s*-?\s*(sec(?:ond)?s?|s|min(?:ute)?s?)\b\s*\)?/gi;
+/** The longest length a sentence mentions, in seconds (0 = none). */
+const secondsIn = (sentence: string) => {
+  let longest = 0;
+  for (const m of sentence.matchAll(DURATION)) {
+    const n = Number(m[2] || m[1]);
+    longest = Math.max(longest, /^m/i.test(m[3]) ? n * 60 : n);
+  }
+  return longest;
+};
+const withoutDurations = (sentence: string) => sentence.replace(DURATION, " ");
 const PER_UNIT = /\b(cpm|cpv|cpc|cpa|per\s+(1,?000|thousand|view|click|sale|sign-?up|install)|\/\s?(view|click|1k)|rev(enue)?\s*share|commission|%)/i;
 const THEIR_OFFER = /\b(your|you['’]?re|you\s+(offered|proposed|mentioned|said|quoted)|budget|offer(ed)?|too\s+low|below|lowball)\b/i;
-const YES = /\b(works?\s+for\s+(me|us)|that\s+works|sounds\s+(good|great|fair|perfect)|(it['’]?s\s+a\s+|we\s+have\s+a\s+)?deal\b|agreed|i\s+agree|we\s+agree|happy\s+(to|with)|(i|we)\s+(can|could|will)\s+(do|go\s+with|accept|work\s+with)|let['’]?s\s+(do|go|lock|proceed)|confirm(ed)?|accept(ed)?|fine\s+(by|with)\s+(me|us)|i['’]?m\s+(in|good\s+with|ok(ay)?\s+with)|ok(ay)?\s+(for|with|at))\b/i;
+const YES = /\b(works?\s+for\s+(me|us)|that\s+works|(sounds|looks)\s+(good|great|fair|perfect|fine)|(it['’]?s\s+a\s+|we\s+have\s+a\s+)?deal\b|agreed|i\s+agree|we\s+agree|happy\s+(to|with)|(i|we)\s+(can|could|will)\s+(do|go\s+with|accept|work\s+with)|let['’]?s\s+(do|go|lock|proceed)|confirm(ed)?|accept(ed)?|fine\s+(by|with)\s+(me|us)|i['’]?m\s+(in|good\s+with|ok(ay)?\s+with)|ok(ay)?\s+(for|with|at))\b/i;
 const COUNTER = /\b(but|however|instead|unfortunately|minimum|at\s+least|lowest|can['’]?t|cannot|could\s+not|couldn['’]?t|won['’]?t|would\s+need|need\s+at|if\s+you|unless|counter|how\s+about|what\s+about|could\s+you|would\s+you|not\s+able|unable)\b/i;
 
 const CURRENCY = (marker: string) => {
@@ -66,6 +79,22 @@ export const ownText = (body: string) => {
   return out.join("\n").slice(0, 8000);
 };
 
+/**
+ * The one format a sentence is about, or null. "Dedicated short-form" is a short;
+ * an integration of 2+ minutes is an extended integration; "bundle" / "A + B" is a bundle.
+ */
+const formatOf = (sentence: string): RateKey | null => {
+  const plain = withoutDurations(sentence);
+  const found = FORMATS.filter(([, re]) => re.test(plain)).map(([key]) => key);
+  if (!found.length) return null;
+  if (found.includes("bundle")) return "bundle";
+  if (found.includes("dedicated") && found.includes("short") && /dedicated\s+(yt\s+|youtube\s+)?(shorts?|short-form|reels?|tik\s?toks?|vertical)/i.test(plain)) return "short";
+  if (found.includes("dedicated")) return "dedicated";
+  if (found.length !== 1) return null;
+  if (found[0] === "video" && (secondsIn(sentence) >= 120 || /\b(extended|long(er)?)\s+(youtube\s+)?integration/i.test(plain))) return "extended";
+  return found[0];
+};
+
 const sentences = (text: string) =>
   text.split(/\n+/).flatMap((line) => line.split(/(?<=[.!])\s+(?=[A-Z])/)).map((s) => s.trim()).filter((s) => s.length > 2 && s.length < 400);
 
@@ -73,17 +102,16 @@ export function readPrices(body: string): PriceReading {
   const stated: PriceHit[] = [];
   const agreed: PriceHit[] = [];
   for (const sentence of sentences(ownText(body))) {
-    if (sentence.includes("?") || RANGE.test(sentence) || PER_UNIT.test(sentence)) continue;
-    const money = Array.from(sentence.matchAll(MONEY));
+    const plain = withoutDurations(sentence);
+    if (sentence.includes("?") || RANGE.test(plain) || PER_UNIT.test(plain)) continue;
+    const money = Array.from(plain.matchAll(MONEY));
     if (money.length !== 1) continue;
     const m = money[0].groups || {};
     const amount = parseAmount(m.a || m.b || "", !!(m.ka || m.kb));
     if (amount < 25 || amount > 1_000_000) continue;
-    const formats = FORMATS.filter(([, re]) => re.test(sentence)).map(([key]) => key);
-    // "dedicated video" also matches the generic patterns of other formats — keep the most specific.
-    const keys = formats.includes("dedicated") ? ["dedicated" as RateKey] : formats;
-    if (keys.length !== 1) continue;
-    const hit = { key: keys[0], amount, currency: CURRENCY(m.pre || m.post || "$"), quote: sentence.slice(0, 300) };
+    const key = formatOf(sentence);
+    if (!key) continue;
+    const hit = { key, amount, currency: CURRENCY(m.pre || m.post || "$"), quote: sentence.slice(0, 300) };
     if (YES.test(sentence) && !COUNTER.test(sentence)) agreed.push(hit);
     else if (!THEIR_OFFER.test(sentence)) stated.push(hit);
   }
@@ -106,16 +134,45 @@ export const isPlainYes = (body: string) => {
 export function readOffer(body: string): PriceHit | null {
   const hits: PriceHit[] = [];
   for (const sentence of sentences(ownText(body))) {
-    if (RANGE.test(sentence) || PER_UNIT.test(sentence)) continue;
-    const money = Array.from(sentence.matchAll(MONEY));
+    const plain = withoutDurations(sentence);
+    if (RANGE.test(plain) || PER_UNIT.test(plain)) continue;
+    const money = Array.from(plain.matchAll(MONEY));
     if (!money.length) continue;
     if (money.length > 1) return null;
     const m = money[0].groups || {};
     const amount = parseAmount(m.a || m.b || "", !!(m.ka || m.kb));
-    const formats = FORMATS.filter(([, re]) => re.test(sentence)).map(([key]) => key);
-    const keys = formats.includes("dedicated") ? ["dedicated" as RateKey] : formats;
-    if (amount < 25 || amount > 1_000_000 || keys.length !== 1) return null;
-    hits.push({ key: keys[0], amount, currency: CURRENCY(m.pre || m.post || "$"), quote: sentence.slice(0, 300) });
+    const key = formatOf(sentence);
+    if (amount < 25 || amount > 1_000_000 || !key) return null;
+    hits.push({ key, amount, currency: CURRENCY(m.pre || m.post || "$"), quote: sentence.slice(0, 300) });
   }
   return hits.length === 1 ? hits[0] : null;
+}
+
+/**
+ * What YOUR email says about money, read against their asking prices:
+ *   accepted — you said yes to a price they asked ("The $500 looks good")
+ *   offer    — you proposed a price of your own ("I can work with $1,400 for the integration")
+ * A yes to an amount that isn't one of their prices is an offer, never an agreement.
+ */
+export function readMine(body: string, theirPrices: Partial<Record<RateKey, number>>): { accepted: PriceHit | null; offer: PriceHit | null } {
+  let accepted: PriceHit | null = null;
+  let offer: PriceHit | null = null;
+  for (const sentence of sentences(ownText(body))) {
+    const plain = withoutDurations(sentence);
+    if (RANGE.test(plain) || PER_UNIT.test(plain)) continue;
+    const money = Array.from(plain.matchAll(MONEY));
+    if (money.length !== 1) continue;
+    const m = money[0].groups || {};
+    const amount = parseAmount(m.a || m.b || "", !!(m.ka || m.kb));
+    if (amount < 25 || amount > 1_000_000) continue;
+    const named = formatOf(sentence);
+    const theirs = (Object.keys(theirPrices) as RateKey[]).filter((k) => theirPrices[k] === amount);
+    const key = named || (theirs.length === 1 ? theirs[0] : null);
+    if (!key) continue;
+    const hit = { key, amount, currency: CURRENCY(m.pre || m.post || "$"), quote: sentence.slice(0, 300) };
+    const yes = YES.test(plain) && !COUNTER.test(plain) && !sentence.includes("?");
+    if (yes && theirPrices[key] === amount) accepted = accepted || hit;
+    else offer = offer || hit;
+  }
+  return { accepted, offer: accepted ? null : offer };
 }

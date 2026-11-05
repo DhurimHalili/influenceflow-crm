@@ -15,14 +15,14 @@
 //
 // Pure TypeScript: no Deno or DOM APIs.
 
-export type RateKey = "video" | "dedicated" | "short" | "post" | "carousel" | "story" | "stream" | "podcast" | "ugc" | "link_in_bio" | "usage_rights" | "exclusivity";
-export const RATE_KEYS: RateKey[] = ["video", "dedicated", "short", "post", "carousel", "story", "stream", "podcast", "ugc", "link_in_bio", "usage_rights", "exclusivity"];
+export type RateKey = "video" | "extended" | "dedicated" | "bundle" | "short" | "post" | "carousel" | "story" | "stream" | "podcast" | "ugc" | "link_in_bio" | "usage_rights" | "exclusivity";
+export const RATE_KEYS: RateKey[] = ["video", "extended", "dedicated", "bundle", "short", "post", "carousel", "story", "stream", "podcast", "ugc", "link_in_bio", "usage_rights", "exclusivity"];
 export const RATE_SHORT: Record<RateKey, string> = {
-  video: "Integrated", dedicated: "Dedicated", short: "Short", post: "Post", carousel: "Carousel", story: "Stories",
+  video: "Integrated", extended: "Extended integration", dedicated: "Dedicated", bundle: "Bundle", short: "Short", post: "Post", carousel: "Carousel", story: "Stories",
   stream: "Stream", podcast: "Podcast", ugc: "UGC", link_in_bio: "Link in bio", usage_rights: "Usage rights", exclusivity: "Exclusivity",
 };
 /** Formats that move together when only one of them is negotiated. */
-export const RATE_FAMILIES: RateKey[][] = [["video", "dedicated"]];
+export const RATE_FAMILIES: RateKey[][] = [["video", "extended", "dedicated"]];
 
 export type RateSource = "email" | "manual" | "media_kit";
 export type RateStatus = "list" | "negotiated" | "auto";

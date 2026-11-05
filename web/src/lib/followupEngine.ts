@@ -39,16 +39,37 @@ export type Touch = { id: string; at: string; dir: "out" | "in"; source: TouchSo
   /** Shown and counted, but doesn't move the follow-up clock. */
   quiet?: boolean };
 
-export type FollowupState =
+/**
+ * Several email threads with one person (after 4 follow-ups you start a fresh
+ * one). Reminders follow ONE thread: the one you chose, else the one with the
+ * latest activity; the others are shown and counted but stay quiet.
+ */
+export type ThreadInfo = {
+  /** The thread reminders follow. */
+  active: string;
+  /** How many threads you started with them. */
+  count: number;
+  /** The thread you started last. */
+  newest: string;
+  /** Ask which thread to continue in: the conversation moved back to an older one, or you have two going. */
+  ask: boolean;
+  /** They answered in another thread than the one you chose. */
+  otherReply?: Touch;
+};
+
+/** What happens when the clock runs out: another follow-up, or (after the cap) a fresh thread. */
+export type NextStep = "followup" | "new-thread";
+
+export type FollowupState = ({ thread?: ThreadInfo }) & (
   | { kind: "idle"; reason: "no-contact" | "paused" | "closed" | "snoozed"; touches: Touch[]; until?: string; cancel?: Touch }
   | { kind: "reply-needed"; since: string; days: number; touches: Touch[]; last: Touch; cancel?: Touch }
-  | { kind: "waiting"; round: number; due: string; last: Touch; touches: Touch[]; cancel?: Touch }
-  | { kind: "due"; round: number; due: string; overdueDays: number; last: Touch; touches: Touch[]; cancel?: Touch }
+  | { kind: "waiting"; round: number; due: string; last: Touch; touches: Touch[]; cancel?: Touch; next?: NextStep }
+  | { kind: "due"; round: number; due: string; overdueDays: number; last: Touch; touches: Touch[]; cancel?: Touch; next?: NextStep }
   | { kind: "exhausted"; round: number; last: Touch; touches: Touch[]; cancel?: Touch }
   /** Their management / an autoresponder declined by email: reach them on another channel. */
   | { kind: "managed"; since: string; last: Touch; touches: Touch[]; cancel?: Touch }
   /** They said no a while ago (Denied): time to try again. */
-  | { kind: "reach-back"; since: string; due: string; touches: Touch[]; reason: string; cancel?: Touch };
+  | { kind: "reach-back"; since: string; due: string; touches: Touch[]; reason: string; cancel?: Touch });
 
 /** Statuses where nobody needs chasing. */
 export const NOT_CHASED: EntityStatus[] = ["denied", "signed", "roster"];
@@ -97,7 +118,37 @@ export const dueDate = (sent: Date, round: number, rules: FollowupRules) => addB
 
 // ----- timeline ------------------------------------------------------------------
 
-type Target = { type: "creator" | "brand"; record: Pick<Creator, "id" | "pipeline_status" | "date_contacted" | "archived_at"> & { followup_snooze_until?: string | null; contact_channel?: string; email_followups?: boolean; lost_at?: string | null; lost_reason?: string; status_updated_at?: string } };
+type Target = { type: "creator" | "brand"; record: Pick<Creator, "id" | "pipeline_status" | "date_contacted" | "archived_at"> & { followup_snooze_until?: string | null; contact_channel?: string; email_followups?: boolean; lost_at?: string | null; lost_reason?: string; status_updated_at?: string; primary_thread?: string; primary_thread_at?: string | null; new_thread_gap?: number | null } };
+
+/** Which thread reminders follow (influencers only; a brand's people each have their own threads). Marks the others quiet. */
+function threadView(target: Target, touches: Touch[]): ThreadInfo | undefined {
+  if (target.type !== "creator") return undefined;
+  const mail = touches.filter((t) => t.source === "gmail" && t.threadId && !t.crossed);
+  const started = new Map<string, string>();
+  for (const t of mail) if (t.dir === "out" && !started.has(t.threadId!)) started.set(t.threadId!, t.at);
+  if (started.size < 2) return undefined;
+  const lastAct = new Map<string, string>();
+  for (const t of mail) if (!(t.dir === "in" && t.kind === "auto")) lastAct.set(t.threadId!, t.at);
+  const newest = [...started.entries()].sort((a, b) => a[1].localeCompare(b[1])).pop()![0];
+  const chosen = target.record.primary_thread || "";
+  const chosenAt = target.record.primary_thread_at || "";
+  // Your choice holds — until you start a thread after making it.
+  const keep = !!chosen && lastAct.has(chosen) && !(newest !== chosen && started.get(newest)! > chosenAt);
+  const active = keep ? chosen : [...lastAct.entries()].sort((a, b) => a[1].localeCompare(b[1])).pop()![0];
+  for (const t of touches) if (t.source === "gmail" && t.threadId && t.threadId !== active) t.quiet = true;
+  let otherReply: Touch | undefined;
+  if (keep) {
+    for (const t of mail) {
+      if (t.threadId === active || t.dir !== "in" || t.kind === "auto" || t.at <= chosenAt) continue;
+      const answered = mail.some((o) => o.threadId === t.threadId && o.dir === "out" && o.at > t.at);
+      if (!answered) otherReply = t;
+    }
+  }
+  // Ask once you've answered there (the banner says "reply there, then choose" until then).
+  const lastInActive = [...mail].reverse().find((t) => t.threadId === active && !(t.dir === "in" && t.kind === "auto"));
+  const ask = keep ? [...lastAct.entries()].some(([tid, at]) => tid !== active && at > chosenAt) : active !== newest && lastInActive?.dir === "out";
+  return { active, count: started.size, newest, ask, otherReply };
+}
 
 export const CHANNEL_LABELS: Record<string, string> = { email: "Email", dm: "Instagram DM", tiktok: "TikTok DM", whatsapp: "WhatsApp", call: "Call", linkedin: "LinkedIn", other: "Other" };
 
@@ -194,35 +245,44 @@ export function followupState(target: Target, followups: Followup[], events: Ema
     if (now < due) return { kind: "idle", reason: "closed", touches, until: dayKey(due) };
     return { kind: "reach-back", since, due: dayKey(due), touches, reason: target.record.lost_reason || "" };
   }
-  if (NOT_CHASED.includes(status)) return { kind: "idle", reason: "paused", touches };
-  if (snoozed) return { kind: "idle", reason: "snoozed", touches, until: snooze!, cancel };
+  const thread = threadView(target, touches);
+  if (NOT_CHASED.includes(status)) return { kind: "idle", reason: "paused", touches, thread };
+  if (snoozed) return { kind: "idle", reason: "snoozed", touches, until: snooze!, cancel, thread };
+  // They answered in another thread than the one you chose: your turn there.
+  if (thread?.otherReply) return { kind: "reply-needed", since: thread.otherReply.at, days: businessDaysBetween(new Date(thread.otherReply.at), now, rules), touches, last: thread.otherReply, cancel, thread };
   let live = touches.filter((t) => !t.quiet);
   // Their management (or an autoresponder) declined: email is a dead end until
   // something happens on another channel — or a real reply comes in.
   const managedAt = live.map((t) => t.kind).lastIndexOf("managed_no");
   if (managedAt >= 0) {
     const after = live.slice(managedAt + 1).filter((t) => !(t.dir === "out" && t.channel === "email"));
-    if (!after.length) return { kind: "managed", since: live[managedAt].at, last: live[managedAt], touches, cancel };
+    if (!after.length) return { kind: "managed", since: live[managedAt].at, last: live[managedAt], touches, cancel, thread };
     live = after;
   }
   const last = live[live.length - 1];
-  if (!last) return { kind: "idle", reason: "no-contact", touches, cancel };
+  if (!last) return { kind: "idle", reason: "no-contact", touches, cancel, thread };
   if (last.dir === "in") {
-    return { kind: "reply-needed", since: last.at, days: businessDaysBetween(new Date(last.at), now, rules), touches, last, cancel };
+    return { kind: "reply-needed", since: last.at, days: businessDaysBetween(new Date(last.at), now, rules), touches, last, cancel, thread };
   }
   // Round = how many messages you've sent since their last reply (1 = first email).
   let round = 0;
   for (let i = live.length - 1; i >= 0 && live[i].dir === "out"; i--) round++;
   const followupsSent = round - 1;
-  if (rules.stop_after > 0 && followupsSent >= rules.stop_after) return { kind: "exhausted", round, last, touches, cancel };
+  // After the cap (4 by default) of email follow-ups in one thread, the next
+  // step is a fresh thread, not another follow-up — after its own wait.
+  const cap = rules.thread_cap ?? 4;
+  const byEmail = last.channel === "email" || last.source === "legacy";
+  const next: NextStep = cap > 0 && byEmail && followupsSent >= cap ? "new-thread" : "followup";
+  if (next === "followup" && rules.stop_after > 0 && followupsSent >= rules.stop_after) return { kind: "exhausted", round, last, touches, cancel, thread };
   // A scheduled email hasn't gone out yet: the clock starts once it does.
   const from = last.scheduled && new Date(last.at) < now ? now : new Date(last.at);
-  const due = dueDate(from, round, rules);
-  if (last.scheduled) return { kind: "waiting", round, due: dayKey(due), last, touches, cancel };
+  const gap = target.record.new_thread_gap ?? rules.new_thread_gap ?? 1;
+  const due = next === "new-thread" ? addBusinessDays(from, gap + 1, rules) : dueDate(from, round, rules);
+  if (last.scheduled) return { kind: "waiting", round, due: dayKey(due), last, touches, cancel, next, thread };
   const today = new Date(now);
   today.setHours(0, 0, 0, 0);
-  if (today >= due) return { kind: "due", round, due: dayKey(due), overdueDays: businessDaysBetween(due, today, rules), last, touches, cancel };
-  return { kind: "waiting", round, due: dayKey(due), last, touches, cancel };
+  if (today >= due) return { kind: "due", round, due: dayKey(due), overdueDays: businessDaysBetween(due, today, rules), last, touches, cancel, next, thread };
+  return { kind: "waiting", round, due: dayKey(due), last, touches, cancel, next, thread };
 }
 
 // ----- words ---------------------------------------------------------------------
@@ -263,7 +323,7 @@ export const sendsAt = (iso: string, now = new Date()) => {
   return `${date} ${time}`;
 };
 
-export type Flag = { tone: "due" | "reply" | "wait" | "sched" | "muted" | "managed" | "reach"; short: string; long: string };
+export type Flag = { tone: "due" | "reply" | "wait" | "sched" | "muted" | "managed" | "reach" | "thread"; short: string; long: string };
 
 const agoWords = (iso: string) => {
   const days = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 86400000));
@@ -282,8 +342,10 @@ export function flagFor(state: FollowupState): Flag | null {
     case "reach-back":
       return { tone: "reach", short: "Reach back", long: `They passed ${agoWords(state.since)}${state.reason ? ` — ${state.reason.toLowerCase()}` : ""}. Their calendar may have room again: try them at the same price or better.` };
     case "due":
+      if (state.next === "new-thread") return { tone: "thread", short: state.overdueDays > 0 ? `New thread · ${state.overdueDays}d late` : "Start a new thread", long: `${state.round - 1} follow-ups and no reply in this thread — start a fresh email with a new subject instead of another follow-up` };
       return { tone: "due", short: state.overdueDays > 0 ? `Follow up · ${state.overdueDays}d late` : "Follow up today", long: `No reply to ${roundLabel(state.round, state.last.channel)} — send your ${nextFollowupLabel(state.round)}${state.overdueDays > 0 ? ` (due ${state.overdueDays} business day${state.overdueDays === 1 ? "" : "s"} ago)` : " today"}` };
     case "reply-needed":
+      if (state.thread && (state.thread.otherReply || state.last.threadId !== state.thread.newest) && state.last.source === "gmail") return { tone: "reply", short: state.days > 0 ? `Old thread reply · ${state.days}d` : "Replied in old thread", long: `They answered in an older email thread${state.days > 0 ? ` ${state.days} business day${state.days === 1 ? "" : "s"} ago` : " today"}, not in your newest one — reply there, then choose which thread to continue in` };
       if (state.last.kind === "no") return { tone: "reply", short: "They passed", long: `They said no ${state.days > 0 ? `${state.days} business day${state.days === 1 ? "" : "s"} ago` : "today"} — thank them and mark them Denied; you'll get a reminder to reach back in a month` };
       return { tone: "reply", short: state.days > 0 ? `Reply · ${state.days}d` : "Reply needed", long: `${state.last.kind === "team" ? "Their team" : "They"} wrote ${state.days > 0 ? `${state.days} business day${state.days === 1 ? "" : "s"} ago` : "today"} — your turn to answer` };
     case "waiting": {
@@ -291,7 +353,8 @@ export function flagFor(state: FollowupState): Flag | null {
         const when = sendsAt(state.last.at);
         return { tone: "sched", short: when ? `Scheduled · ${when}` : "Scheduled", long: `${roundLabel(state.round, state.last.channel).replace(/^your/, "Your")} is scheduled in Gmail${when ? ` — it sends ${when}` : ""}. It counts as done; cancel it in Gmail and the reminder comes back.` };
       }
-      return { tone: "wait", short: `Follow up ${weekday(state.due)}`, long: `Waiting for a reply to ${roundLabel(state.round, state.last.channel)} — follow up ${weekday(state.due)} if they stay quiet` };
+      if (state.next === "new-thread") return { tone: "wait", short: `New thread ${weekday(state.due)}`, long: `That was your ${ordinal(state.round - 1)} follow-up in this thread — no more follow-ups here. If they stay quiet, start a new thread ${weekday(state.due)}` };
+      return { tone: "wait", short: `Follow up ${weekday(state.due)}`, long: `Waiting for a reply to ${roundLabel(state.round, state.last.channel)}${state.thread && state.round === 1 && state.thread.active === state.thread.newest ? " in your new thread" : ""} — follow up ${weekday(state.due)} if they stay quiet` };
     }
     case "exhausted":
       return { tone: "muted", short: "No reply", long: `No reply after ${state.round - 1} follow-ups — consider marking them No reply` };
@@ -304,11 +367,14 @@ export function flagFor(state: FollowupState): Flag | null {
 export const cadencePreview = (rules: FollowupRules, start = nextWorkday(new Date(), rules), steps = 5) => {
   const out: { label: string; date: Date }[] = [{ label: "First email", date: start }];
   let sent = start;
-  for (let round = 1; round <= steps; round++) {
+  const cap = rules.thread_cap ?? 4;
+  const last = cap > 0 ? cap : steps;
+  for (let round = 1; round <= last; round++) {
     if (rules.stop_after > 0 && round > rules.stop_after) break;
     sent = dueDate(sent, round, rules);
     out.push({ label: `${ordinal(round)} follow-up`, date: sent });
   }
+  if (cap > 0 && out.length === cap + 1) out.push({ label: "Start a new thread", date: addBusinessDays(sent, (rules.new_thread_gap ?? 1) + 1, rules) });
   return out;
 };
 

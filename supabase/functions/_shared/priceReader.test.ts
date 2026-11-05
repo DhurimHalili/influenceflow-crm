@@ -1,5 +1,5 @@
 // Run: node --experimental-strip-types supabase/functions/_shared/priceReader.test.ts
-import { isPlainYes, readOffer, readPrices } from "./priceReader.ts";
+import { isPlainYes, readMine, readOffer, readPrices } from "./priceReader.ts";
 
 let fail = 0;
 const eq = (name: string, got: unknown, want: unknown) => {
@@ -29,5 +29,32 @@ eq("yes with counter is not plain", isPlainYes("Sounds good but I'd need more ti
 eq("question is not plain yes", isPlainYes("Sounds good, when do you need it?"), false);
 eq("offer read", readOffer("Hi Matt,\nWould you do $2,500 for the integration?\nBest")?.amount, 2500);
 eq("two offers = ambiguous", readOffer("We can do $2,500 for the integration.\nAnd $600 for a short."), null);
+
+// ---- real emails -------------------------------------------------------------
+const fluxphy = `Hi Dhurim,
+
+Thanks for reaching out!
+
+I'm definitely interested in exploring a paid collaboration with Sihoo and TRYX.
+
+For reference, my current rates for dedicated promotional content are:
+
+🟢 Dedicated Short-Form (Cross-posted to TikTok, YouTube Shorts, Instagram Reels, Facebook, and X): $1,200 USD
+
+🔵 YouTube Integration (60–90 sec): $2,000 USD
+
+🟣 Extended YouTube Integration (2–3 min): $2,500 USD
+
+🟠 Bundle (YouTube Integration + Dedicated Short-Form): $2,800 USD
+
+My current availability for new projects is in November 2026.`;
+eq("fluxphy rate list (durations, dedicated short, bundle)", pick(readPrices(fluxphy)), { stated: [["short", 1200, "USD"], ["video", 2000, "USD"], ["extended", 2500, "USD"], ["bundle", 2800, "USD"]], agreed: [] });
+eq("weenie 2-3 minute integration", pick(readPrices("Yes I have attached my metrics. My rate is currently $500 for a 2-3 minute integration.")), { stated: [["extended", 500, "USD"]], agreed: [] });
+eq("your offer with a duration", readOffer("Hi Seth,\nThanks again for sharing the details.\nI've reviewed the channel performance and audience. For the 60-90 second YouTube integration, I can work with $1,400 for this opportunity.\nI think that would be a fair rate based on the current YouTube reach and recent performance.")?.amount, 1400);
+eq("plain yes with signature", isPlainYes("Sounds good, let's do it.\n\nBest,\nSeth Huston\nFounder, Fluxphy\n🌊 Full Media Kit\n🔴 YouTube: @Fluxphy"), true);
+eq("you accept their price", readMine("Thanks for sending them over. The $500 looks good for a 2-3 minute integration. Could we continue on whatsapp?", { extended: 500 }).accepted?.key, "extended");
+eq("you accept by amount only", readMine("The $500 works for us.", { extended: 500 }).accepted?.key, "extended");
+eq("your counter is an offer, not a yes", JSON.stringify(readMine("For the 60-90 second YouTube integration, I can work with $1,400 for this opportunity.", { video: 2000 })), JSON.stringify({ accepted: null, offer: { key: "video", amount: 1400, currency: "USD", quote: "For the 60-90 second YouTube integration, I can work with $1,400 for this opportunity." } }));
+eq("views with m are not minutes", pick(readPrices("I charge $900 for a short and they get 1.2m views.")), { stated: [["short", 900, "USD"]], agreed: [] });
 
 if (fail) { console.log(`${fail} failed`); (globalThis as { process?: { exit(n: number): void } }).process?.exit(1); } else console.log("all price-reader tests pass");

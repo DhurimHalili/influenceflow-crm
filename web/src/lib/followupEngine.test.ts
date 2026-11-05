@@ -85,5 +85,33 @@ const record = (extra: Record<string, unknown> = {}) => ({ type: "creator" as co
   check("follow-ups counts only chasers (email + DM)", sentIn(log, s, e, "followup"), 2);
 }
 
+// 7. Four follow-ups in one thread → no 5th follow-up: a new thread after the gap.
+{
+  const t = (d: string, extra: Partial<EmailEvent> = {}) => ev("out", d, { thread_id: "A", ...extra });
+  const events = [t("2026-10-19T10:00:00"), t("2026-10-21T10:00:00"), t("2026-10-23T10:00:00"), t("2026-10-27T10:00:00"), t("2026-10-30T10:00:00")];
+  const s1 = followupState(record(), [], events, rules, new Date("2026-11-02T09:00:00"));
+  check("after 4 follow-ups the next step is a new thread", s1.kind === "waiting" || s1.kind === "due" ? s1.next : s1.kind, "new-thread");
+  const s2 = followupState(record(), [], events, rules, new Date("2026-11-03T09:00:00"));
+  check("…due after 1 business day of waiting", [s2.kind, flagFor(s2)?.short], ["due", "Start a new thread"]);
+  const s3 = followupState(record({ new_thread_gap: 3 }), [], events, rules, new Date("2026-11-03T09:00:00"));
+  check("per-influencer wait for the new thread", s3.kind, "waiting");
+  // New thread started → follow-ups start over there; the old thread goes quiet.
+  const fresh = ev("out", "2026-11-03T10:00:00", { thread_id: "B" });
+  const s4 = followupState(record(), [], [...events, fresh], rules, new Date("2026-11-03T12:00:00"));
+  check("new thread starts round 1", s4.kind === "waiting" ? [s4.round, s4.thread?.active] : s4.kind, [1, "B"]);
+  // They reply in the OLD thread → reply needed, flagged, and you're asked which thread continues.
+  const oldReply = ev("in", "2026-11-04T09:00:00", { thread_id: "A" });
+  const s5 = followupState(record(), [], [...events, fresh, oldReply], rules, new Date("2026-11-04T10:00:00"));
+  check("reply in the old thread", [s5.kind, flagFor(s5)?.short, s5.thread?.ask], ["reply-needed", "Replied in old thread", false]);
+  const answer = ev("out", "2026-11-04T11:00:00", { thread_id: "A" });
+  const s5b = followupState(record(), [], [...events, fresh, oldReply, answer], rules, new Date("2026-11-04T12:00:00"));
+  check("after you answer there, you're asked which thread continues", [s5b.kind, s5b.thread?.active, s5b.thread?.ask], ["waiting", "A", true]);
+  // You choose the new thread: reminders follow it, an unanswered old-thread reply still needs you.
+  const s6 = followupState(record({ primary_thread: "B", primary_thread_at: "2026-11-04T08:00:00" }), [], [...events, fresh, oldReply], rules, new Date("2026-11-04T10:00:00"));
+  check("chosen thread + their reply elsewhere = reply needed", [s6.kind, s6.thread?.active], ["reply-needed", "B"]);
+  const log = outreachLog({ creators: [{ id: "c1", name: "W", pipeline_status: "contacted", date_contacted: "2026-10-19", archived_at: null } as never], brands: [], followups: [], events: [...events, fresh] });
+  check("a new thread's first email is an email, not a follow-up", [log.filter((x) => x.kind === "email").length, log.filter((x) => x.kind === "followup").length], [2, 4]);
+}
+
 console.log(fail ? `${fail} failed` : "all passed");
 if (fail) throw new Error(`${fail} failed`);

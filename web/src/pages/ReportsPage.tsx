@@ -1,5 +1,5 @@
 import { BestTimeCard } from "../components/Insights";
-import { BarChart3, Clock3, HandCoins, Inbox, Mail, Reply, Send, Target, TrendingDown, Trophy } from "lucide-react";
+import { BarChart3, Clock3, Ghost, HandCoins, Inbox, Mail, MailPlus, Reply, Send, Smile, Target, ThumbsDown, TrendingDown, Trophy, Users } from "lucide-react";
 import { useMemo } from "react";
 import { Link } from "react-router-dom";
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
@@ -10,6 +10,7 @@ import { useSessionState } from "../hooks/useSessionState";
 import { profitOf } from "../lib/deal";
 import { businessDaysBetween, timeline } from "../lib/followupEngine";
 import { mailboxStats } from "../lib/mailboxStats";
+import { declined, replyTone } from "../lib/replyReader";
 import { DEFAULT_FOLLOWUP_RULES } from "../lib/prefs";
 import { lossReasonLabel, money } from "../lib/utils";
 import type { Activity, Brand, Creator, EntityStatus } from "../types";
@@ -57,7 +58,9 @@ export default function ReportsPage() {
     ];
     const people = items.map((item) => {
       // An out-of-office or a management auto-decline isn't a reply.
-      const touches = timeline({ type: item.type, record: item.record as Creator }, data.followups, events).filter((t) => !(t.dir === "in" && (t.kind === "auto" || t.kind === "managed_no")));
+      const all = timeline({ type: item.type, record: item.record as Creator }, data.followups, events);
+      const managedNo = all.some((t) => t.dir === "in" && t.kind === "managed_no");
+      const touches = all.filter((t) => !(t.dir === "in" && (t.kind === "auto" || t.kind === "managed_no")));
       const first = touches[0];
       const inbound = item.record.pipeline_status === "inbound" || first?.dir === "in";
       const firstOut = touches.find((t) => t.dir === "out");
@@ -77,7 +80,14 @@ export default function ReportsPage() {
       const wonAt = rank === 4 ? wonAct || item.record.status_updated_at : null;
       const startAt = first?.at || null;
       const mailbox = firstOut ? events.find((e) => e.entity_id === item.record.id && e.direction === "out" && e.at === firstOut.at)?.mailbox || "" : "";
-      return { ...item, first, firstOut, firstIn, inbound, outsBefore, rank, wonAt, startAt, mailbox, lost: !!item.record.lost_at && item.record.pipeline_status === "denied" };
+      // How their first real answer read, which thread it came in, and whether they ever answered.
+      const tone: "yes" | "no" | "neutral" | null = !firstIn ? null : firstIn.kind === "no" || declined(firstIn.detail) ? "no" : rank >= 3 || replyTone(firstIn.detail) === "yes" ? "yes" : "neutral";
+      const threadsStarted = Array.from(new Set(touches.filter((t) => t.dir === "out" && t.source === "gmail" && t.threadId).map((t) => t.threadId!)));
+      const replyThread = firstIn?.threadId || "";
+      const replyInNewThread = !!replyThread && threadsStarted.length > 1 && replyThread !== threadsStarted[0];
+      const lastOut = [...touches].reverse().find((t) => t.dir === "out");
+      const ghosted = !inbound && !firstIn && !managedNo && !!lastOut && Date.now() - new Date(lastOut.at).getTime() > 7 * 86400000;
+      return { ...item, first, firstOut, firstIn, inbound, outsBefore, rank, wonAt, startAt, mailbox, lost: !!item.record.lost_at && item.record.pipeline_status === "denied", tone, managedNo, ghosted, threads: threadsStarted.length, replyInNewThread };
     }).filter((p) => p.startAt && new Date(p.startAt).getTime() >= from);
 
     const outreach = people.filter((p) => !p.inbound);
@@ -95,7 +105,26 @@ export default function ReportsPage() {
     const closeDays = side(people).filter((p) => p.wonAt && p.startAt).map((p) => Math.max(0, (new Date(p.wonAt!).getTime() - new Date(p.startAt!).getTime()) / 86400000));
     const replied = outreach.filter((p) => p.firstIn && p.firstOut);
     const replyDays = replied.map((p) => businessDaysBetween(new Date(p.firstOut!.at), new Date(p.firstIn!.at), rules));
-    const byRound = [1, 2, 3, 4].map((round) => ({ name: round === 1 ? "First email" : round === 4 ? "3rd follow-up +" : `${round - 1}${round === 2 ? "st" : "nd"} follow-up`, Replies: replied.filter((p) => (round === 4 ? p.outsBefore >= 4 : p.outsBefore === round)).length }));
+    // Which message they answered, and how: a new thread is its own bucket.
+    const sideReplied = side(replied);
+    const bucket = (p: (typeof replied)[number]) => (p.replyInNewThread ? 6 : Math.min(5, Math.max(1, p.outsBefore)));
+    const byRound = [1, 2, 3, 4, 5, 6].map((b) => {
+      const list = sideReplied.filter((p) => bucket(p) === b);
+      return { name: b === 1 ? "First email" : b === 6 ? "New thread" : b === 5 ? "4th follow-up +" : `${["1st", "2nd", "3rd"][b - 2]} follow-up`, Interested: list.filter((p) => p.tone === "yes").length, "Not interested": list.filter((p) => p.tone === "no").length, Unclear: list.filter((p) => p.tone === "neutral").length };
+    });
+    const cohortSide = side(outreach);
+    const quality = {
+      interested: cohortSide.filter((p) => p.tone === "yes").length,
+      declined: cohortSide.filter((p) => p.tone === "no").length,
+      unclear: cohortSide.filter((p) => p.tone === "neutral").length,
+      managed: cohortSide.filter((p) => !p.firstIn && p.managedNo).length,
+      ghosted: cohortSide.filter((p) => p.ghosted).length,
+      waiting: cohortSide.filter((p) => !p.firstIn && !p.managedNo && !p.ghosted).length,
+      newThreads: cohortSide.filter((p) => p.threads > 1).length,
+      newThreadReplies: cohortSide.filter((p) => p.replyInNewThread).length,
+      oldThreadReplies: cohortSide.filter((p) => p.threads > 1 && p.firstIn && !p.replyInNewThread).length,
+      avgFollowups: sideReplied.length ? Math.round((sideReplied.reduce((n, p) => n + Math.max(0, p.outsBefore - 1), 0) / sideReplied.length) * 10) / 10 : 0,
+    };
 
     const losses = side(people).filter((p) => p.lost);
     const lossReasons = Array.from(losses.reduce((m, p) => m.set(p.record.lost_reason || "", (m.get(p.record.lost_reason || "") || 0) + 1), new Map<string, number>())).sort((a, b) => b[1] - a[1]);
@@ -156,6 +185,7 @@ export default function ReportsPage() {
       lossReasons,
       lostAfterReply: pct(losses.length, Math.max(1, stage(2))),
       byRound,
+      quality,
       byNiche: group((p) => p.niche),
       byCountry: group((p) => p.country),
       revenue: campaigns.reduce((s, c) => s + (c.agreed_payment || 0), 0),
@@ -198,7 +228,18 @@ export default function ReportsPage() {
     {!report.gmail && <p className="report-hint"><Mail size={14} /> Reply data comes from follow-ups and replies you log — <Link to="/app/settings#gmail">connect Gmail</Link> and it fills in by itself.</p>}
 
     <section className="reports-grid">
-      <div className="dash-panel"><div className="panel-heading"><div><span>Follow-ups</span><h2>When people reply</h2></div></div><div className="report-chart"><ResponsiveContainer width="100%" height="100%"><BarChart data={report.byRound} margin={{ top: 10, right: 8, left: -18, bottom: 0 }}><CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--line)" /><XAxis dataKey="name" tick={{ fontSize: 11, fill: "var(--muted)" }} axisLine={false} tickLine={false} /><YAxis allowDecimals={false} tick={{ fontSize: 11, fill: "var(--muted)" }} axisLine={false} tickLine={false} /><Tooltip cursor={{ fill: "var(--surface-alt)" }} contentStyle={{ borderRadius: 10, border: "1px solid var(--line)", background: "var(--surface-solid)" }} /><Bar dataKey="Replies" fill="var(--accent)" radius={[6, 6, 0, 0]} /></BarChart></ResponsiveContainer></div><p className="muted-copy">Which message people answered — proof of what each follow-up is worth.</p></div>
+      <div className="dash-panel wide reply-quality"><div className="panel-heading"><div><span>Replies</span><h2>How people answer</h2></div></div>
+        <div className="quality-tiles">
+          <div className="q-tile q-yes"><Smile size={15} /><strong>{report.quality.interested}</strong><small>Interested</small><em>{pct(report.quality.interested, report.contacted)}% of reached</em></div>
+          <div className="q-tile q-no"><ThumbsDown size={15} /><strong>{report.quality.declined}</strong><small>Not interested</small><em>said no themselves</em></div>
+          <div className="q-tile q-managed"><Users size={15} /><strong>{report.quality.managed}</strong><small>Management / auto no</small><em>reach them on socials</em></div>
+          <div className="q-tile q-ghost"><Ghost size={15} /><strong>{report.quality.ghosted}</strong><small>Ghosted</small><em>no answer for 7+ days</em></div>
+          <div className="q-tile"><Clock3 size={15} /><strong>{report.quality.waiting}</strong><small>Still waiting</small><em>last email under 7 days ago</em></div>
+          <div className="q-tile"><MailPlus size={15} /><strong>{report.quality.newThreads}</strong><small>Got a new thread</small><em>{report.quality.newThreadReplies} answered the new · {report.quality.oldThreadReplies} the old</em></div>
+        </div>
+        <div className="report-chart"><ResponsiveContainer width="100%" height="100%"><BarChart data={report.byRound} margin={{ top: 10, right: 8, left: -18, bottom: 0 }}><CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--line)" /><XAxis dataKey="name" tick={{ fontSize: 11, fill: "var(--muted)" }} axisLine={false} tickLine={false} interval={0} /><YAxis allowDecimals={false} tick={{ fontSize: 11, fill: "var(--muted)" }} axisLine={false} tickLine={false} /><Tooltip cursor={{ fill: "var(--surface-alt)" }} contentStyle={{ borderRadius: 10, border: "1px solid var(--line)", background: "var(--surface-solid)" }} /><Legend wrapperStyle={{ fontSize: 12 }} /><Bar dataKey="Interested" stackId="r" fill="var(--success)" /><Bar dataKey="Not interested" stackId="r" fill="#d9534f" /><Bar dataKey="Unclear" stackId="r" fill="color-mix(in srgb, var(--accent) 45%, var(--line))" radius={[6, 6, 0, 0]} /></BarChart></ResponsiveContainer></div>
+        <p className="muted-copy">Which message people answered and how — {report.quality.avgFollowups ? `on average after ${report.quality.avgFollowups} follow-up${report.quality.avgFollowups === 1 ? "" : "s"}` : "most answer the first email"}. A “new thread” answer came after you started a fresh email.</p>
+      </div>
 
       <div className="dash-panel side-stack">
         <div className="mini-stat"><span className="mini-icon inbound"><Inbox size={15} /></span><div><small>Came to you</small><strong>{report.inbound.count} inbound {who === "creator" ? "influencer" : "brand"}{report.inbound.count === 1 ? "" : "s"}</strong><p>{report.inbound.count ? `${pct(report.inbound.won, report.inbound.count)}% became ${wonWord}` : "None in this range"}{report.inbound.leads ? ` · ${report.inbound.leads} spotted in Gmail, ${report.inbound.leadsAdded} added` : ""}</p></div></div>
