@@ -2,7 +2,7 @@
   "name": "influenceflow-crm",
   "private": true,
   "version": "0.1.0",
-  "description": "Open-source influencer marketing CRM — influencers, brands, campaigns, calendar. Private workspaces.",
+  "description": "Private influencer marketing CRM — influencers, brands, campaigns, follow-ups and Gmail tracking.",
   "type": "module",
   "scripts": {
     "dev": "vite",

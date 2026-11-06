@@ -84,26 +84,28 @@ Deno.serve(async (req) => {
     if (String(input.confirm || "").trim().toLowerCase() !== email.toLowerCase()) return json({ error: "Type the member's email exactly to delete the account." }, 400);
     const { data: target_profile } = await admin.from("profiles").select("role").eq("id", target).maybeSingle();
     if (target_profile?.role === "owner") return json({ error: "The owner account can't be deleted here." }, 400);
-    const { error } = await admin.auth.admin.deleteUser(target);
-    if (error) return json({ error: "Couldn't delete the account — nothing was removed. Try again." }, 502);
-    // Then their private files (database rows went with the account: ON DELETE CASCADE).
-    for (const bucket of ["avatars", "creator-files"]) {
-      for (let round = 0; round < 20; round++) {
-        const { data: objects } = await admin.storage.from(bucket).list(target, { limit: 1000 });
-        if (!objects?.length) break;
-        const paths: string[] = [];
-        for (const o of objects) {
-          if (o.id) paths.push(`${target}/${o.name}`);
-          else {
-            const { data: inner } = await admin.storage.from(bucket).list(`${target}/${o.name}`, { limit: 1000 });
-            for (const f of inner || []) paths.push(`${target}/${o.name}/${f.name}`);
-          }
-        }
-        if (!paths.length) break;
-        await admin.storage.from(bucket).remove(paths);
+    // 1. Their files first: Supabase refuses to delete an account that still
+    //    owns storage objects (a profile picture they uploaded), which used to
+    //    make the delete fail with the account left in place.
+    const { data: files, error: filesError } = await admin.rpc("admin_user_files", { p_user: target });
+    if (filesError) return json({ error: "Couldn't delete the account — nothing was removed. Try again." }, 502);
+    const byBucket = new Map<string, string[]>();
+    for (const f of (files || []) as { bucket_id: string; name: string }[]) byBucket.set(f.bucket_id, [...(byBucket.get(f.bucket_id) || []), f.name]);
+    for (const [bucket, paths] of byBucket) {
+      for (let i = 0; i < paths.length; i += 1000) {
+        const { error: rmError } = await admin.storage.from(bucket).remove(paths.slice(i, i + 1000));
+        if (rmError) return json({ error: "Couldn't remove their files, so the account was kept. Try again." }, 502);
       }
     }
-    return json({ ok: true, email });
+    // 2. The account: their workspace goes with it (ON DELETE CASCADE).
+    const { error } = await admin.auth.admin.deleteUser(target);
+    if (error) return json({ error: files?.length ? "Their files were removed, but the account couldn't be deleted. Try again." : "Couldn't delete the account — nothing was removed. Try again." }, 502);
+    // 3. Anything an older table kept without a link to the account.
+    const { data: purged } = await admin.rpc("admin_purge_user", { p_user: target });
+    // 4. Check it really is gone before saying so.
+    const { data: still } = await admin.auth.admin.getUserById(target);
+    if (still?.user) return json({ error: "The account is still there — try again in a moment." }, 502);
+    return json({ ok: true, email, files: files?.length || 0, leftovers: (purged as { rows?: number } | null)?.rows || 0 });
   }
 
   return json({ error: "Unknown action" }, 400);
