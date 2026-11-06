@@ -34,8 +34,8 @@ plan = {
 };
 calls.length = 0;
 const r1 = await readCreatorEmail(email);
-check("gemini quota → groq does it", r1?.statedRates[0]?.amount === 1500 && calls[0].startsWith("generativelanguage") && calls[1] === "api.groq.com:llama-3.3-70b-versatile", calls.join(" → "));
-check("llama on groq gets JSON mode (schema in the prompt)", groqMode === "json_object", groqMode);
+check("gemini quota → groq does it", r1?.statedRates[0]?.amount === 1500 && calls[0].startsWith("generativelanguage") && calls[1] === "api.groq.com:openai/gpt-oss-120b", calls.join(" → "));
+check("gpt-oss on groq gets a strict JSON schema", groqMode === "json_schema", groqMode);
 
 // 2. Next call skips Gemini (cooling down) without asking it.
 calls.length = 0;

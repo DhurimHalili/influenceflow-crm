@@ -2,7 +2,6 @@ import { Check, Clock3, KeyRound, Mail, RotateCcw, Search, ShieldCheck, ShieldOf
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Navigate } from "react-router-dom";
 import { useAccess } from "../contexts/AccessContext";
-import { useGmail } from "../contexts/GmailContext";
 import { useToast } from "../contexts/ToastContext";
 import { supabase } from "../lib/supabase";
 import { relativeTime } from "../lib/utils";
@@ -41,7 +40,6 @@ async function adminCall<T>(body: Record<string, unknown>): Promise<{ data?: T; 
 
 export default function MembersPage() {
   const { isOwner, loaded } = useAccess();
-  const gmail = useGmail();
   const { toast } = useToast();
   const [rows, setRows] = useState<Member[] | null>(null);
   const [error, setError] = useState("");
@@ -70,8 +68,9 @@ export default function MembersPage() {
 
   if (loaded && !isOwner) return <Navigate to="/app" replace />;
 
-  type Mail = { via: "gmail" | "supabase" | "none"; from: string };
-  const mailNote = (m: Mail | undefined, what: string) => m?.via === "gmail" ? `${what} went from ${m.from || "your Gmail"}` : m?.via === "supabase" ? `${what} went as a sign-in email (connect Gmail in Settings to send it from your address)` : "";
+  type Mail = { via: "supabase" | "none"; why?: string };
+  // Sent by Supabase's mailer (from your personal Gmail once SMTP is set in Supabase → Auth) — never from the outreach mailboxes.
+  const mailNote = (m: Mail | undefined, what: string) => m?.via === "supabase" ? `${what} is on its way` : "";
 
   // The server changes access AND sends the email in one step — nothing depends on this tab staying open.
   const setAccess = async (m: Member, access: Member["access"]) => {
@@ -84,7 +83,7 @@ export default function MembersPage() {
     const note = mailNote(res.data?.mail, "the welcome email");
     if (note) return toast(`${m.email} is in — ${note}`, "success");
     setFallback({ to: m.email, ...welcomeEmail(m.display_name.split(" ")[0] || "") });
-    toast(`${m.email} is in — the email couldn't be sent, send them the message below`, "info");
+    toast(`${m.email} is in — ${res.data?.mail?.why === "rate_limited" ? "the mailer's hourly limit is reached" : "the email couldn't be sent"}, send them the message below`, "info");
   };
 
   const sendReset = async (m: Member) => {
@@ -142,7 +141,7 @@ export default function MembersPage() {
       <div className="modal-actions"><Button variant="ghost" onClick={() => setDoomed(null)}>Keep the account</Button><Button variant="danger" onClick={() => void remove()} disabled={typed.trim().toLowerCase() !== (doomed?.email || "").toLowerCase()} loading={!!doomed && busy === doomed.id}><Trash2 size={14} /> Delete forever</Button></div>
     </Modal>
 
-    <Modal open={!!fallback} onClose={() => setFallback(null)} title={`Send this to ${fallback?.to}`} description={gmail.connected ? "Your Gmail couldn't send it just now — send it yourself:" : "Connect Gmail in Settings to send these automatically. For now, send it yourself:"}>
+    <Modal open={!!fallback} onClose={() => setFallback(null)} title={`Send this to ${fallback?.to}`} description="The mailer couldn't send it just now (until Gmail SMTP is set in Supabase, it only reaches a few addresses an hour). Send it yourself:">
       <div className="members-fallback"><small>Subject</small><p>{fallback?.subject}</p><small>Message</small><pre>{fallback?.body}</pre></div>
       <div className="modal-actions">
         <Button variant="ghost" onClick={() => { void navigator.clipboard?.writeText(`${fallback?.subject}\n\n${fallback?.body}`); toast("Copied"); }}><Check size={14} /> Copy</Button>

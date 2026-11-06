@@ -200,6 +200,25 @@ export function readPrices(body: string): PriceReading {
   return { agreed: a, stated: once(stated).filter((s) => !a.some((x) => x.key === s.key)) };
 }
 
+/**
+ * How many prices the sender wrote in their own words: amounts with a money
+ * marker, plus "format: amount" lines in a price list that names its currency.
+ * When the rules read fewer than this, something is left for the AI.
+ */
+export function moneyMentions(body: string): number {
+  const own = ownText(body);
+  const marked = Array.from(withoutDurations(withoutOld(own)).matchAll(MONEY)).filter((m) => {
+    const g = m.groups || {};
+    const n = parseAmount(g.a || g.b || "", !!(g.ka || g.kb));
+    return n >= 25 && n <= 1_000_000;
+  }).length;
+  const listed = listCurrency(own) ? own.split(/\n+/).filter((line) => !new RegExp(MONEY.source, "i").test(line) && LIST_LINE.test(withoutDurations(line).trim()) && !STATS.test(line)).length : 0;
+  return marked + listed;
+}
+
+/** Audience numbers the sender states (shares, ages, countries) — worth reading when nothing is verified yet. */
+export const statesAudience = (body: string) => /\b\d{1,3}(?:[.,]\d+)?\s?%/.test(ownText(body)) && /\b(audience|demographic|viewers?|followers?|age|female|male|women|men|countr(?:y|ies)|us|uk|usa|tier)\b/i.test(ownText(body));
+
 /** Does the email look like it talks about money or audience at all? (saves AI calls) */
 export const mentionsMoneyOrAudience = (body: string) => /[$€£]|\b(usd|eur|gbp|rate|rates|price|pricing|fee|cost|charge|budget|media\s?kit|demographic|audience|countries|age|female|male|views|subscribers|followers)\b/i.test(ownText(body));
 

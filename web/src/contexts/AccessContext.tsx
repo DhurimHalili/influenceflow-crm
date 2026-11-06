@@ -1,5 +1,5 @@
 import { Clock3, LogOut, RefreshCw, ShieldOff } from "lucide-react";
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { hasSupabase, supabase } from "../lib/supabase";
 import { useAuth } from "./AuthContext";
 
@@ -26,10 +26,15 @@ export function AccessProvider({ children }: { children: ReactNode }) {
     const row = data as { access?: string; role?: string };
     setState({ access: row.access === "pending" || row.access === "revoked" ? row.access : "approved", role: row.role === "owner" ? "owner" : "member", loaded: true });
   }, [user]);
+  // Only a different account shows the loading screen; a re-check for the same
+  // person happens quietly behind what they're doing.
+  const checkedFor = useRef<string | null | undefined>(undefined);
   useEffect(() => {
-    setState((s) => ({ ...s, loaded: false }));
+    const id = user?.id ?? null;
+    if (checkedFor.current !== id) setState((s) => ({ ...s, loaded: false }));
+    checkedFor.current = id;
     void recheck();
-  }, [recheck]);
+  }, [recheck, user?.id]);
   return <AccessContext.Provider value={{ ...state, isOwner: state.role === "owner" && state.access === "approved", recheck }}>{children}</AccessContext.Provider>;
 }
 

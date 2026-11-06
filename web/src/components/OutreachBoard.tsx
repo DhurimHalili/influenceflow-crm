@@ -1,6 +1,6 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, useState } from "react";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { ArrowRight, Building2, CalendarClock, CheckCircle2, Handshake, Mail, MailPlus, RefreshCw, Reply, Send, ShieldCheck, Sparkles, Trophy, UserPlus, Users, X, XCircle } from "lucide-react";
+import { ArrowRight, Building2, CalendarClock, CheckCircle2, Handshake, Mail, RefreshCw, Reply, Send, ShieldCheck, Sparkles, Trophy, UserPlus, Users, X, XCircle } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useData } from "../contexts/DataContext";
 import { useGmail } from "../contexts/GmailContext";
@@ -46,9 +46,9 @@ const recall = <T extends string>(key: string, allowed: readonly T[], fallback: 
   }
 };
 
-type Open = { metric: MetricKey; view: View; start: number; end: number; title: string } | null;
+type Open = { metric: MetricKey; view: View; start: number; end: number; horizon?: number; title: string } | null;
 
-const METRIC_WORD: Record<MetricKey, string> = { emails: "Emails sent", followups: "Follow-ups", first: "New conversations", newthreads: "New threads", answers: "Answers", replies: "Replies received", negotiations: "Negotiations started", wins: "Wins", lost: "Lost", added: "Added" };
+const METRIC_WORD: Record<MetricKey, string> = { emails: "Emails sent", followups: "Follow-ups", first: "New conversations", newthreads: "New threads", answers: "Answers", replies: "Replies received", negotiations: "Negotiations started", wins: "Wins", lost: "Lost", added: "Added", e_first: "New conversations", e_followups: "Follow-ups by email", e_answers: "Answers", e_newthreads: "New threads", e_scheduled: "Scheduled emails" };
 
 export function OutreachBoard() {
   const data = useData();
@@ -72,7 +72,6 @@ export function OutreachBoard() {
 
   const waiting = stats.scheduled(view);
   const nextSend = waiting.map((s) => sendsAt(s.at)).find(Boolean);
-  const fu = stats.followupChannels(view, range.start, range.end);
   const rate = stats.replyRate(view, range.start, range.end);
   const people = stats.repliers(view, range.start, range.end);
 
@@ -92,12 +91,17 @@ export function OutreachBoard() {
     toast(res.ok ? "Gmail checked — the numbers are up to date" : res.message || "Couldn't reach Gmail — it retries by itself", res.ok ? "success" : "error");
   };
 
-  const hero: { key: MetricKey; label: string; icon: typeof Mail; note: ReactNode; tone?: string }[] = [
-    { key: "emails", label: "Emails sent", icon: Mail, note: waiting.length ? <span className="ob-sched" title={`Waiting in Gmail's Scheduled folder${nextSend ? ` — next sends ${nextSend}` : ""}. They count here the minute they go out.`}><CalendarClock size={11} /> {waiting.length} scheduled{nextSend ? ` · ${nextSend}` : ""}</span> : "Every email, all mailboxes" },
-    { key: "followups", label: "Follow-ups", icon: Send, note: fu.other ? `${fu.email} by email · ${fu.other} other` : "Chasers on any channel" },
-    { key: "first", label: "New conversations", icon: MailPlus, note: "First message to someone" },
-    { key: "replies", label: "Replies received", icon: Reply, note: people ? `from ${people} ${people === 1 ? "person" : "people"}` : "Auto-replies never count" },
+  // "Emails sent" is the total; the mix shows what those emails were, and the parts add up to it.
+  const mix = stats.emailMix(view, range.start, range.end, range.horizon);
+  const emailsDelta = range.compare ? mix.total - stats.emailMix(view, range.prevStart, range.prevEnd).total : null;
+  const PARTS: { key: MetricKey; n: number; label: string; hint: string; tone: string }[] = [
+    { key: "e_first", n: mix.first, label: "New conversations", hint: "First email to someone", tone: "first" },
+    { key: "e_followups", n: mix.followups, label: "Follow-ups", hint: "Chasing your own email", tone: "followups" },
+    { key: "e_answers", n: mix.answers, label: "Answers", hint: "Replying, negotiating, lead answers", tone: "answers" },
+    { key: "e_newthreads", n: mix.newthreads, label: "New threads", hint: "Fresh thread after the follow-up cap", tone: "newthreads" },
+    { key: "e_scheduled", n: mix.scheduled, label: "Scheduled", hint: "Waiting in Gmail — counted by send time; cancel it and it's gone", tone: "scheduled" },
   ];
+  const parts = PARTS.filter((p) => p.n > 0 || p.key === "e_first" || p.key === "e_followups");
 
   const sides: { seg: "creator" | "brand"; title: string; icon: typeof Users; tiles: { key: MetricKey; label: string; icon: typeof Mail; invert?: boolean }[] }[] = [
     { seg: "creator", title: "Influencers", icon: Users, tiles: [
@@ -140,16 +144,27 @@ export function OutreachBoard() {
       <button type="button" onClick={() => void sync()} disabled={syncing} aria-label="Check Gmail now"><RefreshCw size={12} className={syncing ? "spin" : ""} /> {syncing ? "Checking…" : "Check now"}</button>
     </div>}
 
-    <div className="ob-hero">{hero.map((h) => {
-      const n = c(h.key);
-      const on = open?.metric === h.key && open.view === view;
-      return <button type="button" key={h.key} className={`ob-big${on ? " on" : ""}`} onClick={() => show(h.key)} aria-expanded={on} aria-label={`${h.label}: ${n}. Show the list`}>
-        <span className="ob-big-top"><span className="ob-ico"><h.icon size={15} /></span><small>{h.label}</small></span>
-        <strong>{n.toLocaleString("en-US")}</strong>
-        <span className="ob-note">{h.note}</span>
-        <Delta value={delta(h.key)} />
-      </button>;
-    })}
+    <div className="ob-hero">
+      <div className={`ob-total${open?.metric === "emails" && open.view === view ? " on" : ""}`}>
+        <button type="button" className="ob-total-main" onClick={() => setOpen((cur) => (cur && cur.metric === "emails" && cur.view === view && cur.start === range.start ? null : { metric: "emails", view, start: range.start, end: range.end, horizon: range.horizon, title: `Emails sent${view === "creator" ? " · influencers" : view === "brand" ? " · brands" : ""}` }))} aria-label={`Emails sent: ${mix.total}. Show every email`}>
+          <span className="ob-total-label"><span className="ob-ico"><Mail size={15} /></span><span><small>Emails sent</small><em>Every email · all mailboxes{mix.scheduled ? " · scheduled included" : ""}</em></span></span>
+          <span className="ob-total-row"><strong>{mix.total.toLocaleString("en-US")}</strong>{emailsDelta !== null && <em className={emailsDelta === 0 ? "delta-flat" : emailsDelta > 0 ? "delta-up" : "delta-down"}>{emailsDelta === 0 ? `— ${range.prevLabel}` : `${emailsDelta > 0 ? "+" : ""}${emailsDelta} ${range.prevLabel}`}</em>}</span>
+        </button>
+        <div className="ob-mix-bar" role="img" aria-label={parts.map((p) => `${p.n} ${p.label.toLowerCase()}`).join(", ")}>{mix.total ? PARTS.filter((p) => p.n > 0).map((p) => <i key={p.key} className={`mix-${p.tone}`} style={{ flexGrow: p.n }} />) : <i className="mix-empty" />}</div>
+        <div className="ob-mix">{parts.map((p) => {
+          const on = open?.metric === p.key && open.view === view;
+          return <button type="button" key={p.key} className={`ob-mix-item${on ? " on" : ""}`} onClick={() => setOpen((cur) => (cur && cur.metric === p.key && cur.view === view ? null : { metric: p.key, view, start: range.start, end: range.end, horizon: range.horizon, title: p.label }))} aria-expanded={on} title={p.hint}>
+            <i className={`mix-dot mix-${p.tone}`} aria-hidden="true" /><b>{p.n.toLocaleString("en-US")}</b><span>{p.label}</span>{mix.total > 0 && p.n > 0 && <small>{Math.round((p.n / mix.total) * 100)}%</small>}
+          </button>;
+        })}</div>
+        {(mix.otherFollowups > 0 || mix.later > 0) && <p className="ob-mix-foot">{mix.otherFollowups > 0 && <span><Send size={11} /> +{mix.otherFollowups} follow-up{mix.otherFollowups === 1 ? "" : "s"} by DM, WhatsApp or call — not emails</span>}{mix.later > 0 && <span><CalendarClock size={11} /> {mix.later} more scheduled for later{nextSend ? ` · next ${nextSend}` : ""}</span>}</p>}
+      </div>
+      <button type="button" className={`ob-big ob-replies${open?.metric === "replies" && open.view === view ? " on" : ""}`} onClick={() => show("replies")} aria-label={`Replies received: ${c("replies")}. Show the list`}>
+        <span className="ob-big-top"><span className="ob-ico"><Reply size={15} /></span><small>Replies received</small></span>
+        <strong>{c("replies").toLocaleString("en-US")}</strong>
+        <span className="ob-note">{people ? `from ${people} ${people === 1 ? "person" : "people"}` : "Auto-replies never count"}</span>
+        <Delta value={delta("replies")} />
+      </button>
       <div className="ob-big ob-rate" title="Of the people you first contacted in this range, how many have answered so far">
         <span className="ob-big-top"><span className="ob-ico"><CheckCircle2 size={15} /></span><small>Reply rate</small></span>
         <strong>{rate.pct === null ? "—" : `${rate.pct}%`}</strong>
@@ -158,18 +173,18 @@ export function OutreachBoard() {
       </div>
     </div>
 
-    {open && <Ledger open={open} rows={stats.rows(open.metric, open.view, open.start, open.end)} onClose={() => setOpen(null)} />}
+    {open && <Ledger open={open} rows={stats.rows(open.metric, open.view, open.start, open.end, open.horizon)} onClose={() => setOpen(null)} />}
 
     <div className={`ob-sides view-${view}`}>{sides.filter((s) => view === "all" || view === s.seg).map((side) => <div key={side.seg} className={`ob-side side-${side.seg}`}>
       <div className="ob-side-head"><side.icon size={15} /><strong>{side.title}</strong>{view === "all" && <button type="button" onClick={() => pickView(side.seg)}>Only {side.title.toLowerCase()} <ArrowRight size={12} /></button>}</div>
       <div className="ob-tiles">{side.tiles.map((t) => {
-        const n = c(t.key, side.seg);
+        const n = t.key === "emails" ? stats.emailMix(side.seg, range.start, range.end, range.horizon).total : c(t.key, side.seg);
         const on = open?.metric === t.key && open.view === side.seg;
-        return <button type="button" key={t.key} className={`ob-tile${on ? " on" : ""}${t.invert && n ? " is-loss" : ""}`} onClick={() => show(t.key, side.seg, `${t.label} · ${side.title.toLowerCase()}`)} aria-expanded={on} aria-label={`${side.title}, ${t.label}: ${n}. Show the list`}>
+        return <button type="button" key={t.key} className={`ob-tile${on ? " on" : ""}${t.invert && n ? " is-loss" : ""}`} onClick={() => t.key === "emails" ? setOpen((cur) => (cur && cur.metric === "emails" && cur.view === side.seg ? null : { metric: "emails", view: side.seg, start: range.start, end: range.end, horizon: range.horizon, title: `Emails sent · ${side.title.toLowerCase()}` })) : show(t.key, side.seg, `${t.label} · ${side.title.toLowerCase()}`)} aria-expanded={on} aria-label={`${side.title}, ${t.label}: ${n}. Show the list`}>
           <span className="ob-tile-ico"><t.icon size={13} /></span>
           <strong>{n.toLocaleString("en-US")}</strong>
           <small>{t.label}</small>
-          <Delta value={delta(t.key, side.seg)} invert={t.invert} />
+          <Delta value={t.key === "emails" ? (range.compare ? n - stats.emailMix(side.seg, range.prevStart, range.prevEnd).total : null) : delta(t.key, side.seg)} invert={t.invert} />
         </button>;
       })}</div>
     </div>)}</div>

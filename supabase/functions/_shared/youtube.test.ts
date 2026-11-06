@@ -1,5 +1,5 @@
 // Run: node --experimental-strip-types supabase/functions/_shared/youtube.test.ts
-import { emailsIn, middleMean, parseChannelRef, seconds, starsFor } from "./youtube.ts";
+import { emailsIn, middleMean, nicheOf, parseChannelRef, seconds, starsFor } from "./youtube.ts";
 
 let fail = 0;
 const eq = (name: string, got: unknown, want: unknown) => {

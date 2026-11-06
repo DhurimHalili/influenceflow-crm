@@ -51,8 +51,8 @@ type Route = { provider: AiProvider; model: string; key: string; url: string; ca
 
 const DEFAULTS = {
   gemini: "gemini-3.5-flash",
-  groq: "llama-3.3-70b-versatile",
-  groqVision: "meta-llama/llama-4-scout-17b-16e-instruct",
+  groq: "openai/gpt-oss-120b",
+  groqVision: "qwen/qwen3.8-27b",
   cloudflare: "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
   cloudflareVision: "@cf/meta/llama-4-scout-17b-16e-instruct",
   openrouter: "openai/gpt-oss-120b",
@@ -353,8 +353,8 @@ const num = (v: unknown, max: number) => {
 const str = (v: unknown, max = 200) => (typeof v === "string" ? v.replace(/[\u0000-\u001f]/g, " ").trim().slice(0, max) : "");
 const obj = (props: Json, required = Object.keys(props)) => ({ type: "object", additionalProperties: false, properties: props, required });
 
-// A 16×16 red PNG: proves a vision model really reads images.
-const RED_PNG = "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAFklEQVR4nGO4KyhIEmIY1TCqYfhqAABd+f8BJ3/PcwAAAABJRU5ErkJggg==";
+// A 64×64 red PNG (some vision models refuse under 32 px): proves a vision model really reads images.
+const RED_PNG = "iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAT0lEQVR42u3PQQkAAAgEsKtw/bPZxQi+hcEKLNO+FgEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQGBywJ5r/Diax2YrgAAAABJRU5ErkJggg==";
 
 /** Try every provider for real (text, and images where it has a vision model). Nothing is kept. */
 export async function testAi(): Promise<{ provider: AiProvider; model: string; need: Need; ok: boolean; ms: number; error?: string }[]> {

@@ -13,9 +13,11 @@ import { channelFacts, youtubeConfigured, YouTubeQuota, type ChannelFacts } from
 //   cron              — hourly, server only (x-cron-secret): every member who
 //                       has "Keep YouTube stats fresh" on gets their influencers
 //                       refreshed, oldest first, straight into the database.
-// A refresh updates average views, engagement rate, subscribers and the
-// YouTube facts; name, country and email only when they're empty. It never
-// touches stars — those are yours once set.
+// What a refresh may change: subscribers and the YouTube facts always; name,
+// email, country, niche, average views and engagement rate while they're
+// empty or still exactly what YouTube put there last time (youtube.auto).
+// Change one yourself and it's yours: refreshes leave it alone (youtube.kept
+// says which, so the profile can tell you). It never touches stars.
 
 const APP_URL = (Deno.env.get("APP_URL") || "https://dhurimhalili.github.io/influenceflow-crm").replace(/\/$/, "");
 const ALLOWED_ORIGINS = new Set([new URL(APP_URL).origin, "http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:4173"]);
@@ -23,7 +25,10 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const FRESH_MS = 55 * 60_000;
 
 type Social = { platform: string; url: string; handle: string; followers: number };
-type CreatorRow = { id: string; user_id: string; name: string; country: string | null; contact_email: string | null; socials: Social[] | null; youtube: Record<string, unknown> | null; youtube_synced_at: string | null };
+type CreatorRow = { id: string; user_id: string; name: string; country: string | null; contact_email: string | null; niche: string | null; avg_views: number | null; engagement_rate: number | null; socials: Social[] | null; youtube: Record<string, unknown> | null; youtube_synced_at: string | null };
+type AutoField = "name" | "contact_email" | "country" | "niche" | "avg_views" | "engagement_rate";
+const AUTO_FIELDS: AutoField[] = ["name", "contact_email", "country", "niche", "avg_views", "engagement_rate"];
+const NUMERIC = new Set<AutoField>(["avg_views", "engagement_rate"]);
 
 /** The YouTube link or handle on a record (the first YouTube social), or "". */
 export const youtubeOf = (socials: Social[] | null | undefined) => {
@@ -36,20 +41,33 @@ const countryName = (code: string) => {
   try { return new Intl.DisplayNames(["en"], { type: "region" }).of(code) || code; } catch { return code; }
 };
 
-/** What a refresh writes. Stars are never touched; name/country/email only fill blanks. */
-export function patchFor(c: Pick<CreatorRow, "name" | "country" | "contact_email" | "socials">, f: ChannelFacts) {
+/** What a refresh writes (see the top of the file). Stars are never touched. */
+export function patchFor(c: Pick<CreatorRow, "name" | "country" | "contact_email" | "niche" | "avg_views" | "engagement_rate" | "socials" | "youtube">, f: ChannelFacts) {
   // Only the first YouTube link (the one that was read) gets the subscriber count.
   const first = (c.socials || []).findIndex((s) => s && s.platform === "YouTube" && (s.url || s.handle));
   const socials = (c.socials || []).map((s, i) => (i === first ? { ...s, url: s.url || f.url, handle: s.handle || f.handle, followers: f.subscribers || s.followers || 0 } : s));
-  const patch: Record<string, unknown> = {
-    socials,
-    youtube: { channel_id: f.channelId, handle: f.handle, title: f.title, url: f.url, country: f.country, subscribers: f.subscribers, hidden_subscribers: f.hiddenSubscribers, video_count: f.videoCount, total_views: f.totalViews, avg_views: f.avgViews, engagement_rate: f.engagementRate, sampled: f.sampled, uploads_90d: f.uploads90d, last_upload_at: f.lastUploadAt, emails: f.emails, business_email_hidden: f.businessEmailHidden, at: f.at },
-    youtube_synced_at: f.at,
+  const prevAuto = (c.youtube && typeof c.youtube.auto === "object" && c.youtube.auto ? c.youtube.auto : {}) as Partial<Record<AutoField, string>>;
+  // Records from before this rule: numbers were always YouTube's.
+  const legacy = !(c.youtube && typeof c.youtube.auto === "object");
+  const fresh: Partial<Record<AutoField, string | number>> = {
+    name: f.title, contact_email: f.emails[0] || "", country: f.country ? countryName(f.country) : "", niche: f.niche,
+    ...(f.sampled ? { avg_views: f.avgViews, engagement_rate: f.engagementRate } : {}),
   };
-  if (f.sampled) { patch.avg_views = f.avgViews; patch.engagement_rate = f.engagementRate; }
-  if (!String(c.name || "").trim() && f.title) patch.name = f.title;
-  if (!String(c.country || "").trim() && f.country) patch.country = countryName(f.country);
-  if (!String(c.contact_email || "").trim() && f.emails[0]) patch.contact_email = f.emails[0];
+  const blank = (k: AutoField, v: unknown) => (NUMERIC.has(k) ? !(Number(v) > 0) : !String(v ?? "").trim());
+  const same = (k: AutoField, a: unknown, b: unknown) => (NUMERIC.has(k) ? Number(a) === Number(b) : String(a ?? "").trim().toLowerCase() === String(b ?? "").trim().toLowerCase());
+  const patch: Record<string, unknown> = { socials };
+  const auto: Partial<Record<AutoField, string>> = { ...prevAuto };
+  const kept: AutoField[] = [];
+  for (const k of AUTO_FIELDS) {
+    const value = fresh[k];
+    if (value === undefined || blank(k, value)) continue;
+    const current = c[k];
+    const free = blank(k, current) || (prevAuto[k] !== undefined && same(k, current, prevAuto[k])) || (legacy && NUMERIC.has(k));
+    if (free) { patch[k] = value; auto[k] = String(value); }
+    else if (!same(k, current, value)) kept.push(k);
+  }
+  patch.youtube = { channel_id: f.channelId, handle: f.handle, title: f.title, url: f.url, country: f.country, subscribers: f.subscribers, hidden_subscribers: f.hiddenSubscribers, video_count: f.videoCount, total_views: f.totalViews, avg_views: f.avgViews, engagement_rate: f.engagementRate, sampled: f.sampled, uploads_90d: f.uploads90d, last_upload_at: f.lastUploadAt, emails: f.emails, business_email_hidden: f.businessEmailHidden, niche: f.niche, sub_niche: f.subNiche, includes_recent: f.includesRecent, at: f.at, auto, kept };
+  patch.youtube_synced_at = f.at;
   return patch;
 }
 
@@ -79,8 +97,9 @@ Deno.serve(async (req) => {
     const deadline = Date.now() + 100_000;
     const { data: members } = await admin.from("profiles").select("id, preferences, access").eq("access", "approved").limit(500);
     const on = new Set((members || []).filter((m) => (m.preferences as { youtube_auto?: boolean } | null)?.youtube_auto !== false).map((m) => m.id));
+    const recent = new Set((members || []).filter((m) => (m.preferences as { youtube_recent?: boolean } | null)?.youtube_recent === true).map((m) => m.id));
     const stale = new Date(Date.now() - FRESH_MS).toISOString();
-    const { data: rows } = await admin.from("creators").select("id, user_id, name, country, contact_email, socials, youtube, youtube_synced_at").is("archived_at", null).or(`youtube_synced_at.is.null,youtube_synced_at.lt.${stale}`).order("youtube_synced_at", { ascending: true, nullsFirst: true }).limit(600);
+    const { data: rows } = await admin.from("creators").select("id, user_id, name, country, contact_email, niche, avg_views, engagement_rate, socials, youtube, youtube_synced_at").is("archived_at", null).or(`youtube_synced_at.is.null,youtube_synced_at.lt.${stale}`).order("youtube_synced_at", { ascending: true, nullsFirst: true }).limit(600);
     let done = 0, skipped = 0;
     for (const c of (rows || []) as CreatorRow[]) {
       if (Date.now() > deadline) break;
@@ -88,7 +107,7 @@ Deno.serve(async (req) => {
       const ref = youtubeOf(c.socials);
       if (!ref) continue;
       try {
-        const f = await channelFacts(ref);
+        const f = await channelFacts(ref, new Date(), { includeRecent: recent.has(c.user_id) });
         if (!f) { await admin.from("creators").update({ youtube_synced_at: new Date().toISOString() }).eq("id", c.id).eq("user_id", c.user_id); skipped++; continue; }
         // Only these columns are written; an archived record is left alone.
         const { error } = await admin.from("creators").update(patchFor(c, f)).eq("id", c.id).eq("user_id", c.user_id).is("archived_at", null);
@@ -108,7 +127,7 @@ Deno.serve(async (req) => {
     const text = typeof input.input === "string" ? input.input.trim().slice(0, 500) : "";
     if (!text) return json({ error: "Paste a YouTube channel link or @handle." }, 400);
     try {
-      const f = await channelFacts(text);
+      const f = await channelFacts(text, new Date(), { includeRecent: input.recent === true });
       return f ? json({ ok: true, facts: f }) : json({ error: "Couldn't find that YouTube channel — check the link." }, 404);
     } catch (e) {
       return json({ error: e instanceof YouTubeQuota ? "YouTube's daily limit is reached — it resets at midnight Pacific time." : e instanceof Error ? e.message : "YouTube didn't answer." }, e instanceof YouTubeQuota ? 429 : 502);
@@ -121,12 +140,12 @@ Deno.serve(async (req) => {
     // nothing is read from or written to anyone's records here.
     const items = (Array.isArray(input.items) ? input.items : []).slice(0, 10).map((x) => (x && typeof x === "object" ? x as Record<string, unknown> : {}))
       .filter((x) => typeof x.id === "string" && UUID.test(x.id) && typeof x.link === "string" && x.link.length <= 500)
-      .map((x) => ({ id: x.id as string, link: x.link as string, name: String(x.name || "").slice(0, 300), country: String(x.country || "").slice(0, 80), contact_email: String(x.contact_email || "").slice(0, 254), socials: (Array.isArray(x.socials) ? x.socials : []).slice(0, 30) as Social[] }));
+      .map((x) => ({ id: x.id as string, link: x.link as string, name: String(x.name || "").slice(0, 300), country: String(x.country || "").slice(0, 80), contact_email: String(x.contact_email || "").slice(0, 254), niche: String(x.niche || "").slice(0, 120), avg_views: Number(x.avg_views) || 0, engagement_rate: Number(x.engagement_rate) || 0, youtube: x.youtube && typeof x.youtube === "object" && !Array.isArray(x.youtube) ? { auto: (x.youtube as Record<string, unknown>).auto } as Record<string, unknown> : null, socials: (Array.isArray(x.socials) ? x.socials : []).slice(0, 30) as Social[] }));
     if (!items.length) return json({ error: "Pick at least one influencer with a YouTube channel." }, 400);
     const results: { id: string; ok: boolean; patch?: Record<string, unknown>; error?: string }[] = [];
     for (const c of items) {
       try {
-        const f = await channelFacts(c.link);
+        const f = await channelFacts(c.link, new Date(), { includeRecent: input.recent === true });
         results.push(f ? { id: c.id, ok: true, patch: patchFor(c, f) } : { id: c.id, ok: false, error: "Couldn't find that YouTube channel" });
       } catch (e) {
         if (e instanceof YouTubeQuota) return json({ results, error: "YouTube's daily limit is reached — the rest refresh after midnight Pacific time.", quota: true }, 429);

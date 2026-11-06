@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { Session, User } from "@supabase/supabase-js";
 import { authRedirectUrl, hasSupabase, pendingAuthRedirect, supabase } from "../lib/supabase";
 import { clearSessionState } from "../hooks/useSessionState";
@@ -275,8 +275,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  // The same person keeps the same user object: Supabase hands out a fresh
+  // session (and a new user object) on every token refresh — e.g. when you come
+  // back to the tab — and everything keyed on the user would otherwise reload,
+  // closing whatever you had open.
+  const stableUser = useRef<User | null>(null);
+  const nextUser = session?.user ?? null;
+  if (!nextUser) stableUser.current = null;
+  else if (!stableUser.current || stableUser.current.id !== nextUser.id || stableUser.current.email !== nextUser.email || JSON.stringify(stableUser.current.user_metadata) !== JSON.stringify(nextUser.user_metadata)) stableUser.current = nextUser;
+  const user = stableUser.current;
   const value = useMemo<AuthContextValue>(
-    () => ({ user: session?.user ?? null, session, loading, configured: hasSupabase, recovery, linkError, signIn, signUp, signOut, sendPasswordReset, updatePassword }),
+    () => ({ user, session, loading, configured: hasSupabase, recovery, linkError, signIn, signUp, signOut, sendPasswordReset, updatePassword }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [session, loading, recovery, linkError],
   );
