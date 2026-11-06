@@ -65,6 +65,25 @@ export interface WorkspacePreferences {
   youtube_auto: boolean;
   /** Average views also count videos younger than a day (off: only videos 1 day+ old). */
   youtube_recent?: boolean;
+  /** Your bar for YouTube influencers (lib/criteria). */
+  youtube_criteria?: YouTubeCriteria;
+  /** Weekly report by email: Monday morning (last week), Sunday evening (this week) or off. */
+  weekly_report?: "monday" | "sunday" | "off";
+  /** Your time zone (IANA, from the browser) — the weekly report's days and send time. */
+  timezone?: string;
+}
+
+/** Minimums and maximums an influencer is checked against (see lib/criteria). */
+export interface YouTubeCriteria {
+  on: boolean;
+  /** Hard floor: average views under this = below criteria. */
+  min_views: number;
+  /** Engagement under this (views fine) = slightly below. */
+  min_er: number;
+  /** Preferred subscribers: a plus, not a rule. */
+  pref_subs: number;
+  /** Above this = above criteria. 0 = no maximum. */
+  max_subs: number;
 }
 
 /** Creator's prices per deliverable, in the workspace currency. 0 = not offered / unknown. */
@@ -194,7 +213,7 @@ export interface YouTubeFacts {
   /** The videos behind avg views, newest first; cut = the highest/lowest left out. */
   sample?: { id: string; title: string; views: number; at: string; cut?: "high" | "low" }[];
   /** The values YouTube last wrote into the record's own fields. A field that still equals its value is refreshed; one you changed is yours. */
-  auto?: Partial<Record<"name" | "contact_email" | "country" | "niche" | "avg_views" | "engagement_rate", string>>;
+  auto?: Partial<Record<"name" | "contact_email" | "country" | "niche" | "avg_views" | "engagement_rate" | "stars_engagement" | "stars_consistency" | "stars_demographics", string>>;
   /** Fields where your value differs from YouTube's and was kept. */
   kept?: string[];
 }

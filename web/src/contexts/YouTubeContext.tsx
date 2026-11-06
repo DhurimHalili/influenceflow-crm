@@ -84,7 +84,7 @@ export function YouTubeProvider({ children }: { children: ReactNode }) {
       const batch = wanted.slice(i, i + 10);
       // What's on screen right now: a record saved a moment ago may not be in the database yet.
       const items = batch.map((id) => dataRef.current.creators.find((c) => c.id === id)).filter((c): c is Creator => !!c && !c.archived_at)
-        .map((c) => ({ id: c.id, link: channelOf(c.socials), name: c.name, country: c.country || "", contact_email: c.contact_email, niche: c.niche || "", avg_views: c.avg_views || 0, engagement_rate: c.engagement_rate || 0, youtube: c.youtube ? { auto: c.youtube.auto } : null, socials: c.socials || [] }));
+        .map((c) => ({ id: c.id, link: channelOf(c.socials), name: c.name, country: c.country || "", contact_email: c.contact_email, niche: c.niche || "", avg_views: c.avg_views || 0, engagement_rate: c.engagement_rate || 0, stars_engagement: c.stars_engagement || 0, stars_consistency: c.stars_consistency || 0, stars_demographics: c.stars_demographics || 0, youtube: c.youtube ? { auto: c.youtube.auto } : null, socials: c.socials || [] }));
       const res = items.length ? await call<{ results?: { id: string; ok: boolean; patch?: Partial<Creator>; error?: string }[]; quota?: boolean }>({ action: "refresh", items, recent: recentRef.current }) : { data: { results: [] } };
       for (const r of res.data?.results || []) {
         const record = dataRef.current.creators.find((c) => c.id === r.id);

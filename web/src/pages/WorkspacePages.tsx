@@ -1,11 +1,12 @@
 import { AlertTriangle, Bell, Building, Check, ChevronRight, LogOut, MonitorX, FileText, Gauge, Pencil, Plus, Database, Download, FileJson, HardDriveDownload, LockKeyhole, RefreshCcw, RotateCcw, Save, ShieldCheck, Sparkles, Trash2, Upload, UserRound, X, Users } from "lucide-react";
-import { useEffect, useRef, useState, type ChangeEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Button, EmptyState, Input, Modal, PageHeader, Select, Tabs } from "../components/ui";
 import { useAuth } from "../contexts/AuthContext";
 import { useData } from "../contexts/DataContext";
 import { useToast } from "../contexts/ToastContext";
 import { CURRENCIES } from "../lib/prefs";
+import { DEFAULT_CRITERIA, LEVEL_LABEL, normalizeCriteria, short, verdictOf } from "../lib/criteria";
 import { BRAND_HEADERS, brandRow, CAMPAIGN_HEADERS, campaignRow, CONTACT_HEADERS, contactRow, CREATOR_HEADERS, creatorRow } from "../lib/exports";
 import { creatorScore, money, dateLabel, DEFAULT_RATING_WEIGHTS, today, download, normalize, RATING_DIMS, ratingScore, resolveWeights, TEMPLATE_TOKENS, toCSV, uid, weightShares, type RatingWeightsValue } from "../lib/utils";
 import { Stars, Textarea } from "../components/ui";
@@ -13,6 +14,7 @@ import type { EmailTemplate, ThemeName, WorkspaceData } from "../types";
 import { columnKeys } from "../lib/exportFormats";
 import { CoachSettings, FollowupRulesSettings, GmailSettings } from "../components/SettingsGmail";
 import { TeamSettings } from "../components/Team";
+import { WeeklyReportSettings } from "../components/WeeklyReport";
 import { AvatarButton } from "../components/AvatarEditor";
 import { CalendarDays, Mail, Target, Youtube } from "lucide-react";
 import { APP_BUILT_AT, APP_VERSION, liveVersion, reloadInto } from "../lib/appUpdate";
@@ -173,9 +175,44 @@ function YouTubeSettings() {
   const prefs = data.profile.preferences;
   const withChannel = data.creators.filter((c) => !c.archived_at && (c.socials || []).some((x) => x.platform === "YouTube")).length;
   return <section id="youtube" className="settings-section"><div className="settings-heading"><span><Youtube /></span><div><h2>YouTube stats</h2><p>Average views, engagement and subscribers read straight from each influencer's channel.</p></div></div><div className="settings-body">
-    <label className="toggle-row"><span><strong>Keep YouTube stats fresh</strong><small>Pasting a channel in Quick fill fills the form: name, email, country, niche, views, engagement and suggested stars. Saving a profile with a YouTube link reads it, and every hour all {withChannel} influencer{withChannel === 1 ? "" : "s"} with a channel are refreshed. Anything you change yourself stays yours — and stars are never touched. Average views use the latest 12 long videos without the highest and lowest.</small></span><input type="checkbox" role="switch" checked={prefs.youtube_auto !== false} onChange={(event) => { data.updateProfile({ preferences: { ...prefs, youtube_auto: event.target.checked } }); toast(event.target.checked ? "YouTube stats on — they refresh every hour" : "YouTube stats off — use Refresh on a profile when you want them"); }} /></label>
+    <label className="toggle-row"><span><strong>Keep YouTube stats fresh</strong><small>Pasting a channel in Quick fill fills the form: name, email, country, niche, views, engagement and suggested stars. Saving a profile with a YouTube link reads it, and every hour all {withChannel} influencer{withChannel === 1 ? "" : "s"} with a channel are refreshed. Anything you change yourself stays yours — so do stars you set; stars you never touched are filled from the channel. Average views use the latest 12 long videos without the highest and lowest.</small></span><input type="checkbox" role="switch" checked={prefs.youtube_auto !== false} onChange={(event) => { data.updateProfile({ preferences: { ...prefs, youtube_auto: event.target.checked } }); toast(event.target.checked ? "YouTube stats on — they refresh every hour" : "YouTube stats off — use Refresh on a profile when you want them"); }} /></label>
     <label className="toggle-row"><span><strong>Count brand-new videos in average views</strong><small>Off (recommended): only videos at least 1 day old count — one posted 12 hours ago is still collecting views and would pull the average down. On: the latest videos count whatever their age.</small></span><input type="checkbox" role="switch" checked={prefs.youtube_recent === true} onChange={(event) => { data.updateProfile({ preferences: { ...prefs, youtube_recent: event.target.checked } }); toast(event.target.checked ? "New videos count too — from the next refresh" : "Only videos 1 day+ old count — from the next refresh"); }} /></label>
+    <CriteriaSettings />
   </div></section>;
+}
+
+/** Your bar for YouTube influencers: checked on quick fill, after every refresh and in the list. */
+function CriteriaSettings() {
+  const data = useData(); const { toast } = useToast();
+  const prefs = data.profile.preferences;
+  const saved = prefs.youtube_criteria || DEFAULT_CRITERIA;
+  const [form, setForm] = useState(() => ({ min_views: String(saved.min_views), min_er: String(saved.min_er), pref_subs: String(saved.pref_subs), max_subs: String(saved.max_subs) }));
+  useEffect(() => setForm({ min_views: String(saved.min_views), min_er: String(saved.min_er), pref_subs: String(saved.pref_subs), max_subs: String(saved.max_subs) }), [saved.min_views, saved.min_er, saved.pref_subs, saved.max_subs]);
+  const draft = normalizeCriteria({ ...saved, ...form });
+  const counts = useMemo(() => {
+    const out = { fits: 0, over: 0, slight: 0, hard: 0, none: 0 };
+    for (const c of data.creators) if (!c.archived_at) out[verdictOf(c, draft).level]++;
+    return out;
+  }, [data.creators, draft]);
+  const save = (key: keyof typeof form) => {
+    const next = normalizeCriteria({ ...saved, ...form });
+    if (next[key] === saved[key]) return setForm((f) => ({ ...f, [key]: String(saved[key]) }));
+    data.updateProfile({ preferences: { ...prefs, youtube_criteria: next } });
+    toast(key === "min_views" ? `Minimum avg views: ${short(next.min_views)} — under it is below criteria` : key === "min_er" ? `Minimum engagement: ${next.min_er}%` : key === "pref_subs" ? `Preferred subscribers: ${short(next.pref_subs)}` : next.max_subs ? `Maximum subscribers: ${short(next.max_subs)}` : "No subscriber maximum");
+  };
+  const field = (key: keyof typeof form, label: string, hint: string, step = "1") => <div className={`crit-field crit-field-${key}`}><Input label={label} type="number" min={0} step={step} inputMode="decimal" value={form[key]} onChange={(event) => setForm({ ...form, [key]: event.target.value })} onBlur={() => save(key)} onKeyDown={(event) => { if (event.key === "Enter") (event.target as HTMLInputElement).blur(); }} hint={hint} /></div>;
+  return <div className={`crit-settings${saved.on ? "" : " off"}`}>
+    <label className="toggle-row"><span><strong>Check influencers against your criteria</strong><small>Quick fill warns you right away, and the list marks anyone who falls outside after a refresh — yellow for slightly below, red for below.</small></span><input type="checkbox" role="switch" checked={saved.on} onChange={(event) => { data.updateProfile({ preferences: { ...prefs, youtube_criteria: { ...saved, on: event.target.checked } } }); toast(event.target.checked ? "Criteria checks on" : "Criteria checks off — nobody is marked"); }} /></label>
+    {saved.on && <>
+      <div className="crit-grid">
+        {field("min_views", "Minimum avg views", `The floor. Under ${short(draft.min_views)} = below criteria (red).`)}
+        {field("min_er", "Minimum engagement (%)", `Under ${draft.min_er}% with the views there = slightly below (yellow).`, "0.1")}
+        {field("pref_subs", "Preferred subscribers", `A plus at ${short(draft.pref_subs)}+. Fewer is fine.`)}
+        {field("max_subs", "Maximum subscribers", draft.max_subs ? `Over ${short(draft.max_subs)} = above criteria. 0 = no maximum.` : "No maximum.")}
+      </div>
+      <div className="crit-preview" aria-live="polite"><span>Your influencers today</span><div className="crit-bar" aria-hidden="true">{(["fits", "over", "slight", "hard"] as const).map((k) => counts[k] > 0 && <i key={k} className={`b-${k}`} style={{ flexGrow: counts[k] }} />)}</div><ul>{(["fits", "over", "slight", "hard"] as const).map((k) => <li key={k} className={`l-${k}`}><b>{counts[k]}</b> {LEVEL_LABEL[k].toLowerCase()}</li>)}{counts.none > 0 && <li className="l-none"><b>{counts.none}</b> without YouTube numbers</li>}</ul></div>
+    </>}
+  </div>;
 }
 
 function WorkspaceSettings() {
@@ -204,6 +241,7 @@ function NotificationSettings() {
   return <section id="reminders" className="settings-section"><div className="settings-heading"><span><Bell /></span><div><h2>Notifications</h2><p>How meeting reminders and due actions reach you.</p></div></div><div className="settings-body">
     <div className={`permission-banner perm-${permission}`}><Bell size={16} /><span><strong>Browser notifications: {permission === "granted" ? "on" : permission === "denied" ? "blocked" : permission === "unsupported" ? "not supported" : "not enabled"}</strong><small>{permission === "denied" ? "Allow notifications for this site in your browser's site settings." : permission === "granted" ? "Alerts arrive while InfluenceFlow is open in a tab." : "Enable them to get reminders and the daily action summary."}</small></span>{permission === "default" && <Button size="sm" onClick={async () => { const result = await Notification.requestPermission(); setPermission(result); toast(result === "granted" ? "Notifications enabled" : "Permission not granted", result === "granted" ? "success" : "info"); }}>Enable</Button>}{permission === "granted" && <Button size="sm" variant="secondary" onClick={() => { new Notification("InfluenceFlow", { body: "Test notification — reminders are working.", icon: "./favicon.svg" }); }}>Send test</Button>}</div>
     <div className="reminder-options">{(["browser", "email", "both", "off"] as const).map((option) => <button className={data.profile.reminder_prefs === option ? "selected" : ""} key={option} onClick={() => { data.updateProfile({ reminder_prefs: option }); toast(`Reminders set to ${option}`); }}><span>{option === "browser" ? "Browser" : option === "email" ? "Email" : option === "both" ? "Browser + email" : "Off"}</span><small>{option === "browser" ? "Alerts while the app is open" : option === "email" ? "Requires a configured email function" : option === "both" ? "Use every configured channel" : "No meeting reminders"}</small>{data.profile.reminder_prefs === option && <Check />}</button>)}</div>
+    <WeeklyReportSettings />
     <label className="toggle-row"><span><strong>Daily action summary</strong><small>Once a day after 8:00, one alert listing actions due today and overdue.</small></span><input type="checkbox" role="switch" checked={prefs.action_digest} onChange={(event) => { data.updateProfile({ preferences: { ...prefs, action_digest: event.target.checked } }); toast(event.target.checked ? "Daily summary on" : "Daily summary off"); }} /></label>
   </div></section>;
 }

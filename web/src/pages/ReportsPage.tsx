@@ -4,6 +4,7 @@ import { useMemo } from "react";
 import { Link } from "react-router-dom";
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Metric, PageHeader, Tabs } from "../components/ui";
+import { WeeklyReportButton } from "../components/WeeklyReport";
 import { useData } from "../contexts/DataContext";
 import { useGmail } from "../contexts/GmailContext";
 import { useSessionState } from "../hooks/useSessionState";
@@ -204,7 +205,7 @@ export default function ReportsPage() {
   const table = (title: string, rows: Row[], label: string) => <div className="dash-panel report-table"><div className="panel-heading"><div><span>{who === "creator" ? "Influencers" : "Brands"}</span><h2>{title}</h2></div></div>{rows.length ? <table><thead><tr><th>{label}</th><th>Reached</th><th>Reply rate</th><th>{who === "creator" ? "Roster" : "Signed"}</th></tr></thead><tbody>{rows.map((r) => <tr key={r.key}><td>{r.key}</td><td>{r.contacted}</td><td><span className="rate-bar"><i style={{ width: `${pct(r.replied, r.contacted)}%` }} />{pct(r.replied, r.contacted)}%</span></td><td><b>{r.won}</b> <small className="muted">{pct(r.won, r.contacted)}%</small></td></tr>)}</tbody></table> : <p className="muted-copy">No outreach in this range yet.</p>}</div>;
 
   return <div className="reports-page">
-    <PageHeader eyebrow="Insights" title="Reports" description="From first email to signed deal — what converts, how fast, and where the money comes from." actions={<Tabs active={range} onChange={setRange} tabs={RANGES} />} />
+    <PageHeader eyebrow="Insights" title="Reports" description="From first email to signed deal — what converts, how fast, and where the money comes from." actions={<><WeeklyReportButton /><Tabs active={range} onChange={setRange} tabs={RANGES} /></>} />
 
     <section className="dash-panel funnel-hero">
       <div className="funnel-hero-head">

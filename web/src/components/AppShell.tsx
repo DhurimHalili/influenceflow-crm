@@ -1,7 +1,8 @@
+import { browserZone } from "./WeeklyReport";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   Archive, BarChart3, Building2, CalendarDays, Check, ChevronRight, CircleDollarSign, Clock3, Cloud, CloudOff, Command, HelpCircle, Inbox, LoaderCircle,
-  Keyboard, LayoutDashboard, LifeBuoy, LogOut, UserCheck, Menu, MessageCircle, MonitorX, Moon, Palette, Plus, Search, SearchX, Settings, ShieldCheck, Sun,
+  Keyboard, LayoutDashboard, Compass, LogOut, UserCheck, Menu, MessageCircle, MonitorX, Moon, Palette, Plus, Search, SearchX, Settings, ShieldCheck, Sun,
   Sparkles, TrendingUp, UserX, Users, Wallet, X,
   Receipt,
 } from "lucide-react";
@@ -45,7 +46,7 @@ const navSections = [
     { to: "/app/themes", label: "Themes", icon: Palette },
     { to: "/app/settings", label: "Settings", icon: Settings },
     { to: "/app/members", label: "Members", icon: UserCheck, owner: true },
-    { to: "/app/help", label: "Help center", icon: LifeBuoy },
+    { to: "/app/help", label: "Guide", icon: Compass },
     { to: "/app/deleted", label: "Archive", icon: Archive },
   ] },
 ];
@@ -61,6 +62,9 @@ export default function AppShell() {
   const { user, signOut } = useAuth();
   const data = useData();
   const chase = useChase();
+  // The weekly report counts days in your time zone: remember it once the workspace is loaded.
+  const zoneMissing = data.cloudLive && !data.profile.preferences.timezone;
+  useEffect(() => { if (zoneMissing) data.updateProfile({ preferences: { ...data.profile.preferences, timezone: browserZone() } }); }, [zoneMissing]); // eslint-disable-line react-hooks/exhaustive-deps
   const gmail = useGmail();
   const newLeads = gmail.leads.filter((l) => l.status === "new").length;
   const invoicesDue = useInvoicesToChase().length;
@@ -337,7 +341,7 @@ export default function AppShell() {
                   <button role="menuitem" onClick={() => { const next = data.profile.theme === "dark" ? "agency" : "dark"; data.updateProfile({ theme: next }); toast(next === "dark" ? "Dark theme on" : "Agency theme on"); }}>{data.profile.theme === "dark" ? <Sun size={15} /> : <Moon size={15} />} {data.profile.theme === "dark" ? "Light mode" : "Dark mode"}</button>
                   <NavLink role="menuitem" to="/app/themes"><Palette size={15} /> All themes</NavLink>
                   <button role="menuitem" onClick={() => { setAccountOpen(false); setShortcutsOpen(true); }}><Keyboard size={15} /> Keyboard shortcuts <kbd>?</kbd></button>
-                  <NavLink role="menuitem" to="/app/help"><LifeBuoy size={15} /> Help center</NavLink>
+                  <NavLink role="menuitem" to="/app/help"><Compass size={15} /> Guide</NavLink>
                 </div>
                 <div className="account-group">
                   <button role="menuitem" className="danger" onClick={() => { setAccountOpen(false); void logout(); }} disabled={signingOut}><LogOut size={15} /> {signingOut ? "Signing out…" : "Sign out"}</button>

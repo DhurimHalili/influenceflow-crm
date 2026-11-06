@@ -1,6 +1,6 @@
 import type { Brand, Creator, EmailEvent, EntityStatus, Followup, FollowupRules } from "../types";
-import { dayKey, parseDay } from "./utils";
-import { quotedOwnDate } from "./replyReader";
+import { dayKey, parseDay } from "./days.ts";
+import { quotedOwnDate } from "./replyReader.ts";
 
 // The follow-up engine: who is waiting on whom, and when to follow up.
 //
