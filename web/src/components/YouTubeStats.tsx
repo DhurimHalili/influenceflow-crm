@@ -1,4 +1,4 @@
-import { ExternalLink, RefreshCw, Square } from "lucide-react";
+import { ChevronRight, ExternalLink, RefreshCw, Square } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useData } from "../contexts/DataContext";
 import { useToast } from "../contexts/ToastContext";
@@ -79,9 +79,28 @@ export function YouTubePanel({ creator }: { creator: Creator }) {
         <div><small>Subscribers</small><strong>{f.hidden_subscribers ? "Hidden" : f.subscribers ? compact(f.subscribers) : "—"}</strong><em>{f.video_count ? `${compact(f.video_count)} videos` : ""}</em></div>
         <div><small>Uploads</small><strong>{f.uploads_90d ?? 0}</strong><em>in the last 90 days</em></div>
       </div>
+      {f.sample && f.sample.length > 0 && <VideoSample sample={f.sample} avg={f.avg_views || 0} recent={!!f.includes_recent} />}
       {(f.niche || (f.kept || []).length > 0) && <p className="yt-facts">{f.niche && <span className="yt-chip">{f.niche}{f.sub_niche ? ` · ${f.sub_niche}` : ""}</span>}{(f.kept || []).length > 0 && <span className="yt-kept">Kept your {(f.kept || []).map((k) => KEPT_LABEL[k] || k).join(", ")} — YouTube says otherwise, your edit wins</span>}</p>}
       <p className="yt-foot">Updated {relativeTime(at)} · refreshes every hour{!yt.enabled && " (off in Settings)"} · <a href={f.url || link} target="_blank" rel="noreferrer">Open channel <ExternalLink size={11} /></a>
         {f.business_email_hidden && !creator.contact_email && <> · No email in the description — <a href={`${f.url || link}/about`} target="_blank" rel="noreferrer">check “View email address” <ExternalLink size={11} /></a></>}</p>
     </> : <p className="yt-foot">{busy ? "Reading the channel — last 12 videos, engagement, subscribers…" : yt.enabled ? "Not read yet — press Refresh, or it happens within the hour." : <>Automatic YouTube stats are off. <Link to="/app/settings#youtube">Turn them on</Link> or press Refresh.</>}</p>}
   </section>;
+}
+
+/** "Where does this number come from?" — the videos behind avg views, with the two left out. */
+function VideoSample({ sample, avg, recent }: { sample: NonNullable<NonNullable<Creator["youtube"]>["sample"]>; avg: number; recent: boolean }) {
+  const kept = sample.filter((v) => !v.cut);
+  const total = kept.reduce((s, v) => s + v.views, 0);
+  const top = Math.max(1, ...sample.map((v) => v.views));
+  const full = (n: number) => n.toLocaleString("en-US");
+  return <details className="yt-sample">
+    <summary><ChevronRight size={14} className="yt-sample-chev" aria-hidden="true" /><span>How we got <b>{compact(avg)}</b></span><small>{sample.length} latest videos{recent ? "" : " 1 day+ old"} · no Shorts or live streams</small></summary>
+    <ol>{sample.map((v) => <li key={v.id} className={v.cut ? "is-cut" : ""}>
+      <a href={`https://www.youtube.com/watch?v=${encodeURIComponent(v.id)}`} target="_blank" rel="noreferrer" title={v.title}>{v.title || "Untitled video"}</a>
+      <span className="yt-sample-bar" aria-hidden="true"><i style={{ width: `${Math.max(2, Math.round((v.views / top) * 100))}%` }} /></span>
+      <b title={`${full(v.views)} views`}>{compact(v.views)}</b>
+      <small>{v.cut ? (v.cut === "high" ? "Highest · left out" : "Lowest · left out") : relativeTime(v.at)}</small>
+    </li>)}</ol>
+    <p className="yt-sample-math">{kept.length > 0 ? <>{full(total)} views ÷ {kept.length} videos = <b>{full(Math.round(total / kept.length))}</b>. The highest and lowest are left out so one hit or one flop can't move it.</> : null}</p>
+  </details>;
 }

@@ -3,9 +3,11 @@
 //
 //   • the channel is found from whatever was pasted: youtube.com/@handle,
 //     /channel/UC…, /user/…, /c/… (one search), a video or Short link, or @handle
-//   • average views = the latest 12 long videos (Shorts, live streams and
-//     videos younger than 1 day left out — a video still collecting its
-//     first views would drag the number down; Settings can include them),
+//   • average views = the latest 12 long videos from the channel's Videos tab
+//     (YouTube's own list: no Shorts, no past live streams — the plain uploads
+//     list counts a finished 4-hour stream as a video), videos younger than
+//     1 day left out (a video still collecting its first views would drag the
+//     number down; Settings can include them),
 //     minus the highest and the lowest
 //     → the mean of the 10 in the middle; one viral hit or one flop never
 //     moves the number
@@ -18,7 +20,8 @@
 //   • niche + sub-niche from what the channel actually makes: YouTube's own
 //     topic categories, the description, and the titles/tags of the latest
 //     videos (e.g. "Gaming · Mac gaming"). Rules only — no AI quota.
-// Uses about 3 quota units per channel (+100 for a /c/ name search).
+// Uses about 3 quota units per channel (+2 when the Videos tab list is missing,
+// +100 for a /c/ name search). The videos behind the average are kept (sample).
 // Pure helpers are exported for tests; nothing here touches the database.
 
 const YT = "https://www.googleapis.com/youtube/v3";
@@ -31,6 +34,18 @@ export type ChannelFacts = {
   avgViews: number; engagementRate: number; sampled: number; uploads90d: number; lastUploadAt: string;
   emails: string[]; businessEmailHidden: boolean; stars: Stars; at: string;
   niche: string; subNiche: string; includesRecent: boolean;
+  /** The videos behind the average, newest first; "high"/"low" = the one left out. */
+  sample: SampleVideo[];
+};
+export type SampleVideo = { id: string; title: string; views: number; at: string; cut?: "high" | "low" };
+export type Video = {
+  id: string; views: number; likes: number; comments: number; secs: number; at: string; title: string; tags: string[];
+  /** liveBroadcastContent: "none" once it's a normal video (also for a finished stream). */
+  live: string;
+  /** It was broadcast live (or premiered) — liveStreamingDetails.actualStartTime is set. */
+  stream: boolean;
+  /** Came from the channel's Videos tab (long videos only, YouTube's own split). */
+  videosTab?: boolean;
 };
 
 export class YouTubeQuota extends Error {
@@ -70,6 +85,35 @@ export function middleMean(values: number[]) {
   const v = values.filter((x) => Number.isFinite(x) && x >= 0).sort((a, b) => a - b);
   const mid = v.length >= 4 ? v.slice(1, -1) : v;
   return mid.length ? mid.reduce((s, x) => s + x, 0) / mid.length : 0;
+}
+
+/**
+ * Average views + ER from a channel's latest videos:
+ *   the latest 12 long videos that are 1 day+ old (any age with includeRecent),
+ *   minus the single highest and lowest → the mean of the middle 10.
+ * Long = from the Videos tab (YouTube already left out Shorts and streams), or,
+ * from the plain uploads list, over 3 minutes and never broadcast live.
+ * A Shorts-only channel falls back to its latest 12 settled videos of any length
+ * (still no streams).
+ */
+export function averageOf(videos: Video[], now: Date, opts: { includeRecent?: boolean } = {}) {
+  const settled = opts.includeRecent ? Infinity : now.getTime() - 86400000;
+  const newest = [...videos].filter((v) => v.live === "none" && new Date(v.at).getTime() < settled).sort((a, b) => b.at.localeCompare(a.at));
+  const notStream = (v: Video) => v.videosTab || !v.stream;
+  let pick = newest.filter((v) => notStream(v) && (v.videosTab || v.secs > 180)).slice(0, 12);
+  if (pick.length < 4) pick = newest.filter(notStream).slice(0, 12);
+  const sorted = [...pick].sort((a, b) => a.views - b.views);
+  const trim = sorted.length >= 4;
+  const middle = trim ? sorted.slice(1, -1) : sorted;
+  const views = middle.reduce((s, v) => s + v.views, 0);
+  const low = trim ? sorted[0] : null;
+  const high = trim ? sorted[sorted.length - 1] : null;
+  return {
+    avgViews: Math.round(middleMean(pick.map((v) => v.views))),
+    engagementRate: views ? Math.round(((middle.reduce((s, v) => s + v.likes + v.comments, 0) / views) * 100) * 100) / 100 : 0,
+    sampled: middle.length,
+    sample: pick.map((v): SampleVideo => ({ id: v.id, title: v.title.slice(0, 160), views: v.views, at: v.at, ...(v === high ? { cut: "high" as const } : v === low ? { cut: "low" as const } : {}) })),
+  };
 }
 
 const EMAIL = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
@@ -209,24 +253,34 @@ export async function channelFacts(input: string, now = new Date(), opts: { incl
   const ch = (await api("channels", { part: "snippet,statistics,contentDetails,brandingSettings,topicDetails", id })).items?.[0];
   if (!ch) return null;
   const uploads = ch.contentDetails?.relatedPlaylists?.uploads || "";
-  const items = uploads ? ((await api("playlistItems", { part: "contentDetails", playlistId: uploads, maxResults: "40" }).catch(() => ({ items: [] }))).items || []) : [];
-  const ids: string[] = items.map((i: { contentDetails?: { videoId?: string } }) => i.contentDetails?.videoId).filter(Boolean).slice(0, 40);
-  const videos: { views: number; likes: number; comments: number; secs: number; at: string; live: string; title: string; tags: string[] }[] = [];
-  for (let i = 0; i < ids.length; i += 50) {
-    const got = await api("videos", { part: "statistics,contentDetails,snippet", id: ids.slice(i, i + 50).join(",") });
-    for (const v of got.items || []) videos.push({ views: Number(v.statistics?.viewCount || 0), likes: Number(v.statistics?.likeCount || 0), comments: Number(v.statistics?.commentCount || 0), secs: seconds(v.contentDetails?.duration || ""), at: v.snippet?.publishedAt || "", live: v.snippet?.liveBroadcastContent || "none", title: String(v.snippet?.title || ""), tags: Array.isArray(v.snippet?.tags) ? v.snippet.tags.map(String) : [] });
+  // The channel's "Videos" tab as its own playlist (UULF…): long videos only —
+  // no Shorts and no past live streams. The plain uploads list (UU…) mixes all
+  // three, and a finished stream looks like a normal video there.
+  const longList = /^UC[\w-]{22}$/.test(id) ? `UULF${id.slice(2)}` : "";
+  const listed = async (playlistId: string) => {
+    const got = await api("playlistItems", { part: "contentDetails", playlistId, maxResults: "40" });
+    return (got.items || []).map((i: { contentDetails?: { videoId?: string } }) => i.contentDetails?.videoId).filter(Boolean).slice(0, 40) as string[];
+  };
+  const read = async (ids: string[]) => {
+    const out: Video[] = [];
+    for (let i = 0; i < ids.length; i += 50) {
+      const got = await api("videos", { part: "statistics,contentDetails,snippet,liveStreamingDetails", id: ids.slice(i, i + 50).join(",") });
+      for (const v of got.items || []) out.push({ id: String(v.id || ""), views: Number(v.statistics?.viewCount || 0), likes: Number(v.statistics?.likeCount || 0), comments: Number(v.statistics?.commentCount || 0), secs: seconds(v.contentDetails?.duration || ""), at: v.snippet?.publishedAt || "", live: v.snippet?.liveBroadcastContent || "none", stream: !!v.liveStreamingDetails?.actualStartTime, title: String(v.snippet?.title || ""), tags: Array.isArray(v.snippet?.tags) ? v.snippet.tags.map(String) : [] });
+    }
+    return out;
+  };
+  // The Videos tab first; the full uploads list only when it is missing or too
+  // thin (a Shorts-only channel), and then streams are filtered out by hand.
+  const longIds = longList ? await listed(longList).catch(() => []) : [];
+  let videos = longIds.length ? (await read(longIds)).map((v) => ({ ...v, videosTab: true })) : [];
+  let avg = averageOf(videos, now, opts);
+  if (avg.sampled < 4 && uploads) {
+    const all = await read(await listed(uploads).catch(() => []));
+    const avgAll = averageOf(all, now, opts);
+    if (avgAll.sampled > avg.sampled) { videos = all; avg = avgAll; }
   }
   videos.sort((a, b) => b.at.localeCompare(a.at));
-  // Videos still collecting their first day of views are left out (unless asked for).
-  const settled = opts.includeRecent ? Infinity : now.getTime() - 86400000;
-  const isLong = (v: (typeof videos)[number]) => v.live === "none" && v.secs > 180 && new Date(v.at).getTime() < settled;
-  let pick = videos.filter(isLong).slice(0, 12);
-  // A Shorts-only channel: its latest 12 settled videos of any length.
-  if (pick.length < 4) pick = videos.filter((v) => v.live === "none" && new Date(v.at).getTime() < settled).slice(0, 12);
-  const sorted = [...pick].sort((a, b) => a.views - b.views);
-  const middle = sorted.length >= 4 ? sorted.slice(1, -1) : sorted;
-  const views = middle.reduce((s, v) => s + v.views, 0);
-  const engagementRate = views ? Math.round(((middle.reduce((s, v) => s + v.likes + v.comments, 0) / views) * 100) * 100) / 100 : 0;
+  const engagementRate = avg.engagementRate;
   const uploads90d = videos.filter((v) => new Date(v.at).getTime() > now.getTime() - 90 * 86400000).length;
   const description = String(ch.snippet?.description || "");
   const country = String(ch.snippet?.country || ch.brandingSettings?.channel?.country || "").toUpperCase().slice(0, 2);
@@ -237,7 +291,7 @@ export async function channelFacts(input: string, now = new Date(), opts: { incl
     country, thumbnail: String(ch.snippet?.thumbnails?.medium?.url || ch.snippet?.thumbnails?.default?.url || ""),
     subscribers: ch.statistics?.hiddenSubscriberCount ? 0 : Number(ch.statistics?.subscriberCount || 0), hiddenSubscribers: !!ch.statistics?.hiddenSubscriberCount,
     videoCount: Number(ch.statistics?.videoCount || 0), totalViews: Number(ch.statistics?.viewCount || 0),
-    avgViews: Math.round(middleMean(pick.map((v) => v.views))), engagementRate, sampled: middle.length, uploads90d, lastUploadAt: videos[0]?.at || "",
+    avgViews: avg.avgViews, engagementRate, sampled: avg.sampled, sample: avg.sample, uploads90d, lastUploadAt: videos[0]?.at || "",
     emails, businessEmailHidden: !emails.length, at: now.toISOString(), includesRecent: !!opts.includeRecent,
     ...nicheOf({ topics: [...(ch.topicDetails?.topicCategories || [])].map(String), description, titles: videos.map((v) => v.title), tags: videos.flatMap((v) => v.tags) }),
   };

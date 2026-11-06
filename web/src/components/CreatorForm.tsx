@@ -186,7 +186,7 @@ export function CreatorFields({ draft, setDraft, mode }: Props) {
     if (f.stars.consistency) next.stars_consistency = f.stars.consistency;
     if (f.stars.demographics) next.stars_demographics = f.stars.demographics;
     if (f.stars.engagement || f.stars.consistency || f.stars.demographics) filled.push("stars");
-    next.youtube = { channel_id: f.channelId, handle: f.handle, title: f.title, url: f.url, country: f.country, subscribers: f.subscribers, hidden_subscribers: f.hiddenSubscribers, video_count: f.videoCount, total_views: f.totalViews, avg_views: f.avgViews, engagement_rate: f.engagementRate, sampled: f.sampled, uploads_90d: f.uploads90d, last_upload_at: f.lastUploadAt, emails: f.emails, business_email_hidden: f.businessEmailHidden, niche: f.niche, sub_niche: f.subNiche, includes_recent: f.includesRecent, at: f.at, auto, kept: [] };
+    next.youtube = { channel_id: f.channelId, handle: f.handle, title: f.title, url: f.url, country: f.country, subscribers: f.subscribers, hidden_subscribers: f.hiddenSubscribers, video_count: f.videoCount, total_views: f.totalViews, avg_views: f.avgViews, engagement_rate: f.engagementRate, sampled: f.sampled, uploads_90d: f.uploads90d, last_upload_at: f.lastUploadAt, emails: f.emails, business_email_hidden: f.businessEmailHidden, niche: f.niche, sub_niche: f.subNiche, includes_recent: f.includesRecent, sample: f.sample, at: f.at, auto, kept: [] };
     next.youtube_dirty = true;
     next.youtube_synced_at = f.at;
     setDraft(next);
