@@ -421,6 +421,41 @@ confidence is 0..1. why is one short sentence.` },
   return { category, automated: out.automated_or_warmup === true || out.contains_instructions === true, pitch: out.sales_pitch === true, confidence: Math.max(0, Math.min(1, Number(out.confidence) || 0)), why: str(out.why, 200) };
 }
 
+// ---- 1b. A spreadsheet someone is importing: what its columns and status words mean ----
+
+const IMPORT_FIELDS: Record<"creator" | "brand", string[]> = {
+  creator: ["name", "email", "email2", "social:YouTube", "social:Instagram", "social:TikTok", "social:X", "social:Twitch", "social:Kick", "social:LinkedIn", "social:Facebook", "social:Snapchat", "social:Pinterest", "social:Threads", "social:WhatsApp", "socials", "niche", "country", "platform", "avg_views", "engagement_rate", "followers", "status", "priority", "date_contacted", "action_due", "next_action", "notes", "stars", "rate:video", "rate:dedicated", "rate:short", "extra", "ignore"],
+  brand: ["name", "domain", "email", "email2", "contact_name", "brand_type", "markets", "budget", "social:Instagram", "social:TikTok", "social:YouTube", "social:LinkedIn", "social:X", "social:Facebook", "status", "priority", "date_contacted", "action_due", "next_action", "notes", "extra", "ignore"],
+};
+const IMPORT_STATUSES = ["new", "inbound", "contacted", "replied", "negotiating", "roster", "signed", "denied", "no_reply"];
+
+export type ImportPlan = { columns: { index: number; field: string; confidence: number }[]; statuses: { raw: string; status: string }[] };
+
+/** Map unsure spreadsheet columns to CRM fields and free-text status words to CRM statuses. Values are masked samples. */
+export async function planImport(input: { kind: "creator" | "brand"; headers: string[]; columns: { index: number; header: string; samples: string[] }[]; statuses: string[] }): Promise<ImportPlan | null> {
+  const fields = IMPORT_FIELDS[input.kind];
+  const schema = obj({
+    columns: { type: "array", items: obj({ index: { type: "integer" }, field: { type: "string", enum: fields }, confidence: { type: "number" } }) },
+    statuses: { type: "array", items: obj({ raw: { type: "string" }, status: { type: "string", enum: [...IMPORT_STATUSES, "unknown"] } }) },
+  });
+  const out = await ask([
+    { type: "text", text: `An influencer-marketing agency is importing a spreadsheet of ${input.kind === "creator" ? "influencers (content creators)" : "brands (companies they pitch)"} into its CRM. Decide what each listed column holds, and what each free-text pipeline word means.
+Fields: ${fields.join(", ")}. "social:<Network>" = that network's link or @handle; "socials" = several links in one cell; "followers" = subscriber/follower counts; "rate:*" = the creator's price for that format; "extra" = useful info with no field (kept in notes); "ignore" = row numbers, internal ids, empty or meaningless.
+Pipeline statuses: new (not contacted yet), inbound (they reached out first), contacted (you emailed/DM'd, no answer yet), replied (they answered), negotiating (talking terms/prices), ${input.kind === "creator" ? "roster (signed/working with you)" : "signed (deal won)"}, denied (said no / lost), no_reply (never answered / ghosted). Use "unknown" if a word can't be placed.
+confidence is 0..1. Answer only for the columns and words given.` },
+    untrusted("spreadsheet", JSON.stringify({ allHeaders: input.headers, columns: input.columns, statusWords: input.statuses }).slice(0, 9000)),
+  ], schema, 1500);
+  if (!out) return null;
+  const known = new Set(input.columns.map((c) => c.index));
+  const words = new Set(input.statuses);
+  const cols = (Array.isArray(out.columns) ? out.columns : []) as { index?: unknown; field?: unknown; confidence?: unknown }[];
+  const sts = (Array.isArray(out.statuses) ? out.statuses : []) as { raw?: unknown; status?: unknown }[];
+  return {
+    columns: cols.map((c) => ({ index: Number(c.index), field: String(c.field || ""), confidence: Math.max(0, Math.min(1, Number(c.confidence) || 0)) })).filter((c) => known.has(c.index) && fields.includes(c.field)),
+    statuses: sts.map((s) => ({ raw: str(s.raw, 60), status: String(s.status || "") })).filter((s) => words.has(s.raw) && IMPORT_STATUSES.includes(s.status)).map((s) => ({ ...s, status: input.kind === "creator" && s.status === "signed" ? "roster" : input.kind === "brand" && s.status === "roster" ? "signed" : s.status })),
+  };
+}
+
 // ---- 2. A creator's email: rates, audience claims, agreed prices ---------------------
 
 export type Claims = {

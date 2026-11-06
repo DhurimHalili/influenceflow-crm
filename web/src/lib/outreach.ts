@@ -41,7 +41,8 @@ export type Sent = {
 };
 
 /** A message from their side: an email reply or one you logged ("They replied"). */
-export type Received = { key: string; at: string; entityId: string; segment: Segment; channel: string; kind: string; source: "gmail" | "manual" };
+/** A real reply. `mailbox` = the mailbox it came into (Gmail), "" for one logged by hand. */
+export type Received = { key: string; at: string; entityId: string; segment: Segment; channel: string; kind: string; source: "gmail" | "manual"; mailbox: string };
 
 type Input = { creators: Creator[]; brands: Brand[]; contacts?: BrandContact[]; followups: Followup[]; events: EmailEvent[]; leads?: InboundLead[]; now?: Date };
 
@@ -85,7 +86,7 @@ export function build({ creators, brands, contacts = [], followups, events, lead
       if (t.dir === "in" && t.kind === "auto") continue;
       if (t.dir === "in") {
         // Their management turning it down automatically isn't a reply from them.
-        if (t.kind !== "managed_no") received.push({ key: t.source === "gmail" ? t.id : `${record.id}:${t.id}`, at: t.at, entityId: record.id, segment: type, channel: t.channel || "email", kind: t.kind || "", source: t.source === "gmail" ? "gmail" : "manual" });
+        if (t.kind !== "managed_no") received.push({ key: t.source === "gmail" ? t.id : `${record.id}:${t.id}`, at: t.at, entityId: record.id, segment: type, channel: t.channel || "email", kind: t.kind || "", source: t.source === "gmail" ? "gmail" : "manual", mailbox: t.source === "gmail" ? t.mailbox || "" : "" });
         prev = t;
         continue;
       }

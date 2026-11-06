@@ -1,6 +1,6 @@
 // Run: cd web && node --experimental-strip-types --import ./scripts/ts-hooks.mjs src/lib/dashboardStats.test.ts
 import { build } from "./outreach.ts";
-import { makeStats, rangeOf, statusOfActivity } from "./dashboardStats.ts";
+import { mailboxesOf, makeStats, rangeOf, statusOfActivity } from "./dashboardStats.ts";
 
 let fail = 0;
 const eq = (name: string, got: unknown, want: unknown) => {
@@ -54,5 +54,25 @@ eq("status words", [statusOfActivity("Gmail: X moved to Negotiating — y"), sta
 eq("all time has no comparison", rangeOf("all", now).compare, false);
 eq("today compares with the whole of yesterday", [new Date(rangeOf("today", now).prevStart).getDate(), rangeOf("today", now).prevEnd === rangeOf("today", now).start], [4, true]);
 eq("reply rate: first contacts in range who answered", st.replyRate("all", r.start, r.end), { contacted: 1, replied: 1, pct: 100 });
+
+// One mailbox's share: two mailboxes, the parts add up to the whole.
+{
+  const two = [
+    ev("m1", "creator", "out", t - 3 * H, { mailbox: "a@agency.com" }), ev("m1", "creator", "in", t - 2 * H, { mailbox: "a@agency.com" }),
+    ev("m2", "creator", "out", t - 3 * H, { mailbox: "B@agency.com" }), ev("m2", "creator", "out", t - 1 * H, { mailbox: "B@agency.com" }),
+    ev("m3", "creator", "out", t - 2 * H, { mailbox: "b@agency.com" }),
+  ];
+  const people = [rec("m1"), rec("m2"), rec("m3")];
+  const logs = build({ creators: people, brands: [], contacts: [], followups: [], events: two, leads: [], now });
+  const acts = [{ id: "x1", text: "m1 updated to negotiating", at: iso(t - 1 * H), entity_type: "creator", entity_id: "m1" }] as never[];
+  const base = { ...logs, creators: people, brands: [], contacts: [], campaigns: [], activities: acts, leads: [] };
+  const whole = makeStats(base), A = makeStats({ ...base, mailbox: "a@agency.com" }), B = makeStats({ ...base, mailbox: "b@agency.com" });
+  const total = (x: typeof whole) => x.emailMix("all", r.start, r.end, r.horizon).total;
+  eq("mailboxes, busiest first, case folded", mailboxesOf(logs.sent, logs.received), ["b@agency.com", "a@agency.com"]);
+  eq("each mailbox's emails add up to all", [total(A), total(B), total(whole)], [1, 3, 4]);
+  eq("a reply counts for the mailbox it came into", [A.count("replies", "all", r.start, r.end), B.count("replies", "all", r.start, r.end)], [1, 0]);
+  eq("a negotiation belongs to the mailbox that first emailed them", [A.count("negotiations", "all", r.start, r.end), B.count("negotiations", "all", r.start, r.end)], [1, 0]);
+  eq("names still resolve in a mailbox view", B.rows("emails", "all", r.start, r.end, r.horizon).every((x) => x.name.startsWith("m")), true);
+}
 
 if (fail) { console.log(`${fail} failed`); (globalThis as { process?: { exit(n: number): void } }).process?.exit(1); } else console.log("all passed");

@@ -1,12 +1,13 @@
 import Papa from "papaparse";
-import { Archive, ArrowDownAZ, CalendarX, Globe2, Inbox, Mail, Reply, Send, Wallet, ArrowLeft, ArrowRight, Columns3, Contact, Download, ExternalLink, FileSpreadsheet, Filter, Flag, LayoutGrid, List, Merge, Pencil, MoreHorizontal, Plus, RotateCcw, Upload, Users, X } from "lucide-react";
+import { Archive, ArrowDownAZ, CalendarX, Globe2, Inbox, Mail, Reply, Send, Wallet, ArrowLeft, ArrowRight, Columns3, Contact, Download, ExternalLink, Filter, Flag, LayoutGrid, List, Merge, Pencil, MoreHorizontal, Plus, RotateCcw, Upload, Users, X } from "lucide-react";
 import { copyText, emailList } from "../lib/clipboard";
 import { useChase } from "../hooks/useChase";
 import { ConversationSection, FollowFlag } from "../components/Conversation";
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { EmailDraftPanel } from "../components/EmailDraft";
 import { KanbanBoard } from "../components/KanbanBoard";
+import { ImportReport, SmartImport, type ImportSummary } from "../components/SmartImport";
 import { ExportDialog } from "../components/ExportDialog";
 import { BRAND_HEADERS, brandRow } from "../lib/exports";
 import { NextActionEditor } from "../components/NextAction";
@@ -183,10 +184,9 @@ const briefFromRow = (column: (names: string[]) => string) => {
 function ImportBrands({ open, onClose: close }: { open: boolean; onClose: () => void }) {
   const data = useData();
   const { toast } = useToast();
-  const [mode, setMode] = useState("paste");
-  const [text, setText] = useState("");
   const [rows, setRows] = useState<BrandImportRow[]>([]);
-  const onClose = () => { setRows([]); setText(""); close(); };
+  const [summary, setSummary] = useState<ImportSummary | null>(null);
+  const onClose = () => { setRows([]); setSummary(null); close(); };
   const preview = (raw: string) => {
     const parsed = Papa.parse<string[]>(raw.trim(), { skipEmptyLines: true }).data;
     const hasHeader = looksLikeHeader(parsed[0], ["company", "name", "brand", "domain", "website", "url", "email", "contact_email", "type", "brand_type", "category", "status", "pipeline_status", "date_contacted", "contacted", "date", "priority", "action_due", "due", "due_date", "next_action", "notes", "people", "added_on", "archived", ...BRIEF_IMPORT_HEADERS]);
@@ -224,10 +224,9 @@ function ImportBrands({ open, onClose: close }: { open: boolean; onClose: () => 
     });
     setRows(next);
   };
-  const file = (event: ChangeEvent<HTMLInputElement>) => { const selected = event.target.files?.[0]; if (selected) selected.text().then(preview).catch(() => toast("Could not read that file", "error")); };
-  const confirm = () => { const valid = rows.filter((row) => !row.errors.length && !row.duplicate); data.addBrands(valid.map(({ row: _row, errors: _errors, duplicate: _duplicate, ...item }) => brandValue(item))); toast(`${valid.length} brands imported. ${rows.length - valid.length} flagged rows skipped.`); setRows([]); setText(""); onClose(); };
+  const confirm = () => { const valid = rows.filter((row) => !row.errors.length && !row.duplicate); data.addBrands(valid.map(({ row: _row, errors: _errors, duplicate: _duplicate, ...item }) => brandValue(item))); toast(`${valid.length} brands imported. ${rows.length - valid.length} flagged rows skipped.`); setRows([]); setSummary(null); onClose(); };
   const template = () => download("influenceflow-brand-template.csv", CSV_BOM + "Company,Domain,Type,Email,Email 2,Email 2 is,Creator niches,Platforms,Creator size,Budget min,Budget max,Budget per,Goals,Markets,Priority,Status,Date contacted,Action due,Next action,Notes\nNorthstar Labs,northstarlabs.com,Technology,partners@northstarlabs.com,anna@northstarlabs.com,Brand manager,Tech; Gaming,YouTube; TikTok,micro; mid,5000,20000,campaign,Awareness; Sales,United States; DACH,Urgent,New,2026-09-01,2026-09-05,Send intro deck,Annual program", "text/csv");
-  return <Modal open={open} onClose={onClose} title="Import brands" description="Preview, validate, and deduplicate before companies reach your pipeline." wide><div className="import-flow"><Tabs active={mode} onChange={setMode} tabs={[{ value: "paste", label: "Paste rows" }, { value: "file", label: "Upload CSV" }]} />{!rows.length ? <>{mode === "paste" ? <div className="paste-zone"><Textarea value={text} onChange={(event) => setText(event.target.value)} rows={9} placeholder={`Northstar Labs, northstarlabs.com\nAster & Co., partners@aster.com, Lifestyle`} /><p>Accepted: Company + domain, or Company + email + type. With a header row, brief columns (Creator niches, Platforms, Budget min/max, Goals, Markets…) are picked up too.</p></div> : <label className="upload-zone"><FileSpreadsheet size={28} /><strong>Choose a CSV file</strong><span>CSV up to 5 MB. Nothing is imported before confirmation.</span><input type="file" accept=".csv,.tsv,.txt,text/csv,text/plain" onChange={file} /></label>}<button className="template-link" onClick={template}><Download size={14} /> Download CSV template</button><div className="modal-actions"><Button variant="ghost" onClick={onClose}>Cancel</Button>{mode === "paste" && <Button onClick={() => preview(text)} disabled={!text.trim()}>Preview rows</Button>}</div></> : <><div className="import-summary"><span><b>{rows.length}</b> parsed</span><span className="valid"><b>{rows.filter((row) => !row.errors.length && !row.duplicate).length}</b> ready</span><span className="invalid"><b>{rows.filter((row) => row.errors.length).length}</b> invalid</span><span className="duplicate"><b>{rows.filter((row) => row.duplicate).length}</b> duplicates</span></div><div className="import-table-wrap"><table className="import-table"><thead><tr><th>Row</th><th>Company</th><th>Domain / email</th><th>Type</th><th>Result</th></tr></thead><tbody>{rows.map((row) => <tr key={row.row} className={row.errors.length || row.duplicate ? "row-invalid" : ""}><td>{row.row}</td><td>{row.name || "Missing"}</td><td>{row.domain || row.contact_email || "Missing"}</td><td>{row.brand_type || "-"}</td><td>{row.errors.length ? row.errors.join(", ") : row.duplicate ? "Duplicate" : "Ready"}</td></tr>)}</tbody></table></div><div className="modal-actions"><Button variant="ghost" onClick={() => { setRows([]); setText(""); }}>Back</Button><Button onClick={confirm} disabled={!rows.some((row) => !row.errors.length && !row.duplicate)}>Import ready rows</Button></div></>}</div></Modal>;
+  return <Modal open={open} onClose={onClose} title="Import brands" description="Bring any sheet — Excel, Google Sheets or CSV, your own columns and words. You check the plan, nothing is imported until you confirm." wide><div className="import-flow"><div hidden={rows.length > 0}><SmartImport kind="brand" template={template} onReady={(csv, sum) => { setSummary(sum); preview(csv); }} /></div>{rows.length > 0 && <>{summary && <ImportReport summary={summary} youtube={0} />}<div className="import-summary"><span><b>{rows.length}</b> parsed</span><span className="valid"><b>{rows.filter((row) => !row.errors.length && !row.duplicate).length}</b> ready</span><span className="invalid"><b>{rows.filter((row) => row.errors.length).length}</b> invalid</span><span className="duplicate"><b>{rows.filter((row) => row.duplicate).length}</b> duplicates</span></div><div className="import-table-wrap"><table className="import-table"><thead><tr><th>Row</th><th>Company</th><th>Domain / email</th><th>Type</th><th>Result</th></tr></thead><tbody>{rows.map((row) => <tr key={row.row} className={row.errors.length || row.duplicate ? "row-invalid" : ""}><td>{summary?.rowNumbers[row.row - 2] ?? row.row}</td><td>{row.name || "Missing"}</td><td>{row.domain || row.contact_email || "Missing"}</td><td>{row.brand_type || "-"}</td><td>{row.errors.length ? row.errors.join(", ") : row.duplicate ? "Duplicate" : "Ready"}</td></tr>)}</tbody></table></div><div className="modal-actions"><Button variant="ghost" onClick={() => { setRows([]); setSummary(null); }}>Back</Button><Button onClick={confirm} disabled={!rows.some((row) => !row.errors.length && !row.duplicate)}>Import ready rows</Button></div></>}</div></Modal>;
 }
 
 // What a brand wants, in one glance: platform marks + niches.

@@ -48,7 +48,48 @@ export type DashInput = {
   campaigns: Campaign[];
   activities: Activity[];
   leads: InboundLead[];
+  /** Only what one mailbox did (lowercase address); empty = every mailbox. */
+  mailbox?: string;
 };
+
+/** Every mailbox that sent or received something, busiest first. */
+export function mailboxesOf(sent: Sent[], received: Received[] = []): string[] {
+  const n = new Map<string, number>();
+  for (const x of sent) if (x.mailbox) n.set(x.mailbox.toLowerCase(), (n.get(x.mailbox.toLowerCase()) || 0) + 1);
+  for (const r of received) if (r.mailbox && !n.has(r.mailbox.toLowerCase())) n.set(r.mailbox.toLowerCase(), 0);
+  return [...n.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([m]) => m);
+}
+
+/**
+ * One mailbox's share of the work. Emails count for the mailbox that sent
+ * them; a reply for the mailbox it came into (one logged by hand, for the
+ * mailbox that first emailed them). Pipeline moves — negotiations, wins,
+ * losses, records added — belong to the mailbox that first emailed that
+ * person or brand. Follow-ups by DM / WhatsApp / call aren't from a mailbox,
+ * so a mailbox view leaves them out.
+ */
+function scopeTo(input: DashInput): DashInput {
+  const box = (input.mailbox || "").toLowerCase();
+  if (!box) return input;
+  const owner = new Map<string, string>();
+  for (const x of [...input.sent].sort((a, b) => a.at.localeCompare(b.at))) {
+    if (x.scheduled || x.channel !== "email" || !x.mailbox) continue;
+    if (!owner.has(x.recordId)) owner.set(x.recordId, x.mailbox.toLowerCase());
+  }
+  const mine = (id: string | null | undefined) => !!id && owner.get(id) === box;
+  const brandOfCampaign = new Map(input.campaigns.map((c) => [c.id, c.brand_id]));
+  return {
+    ...input,
+    sent: input.sent.filter((x) => (x.mailbox || "").toLowerCase() === box),
+    received: input.received.filter((r) => (r.mailbox ? r.mailbox.toLowerCase() === box : mine(r.entityId))),
+    activities: input.activities.filter((a) => (a.entity_type === "campaign" ? mine(brandOfCampaign.get(a.entity_id || "")) : mine(a.entity_id))),
+    creators: input.creators.filter((c) => mine(c.id)),
+    brands: input.brands.filter((b) => mine(b.id)),
+    contacts: input.contacts.filter((c) => mine(c.brand_id)),
+    campaigns: input.campaigns.filter((c) => mine(c.brand_id)),
+    leads: input.leads.filter((l) => (l.mailbox || "").toLowerCase() === box),
+  };
+}
 
 export type MetricKey = "emails" | "followups" | "first" | "newthreads" | "answers" | "replies" | "negotiations" | "wins" | "lost" | "added"
   // The parts of "Emails sent" (email only): what each email was.
@@ -74,12 +115,16 @@ export const statusOfActivity = (text: string) => {
 const CHANNEL_WORD: Record<string, string> = { email: "Email", dm: "Instagram DM", tiktok: "TikTok DM", whatsapp: "WhatsApp", call: "Call", linkedin: "LinkedIn", other: "Other" };
 const ROLE_WORD: Record<Sent["role"], string> = { first: "First email", followup: "Follow-up", newthread: "New thread", answer: "Answer" };
 
-export function makeStats(input: DashInput) {
-  const creatorById = new Map(input.creators.map((c) => [c.id, c]));
-  const brandById = new Map(input.brands.map((b) => [b.id, b]));
-  const contactById = new Map(input.contacts.map((c) => [c.id, c]));
-  const leadById = new Map(input.leads.map((l) => [l.id, l]));
-  const campaignById = new Map(input.campaigns.map((c) => [c.id, c]));
+export function makeStats(all: DashInput) {
+  // Names come from every record; what's counted can be one mailbox's share.
+  const creatorById = new Map(all.creators.map((c) => [c.id, c]));
+  const brandById = new Map(all.brands.map((b) => [b.id, b]));
+  const contactById = new Map(all.contacts.map((c) => [c.id, c]));
+  const leadById = new Map(all.leads.map((l) => [l.id, l]));
+  const campaignById = new Map(all.campaigns.map((c) => [c.id, c]));
+  const input = scopeTo(all);
+  const counted = new Set(input.creators.map((c) => c.id));
+  const countedDeals = new Set(input.campaigns.map((c) => c.id));
 
   const who = (s: { entityId: string; entityType?: Sent["entityType"]; segment: Segment }): { name: string; to: string } => {
     if (s.entityType === "contact") {
@@ -156,8 +201,8 @@ export function makeStats(input: DashInput) {
         break;
       }
       case "wins":
-        if (matches(view, "creator")) for (const [id, at] of rosterAt) if (within(at, s, e) && creatorById.has(id)) out.push({ key: `ros-${id}`, at, name: creatorById.get(id)!.name, to: `/app/influencers/${id}`, tag: "Joined your roster", sub: "", segment: "creator" });
-        if (matches(view, "brand")) for (const [id, at] of dealAt) if (within(at, s, e) && campaignById.has(id)) { const c = campaignById.get(id)!; out.push({ key: `deal-${id}`, at, name: c.name, to: `/app/campaigns?id=${id}`, tag: "Deal closed", sub: brandById.get(c.brand_id)?.name || "", segment: "brand" }); }
+        if (matches(view, "creator")) for (const [id, at] of rosterAt) if (within(at, s, e) && counted.has(id)) out.push({ key: `ros-${id}`, at, name: creatorById.get(id)!.name, to: `/app/influencers/${id}`, tag: "Joined your roster", sub: "", segment: "creator" });
+        if (matches(view, "brand")) for (const [id, at] of dealAt) if (within(at, s, e) && countedDeals.has(id)) { const c = campaignById.get(id)!; out.push({ key: `deal-${id}`, at, name: c.name, to: `/app/campaigns?id=${id}`, tag: "Deal closed", sub: brandById.get(c.brand_id)?.name || "", segment: "brand" }); }
         break;
       case "lost":
         if (matches(view, "creator")) for (const c of input.creators) if (within(c.lost_at, s, e)) out.push({ key: `lc-${c.id}`, at: c.lost_at!, name: c.name, to: `/app/influencers/${c.id}`, tag: "Negotiation lost", sub: c.lost_reason || "", segment: "creator" });

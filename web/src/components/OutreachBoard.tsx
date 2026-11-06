@@ -1,12 +1,13 @@
 import { useMemo, useState } from "react";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { ArrowRight, Building2, CalendarClock, CheckCircle2, Handshake, Mail, RefreshCw, Reply, Send, ShieldCheck, Sparkles, Trophy, UserPlus, Users, X, XCircle } from "lucide-react";
+import { ArrowRight, Building2, CalendarClock, CheckCircle2, Handshake, Inbox, Mail, RefreshCw, Reply, Send, ShieldCheck, Sparkles, Trophy, UserPlus, Users, X, XCircle } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useData } from "../contexts/DataContext";
 import { useGmail } from "../contexts/GmailContext";
 import { useToast } from "../contexts/ToastContext";
 import { useOutreachLogs } from "../hooks/useOutreach";
-import { dailyBuckets, makeStats, rangeOf, type MetricKey, type RangeKey, type Row, type View } from "../lib/dashboardStats";
+import { dailyBuckets, mailboxesOf, makeStats, rangeOf, type MetricKey, type RangeKey, type Row, type View } from "../lib/dashboardStats";
+import { MailboxName, mailboxTone } from "./MailboxBits";
 import { sendsAt } from "../lib/followupEngine";
 import { relativeTime, stampLabel, timeLabel } from "../lib/utils";
 import { Tabs } from "./ui";
@@ -59,10 +60,19 @@ export function OutreachBoard() {
   const [view, setView] = useState<View>(() => recall("if.dash-view", ["all", "creator", "brand"] as const, "all"));
   const [open, setOpen] = useState<Open>(null);
   const range = rangeOf(rangeKey);
-  const stats = useMemo(
-    () => makeStats({ sent, received, creators: data.creators, brands: data.brands, contacts: data.contacts, campaigns: data.campaigns, activities: data.activities, leads: gmail.leads }),
-    [sent, received, data.creators, data.brands, data.contacts, data.campaigns, data.activities, gmail.leads],
-  );
+  // Every mailbox you connected or that shows up in your mail, busiest first.
+  const mailboxes = useMemo(() => {
+    const seen = mailboxesOf(sent, received);
+    for (const m of gmail.mailboxes) if (!seen.includes(m.email.toLowerCase())) seen.push(m.email.toLowerCase());
+    return seen;
+  }, [sent, received, gmail.mailboxes]);
+  const [boxPick, setBoxPick] = useState(() => { try { return localStorage.getItem("if.dash-mailbox") || ""; } catch { return ""; } });
+  const box = mailboxes.includes(boxPick) ? boxPick : "";
+  const base = useMemo(() => ({ sent, received, creators: data.creators, brands: data.brands, contacts: data.contacts, campaigns: data.campaigns, activities: data.activities, leads: gmail.leads }), [sent, received, data.creators, data.brands, data.contacts, data.campaigns, data.activities, gmail.leads]);
+  const stats = useMemo(() => makeStats({ ...base, mailbox: box }), [base, box]);
+  // Each mailbox's share, for the "who sent it" split (only with 2+ mailboxes).
+  const perBox = useMemo(() => (mailboxes.length > 1 ? mailboxes.map((m) => ({ mailbox: m, stats: makeStats({ ...base, mailbox: m }) })) : []), [base, mailboxes]);
+  const pickBox = (m: string) => { setBoxPick(m); remember("if.dash-mailbox", m); setOpen(null); };
   const pickRange = (v: string) => { setRangeKey(v as RangeKey); remember("if.momentum-range", v); setOpen(null); };
   const pickView = (v: View) => { setView(v); remember("if.dash-view", v); setOpen(null); };
 
@@ -139,6 +149,12 @@ export function OutreachBoard() {
       </div>
     </div>
 
+    {mailboxes.length > 1 && <div className="ob-boxes" role="radiogroup" aria-label="Show stats for a mailbox">
+      <button type="button" role="radio" aria-checked={!box} className={!box ? "on" : ""} onClick={() => pickBox("")}><Inbox size={13} /> All mailboxes <b>{mailboxes.length}</b></button>
+      {mailboxes.map((m, i) => <button type="button" key={m} role="radio" aria-checked={box === m} className={`mbx-${mailboxTone(i)}${box === m ? " on" : ""}`} onClick={() => pickBox(box === m ? "" : m)} title={`Only what ${m} did`}><i className="mbx-dot" aria-hidden="true" /><MailboxName email={m} /></button>)}
+    </div>}
+    {box && <p className="ob-scope"><span className={`mbx-${mailboxTone(mailboxes.indexOf(box))}`}><i className="mbx-dot" aria-hidden="true" /></span><span>Only <b>{box}</b>: emails it sent, replies that came into it, and the people it emailed first (their negotiations and wins). DMs and calls aren't from a mailbox, so they're left out.</span><button type="button" onClick={() => pickBox("")}>Show all mailboxes</button></p>}
+
     {gmail.connected && <div className="ob-fresh">
       <span className={gmail.error ? "warn" : ""}>{gmail.error ? "Gmail needs attention — " : "Gmail checked "}{gmail.lastSyncAt ? relativeTime(gmail.lastSyncAt) : "not yet"}{!gmail.error && " · new mail shows up within a few minutes"}</span>
       <button type="button" onClick={() => void sync()} disabled={syncing} aria-label="Check Gmail now"><RefreshCw size={12} className={syncing ? "spin" : ""} /> {syncing ? "Checking…" : "Check now"}</button>
@@ -147,7 +163,7 @@ export function OutreachBoard() {
     <div className="ob-hero">
       <div className={`ob-total${open?.metric === "emails" && open.view === view ? " on" : ""}`}>
         <button type="button" className="ob-total-main" onClick={() => setOpen((cur) => (cur && cur.metric === "emails" && cur.view === view && cur.start === range.start ? null : { metric: "emails", view, start: range.start, end: range.end, horizon: range.horizon, title: `Emails sent${view === "creator" ? " · influencers" : view === "brand" ? " · brands" : ""}` }))} aria-label={`Emails sent: ${mix.total}. Show every email`}>
-          <span className="ob-total-label"><span className="ob-ico"><Mail size={15} /></span><span><small>Emails sent</small><em>Every email · all mailboxes{mix.scheduled ? " · scheduled included" : ""}</em></span></span>
+          <span className="ob-total-label"><span className="ob-ico"><Mail size={15} /></span><span><small>Emails sent</small><em>Every email · {box ? box : mailboxes.length > 1 ? `${mailboxes.length} mailboxes` : "all mailboxes"}{mix.scheduled ? " · scheduled included" : ""}</em></span></span>
           <span className="ob-total-row"><strong>{mix.total.toLocaleString("en-US")}</strong>{emailsDelta !== null && <em className={emailsDelta === 0 ? "delta-flat" : emailsDelta > 0 ? "delta-up" : "delta-down"}>{emailsDelta === 0 ? `— ${range.prevLabel}` : `${emailsDelta > 0 ? "+" : ""}${emailsDelta} ${range.prevLabel}`}</em>}</span>
         </button>
         <div className="ob-mix-bar" role="img" aria-label={parts.map((p) => `${p.n} ${p.label.toLowerCase()}`).join(", ")}>{mix.total ? PARTS.filter((p) => p.n > 0).map((p) => <i key={p.key} className={`mix-${p.tone}`} style={{ flexGrow: p.n }} />) : <i className="mix-empty" />}</div>
@@ -157,7 +173,12 @@ export function OutreachBoard() {
             <i className={`mix-dot mix-${p.tone}`} aria-hidden="true" /><b>{p.n.toLocaleString("en-US")}</b><span>{p.label}</span>{mix.total > 0 && p.n > 0 && <small>{Math.round((p.n / mix.total) * 100)}%</small>}
           </button>;
         })}</div>
-        {(mix.otherFollowups > 0 || mix.later > 0) && <p className="ob-mix-foot">{mix.otherFollowups > 0 && <span><Send size={11} /> +{mix.otherFollowups} follow-up{mix.otherFollowups === 1 ? "" : "s"} by DM, WhatsApp or call — not emails</span>}{mix.later > 0 && <span><CalendarClock size={11} /> {mix.later} more scheduled for later{nextSend ? ` · next ${nextSend}` : ""}</span>}</p>}
+        {!box && perBox.length > 1 && <MailboxSplit rows={perBox.map((b, i) => {
+          const m = b.stats.emailMix(view, range.start, range.end, range.horizon);
+          const rr = b.stats.replyRate(view, range.start, range.end);
+          return { mailbox: b.mailbox, tone: mailboxTone(i), sent: m.total, first: m.first, followups: m.followups, replies: b.stats.count("replies", view, range.start, range.end), rate: rr.pct, prev: range.compare ? b.stats.emailMix(view, range.prevStart, range.prevEnd).total : null };
+        })} prevLabel={range.prevLabel} onPick={pickBox} />}
+                {(mix.otherFollowups > 0 || mix.later > 0) && <p className="ob-mix-foot">{mix.otherFollowups > 0 && <span><Send size={11} /> +{mix.otherFollowups} follow-up{mix.otherFollowups === 1 ? "" : "s"} by DM, WhatsApp or call — not emails</span>}{mix.later > 0 && <span><CalendarClock size={11} /> {mix.later} more scheduled for later{nextSend ? ` · next ${nextSend}` : ""}</span>}</p>}
       </div>
       <button type="button" className={`ob-big ob-replies${open?.metric === "replies" && open.view === view ? " on" : ""}`} onClick={() => show("replies")} aria-label={`Replies received: ${c("replies")}. Show the list`}>
         <span className="ob-big-top"><span className="ob-ico"><Reply size={15} /></span><small>Replies received</small></span>
@@ -206,6 +227,31 @@ export function OutreachBoard() {
 
     <TrackingCheck />
   </section>;
+}
+
+type SplitRow = { mailbox: string; tone: number; sent: number; first: number; followups: number; replies: number; rate: number | null; prev: number | null };
+
+/** "Who sent it": each mailbox's share of the emails, side by side. Tap one to see only its numbers. */
+function MailboxSplit({ rows, prevLabel, onPick }: { rows: SplitRow[]; prevLabel: string; onPick: (m: string) => void }) {
+  const total = rows.reduce((n, r) => n + r.sent, 0);
+  const top = Math.max(1, ...rows.map((r) => r.sent));
+  return <div className="ob-split" aria-label="Emails by mailbox">
+    <div className="ob-split-head"><span>Who sent it</span>{total > 0 && <div className="ob-split-bar" role="img" aria-label={rows.map((r) => `${r.mailbox}: ${r.sent}`).join(", ")}>{rows.filter((r) => r.sent > 0).map((r) => <i key={r.mailbox} className={`mbx-${r.tone}`} style={{ flexGrow: r.sent }} />)}</div>}</div>
+    <ul>{rows.map((r) => {
+      const delta = r.prev === null ? null : r.sent - r.prev;
+      return <li key={r.mailbox} className={`mbx-${r.tone}`}>
+        <button type="button" onClick={() => onPick(r.mailbox)} title={`${r.mailbox}: ${r.first} new conversation${r.first === 1 ? "" : "s"}, ${r.followups} follow-up${r.followups === 1 ? "" : "s"} — tap to see only this mailbox`}>
+          <span className="sp-who"><i className="mbx-dot" aria-hidden="true" /><MailboxName email={r.mailbox} /></span>
+          <span className="sp-sent"><b>{r.sent.toLocaleString("en-US")}</b><small>{total ? `${Math.round((r.sent / total) * 100)}%` : "—"}</small></span>
+          <span className="sp-bar" aria-hidden="true"><i style={{ width: `${(r.sent / top) * 100}%` }} /></span>
+          <span className="sp-mix">{r.first} new · {r.followups} follow-up{r.followups === 1 ? "" : "s"}</span>
+          <span className="sp-replies"><Reply size={11} /> {r.replies}{r.rate !== null && <em>{r.rate}% reply</em>}</span>
+          {delta !== null && <span className={`sp-delta ${delta > 0 ? "delta-up" : delta < 0 ? "delta-down" : "delta-flat"}`} title={prevLabel}>{delta === 0 ? "—" : `${delta > 0 ? "+" : ""}${delta}`}</span>}
+          <ArrowRight size={13} className="sp-go" />
+        </button>
+      </li>;
+    })}</ul>
+  </div>;
 }
 
 function Ledger({ open, rows, onClose }: { open: NonNullable<Open>; rows: Row[]; onClose: () => void }) {
