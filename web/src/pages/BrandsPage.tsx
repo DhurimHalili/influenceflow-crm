@@ -36,7 +36,7 @@ const [market, setMarket] = useSessionState("brands.market", "all"); const [foll
   const clearFilters = () => { setStatus("all"); setType("all"); setPriorityFilter("all"); setWantsPlatform("all"); setBudgetFilter("all"); setNicheFilter("all"); setMarket("all"); setFollowFilter("all"); };
   const activeFilters = [status !== "all", type !== "all", priorityFilter !== "all", wantsPlatform !== "all", budgetFilter !== "all", nicheFilter !== "all", market !== "all", followFilter !== "all"].filter(Boolean).length;
   const narrowed = activeFilters > 0 || !!query || sort !== "newest";
-  const [selected, setSelected] = useState<string[]>([]); const [open, setOpen] = useState(false); const [draft, setDraft] = useState<BrandDraft>(blankBrand); const [duplicates, setDuplicates] = useState<string[]>([]); const [importOpen, setImportOpen] = useState(false);
+  const [selected, setSelected] = useState<string[]>([]); const [open, setOpen] = useSessionState("brands.add.open", false); const [draft, setDraft] = useSessionState<BrandDraft>("brands.add.draft", blankBrand); const [duplicates, setDuplicates] = useState<string[]>([]); const [importOpen, setImportOpen] = useState(false);
   // ?new=1 opens the form; ?new=inbound opens it already marked Inbound.
   useEffect(() => { const mode = params.get("new"); if (!mode) return; if (mode === "inbound") setDraft((current) => ({ ...current, pipeline_status: "inbound", date_contacted: current.date_contacted || today() }));
     // From the tracking check: someone you already emailed — Gmail fills in the history once they're added.

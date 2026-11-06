@@ -2,7 +2,7 @@ import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { aiEnabled, hasAudience, QuotaExhausted, readAttachment, readCreatorEmail, type AudienceFacts, type FileReading } from "../_shared/ai.ts";
 import { decodeEntities } from "../_shared/leadScanner.ts";
 import { negotiate, normalizeRateHistory, normalizeRateMeta, setListPrices, type RateEvent, type RateKey, type RateMetaMap, type Rates } from "../_shared/negotiation.ts";
-import { isPlainYes, mentionsMoneyOrAudience, ownText, readMine, readOffer, readPrices, type PriceHit } from "../_shared/priceReader.ts";
+import { isPlainYes, mentionsMoneyOrAudience, moneyMentions, ownText, readMine, readOffer, readPrices, statesAudience, type PriceHit } from "../_shared/priceReader.ts";
 import { listPrice } from "../_shared/negotiation.ts";
 
 // What a creator's email adds to their CRM profile:
@@ -97,7 +97,7 @@ const KIT_WORDS = /media[\s_-]?kit|rate[\s_-]?card|\brates\b|press[\s_-]?kit|\bk
 const looksLikeKit = (name: string) => KIT_WORDS.test(name);
 const declaredOk = (att: Attachment) => !!ALLOWED[att.mime] || (/^(application\/(octet-stream|x-pdf|download|force-download)|binary\/octet-stream)$/.test(att.mime) && /\.(pdf|png|jpe?g|webp)$/i.test(att.filename));
 
-type CreatorRow = { id: string; name: string; rates: Partial<Rates> | null; rate_meta: unknown; rate_history: unknown; audience: Record<string, unknown> | null; socials: { handle?: string }[] | null };
+type CreatorRow = { pipeline_status?: string; id: string; name: string; rates: Partial<Rates> | null; rate_meta: unknown; rate_history: unknown; audience: Record<string, unknown> | null; socials: { handle?: string }[] | null };
 type FileRow = { id: string; creator_id: string; path: string; filename: string; mime: string; size: number; received_at: string; storage: string; gmail_id: string; part_id: string; mailbox: string; kind: string; ai_attempts: number };
 
 export async function aiAllowed(admin: Admin, userId: string) {
@@ -209,7 +209,7 @@ class Profile {
 }
 
 async function loadProfile(admin: Admin, userId: string, creatorId: string, currency: string) {
-  const { data } = await admin.from("creators").select("id, name, rates, rate_meta, rate_history, audience, socials").eq("id", creatorId).eq("user_id", userId).maybeSingle();
+  const { data } = await admin.from("creators").select("id, name, rates, rate_meta, rate_history, audience, socials, pipeline_status").eq("id", creatorId).eq("user_id", userId).maybeSingle();
   return data ? new Profile(data as CreatorRow, admin, userId, currency) : null;
 }
 
@@ -431,7 +431,19 @@ export async function processCreatorMail(ctx: MailCtx & { message: FullMessage; 
   let agreed: { key: RateKey; amount: number; currency: string }[] = [...rules.agreed];
   let evidence = rules.agreed[0]?.quote || rules.stated[0]?.quote || "";
   let fromAi = false;
-  if (text.length > 20 && mentionsMoneyOrAudience(text) && (await tryAi(ctx))) {
+  // The AI reads an email only when it adds something the rules couldn't, in
+  // the part of the relationship where prices matter:
+  //   • prices on the page that the rules didn't read (e.g. tangled wording), or
+  //   • audience numbers when nothing verified is on file yet;
+  //   • and only while talking terms (contacted → negotiating, inbound), or a
+  //     signed creator writing new prices. Denied / not contacted: rules only.
+  // Everything else — "thanks!", scheduling, already-read prices — costs no quota.
+  const stage = p.c.pipeline_status || "contacted";
+  const live = ["contacted", "no_reply", "replied", "negotiating", "inbound"].includes(stage) || (["roster", "signed"].includes(stage) && moneyMentions(text) > 0);
+  const unread = moneyMentions(text) > rules.stated.length + rules.agreed.length;
+  const audienceWanted = statesAudience(text) && !(p.audience as { verified?: unknown }).verified;
+  const worthAi = live && (unread || audienceWanted);
+  if (text.length > 20 && worthAi && mentionsMoneyOrAudience(text) && (await tryAi(ctx))) {
     ctx.budget.ai--;
     try {
       const claims = await readCreatorEmail({ creator: p.c.name, subject, body: ownText(text) || text, currentRates: p.rates });

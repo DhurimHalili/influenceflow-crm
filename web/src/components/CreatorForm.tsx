@@ -32,6 +32,27 @@ export type CreatorDraft = {
   /** Filled by the YouTube quick fill: saved with the record, so it isn't read twice. */
   youtube?: YouTubeFacts;
   youtube_synced_at?: string;
+  /** The YouTube facts changed in this form (quick fill, "Use YouTube's"): save them. */
+  youtube_dirty?: boolean;
+  /** Values the form guessed (a name from an @handle): YouTube may replace them. */
+  guess?: Partial<Record<AutoKey, string>>;
+};
+
+/** Fields YouTube fills and keeps fresh — until you change them yourself. */
+export type AutoKey = "name" | "contact_email" | "country" | "niche" | "avg_views" | "engagement_rate";
+const NUMERIC_AUTO = new Set<AutoKey>(["avg_views", "engagement_rate"]);
+export const sameAuto = (k: AutoKey, a: unknown, b: unknown) => (NUMERIC_AUTO.has(k) ? Number(a || 0) === Number(b || 0) : String(a ?? "").trim().toLowerCase() === String(b ?? "").trim().toLowerCase());
+const blankAuto = (k: AutoKey, v: unknown) => (NUMERIC_AUTO.has(k) ? !(Number(v) > 0) : !String(v ?? "").trim());
+const countryNameOf = (code?: string) => (code ? COUNTRIES.find((c) => c.code === code.toUpperCase())?.name || "" : "");
+/** What YouTube says right now for a field ("" when it has nothing). */
+export const youtubeValue = (y: YouTubeFacts | undefined, k: AutoKey): string => {
+  if (!y) return "";
+  if (k === "name") return y.title || "";
+  if (k === "contact_email") return y.emails?.[0] || "";
+  if (k === "country") return countryNameOf(y.country);
+  if (k === "niche") return y.niche || "";
+  if (k === "avg_views") return y.sampled && y.avg_views ? String(y.avg_views) : "";
+  return y.sampled && y.engagement_rate ? String(y.engagement_rate) : "";
 };
 
 export const emptyDraft: CreatorDraft = { name: "", contact_email: "", secondary_email: "", secondary_email_label: "", channel_link: "", niche: "", country: "", avg_views: "", engagement_rate: "", stars_consistency: 0, stars_demographics: 0, stars_niche: 0, stars_engagement: 0, priority: "none", next_action_date: "", platform: "YouTube", pipeline_status: "new", date_contacted: "", notes: "", next_action: "", socials: [] };
@@ -57,7 +78,7 @@ export const draftToCreator = (draft: CreatorDraft) => {
     platform: main ? asPlatform(main.platform) : draft.platform,
     // "New" means nobody reached out yet, so it never carries a contact date.
     pipeline_status: draft.pipeline_status, date_contacted: OUTREACH_STAGES.includes(draft.pipeline_status) ? draft.date_contacted || today() : null, notes: draft.notes, next_action: draft.next_action,
-    ...(draft.youtube_synced_at ? { youtube: draft.youtube, youtube_synced_at: draft.youtube_synced_at } : {}),
+    ...(draft.youtube_dirty && draft.youtube && draft.youtube_synced_at ? { youtube: draft.youtube, youtube_synced_at: draft.youtube_synced_at } : {}),
   };
 };
 
@@ -66,6 +87,8 @@ export const creatorToDraft = (creator: Creator): CreatorDraft => ({
   stars_consistency: creator.stars_consistency || 0, stars_demographics: creator.stars_demographics || 0, stars_niche: creator.stars_niche || 0, stars_engagement: creator.stars_engagement || 0,
   priority: creator.priority || "none", next_action_date: creator.next_action_date || "", platform: creator.platform, pipeline_status: creator.pipeline_status, date_contacted: creator.date_contacted || "", notes: creator.notes, next_action: creator.next_action || "",
   socials: socialsToRows(creator.socials),
+  // Read-only here (to tell YouTube's values from yours); saved only when the form changes them.
+  ...(creator.youtube && creator.youtube_synced_at ? { youtube: creator.youtube, youtube_synced_at: creator.youtube_synced_at } : {}),
 });
 
 // Status change inside a form: entering an outreach stage pre-fills today's
@@ -141,19 +164,30 @@ export function CreatorFields({ draft, setDraft, mode }: Props) {
     // Read from the latest draft: anything typed while YouTube answered is kept.
     const d = draftRef.current;
     const firstYt = d.socials.findIndex((r) => r.platform === "YouTube");
-    const country = COUNTRIES.find((c) => c.code === f.country)?.name || "";
     const filled: string[] = [];
     const next: CreatorDraft = { ...d, socials: d.socials.map((r, i) => (i === firstYt && f.subscribers ? { ...r, followers: String(f.subscribers) } : r)) };
-    if (!d.name.trim() && f.title) { next.name = f.title; filled.push("name"); }
-    if (!d.country.trim() && country) { next.country = country; filled.push("country"); }
-    if (!d.contact_email.trim() && f.emails[0]) { next.contact_email = f.emails[0]; filled.push("email"); }
-    if (f.sampled) { next.avg_views = String(f.avgViews); next.engagement_rate = String(f.engagementRate); filled.push("avg views", "engagement"); }
+    // Your own niche spelling when you already use it ("tech" → your "Tech").
+    const niche = f.niche ? niches.find((n) => n.toLowerCase() === f.niche.toLowerCase()) || f.niche : "";
+    const fresh: Partial<Record<AutoKey, string>> = { name: f.title, contact_email: f.emails[0] || "", country: countryNameOf(f.country), niche, ...(f.sampled ? { avg_views: String(f.avgViews), engagement_rate: String(f.engagementRate) } : {}) };
+    const prevAuto = d.youtube?.auto || {};
+    const auto: Partial<Record<AutoKey, string>> = { ...prevAuto };
+    const LABEL: Record<AutoKey, string> = { name: "name", contact_email: "email", country: "country", niche: "niche", avg_views: "avg views", engagement_rate: "engagement" };
+    for (const k of Object.keys(fresh) as AutoKey[]) {
+      const value = fresh[k];
+      if (!value) continue;
+      const current = d[k];
+      // Empty, a guess (a name made from the @handle), or what YouTube put there before: YouTube's real value wins.
+      const free = blankAuto(k, current) || (d.guess?.[k] !== undefined && sameAuto(k, current, d.guess[k])) || (prevAuto[k] !== undefined && sameAuto(k, current, prevAuto[k]));
+      if (free) { next[k] = value; auto[k] = value; filled.push(LABEL[k]); }
+    }
+    next.guess = {};
     if (f.subscribers) filled.push("subscribers");
     if (f.stars.engagement) next.stars_engagement = f.stars.engagement;
     if (f.stars.consistency) next.stars_consistency = f.stars.consistency;
     if (f.stars.demographics) next.stars_demographics = f.stars.demographics;
     if (f.stars.engagement || f.stars.consistency || f.stars.demographics) filled.push("stars");
-    next.youtube = { channel_id: f.channelId, handle: f.handle, title: f.title, url: f.url, country: f.country, subscribers: f.subscribers, hidden_subscribers: f.hiddenSubscribers, video_count: f.videoCount, total_views: f.totalViews, avg_views: f.avgViews, engagement_rate: f.engagementRate, sampled: f.sampled, uploads_90d: f.uploads90d, last_upload_at: f.lastUploadAt, emails: f.emails, business_email_hidden: f.businessEmailHidden, at: f.at };
+    next.youtube = { channel_id: f.channelId, handle: f.handle, title: f.title, url: f.url, country: f.country, subscribers: f.subscribers, hidden_subscribers: f.hiddenSubscribers, video_count: f.videoCount, total_views: f.totalViews, avg_views: f.avgViews, engagement_rate: f.engagementRate, sampled: f.sampled, uploads_90d: f.uploads90d, last_upload_at: f.lastUploadAt, emails: f.emails, business_email_hidden: f.businessEmailHidden, niche: f.niche, sub_niche: f.subNiche, includes_recent: f.includesRecent, at: f.at, auto, kept: [] };
+    next.youtube_dirty = true;
     next.youtube_synced_at = f.at;
     setDraft(next);
     setYtFacts(f);
@@ -171,7 +205,7 @@ export function CreatorFields({ draft, setDraft, mode }: Props) {
     const next: CreatorDraft = { ...draft, socials: rows };
     const filled: string[] = additions.map((a) => SOCIAL_META[a.platform].label);
     if (found.email && !draft.contact_email.trim()) { next.contact_email = found.email; filled.push("email"); }
-    if (found.nameGuess && !draft.name.trim()) { next.name = found.nameGuess; filled.push("name (check it)"); }
+    if (found.nameGuess && !draft.name.trim()) { next.name = found.nameGuess; next.guess = { ...draft.guess, name: found.nameGuess }; filled.push("name (check it)"); }
     setDraft(next);
     setPasteText("");
     setHandleChoice("");
@@ -183,7 +217,7 @@ export function CreatorFields({ draft, setDraft, mode }: Props) {
     const row = socialRow(platform, `@${handleChoice}`);
     const next: CreatorDraft = { ...draft, socials: [...draft.socials.filter((r) => r.text.trim()), row] };
     let note = `Added ${SOCIAL_META[platform].label}`;
-    if (!draft.name.trim()) { next.name = handleChoice.replace(/[._-]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()); note += ", name (check it)"; }
+    if (!draft.name.trim()) { next.name = handleChoice.replace(/[._-]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()); next.guess = { ...draft.guess, name: next.name }; note += ", name (check it)"; }
     setDraft(next);
     setHandleChoice("");
     setPasteText("");
@@ -220,10 +254,10 @@ export function CreatorFields({ draft, setDraft, mode }: Props) {
     </div>}
 
     <div className="form-grid cf-essentials">
-      <Input label="Full name" value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} required autoFocus={mode === "add"} placeholder="Maya Chen" />
-      <Input label="Email" type="email" value={draft.contact_email} error={draft.contact_email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(draft.contact_email.trim()) ? "Enter a valid email" : ""} onChange={(event) => setDraft({ ...draft, contact_email: event.target.value })} placeholder="maya@studio.com" />
-      <label className="field-wrap cf-niche"><span className="field-label">Niche</span><input className="field" list="cf-niches" value={draft.niche} onChange={(event) => setDraft({ ...draft, niche: event.target.value })} placeholder="Tech, beauty, travel…" /><datalist id="cf-niches">{niches.map((n) => <option key={n} value={n} />)}</datalist></label>
-      <CountryPicker value={draft.country} onChange={(country) => setDraft({ ...draft, country })} />
+      <div className="cf-auto"><Input label="Full name" value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} required autoFocus={mode === "add"} placeholder="Maya Chen" /><AutoHint field="name" draft={draft} setDraft={setDraft} /></div>
+      <div className="cf-auto"><Input label="Email" type="email" value={draft.contact_email} error={draft.contact_email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(draft.contact_email.trim()) ? "Enter a valid email" : ""} onChange={(event) => setDraft({ ...draft, contact_email: event.target.value })} placeholder="maya@studio.com" /><AutoHint field="contact_email" draft={draft} setDraft={setDraft} /></div>
+      <div className="cf-auto cf-niche-wrap"><label className="field-wrap cf-niche"><span className="field-label">Niche</span><input className="field" list="cf-niches" value={draft.niche} onChange={(event) => setDraft({ ...draft, niche: event.target.value })} placeholder="Tech, beauty, travel…" /><datalist id="cf-niches">{niches.map((n) => <option key={n} value={n} />)}</datalist></label><AutoHint field="niche" draft={draft} setDraft={setDraft} />{draft.youtube?.sub_niche && sameAuto("niche", draft.niche, draft.youtube.niche) && <span className="cf-subniche">Sub-niche: <b>{draft.youtube.sub_niche}</b></span>}</div>
+      <div className="cf-auto"><CountryPicker value={draft.country} onChange={(country) => setDraft({ ...draft, country })} /><AutoHint field="country" draft={draft} setDraft={setDraft} /></div>
     </div>
     <SecondaryEmailField email={draft.secondary_email} label={draft.secondary_email_label} onChange={(patch) => setDraft({ ...draft, ...patch })} />
 
@@ -233,8 +267,8 @@ export function CreatorFields({ draft, setDraft, mode }: Props) {
 
     <Fold id="performance" title="Audience & performance" open={open.includes("performance")} onToggle={toggle} filled={perfBits.length > 0} summary={perfBits.join(" · ") || "Views and engagement — optional"}>
       <div className="form-grid">
-        <Input label="Average views" type="number" min="0" value={draft.avg_views} onChange={(event) => setDraft({ ...draft, avg_views: event.target.value })} placeholder="e.g. 120000" />
-        <Input label="Engagement rate (%)" type="number" min="0" step="0.1" value={draft.engagement_rate} onChange={(event) => setDraft({ ...draft, engagement_rate: event.target.value })} hint={erContext(Number(draft.engagement_rate), main ? asPlatform(main.platform) : draft.platform)} />
+        <div className="cf-auto"><Input label="Average views" type="number" min="0" value={draft.avg_views} onChange={(event) => setDraft({ ...draft, avg_views: event.target.value })} placeholder="e.g. 120000" /><AutoHint field="avg_views" draft={draft} setDraft={setDraft} /></div>
+        <div className="cf-auto"><Input label="Engagement rate (%)" type="number" min="0" step="0.1" value={draft.engagement_rate} onChange={(event) => setDraft({ ...draft, engagement_rate: event.target.value })} hint={erContext(Number(draft.engagement_rate), main ? asPlatform(main.platform) : draft.platform)} /><AutoHint field="engagement_rate" draft={draft} setDraft={setDraft} /></div>
       </div>
     </Fold>
 
@@ -256,4 +290,21 @@ export function CreatorFields({ draft, setDraft, mode }: Props) {
       <Textarea label="Notes" value={draft.notes} onChange={(event) => setDraft({ ...draft, notes: event.target.value })} rows={3} />
     </Fold>}
   </div>;
+}
+
+/**
+ * Under a field YouTube fills: "From YouTube" while it's YouTube's value (it
+ * refreshes by itself), "Your edit" the moment you change it — before you even
+ * save — with a one-tap way back to YouTube's value.
+ */
+function AutoHint({ field, draft, setDraft }: { field: AutoKey; draft: CreatorDraft; setDraft: (draft: CreatorDraft) => void }) {
+  const auto = draft.youtube?.auto?.[field];
+  const yours = youtubeValue(draft.youtube, field);
+  if (auto === undefined) {
+    // YouTube has a value it couldn't use because the field was already filled.
+    if (!yours || !draft.youtube_synced_at || sameAuto(field, draft[field], yours) || blankAuto(field, draft[field])) return null;
+    return <span className="yt-hint mine"><i aria-hidden="true" />Yours — YouTube says {field === "avg_views" ? compact(Number(yours)) : yours}{field === "engagement_rate" ? "%" : ""} <button type="button" onClick={() => setDraft({ ...draft, [field]: yours, youtube: { ...draft.youtube, auto: { ...(draft.youtube?.auto || {}), [field]: yours } }, youtube_dirty: true })}>Use it</button></span>;
+  }
+  if (sameAuto(field, draft[field], auto)) return <span className="yt-hint yt" title="Refreshes with the channel until you change it"><i aria-hidden="true" />From YouTube · stays fresh</span>;
+  return <span className="yt-hint mine" role="status"><i aria-hidden="true" />Your edit — YouTube won't change it{yours && !blankAuto(field, yours) ? <> <button type="button" onClick={() => setDraft({ ...draft, [field]: yours, youtube: { ...draft.youtube, auto: { ...(draft.youtube?.auto || {}), [field]: yours } }, youtube_dirty: true })}>Use YouTube's{field === "avg_views" ? ` (${compact(Number(yours))})` : field === "engagement_rate" ? ` (${yours}%)` : ""}</button></> : null}</span>;
 }

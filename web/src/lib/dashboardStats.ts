@@ -12,7 +12,12 @@ import type { Received, Segment, Sent } from "./outreach";
 export type RangeKey = "today" | "yesterday" | "week" | "lastweek" | "30" | "90" | "all";
 export type View = "all" | Segment;
 
-export type Range = { key: RangeKey; start: number; end: number; prevStart: number; prevEnd: number; label: string; prevLabel: string; compare: boolean };
+/**
+ * horizon = where the period ends on the calendar (end of today, end of this
+ * week…). Emails waiting in Gmail's Scheduled folder count in "Emails sent"
+ * when their send time falls before it — a cancelled one simply disappears.
+ */
+export type Range = { key: RangeKey; start: number; end: number; horizon: number; prevStart: number; prevEnd: number; label: string; prevLabel: string; compare: boolean };
 
 const DAY = 86400000;
 
@@ -24,13 +29,13 @@ export function rangeOf(key: RangeKey, now = new Date()): Range {
   // Calendar days back from a midnight (DST-safe: built from dates, not 24 h steps).
   const back = (ms: number, days: number) => { const d = new Date(ms); d.setDate(d.getDate() - days); return d.getTime(); };
   switch (key) {
-    case "today": return { key, start: midnight, end: t, prevStart: back(midnight, 1), prevEnd: midnight, label: `Today · ${fmt(t, { weekday: "long", month: "short", day: "numeric" })}`, prevLabel: "vs yesterday", compare: true };
-    case "yesterday": { const s = back(midnight, 1); return { key, start: s, end: midnight, prevStart: back(s, 1), prevEnd: s, label: `Yesterday · ${fmt(s, { weekday: "long", month: "short", day: "numeric" })}`, prevLabel: "vs the day before", compare: true }; }
-    case "week": return { key, start: monday, end: t, prevStart: back(monday, 7), prevEnd: monday, label: `This week · since ${fmt(monday, { weekday: "short", month: "short", day: "numeric" })}`, prevLabel: "vs last week", compare: true };
-    case "lastweek": { const s = back(monday, 7); return { key, start: s, end: monday, prevStart: back(s, 7), prevEnd: s, label: `Last week · ${fmt(s, { month: "short", day: "numeric" })} – ${fmt(monday - 1, { month: "short", day: "numeric" })}`, prevLabel: "vs the week before", compare: true }; }
+    case "today": return { key, start: midnight, end: t, horizon: back(midnight, -1), prevStart: back(midnight, 1), prevEnd: midnight, label: `Today · ${fmt(t, { weekday: "long", month: "short", day: "numeric" })}`, prevLabel: "vs yesterday", compare: true };
+    case "yesterday": { const s = back(midnight, 1); return { key, start: s, end: midnight, horizon: midnight, prevStart: back(s, 1), prevEnd: s, label: `Yesterday · ${fmt(s, { weekday: "long", month: "short", day: "numeric" })}`, prevLabel: "vs the day before", compare: true }; }
+    case "week": return { key, start: monday, end: t, horizon: back(monday, -7), prevStart: back(monday, 7), prevEnd: monday, label: `This week · since ${fmt(monday, { weekday: "short", month: "short", day: "numeric" })}`, prevLabel: "vs last week", compare: true };
+    case "lastweek": { const s = back(monday, 7); return { key, start: s, end: monday, horizon: monday, prevStart: back(s, 7), prevEnd: s, label: `Last week · ${fmt(s, { month: "short", day: "numeric" })} – ${fmt(monday - 1, { month: "short", day: "numeric" })}`, prevLabel: "vs the week before", compare: true }; }
     case "30":
-    case "90": { const n = Number(key); const s = back(midnight, n - 1); return { key, start: s, end: t, prevStart: back(s, n), prevEnd: s, label: `Last ${n} days`, prevLabel: `vs the ${n} days before`, compare: true }; }
-    default: return { key: "all", start: 0, end: t + DAY, prevStart: 0, prevEnd: 0, label: "All time", prevLabel: "", compare: false };
+    case "90": { const n = Number(key); const s = back(midnight, n - 1); return { key, start: s, end: t, horizon: back(midnight, -1), prevStart: back(s, n), prevEnd: s, label: `Last ${n} days`, prevLabel: `vs the ${n} days before`, compare: true }; }
+    default: return { key: "all", start: 0, end: t + DAY, horizon: Number.MAX_SAFE_INTEGER, prevStart: 0, prevEnd: 0, label: "All time", prevLabel: "", compare: false };
   }
 }
 
@@ -45,7 +50,9 @@ export type DashInput = {
   leads: InboundLead[];
 };
 
-export type MetricKey = "emails" | "followups" | "first" | "newthreads" | "answers" | "replies" | "negotiations" | "wins" | "lost" | "added";
+export type MetricKey = "emails" | "followups" | "first" | "newthreads" | "answers" | "replies" | "negotiations" | "wins" | "lost" | "added"
+  // The parts of "Emails sent" (email only): what each email was.
+  | "e_first" | "e_followups" | "e_answers" | "e_newthreads" | "e_scheduled";
 
 /** One row behind a number: who, when, what. */
 export type Row = { key: string; at: string; name: string; to: string; tag: string; sub: string; segment: Segment };
@@ -104,17 +111,26 @@ export function makeStats(input: DashInput) {
   for (const c of input.campaigns) if (!dealAt.has(c.id) && ["active", "completed"].includes(c.status)) dealAt.set(c.id, c.created_at);
 
   /** Every row behind one metric, newest first. */
-  function rows(metric: MetricKey, view: View, s: number, e: number): Row[] {
+  function rows(metric: MetricKey, view: View, s: number, e: number, horizon = e): Row[] {
     const out: Row[] = [];
-    const sentRows = (pick: (x: Sent) => boolean) => {
+    const sentRows = (pick: (x: Sent) => boolean, withScheduled = false) => {
       for (const x of input.sent) {
-        if (x.scheduled || !matches(view, x.segment) || !within(x.at, s, e) || !pick(x)) continue;
+        if (!matches(view, x.segment) || !pick(x)) continue;
+        // Waiting to go out: counted by its send time, up to the end of the period.
+        if (x.scheduled ? !withScheduled || !within(x.at, s, Math.max(e, horizon)) : !within(x.at, s, e)) continue;
         const w = who(x);
-        out.push({ key: x.key, at: x.at, name: w.name, to: w.to, tag: x.channel === "email" ? ROLE_WORD[x.role] : `${ROLE_WORD[x.role]} · ${CHANNEL_WORD[x.channel] || x.channel}`, sub: x.mailbox || (x.channel === "email" ? "Logged by hand" : ""), segment: x.segment });
+        const tag = x.scheduled ? `Scheduled · ${new Date(x.at).toLocaleString("en-US", { weekday: "short", hour: "numeric", minute: "2-digit" })}` : x.channel === "email" ? ROLE_WORD[x.role] : `${ROLE_WORD[x.role]} · ${CHANNEL_WORD[x.channel] || x.channel}`;
+        out.push({ key: x.key, at: x.at, name: w.name, to: w.to, tag, sub: x.mailbox || (x.channel === "email" ? "Logged by hand" : ""), segment: x.segment });
       }
     };
+    const email = (x: Sent) => x.channel === "email";
     switch (metric) {
-      case "emails": sentRows((x) => x.channel === "email"); break;
+      case "emails": sentRows(email, true); break;
+      case "e_first": sentRows((x) => email(x) && !x.scheduled && x.role === "first"); break;
+      case "e_followups": sentRows((x) => email(x) && !x.scheduled && x.role === "followup"); break;
+      case "e_answers": sentRows((x) => email(x) && !x.scheduled && x.role === "answer"); break;
+      case "e_newthreads": sentRows((x) => email(x) && !x.scheduled && x.role === "newthread"); break;
+      case "e_scheduled": sentRows((x) => email(x) && x.scheduled, true); break;
       case "followups": sentRows((x) => x.role === "followup"); break;
       case "first": sentRows((x) => x.role === "first"); break;
       case "newthreads": sentRows((x) => x.role === "newthread"); break;
@@ -159,7 +175,17 @@ export function makeStats(input: DashInput) {
     return out.sort((a, b) => b.at.localeCompare(a.at));
   }
 
-  const count = (metric: MetricKey, view: View, s: number, e: number) => rows(metric, view, s, e).length;
+  const count = (metric: MetricKey, view: View, s: number, e: number, horizon = e) => rows(metric, view, s, e, horizon).length;
+
+  /** "Emails sent" taken apart: every part adds up to the total. */
+  function emailMix(view: View, s: number, e: number, horizon = e) {
+    const part = (m: MetricKey) => count(m, view, s, e, horizon);
+    const mix = { first: part("e_first"), followups: part("e_followups"), answers: part("e_answers"), newthreads: part("e_newthreads"), scheduled: part("e_scheduled") };
+    const otherFollowups = count("followups", view, s, e) - mix.followups;
+    // Scheduled for a day after this period: not counted yet, but worth showing.
+    const later = horizon < Number.MAX_SAFE_INTEGER ? input.sent.filter((x) => x.scheduled && x.channel === "email" && matches(view, x.segment) && new Date(x.at).getTime() >= Math.max(e, horizon)).length : 0;
+    return { ...mix, total: mix.first + mix.followups + mix.answers + mix.newthreads + mix.scheduled, otherFollowups, later };
+  }
 
   /** People who replied at all, and the share of the people you first emailed in the range who answered (by now). */
   function replyRate(view: View, s: number, e: number) {
@@ -187,7 +213,7 @@ export function makeStats(input: DashInput) {
     return { email, other };
   };
 
-  return { rows, count, replyRate, repliers, scheduled, followupChannels };
+  return { rows, count, emailMix, replyRate, repliers, scheduled, followupChannels };
 }
 
 export type Stats = ReturnType<typeof makeStats>;

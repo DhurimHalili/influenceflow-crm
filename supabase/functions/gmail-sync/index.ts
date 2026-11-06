@@ -62,7 +62,7 @@ const SENDS_PER_DAY = 400; // per mailbox, well under Gmail's own limits
 const MAX_MAILBOXES = 5;
 
 type Admin = SupabaseClient;
-type TokenRow = { id: string; user_id: string; access_token: string | null; refresh_token: string; expiry: string | null; email: string | null; scopes: string; history_id: string | null; last_sync_at: string | null; backfilled: string[] | null; sync_error?: string; connected_at?: string | null; updated_at?: string | null; send_day?: string | null; send_count?: number; leads_scanned_at?: string | null; coverage?: unknown; lead_queue?: string[] | null; read_at?: string | null };
+type TokenRow = { id: string; user_id: string; access_token: string | null; refresh_token: string; expiry: string | null; email: string | null; scopes: string; history_id: string | null; last_sync_at: string | null; backfilled: string[] | null; sync_error?: string; connected_at?: string | null; updated_at?: string | null; send_day?: string | null; send_count?: number; leads_scanned_at?: string | null; coverage?: unknown; lead_queue?: string[] | null; read_at?: string | null; watch_expires_at?: string | null };
 type Entity = { type: "creator" | "brand"; id: string; name?: string };
 type TeamMember = { email: string; role?: string; removed?: boolean };
 type Meta = { id: string; threadId: string; labelIds?: string[]; snippet?: string; internalDate?: string; payload?: { headers?: { name: string; value: string }[] } };
@@ -1188,6 +1188,65 @@ async function send(admin: Admin, rows: TokenRow[], input: Record<string, unknow
 
 // ----- entry -----------------------------------------------------------------------
 
+// ----- instant Gmail (Pub/Sub push) ---------------------------------------------
+//
+// With GMAIL_PUBSUB_TOPIC ("projects/<id>/topics/<name>") and GMAIL_PUSH_SA (the
+// service account the push subscription signs with) set, every mailbox asks
+// Gmail to announce changes on that topic (users.watch, renewed daily — a
+// watch lasts 7 days). Pub/Sub POSTs each announcement here with a Google-
+// signed token; it is verified (signature, issuer, audience, service account)
+// and the mailbox's track phase runs within seconds. The every-minute cron
+// stays as the safety net, so nothing depends on a push arriving.
+
+const PUSH_TOPIC = () => (Deno.env.get("GMAIL_PUBSUB_TOPIC") || "").trim();
+const PUSH_SA = () => (Deno.env.get("GMAIL_PUSH_SA") || "").trim().toLowerCase();
+const pushAudience = () => (Deno.env.get("GMAIL_PUSH_AUDIENCE") || `${(Deno.env.get("SUPABASE_URL") || "").replace(/\/$/, "")}/functions/v1/gmail-sync`).trim();
+let googleKeys: { at: number; keys: Map<string, CryptoKey> } | null = null;
+const b64urlBytes = (text: string) => Uint8Array.from(atob(text.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((text.length + 3) % 4)), (c) => c.charCodeAt(0));
+
+/** A Google-signed OIDC token from our push subscription, or false. */
+async function verifyPushToken(auth: string): Promise<boolean> {
+  const sa = PUSH_SA();
+  const token = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
+  if (!sa || !token) return false;
+  const [h, p, sig] = token.split(".");
+  if (!h || !p || !sig) return false;
+  let header: { kid?: string; alg?: string }, claims: { iss?: string; aud?: string; exp?: number; iat?: number; email?: string; email_verified?: boolean };
+  try {
+    header = JSON.parse(new TextDecoder().decode(b64urlBytes(h)));
+    claims = JSON.parse(new TextDecoder().decode(b64urlBytes(p)));
+  } catch {
+    return false;
+  }
+  if (header.alg !== "RS256" || !header.kid) return false;
+  const now = Date.now() / 1000;
+  if (!["https://accounts.google.com", "accounts.google.com"].includes(claims.iss || "") || claims.aud !== pushAudience() || !claims.exp || claims.exp < now - 30 || (claims.iat || 0) > now + 300) return false;
+  if ((claims.email || "").toLowerCase() !== sa || claims.email_verified !== true) return false;
+  if (!googleKeys || Date.now() - googleKeys.at > 3600_000 || !googleKeys.keys.has(header.kid)) {
+    const res = await fetch("https://www.googleapis.com/oauth2/v3/certs", { signal: AbortSignal.timeout(8_000) }).catch(() => null);
+    const body = res?.ok ? await res.json().catch(() => null) as { keys?: (JsonWebKey & { kid?: string })[] } | null : null;
+    if (!body?.keys) return false;
+    const keys = new Map<string, CryptoKey>();
+    for (const k of body.keys) if (k.kid) keys.set(k.kid, await crypto.subtle.importKey("jwk", k, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["verify"]));
+    googleKeys = { at: Date.now(), keys };
+  }
+  const key = googleKeys.keys.get(header.kid);
+  if (!key) return false;
+  return crypto.subtle.verify("RSASSA-PKCS1-v1_5", key, b64urlBytes(sig), new TextEncoder().encode(`${h}.${p}`));
+}
+
+/** Ask Gmail to announce this mailbox's changes (renewed a day before it lapses). */
+async function ensureWatch(admin: Admin, row: TokenRow) {
+  const topic = PUSH_TOPIC();
+  if (!topic || !/^projects\/[\w-]+\/topics\/[\w.-]+$/.test(topic)) return false;
+  const until = row.watch_expires_at ? new Date(row.watch_expires_at).getTime() : 0;
+  if (until - Date.now() > 24 * 3600_000) return false;
+  const token = await accessToken(admin, row);
+  const res = await gmail<{ historyId?: string; expiration?: string }>(token, "/watch", { method: "POST", body: JSON.stringify({ topicName: topic }) });
+  await admin.from("gmail_tokens").update({ watch_expires_at: new Date(Number(res.expiration) || Date.now() + 6 * 86400000).toISOString() }).eq("id", row.id);
+  return true;
+}
+
 const publicMailbox = (r: TokenRow) => ({ id: r.id, email: r.email, canRead: (r.scopes || "").includes("gmail.readonly"), canSend: (r.scopes || "").includes("gmail.send"), canModify: (r.scopes || "").includes("gmail.modify"), lastSyncAt: r.last_sync_at, error: r.sync_error || "", connectedAt: r.connected_at || null, sentToday: r.send_day === new Date().toISOString().slice(0, 10) ? r.send_count || 0 : 0, coverage: r.coverage && (r.coverage as { at?: string }).at ? readCoverage(r.coverage) : null });
 
 Deno.serve(async (req) => {
@@ -1210,18 +1269,57 @@ Deno.serve(async (req) => {
   }
   const action = String(input.action || "status");
 
+  // A Gmail change announced through Pub/Sub: verified, answered at once, tracked right after.
+  if (input.message && typeof input.message === "object" && typeof input.subscription === "string") {
+    if (!(await verifyPushToken(req.headers.get("Authorization") || ""))) return json({ error: "Unauthorized" }, 401);
+    let address = "";
+    try { address = String(JSON.parse(atob(String((input.message as { data?: string }).data || ""))).emailAddress || "").toLowerCase(); } catch { /* malformed: acknowledged, nothing to do */ }
+    if (!configured || !VALID_EMAIL.test(address)) return new Response(null, { status: 204, headers: cors });
+    const work = (async () => {
+      const { data: hit } = await admin.from("gmail_tokens").select("*").eq("email", address).limit(5);
+      for (const row of (hit || []) as TokenRow[]) {
+        // A burst of announcements: one track every few seconds is plenty (the lease stops overlaps).
+        if (row.last_sync_at && Date.now() - new Date(row.last_sync_at).getTime() < 5_000) continue;
+        const { data: all } = await admin.from("gmail_tokens").select("*").eq("user_id", row.user_id);
+        const { data: member } = await admin.from("profiles").select("access").eq("id", row.user_id).maybeSingle();
+        if (member?.access && member.access !== "approved") continue;
+        await syncUser(admin, [row], (all || [row]) as TokenRow[], Date.now() + 25_000, { force: true, read: "later" }).catch(() => null);
+      }
+    })();
+    // deno-lint-ignore no-explicit-any
+    const runtime = (globalThis as any).EdgeRuntime as { waitUntil?: (p: Promise<unknown>) => void } | undefined;
+    if (runtime?.waitUntil) runtime.waitUntil(work);
+    else await work;
+    return new Response(null, { status: 204, headers: cors });
+  }
+
   if (action === "health") return json({ configured });
 
-  if (action === "cron") {
-    // The secret lives in Vault (checked by a service-role-only function); an
-    // env secret also works for self-hosted setups.
+  // The cron secret lives in Vault (checked by a service-role-only function);
+  // an env secret also works for self-hosted setups.
+  const cronAllowed = async () => {
     const given = req.headers.get("x-cron-secret") || "";
-    let allowed = timingSafeEqual(given, Deno.env.get("GMAIL_CRON_SECRET") || "");
-    if (!allowed && given.length >= 32) {
-      const { data } = await admin.rpc("gmail_cron_secret_ok", { p_secret: given });
-      allowed = data === true;
+    if (timingSafeEqual(given, Deno.env.get("GMAIL_CRON_SECRET") || "")) return true;
+    if (given.length < 32) return false;
+    const { data } = await admin.rpc("gmail_cron_secret_ok", { p_secret: given });
+    return data === true;
+  };
+
+  // Server-side health check of every AI provider (same secret as cron). Answers carry no keys.
+  if (action === "ai_check") {
+    if (!(await cronAllowed())) return json({ error: "Unauthorized" }, 401);
+    // Which models a provider offers this account (ids only), to pick working defaults.
+    if (input.list === "groq") {
+      const key = (Deno.env.get("GROQ_API_KEYS") || Deno.env.get("GROQ_API_KEY") || "").split(/[\s,;]+/)[0];
+      const res = await fetch("https://api.groq.com/openai/v1/models", { headers: { Authorization: `Bearer ${key}` } }).catch(() => null);
+      const body = res?.ok ? await res.json().catch(() => null) as { data?: { id: string; active?: boolean }[] } | null : null;
+      return json({ status: res?.status || 0, models: (body?.data || []).filter((m) => m.active !== false).map((m) => m.id).sort() });
     }
-    if (!allowed) return json({ error: "Unauthorized" }, 401);
+    return json({ chain: await aiChain(), results: await testAi() });
+  }
+
+  if (action === "cron") {
+    if (!(await cronAllowed())) return json({ error: "Unauthorized" }, 401);
     if (!configured) return json({ skipped: "not configured" });
     // Runs every minute: first TRACK every mailbox (seconds each, least
     // recently synced first), then READ the ones due with the time left.
@@ -1233,6 +1331,8 @@ Deno.serve(async (req) => {
     const approved = new Set((members || []).filter((m) => !m.access || m.access === "approved").map((m) => m.id));
     const byUser = new Map<string, TokenRow[]>();
     for (const row of (data || []) as TokenRow[]) if (approved.has(row.user_id)) byUser.set(row.user_id, [...(byUser.get(row.user_id) || []), row]);
+    // Instant Gmail: keep every mailbox's watch alive (no-op without the topic secret).
+    if (PUSH_TOPIC()) for (const rows of byUser.values()) for (const row of rows) if (Date.now() < trackUntil - 20_000) await ensureWatch(admin, row).catch(() => false);
     let tracked = 0, read = 0;
     const readers: ((until: number) => Promise<Record<string, unknown>[]>)[] = [];
     const users = Array.from(byUser.values());
@@ -1338,6 +1438,7 @@ Deno.serve(async (req) => {
     const targets = input.all === true ? rows : rows.filter((r) => r.id === input.id || (!input.id && rows.length === 1));
     if (!targets.length && rows.length) return json({ error: "Pick which mailbox to disconnect." }, 400);
     for (const row of targets) {
+      if (PUSH_TOPIC() && row.watch_expires_at) await accessToken(admin, row).then((t) => gmail(t, "/stop", { method: "POST" })).catch(() => null);
       const refresh = await openToken(admin, row.refresh_token).catch(() => null);
       if (refresh) await fetch("https://oauth2.googleapis.com/revoke", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ token: refresh }) }).catch(() => null);
       await admin.from("gmail_tokens").delete().eq("id", row.id).eq("user_id", userId);

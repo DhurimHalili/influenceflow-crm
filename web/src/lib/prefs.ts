@@ -103,6 +103,7 @@ export const normalizePreferences = (value: unknown): WorkspacePreferences => {
     daily_email_goal: Number.isFinite(Number(v.daily_email_goal)) && Number(v.daily_email_goal) >= 5 && Number(v.daily_email_goal) <= 500 ? Math.round(Number(v.daily_email_goal)) : 50,
     coach: v.coach !== false,
     youtube_auto: v.youtube_auto !== false,
+    youtube_recent: v.youtube_recent === true,
   };
 };
 

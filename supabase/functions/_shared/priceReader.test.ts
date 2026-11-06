@@ -1,5 +1,5 @@
 // Run: node --experimental-strip-types supabase/functions/_shared/priceReader.test.ts
-import { isPlainYes, readMine, readOffer, readPrices } from "./priceReader.ts";
+import { isPlainYes, readMine, readOffer, readPrices, moneyMentions, statesAudience } from "./priceReader.ts";
 
 let fail = 0;
 const eq = (name: string, got: unknown, want: unknown) => {
@@ -82,5 +82,14 @@ eq("agree to two prices at once", pick(readPrices("Deal — $1,000 for the integ
 eq("percent never a price", pick(readPrices("My integration has 60% US audience and costs $1,100.")), { stated: [], agreed: [] });
 eq("european thousands", pick(readPrices("Integration: 1.500 € pro Video")), { stated: [["video", 1500, "EUR"]], agreed: [] });
 eq("html table text", pick(readPrices("Format Price\nYouTube Integration $1,750\nYouTube Short $450")), { stated: [["video", 1750, "USD"], ["short", 450, "USD"]], agreed: [] });
+
+
+// When the AI is worth calling: prices the rules didn't read, audience numbers.
+eq("money mentions: two marked prices", moneyMentions("Integration $1,500 / Dedicated $3,000"), 2);
+eq("money mentions: price list with currency named once", moneyMentions("My rates (USD):\nIntegration: 1,500\nShort: 400"), 2);
+eq("money mentions: durations and years aren't prices", moneyMentions("A 60-90 sec integration in March 2026"), 0);
+eq("money mentions: thanks email", moneyMentions("Thanks, sounds good! Talk soon."), 0);
+eq("audience stated", statesAudience("My audience is 68% US, mostly 18-24, 70% male"), true);
+eq("no audience in a plain reply", statesAudience("Sure, sending the kit now"), false);
 
 if (fail) { console.log(`${fail} failed`); (globalThis as { process?: { exit(n: number): void } }).process?.exit(1); } else console.log("all price-reader tests pass");

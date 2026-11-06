@@ -63,6 +63,8 @@ export interface WorkspacePreferences {
   coach: boolean;
   /** Read YouTube numbers automatically (quick fill, on save, and every hour). */
   youtube_auto: boolean;
+  /** Average views also count videos younger than a day (off: only videos 1 day+ old). */
+  youtube_recent?: boolean;
 }
 
 /** Creator's prices per deliverable, in the workspace currency. 0 = not offered / unknown. */
@@ -185,6 +187,14 @@ export interface YouTubeFacts {
   subscribers?: number; hidden_subscribers?: boolean; video_count?: number; total_views?: number;
   avg_views?: number; engagement_rate?: number; sampled?: number; uploads_90d?: number; last_upload_at?: string;
   emails?: string[]; business_email_hidden?: boolean; at?: string;
+  /** What the channel makes, read from its topics, description and latest videos. */
+  niche?: string; sub_niche?: string;
+  /** Average views included videos younger than a day (Settings choice). */
+  includes_recent?: boolean;
+  /** The values YouTube last wrote into the record's own fields. A field that still equals its value is refreshed; one you changed is yours. */
+  auto?: Partial<Record<"name" | "contact_email" | "country" | "niche" | "avg_views" | "engagement_rate", string>>;
+  /** Fields where your value differs from YouTube's and was kept. */
+  kept?: string[];
 }
 
 /** Someone who speaks for a creator: mail with them counts for the creator. */
