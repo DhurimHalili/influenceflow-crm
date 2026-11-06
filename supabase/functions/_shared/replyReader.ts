@@ -134,3 +134,39 @@ export function replyTone(text: string): "yes" | "no" | "" {
   if (parts.some((s) => YES.some((re) => re.test(s)))) return "yes";
   return "";
 }
+
+export type TeamRole = "manager" | "agent" | "agency" | "assistant" | "team";
+export type Referral = { email: string; role: TeamRole };
+
+const ROLE_WORDS: [TeamRole, RegExp][] = [
+  ["manager", /\b(manager|management|managed by|mgmt)\b/i],
+  ["agent", /\b(agent|talent rep|representative|rep)\b/i],
+  ["agency", /\b(agency|network|mcn)\b/i],
+  ["assistant", /\b(assistant|pa)\b/i],
+  ["team", /\b(team|partnerships?|business (?:email|inquiries|enquiries)|bookings?|collabs?)\b/i],
+];
+const POINTING = /\b(reach out|contact|email|e-mail|write|forward|loop in|cc|cc'?d|copy|send (?:it|this|everything|details)|get in touch|speak|talk|handles?|deals with|looks after|go through|direct (?:it|this|all)|best (?:person|contact|way))\b/i;
+
+/**
+ * Someone pointing you to another address in their own words: "please reach
+ * out to my manager Jane at jane@agency.com", "loop in my team (team@x.com)".
+ * Only an address in the sender's own text (quotes cut off), next to a
+ * pointing word AND a role word, that isn't theirs or yours. Null otherwise.
+ */
+export function referralOf(text: string, exclude: string[]): Referral | null {
+  const body = stripQuoted(text).slice(0, 3000);
+  const skip = new Set(exclude.map((e) => e.toLowerCase()));
+  const own = new Set(exclude.map((e) => e.toLowerCase().split("@")[1]).filter(Boolean));
+  for (const m of body.matchAll(/[A-Z0-9._%+'-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi)) {
+    const email = m[0].toLowerCase().replace(/\.$/, "");
+    if (skip.has(email) || /^(no-?reply|noreply|notifications?|mailer-daemon)@/.test(email)) continue;
+    // Your own company domain is your team, not theirs.
+    if (own.has(email.split("@")[1]) && !/^(gmail|googlemail|outlook|hotmail|yahoo|icloud)\./.test(email.split("@")[1])) continue;
+    const at = m.index || 0;
+    const near = body.slice(Math.max(0, at - 140), at + email.length + 40);
+    if (!POINTING.test(near)) continue;
+    const role = ROLE_WORDS.find(([, re]) => re.test(near))?.[0];
+    if (role) return { email, role };
+  }
+  return null;
+}

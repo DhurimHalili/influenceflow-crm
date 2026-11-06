@@ -1,8 +1,10 @@
 import type { EmailEvent, InboundLead } from "../types";
 
 // Per-mailbox numbers: which of your addresses sends the most, and which one
-// gets answered. Counted from synced Gmail activity (one message = one send,
-// even when it went to several people in the CRM).
+// gets answered. Counted the same way as the dashboard (lib/outreach.ts): one
+// message = one send even when it went to several people in the CRM, your
+// answers to inbound leads count as sent, a scheduled email counts once its
+// send time has passed, and auto-replies / automatic declines aren't replies.
 
 export type MailboxStats = {
   mailbox: string;
@@ -19,6 +21,7 @@ export type MailboxStats = {
 
 export function mailboxStats(events: EmailEvent[], leads: InboundLead[], mailboxes: string[], days: number | null): MailboxStats[] {
   const since = days === null ? 0 : Date.now() - days * 86400000;
+  const nowIso = new Date().toISOString();
   const span = Math.min(days ?? 30, 60);
   const dayStart = new Date();
   dayStart.setHours(0, 0, 0, 0);
@@ -26,20 +29,22 @@ export function mailboxStats(events: EmailEvent[], leads: InboundLead[], mailbox
   const names = Array.from(new Set([...mailboxes.map((m) => m.toLowerCase()), ...events.map((e) => (e.mailbox || "").toLowerCase()).filter(Boolean)]));
   return names.map((mailbox) => {
     const mine = events.filter((e) => (e.mailbox || "").toLowerCase() === mailbox && new Date(e.at).getTime() >= since);
-    const out = mine.filter((e) => e.direction === "out" && !e.scheduled);
-    const sentIds = new Set(out.map((e) => e.gmail_id));
+    const out = mine.filter((e) => e.direction === "out" && (!e.scheduled || e.at <= nowIso));
+    const answers = leads.filter((l) => l.mailbox.toLowerCase() === mailbox).flatMap((l) => l.my_replies || []).filter((r) => new Date(r.at).getTime() >= since && (!r.scheduled || r.at <= nowIso));
+    const sentIds = new Set([...out.map((e) => `g-${e.gmail_id}`), ...answers.map((r) => `g-${r.id}`)]);
+    const real = (e: EmailEvent) => e.direction === "in" && e.reply_kind !== "auto" && e.reply_kind !== "managed_no";
     const reachedAt = new Map<string, number>();
     for (const e of out) {
       const t = new Date(e.at).getTime();
       if (!reachedAt.has(e.entity_id) || t < reachedAt.get(e.entity_id)!) reachedAt.set(e.entity_id, t);
     }
     // A reply counts for this mailbox when it came back to it after it wrote first.
-    const replied = new Set(mine.filter((e) => e.direction === "in" && reachedAt.has(e.entity_id) && new Date(e.at).getTime() > reachedAt.get(e.entity_id)!).map((e) => e.entity_id));
+    const replied = new Set(mine.filter((e) => real(e) && reachedAt.has(e.entity_id) && new Date(e.at).getTime() > reachedAt.get(e.entity_id)!).map((e) => e.entity_id));
     const daily = Array.from({ length: span }, () => 0);
     const counted = new Set<string>();
-    for (const e of out) {
-      if (counted.has(e.gmail_id)) continue;
-      counted.add(e.gmail_id);
+    for (const e of [...out.map((x) => ({ id: `g-${x.gmail_id}`, at: x.at })), ...answers.map((r) => ({ id: `g-${r.id}`, at: r.at }))]) {
+      if (counted.has(e.id)) continue;
+      counted.add(e.id);
       const i = Math.floor((new Date(e.at).getTime() - first) / 86400000);
       if (i >= 0 && i < span) daily[i]++;
     }
@@ -47,7 +52,7 @@ export function mailboxStats(events: EmailEvent[], leads: InboundLead[], mailbox
     return {
       mailbox,
       sent: sentIds.size,
-      received: new Set(mine.filter((e) => e.direction === "in").map((e) => e.gmail_id)).size,
+      received: new Set(mine.filter(real).map((e) => e.gmail_id)).size,
       reached: reachedAt.size,
       replied: replied.size,
       replyRate: reachedAt.size ? Math.round((replied.size / reachedAt.size) * 100) : 0,

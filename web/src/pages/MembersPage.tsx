@@ -70,35 +70,32 @@ export default function MembersPage() {
 
   if (loaded && !isOwner) return <Navigate to="/app" replace />;
 
-  /** Send from the owner's Gmail; without it, hand over the text to send by hand. */
-  const mail = async (to: string, msg: { subject: string; body: string }) => {
-    if (gmail.canSend) {
-      const res = await gmail.send({ to: [to], subject: msg.subject, body: msg.body });
-      if (res.ok) return true;
-    }
-    setFallback({ to, ...msg });
-    return false;
-  };
+  type Mail = { via: "gmail" | "supabase" | "none"; from: string };
+  const mailNote = (m: Mail | undefined, what: string) => m?.via === "gmail" ? `${what} went from ${m.from || "your Gmail"}` : m?.via === "supabase" ? `${what} went as a sign-in email (connect Gmail in Settings to send it from your address)` : "";
 
+  // The server changes access AND sends the email in one step — nothing depends on this tab staying open.
   const setAccess = async (m: Member, access: Member["access"]) => {
     setBusy(m.id);
-    const { error: e } = await supabase.rpc("admin_set_access", { p_user: m.id, p_access: access });
-    if (e) { setBusy(""); toast("Couldn't change their access — nothing changed. Try again.", "error"); return; }
-    setRows((list) => (list || []).map((r) => (r.id === m.id ? { ...r, access, access_changed_at: new Date().toISOString() } : r)));
-    if (access === "approved") {
-      const sent = await mail(m.email, welcomeEmail(m.display_name.split(" ")[0] || ""));
-      toast(sent ? `${m.email} is in — the welcome email went from your Gmail` : `${m.email} is in — send them the welcome message`, "success");
-    } else toast(access === "revoked" ? `${m.email} can't sign in any more — their data stays until you delete it` : `${m.email} is back to pending`, "success");
+    const res = await adminCall<{ mail?: Mail }>({ action: "set_access", userId: m.id, access });
     setBusy("");
+    if (res.error) return toast(res.error, "error");
+    setRows((list) => (list || []).map((r) => (r.id === m.id ? { ...r, access, access_changed_at: new Date().toISOString() } : r)));
+    if (access !== "approved") return toast(access === "revoked" ? `${m.email} can't sign in any more — their data stays until you delete it` : `${m.email} is back to waiting`, "success");
+    const note = mailNote(res.data?.mail, "the welcome email");
+    if (note) return toast(`${m.email} is in — ${note}`, "success");
+    setFallback({ to: m.email, ...welcomeEmail(m.display_name.split(" ")[0] || "") });
+    toast(`${m.email} is in — the email couldn't be sent, send them the message below`, "info");
   };
 
   const sendReset = async (m: Member) => {
     setBusy(m.id);
-    const res = await adminCall<{ link: string }>({ action: "reset_link", userId: m.id });
-    if (res.error || !res.data?.link) { setBusy(""); toast(res.error || "Couldn't create a reset link.", "error"); return; }
-    const sent = await mail(m.email, resetEmail(res.data.link));
-    toast(sent ? `Reset link sent to ${m.email} from your Gmail` : "Reset link ready — send it to them yourself", "success");
+    const res = await adminCall<{ mail?: Mail }>({ action: "send_reset", userId: m.id });
+    if (!res.error && res.data?.mail && res.data.mail.via !== "none") { setBusy(""); return toast(`Reset link sent to ${m.email} — ${mailNote(res.data.mail, "it")}`, "success"); }
+    // Couldn't email it: hand the owner the link instead.
+    const link = await adminCall<{ link: string }>({ action: "reset_link", userId: m.id });
     setBusy("");
+    if (link.error || !link.data?.link) return toast(link.error || res.error || "Couldn't create a reset link.", "error");
+    setFallback({ to: m.email, ...resetEmail(link.data.link) });
   };
 
   const remove = async () => {

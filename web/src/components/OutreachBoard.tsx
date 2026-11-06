@@ -217,9 +217,10 @@ function TrackingCheck() {
   const [open, setOpen] = useState(false);
   const cover = gmail.mailboxes.map((m) => m.coverage).filter((x): x is NonNullable<typeof x> => !!x);
   if (!cover.length) return null;
-  const known = new Set([...data.creators.flatMap((c) => [c.contact_email, c.secondary_email || ""]), ...data.brands.flatMap((b) => [b.contact_email, b.secondary_email || ""]), ...data.contacts.map((p) => p.email)].map((e) => (e || "").toLowerCase()).filter(Boolean));
+  const known = new Set([...data.creators.flatMap((c) => [c.contact_email, c.secondary_email || "", ...(c.team || []).filter((t) => !t.removed).map((t) => t.email)]), ...data.brands.flatMap((b) => [b.contact_email, b.secondary_email || ""]), ...data.contacts.map((p) => p.email)].map((e) => (e || "").toLowerCase()).filter(Boolean));
   const sent = cover.reduce((s, x) => s + x.sent, 0);
   const pending = cover.reduce((s, x) => s + x.pending, 0);
+  const warmup = cover.reduce((s, x) => s + (x.warmup || 0), 0);
   // Grouped by person; anyone you've added since the last check counts as tracked.
   const people = new Map<string, { email: string; n: number; last: string; subject: string }>();
   let untracked = 0;
@@ -237,7 +238,7 @@ function TrackingCheck() {
   const list = [...people.values()].sort((a, b) => b.last.localeCompare(a.last));
   return <div className={`ob-check${untracked ? " has-gaps" : ""}`}>
     <ShieldCheck size={16} />
-    <p><b>Tracking check</b> · last {days} days: {untracked ? <>{tracked} of {sent} emails you sent are in your CRM. <b>{untracked}</b> went to {list.length === 1 ? "someone" : `${list.length} people`} the CRM doesn't know.</> : <>all {sent} emails you sent are tracked{pending ? ` (${pending} still being read)` : ""}.</>}</p>
+    <p><b>Tracking check</b> · last {days} days: {untracked ? <>{tracked} of {sent} emails you sent are in your CRM. <b>{untracked}</b> went to {list.length === 1 ? "someone" : `${list.length} people`} the CRM doesn't know.</> : <>all {sent} emails you sent are tracked{pending ? ` (${pending} still being read)` : ""}.</>}{warmup > 0 && <span className="ob-check-warm"> {warmup} warm-up email{warmup === 1 ? "" : "s"} left out.</span>}</p>
     {untracked > 0 && <button type="button" onClick={() => setOpen(!open)} aria-expanded={open}>{open ? "Hide" : "Review"}</button>}
     {open && <ul className="ob-check-list">{list.slice(0, 30).map((p) => <li key={p.email}>
       <span><b>{p.email}</b><small>{p.n} email{p.n === 1 ? "" : "s"} · {relativeTime(p.last)}{p.subject ? ` · “${p.subject}”` : ""}</small></span>

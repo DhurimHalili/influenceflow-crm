@@ -1,5 +1,5 @@
 // Run: node --experimental-strip-types supabase/functions/_shared/replyReader.test.ts
-import { classifyIncoming, myReplyIntent, quotedOwnDate, replyTone, stripQuoted } from "./replyReader.ts";
+import { classifyIncoming, myReplyIntent, quotedOwnDate, referralOf, replyTone, stripQuoted } from "./replyReader.ts";
 
 let fail = 0;
 const check = (name: string, got: unknown, want: unknown) => {
@@ -43,5 +43,16 @@ check("tone: interested", replyTone("Yes, I would be interested. On Thu, Oct 29,
 check("tone: rates sent", replyTone("Yes I have attached my metrics. My rate is currently $500 for a 2-3 minute integration."), "yes");
 check("tone: declined", replyTone("Thanks but we're not interested right now."), "no");
 check("tone: neutral", replyTone("Got it, thanks."), "");
+
+// ---- pointed to someone else ------------------------------------------------------
+const me = ["dhurim@mimibridge.com", "nick@gmail.com"];
+check("manager by email", referralOf("Hey! Please reach out to my manager Jane at jane@topagency.com for anything business related.", me), { email: "jane@topagency.com", role: "manager" });
+check("loop in team", referralOf("Thanks for this. Can you loop in my team on team@nickmedia.co? They handle all collabs.", me), { email: "team@nickmedia.co", role: "team" });
+check("agent handles deals", referralOf("My agent handles all deals: sam@talentco.com", me), { email: "sam@talentco.com", role: "agent" });
+check("address only in the quote is ignored", referralOf("Sounds good!\n\nOn Thu, Oct 29, 2026 at 9:28 PM X <x@y.com> wrote: contact my manager jane@topagency.com", me), null);
+check("their own address in signature is not a referral", referralOf("Love it, let's talk.\nNick\nnick@gmail.com", me), null);
+check("an address without a role word is ignored", referralOf("Please email bob@random.com", me), null);
+check("your own company address is never their team", referralOf("Contact my manager at dhurimi@mimibridge.com", me), null);
+
 console.log(fail ? `${fail} failed` : "all passed");
 if (typeof process !== "undefined") process.exit(fail ? 1 : 0);

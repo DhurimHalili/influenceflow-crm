@@ -138,7 +138,9 @@ export function precheck(input: ScanInput): Precheck {
   const h = (name: string) => input.headers[name.toLowerCase()] || "";
   const own = new Set(input.own.map((e) => e.toLowerCase()));
   const ownDomains = new Set(input.own.map(domainOf).filter((d) => d && !FREE_MAIL.has(d)));
-  if (labels.some((l) => ["SPAM", "TRASH", "DRAFT", "SENT", "CHAT"].includes(l))) return { ok: false };
+  // Spam is read too: a real enquiry often lands there. The rules below are
+  // just as strict for it (warm-up, pitches, bulk mail are still dropped).
+  if (labels.some((l) => ["TRASH", "DRAFT", "SENT", "CHAT"].includes(l))) return { ok: false };
   const sender = addressesIn(input.from)[0] || "";
   if (!sender || own.has(sender)) return { ok: false };
   const subject = input.subject || "";
@@ -198,6 +200,7 @@ export function scanForLead(input: ScanInput): Lead | null {
 
   let score = 6;
   if (pre.viaForm) { score += 2; reasons.unshift("Came through your website contact form"); }
+  if (input.labels.includes("SPAM")) reasons.push("Found in your spam folder — reply from Gmail so it lands in their inbox");
   const company = !FREE_MAIL.has(domainOf(email)) ? companyFrom(domainOf(email)) : "";
   if (company && category !== "creator_management") { score += 1; reasons.push(`Company email · ${domainOf(email)}`); }
   if (category === "creator_management" && LINK.test(text)) { score += 1; reasons.push("Links their channel"); }
@@ -211,6 +214,9 @@ export function scanForLead(input: ScanInput): Lead | null {
   const kind = category === "creator_management" ? "creator" : category === "agency_partnership" ? "agency" : "brand";
   return { email, name, company, kind, category, score, reasons: reasons.slice(0, 6), viaForm: pre.viaForm };
 }
+
+/** Warm-up traffic (TrulyInbox \"Phone_N0:\" lines, tool names): never real outreach. */
+export const isWarmup = (text: string) => WARMUP_PHONE.test(text) || WARMUP_WORDS.test(text);
 
 export const CATEGORY_LABEL: Record<LeadCategory, string> = {
   creator_management: "Creator wants management",

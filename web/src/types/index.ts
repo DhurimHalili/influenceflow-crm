@@ -187,7 +187,23 @@ export interface YouTubeFacts {
   emails?: string[]; business_email_hidden?: boolean; at?: string;
 }
 
+/** Someone who speaks for a creator: mail with them counts for the creator. */
+export type TeamRole = "manager" | "agent" | "agency" | "assistant" | "team";
+export interface TeamMember {
+  email: string;
+  role: TeamRole;
+  name?: string;
+  /** "gmail" = linked from their email (a referral, or a reply in your thread); "manual" = added by you. */
+  source?: "gmail" | "manual";
+  why?: string;
+  at?: string;
+  /** Removed by you: kept so Gmail never links it again. */
+  removed?: boolean;
+}
+
 export interface Creator {
+  /** Their manager / agent / team addresses. */
+  team?: TeamMember[];
   /** Channel facts from YouTube and when they were read (empty until the first refresh). */
   youtube?: YouTubeFacts;
   youtube_synced_at?: string | null;

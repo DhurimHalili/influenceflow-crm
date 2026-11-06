@@ -8,6 +8,7 @@ import { cadencePreview } from "../lib/followupEngine";
 import { mailboxStats } from "../lib/mailboxStats";
 import { DEFAULT_FOLLOWUP_RULES } from "../lib/prefs";
 import { relativeTime } from "../lib/utils";
+import { supabase } from "../lib/supabase";
 import type { FollowupRules } from "../types";
 import { Button, Tabs } from "./ui";
 
@@ -165,23 +166,49 @@ export function CoachSettings() {
   </div></section>;
 }
 
-/** Which AI reads media kits, how many keys it has, and how to switch it on. */
+const PROVIDER_NAME: Record<string, string> = { claude: "Claude", gemini: "Gemini", groq: "Groq", cloudflare: "Cloudflare Workers AI", openrouter: "OpenRouter" };
+const CAN_LABEL = (can: string[]) => [can.includes("text") && "emails", can.includes("image") && "screenshots", can.includes("pdf") && "PDF kits"].filter(Boolean).join(", ");
+type TestRow = { provider: string; model: string; need: string; ok: boolean; ms: number; error?: string };
+
+/** Which AI providers read emails and media kits, in the order they're tried, and a real test of each. */
 function AiStatus() {
   const gmail = useGmail();
+  const { toast } = useToast();
+  const [testing, setTesting] = useState(false);
+  const [tests, setTests] = useState<TestRow[] | null>(null);
+  const chain = gmail.aiChain || [];
   const resting = gmail.aiReadyAt && new Date(gmail.aiReadyAt).getTime() > Date.now();
+  const when = (iso: string) => new Date(iso).toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit" });
+  const test = async () => {
+    setTesting(true);
+    const { data, error } = await supabase.functions.invoke("gmail-sync", { body: { action: "ai_test" } });
+    setTesting(false);
+    if (error && !data) return toast("Couldn't run the test — try again in a moment.", "error");
+    const rows = ((data as { results?: TestRow[] })?.results || []) as TestRow[];
+    setTests(rows);
+    void gmail.refreshStatus();
+    toast(rows.every((r) => r.ok) ? `All ${rows.length} AI checks passed` : `${rows.filter((r) => !r.ok).length} of ${rows.length} AI checks failed — see below`, rows.every((r) => r.ok) ? "success" : "error");
+  };
   if (gmail.ai) {
-    const who = gmail.aiProvider === "gemini" ? `Gemini (${gmail.aiModel || "gemini-3.8-flash"}) · ${gmail.aiKeys} key${gmail.aiKeys === 1 ? "" : "s"}` : `Claude (${gmail.aiModel})`;
-    return <div className={`ai-status ${resting ? "rest" : "on"}`}><Sparkles size={15} /><div><strong>AI reading is on — {who}</strong>
-      <small>{resting ? `Every key has used its free quota for now. Files keep saving and wait in line; they're read automatically from ${new Date(gmail.aiReadyAt!).toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit" })}.` : "Media kits, rate cards and stats screenshots creators email you are read and filed; their audience goes to the Verified panel; prices they send or agree to update the rate card. When a key runs out, the next one takes over with the same model."}</small>
-      {gmail.aiProvider === "gemini" && <small className="ai-note">Free-tier Gemini may use what it reads to improve Google's products. Only attachments and the creator's own words are sent — never your whole inbox.</small>}
+    return <div className={`ai-status ${resting ? "rest" : "on"}`}><Sparkles size={15} /><div><strong>AI reading is on — {chain.length} provider{chain.length === 1 ? "" : "s"}</strong>
+      <small>{resting ? `Every provider has used its quota for now. Files keep saving and wait in line; they're read automatically from ${when(gmail.aiReadyAt!)}.` : "Each email or file goes to the first provider below that can read it. If it's out of quota, slow or can't answer, the same work moves to the next one — nothing is left half done."}</small>
+      {chain.length > 0 && <ol className="ai-chain">{chain.map((c, i) => {
+        const waiting = c.readyAt && new Date(c.readyAt).getTime() > Date.now();
+        const failed = tests?.filter((t) => t.provider === c.provider && !t.ok) || [];
+        const passed = tests?.some((t) => t.provider === c.provider && t.ok);
+        return <li key={c.provider}><span className="ai-step">{i + 1}</span><b>{PROVIDER_NAME[c.provider] || c.provider}</b><small>{c.models.join(" · ")} · {c.keys} key{c.keys === 1 ? "" : "s"} · reads {CAN_LABEL(c.can)}</small>
+          <span className={`ai-state ${failed.length ? "bad" : waiting ? "wait" : "ok"}`}>{failed.length ? `Check failed: ${failed[0].error || "no answer"}` : waiting ? `Resting until ${when(c.readyAt!)}` : passed ? "Tested · working" : "Ready"}</span></li>;
+      })}</ol>}
+      <div className="ai-actions"><Button size="sm" variant="secondary" onClick={() => void test()} loading={testing}>Test every provider</Button></div>
+      {chain.some((c) => c.provider === "gemini") && <small className="ai-note">Free-tier Gemini may use what it reads to improve Google's products. Only attachments and the creator's own words are sent — never your whole inbox.</small>}
     </div></div>;
   }
   return <div className="ai-status off"><Sparkles size={15} /><div><strong>AI reading is off</strong>
     <small>Without it, kits and stats screenshots are still saved and downloadable, and prices are read from emails by strict rules (“Integration: $1,500”, “$2,500 for the integration works for me”). The AI adds the audience numbers inside the files.</small>
-    <details className="ai-setup"><summary>Switch it on with free Gemini keys</summary><ol>
-      <li>Open <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer">aistudio.google.com/apikey</a> → <b>Create API key</b>.</li>
-      <li>Supabase → Edge Functions → <b>Secrets</b> → add <code>GEMINI_API_KEYS</code> with your key (several keys: separate them with commas).</li>
+    <details className="ai-setup"><summary>Switch it on</summary><ol>
+      <li>Get a key from any of: <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer">Gemini</a>, <a href="https://console.groq.com/keys" target="_blank" rel="noopener noreferrer">Groq</a>, <a href="https://openrouter.ai/settings/keys" target="_blank" rel="noopener noreferrer">OpenRouter</a> or Cloudflare Workers AI.</li>
+      <li>Supabase → Edge Functions → <b>Secrets</b> → add <code>GEMINI_API_KEYS</code>, <code>GROQ_API_KEY</code>, <code>OPENROUTER_API_KEY</code>, or <code>CLOUDFLARE_ACCOUNT_ID</code> + <code>CLOUDFLARE_AI_TOKEN</code>.</li>
       <li>Done. The next sync reads every saved kit, media kits first.</li>
-    </ol><p>Free quota is counted per Google Cloud <b>project</b>, not per key — several keys from one project share one quota.</p></details>
+    </ol></details>
   </div></div>;
 }

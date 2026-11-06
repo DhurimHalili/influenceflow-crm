@@ -1,10 +1,13 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 
-// The owner's controls that need Supabase's admin API (approve / remove live in
-// the database: admin_set_access). Only the owner may call this:
-//   reset_link — a one-time password-reset link for a member, returned to the
-//                owner, who sends it from their own Gmail (no shared mail quota)
+// The owner's controls. Only the owner may call this:
+//   set_access — approve / remove / back to waiting (admin_set_access, run AS the
+//                owner so the database checks it too). Approving emails the
+//                member their welcome with the link — automatically, from the
+//                owner's Gmail; without Gmail, Supabase sends a sign-in link.
+//   send_reset — a one-time password-reset link, emailed to the member the same way
+//   reset_link — just the link, returned to the owner (to send by hand)
 //   delete     — delete a member's account and everything in it, files included
 // The caller is checked server-side on every request; ids from the client are
 // only ever targets, never proof of who is asking.
@@ -42,6 +45,44 @@ Deno.serve(async (req) => {
   const { data: found, error: lookupError } = await admin.auth.admin.getUserById(target);
   if (lookupError || !found.user?.email) return json({ error: "That account doesn't exist any more." }, 404);
   const email = found.user.email;
+  const name = String((found.user.user_metadata as { display_name?: string; full_name?: string } | null)?.display_name || (found.user.user_metadata as { full_name?: string } | null)?.full_name || "").split(" ")[0].slice(0, 40);
+
+  // From the owner's own Gmail (through gmail-sync, as the owner). Falls back to Supabase's mailer.
+  const sendMail = async (subject: string, body: string, fallback: () => Promise<{ error: unknown }>) => {
+    const res = await fetch(`${supabaseUrl}/functions/v1/gmail-sync`, { method: "POST", headers: { Authorization: auth, "Content-Type": "application/json", apikey: Deno.env.get("SUPABASE_ANON_KEY")! }, body: JSON.stringify({ action: "send", to: [email], subject, body }) }).catch(() => null);
+    const out = res ? await res.json().catch(() => ({})) as { ok?: boolean; from?: string } : {};
+    if (res?.ok && out.ok) return { via: "gmail", from: out.from || "" };
+    const { error } = await fallback();
+    return error ? { via: "none", from: "" } : { via: "supabase", from: "" };
+  };
+  const anon = createClient(supabaseUrl, Deno.env.get("SUPABASE_ANON_KEY")!, { auth: { persistSession: false } });
+
+  if (input.action === "set_access") {
+    const access = String(input.access || "");
+    if (!["approved", "revoked", "pending"].includes(access)) return json({ error: "Unknown access level." }, 400);
+    // As the owner: the database checks is_owner() itself.
+    const asOwner = createClient(supabaseUrl, Deno.env.get("SUPABASE_ANON_KEY")!, { global: { headers: { Authorization: auth } }, auth: { persistSession: false } });
+    const { error } = await asOwner.rpc("admin_set_access", { p_user: target, p_access: access });
+    if (error) return json({ error: "Couldn't change their access — nothing changed. Try again." }, 502);
+    if (access !== "approved") return json({ ok: true, email, access });
+    const mail = await sendMail(
+      "You're in — your CRM access is approved",
+      `Hi${name ? ` ${name}` : ""},\n\nYour access to the CRM is approved. Sign in with the email and password you signed up with:\n\n${APP_URL}/\n\nIt's a private workspace — your records are yours alone and nobody else in the circle can see them.\n\nSee you inside!`,
+      () => anon.auth.signInWithOtp({ email, options: { shouldCreateUser: false, emailRedirectTo: `${APP_URL}/` } }),
+    );
+    return json({ ok: true, email, access, mail });
+  }
+
+  if (input.action === "send_reset") {
+    const { data, error } = await admin.auth.admin.generateLink({ type: "recovery", email, options: { redirectTo: `${APP_URL}/#/update-password` } });
+    if (error || !data.properties?.action_link) return json({ error: "Couldn't create a reset link — try again in a minute." }, 502);
+    const mail = await sendMail(
+      "Reset your CRM password",
+      `Hi${name ? ` ${name}` : ""},\n\nHere's your link to set a new password (it works once and expires soon):\n\n${data.properties.action_link}\n\nIf you didn't ask for this, you can ignore this email.`,
+      () => anon.auth.resetPasswordForEmail(email, { redirectTo: `${APP_URL}/#/update-password` }),
+    );
+    return json({ ok: true, email, mail });
+  }
 
   if (input.action === "reset_link") {
     const { data, error } = await admin.auth.admin.generateLink({ type: "recovery", email, options: { redirectTo: `${APP_URL}/#/update-password` } });
