@@ -103,11 +103,13 @@ export default function MembersPage() {
     setBusy(doomed.id);
     const res = await adminCall({ action: "delete", userId: doomed.id, confirm: typed });
     setBusy("");
-    if (res.error) return toast(res.error, "error");
+    if (res.error) { void load(); return toast(res.error, "error"); }
     setRows((list) => (list || []).filter((r) => r.id !== doomed.id));
     toast(`${doomed.email} and everything in their workspace were deleted`, "success");
     setDoomed(null);
     setTyped("");
+    // Re-read the list from the server, so what you see is what's really there.
+    void load();
   };
 
   return <div className="members-page">

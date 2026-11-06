@@ -5,17 +5,15 @@ On https://github.com/DhurimHalili/influenceflow-crm → gear icon next to **Abo
 **Description**
 
 ```
-Free influencer CRM for agencies — creators, brands, campaigns & calendar. Private, open-source.
+Private CRM for influencer agencies: creators, brands, deals and follow-ups, kept up to date from your Gmail.
 ```
 
 **Website**
 
 ```
-https://dhurimhalili.github.io/influenceflow-crm/#/app
+https://dhurimhalili.github.io/influenceflow-crm/#/login
 ```
 
 **Topics**
 
-`influencer-marketing` `crm` `supabase` `react` `typescript` `vite` `agency-tools` `open-source` `mit-license`
-
-> Hidden: Discovery (auto YouTube finding) + Outreach (Gmail queue) are turned OFF in UI but code is preserved. Set About as above so GitHub shows no Discovery/Outreach. To re-enable, flip `FEATURES` in `web/src/lib/features.ts`.
+`influencer-marketing` `crm` `agency-tools` `gmail` `creator-management` `brand-deals`
