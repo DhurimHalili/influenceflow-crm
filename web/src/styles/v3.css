@@ -19,27 +19,40 @@
 [data-theme="dark"] .rail-inbound.on small { color: #f3a079; }
 
 /* ---------- Logo mark ---------- */
-svg.logo-mark { display: block; flex: none; width: auto; height: auto; padding: 0; gap: 0; background: none; border-radius: 9px; box-shadow: 0 6px 16px rgba(var(--accent-rgb), .3); overflow: visible; }
-.logo-mark .lm-stop-a { stop-color: color-mix(in srgb, var(--accent) 82%, #ffffff); }
-.logo-mark .lm-stop-b { stop-color: color-mix(in srgb, var(--accent) 70%, #1a6fd6); }
-.logo-mark .lm-node { fill: #fff; }
-.logo-mark .lm-wave-track { fill: none; stroke: rgba(255, 255, 255, .26); stroke-width: 2.3; stroke-linecap: round; }
-.logo-mark .lm-wave { fill: none; stroke: #fff; stroke-width: 2.3; stroke-linecap: round; stroke-dasharray: 100; stroke-dashoffset: 100; animation: lmWave 3.2s cubic-bezier(.6, .05, .3, 1) infinite; }
-.logo-mark .lm-ripple { fill: none; stroke: #fff; stroke-width: 1.2; transform-box: fill-box; transform-origin: center; opacity: 0; animation: lmRipple 3.2s ease-out infinite; }
-.logo-mark .lm-ripple-2 { animation-delay: .5s; }
-.logo-mark .lm-dot { fill: #fff; opacity: .4; animation: lmDot 3.2s ease-in-out infinite; }
-.logo-mark .lm-dot-2 { animation-delay: .12s; }
-.logo-mark .lm-dot-3 { animation-delay: .24s; }
-.logo-lockup:hover .logo-mark .lm-wave { animation-duration: 1.6s; }
-.logo-lockup:hover .logo-mark .lm-ripple, .logo-lockup:hover .logo-mark .lm-dot { animation-duration: 1.6s; }
-@keyframes lmWave { 0% { stroke-dashoffset: 100; opacity: 1; } 52% { stroke-dashoffset: 0; opacity: 1; } 82% { stroke-dashoffset: 0; opacity: 1; } 100% { stroke-dashoffset: 0; opacity: 0; } }
-@keyframes lmRipple { 0% { transform: scale(1); opacity: .65; } 60%, 100% { transform: scale(3.1); opacity: 0; } }
-@keyframes lmDot { 0%, 45% { opacity: .4; transform: none; } 55% { opacity: 1; } 85% { opacity: 1; } 100% { opacity: .4; } }
-.logo-mark.is-still *, .loading-screen .logo-mark * { animation-duration: 1.4s; }
+/* Tile follows the theme accent; the glow + spark take --logo-glow. Draws in
+   once, then every 5.6 s a shine crosses it and the spark pops. */
+svg.logo-mark { --logo-glow: #ff7ad9; display: block; flex: none; width: auto; height: auto; padding: 0; gap: 0; background: none; border-radius: 25%; box-shadow: 0 6px 16px rgba(var(--accent-rgb), .32); overflow: visible; }
+[data-theme="light"] svg.logo-mark { --logo-glow: #ff8fd6; }
+[data-theme="honey"] svg.logo-mark { --logo-glow: #ffe08a; }
+[data-theme="ocean"] svg.logo-mark { --logo-glow: #8ff5e6; }
+.logo-mark .lm-stop-a { stop-color: color-mix(in srgb, var(--accent) 78%, #ffffff); }
+.logo-mark .lm-stop-b { stop-color: var(--accent); }
+.logo-mark .lm-stop-c { stop-color: color-mix(in srgb, var(--accent) 55%, #120c3a); }
+.logo-mark .lm-glow-a { stop-color: var(--logo-glow); stop-opacity: .78; }
+.logo-mark .lm-glow-b { stop-color: var(--logo-glow); stop-opacity: 0; }
+.logo-mark .lm-glow { transform-box: view-box; transform-origin: 46px 13px; animation: lmGlow 9s ease-in-out infinite alternate; }
+.logo-mark .lm-stem, .logo-mark .lm-arm { fill: none; stroke: #fff; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 100; stroke-dashoffset: 0; }
+.logo-mark .lm-arm { stroke-opacity: .72; }
+.logo-mark .lm-stem { animation: lmDraw .75s cubic-bezier(.65, 0, .25, 1) both; }
+.logo-mark .lm-arm { animation: lmDraw .45s .45s cubic-bezier(.65, 0, .25, 1) both; }
+.logo-mark .lm-spark { fill: color-mix(in srgb, var(--logo-glow) 32%, #fff); transform-box: fill-box; transform-origin: center; animation: lmIn .4s .7s cubic-bezier(.3, 1.6, .5, 1) both, lmPop 5.6s 1.2s ease-out infinite; }
+.logo-mark .lm-ring { fill: none; stroke: color-mix(in srgb, var(--logo-glow) 40%, #fff); stroke-width: 2; opacity: 0; transform-box: fill-box; transform-origin: center; animation: lmRing 5.6s 1.2s ease-out infinite; }
+.logo-mark .lm-shine { transform-box: view-box; transform-origin: 32px 32px; transform: rotate(24deg) translateX(0); animation: lmShine 5.6s 1.2s cubic-bezier(.45, 0, .2, 1) infinite; }
+.logo-lockup:hover .logo-mark .lm-spark { animation-duration: .4s, 1.8s; animation-delay: .7s, 0s; }
+.logo-lockup:hover .logo-mark .lm-ring, .logo-lockup:hover .logo-mark .lm-shine { animation-duration: 1.8s; animation-delay: 0s; }
+@keyframes lmDraw { from { stroke-dashoffset: 100; } to { stroke-dashoffset: 0; } }
+@keyframes lmIn { from { transform: scale(0); } to { transform: scale(1); } }
+@keyframes lmGlow { from { transform: translate(0, 0) scale(1); opacity: .85; } to { transform: translate(-6px, 5px) scale(1.12); opacity: 1; } }
+@keyframes lmShine { 0% { transform: rotate(24deg) translateX(0); } 32%, 100% { transform: rotate(24deg) translateX(132px); } }
+@keyframes lmPop { 0%, 24%, 44%, 100% { transform: scale(1); } 32% { transform: scale(1.24); } }
+@keyframes lmRing { 0%, 27% { transform: scale(1); opacity: 0; } 30% { opacity: .9; } 60%, 100% { transform: scale(2.7); opacity: 0; } }
+.logo-mark.is-still .lm-shine, .logo-mark.is-still .lm-ring { animation: none; opacity: 0; }
+.logo-mark.is-still * { animation: none !important; }
+.loading-screen .logo-mark .lm-spark { animation-duration: .4s, 1.8s; animation-delay: .7s, .6s; }
+.loading-screen .logo-mark .lm-ring, .loading-screen .logo-mark .lm-shine { animation-duration: 1.8s; animation-delay: .6s; }
 @media (prefers-reduced-motion: reduce) {
-  .logo-mark .lm-wave { animation: none; stroke-dashoffset: 0; }
-  .logo-mark .lm-ripple { animation: none; }
-  .logo-mark .lm-dot { animation: none; opacity: 1; }
+  .logo-mark * { animation: none !important; }
+  .logo-mark .lm-ring { opacity: 0; }
 }
 .loading-screen { flex-direction: column; gap: 16px; font-size: 13px; }
 .loading-screen > svg.logo-mark { box-shadow: 0 14px 34px rgba(var(--accent-rgb), .35); }

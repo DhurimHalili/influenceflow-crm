@@ -5,30 +5,46 @@ import { cn } from "../utils/cn";
 import { initials } from "../lib/utils";
 import { useAvatarUrl } from "../lib/avatars";
 import { STATUS_LABELS, type CampaignStatus, type EntityStatus } from "../types";
+import { LOGO } from "../lib/logoArt";
 
-// The InfluenceFlow mark: a creator (the node) sending a wave of influence
-// out to an audience (the three dots), which light up as it reaches them.
+// The InfluenceFlow mark: a forward-leaning "F" whose top arm is a wave (the
+// flow) and a spark (the reach it sends out). Shapes live in lib/logoArt so
+// the app, the tab icon and the PNG icons are one drawing. In the app it
+// draws itself in once, then every few seconds a shine crosses it and the
+// spark pops; the tile follows the theme. `still` = no loop (print pages).
 export function LogoMark({ size = 28, still = false }: { size?: number; still?: boolean }) {
   // Unique per instance: a gradient defined inside a hidden copy (e.g. the
   // collapsed mobile sidebar) would otherwise blank every other logo.
-  const gradient = `if-mark-${useId().replace(/:/g, "")}`;
+  const id = `if-mark-${useId().replace(/:/g, "")}`;
+  const { view, radius, stem, arm, lean, stroke, spark } = LOGO;
   return (
-    <svg className={cn("logo-mark", still && "is-still")} width={size} height={size} viewBox="0 0 32 32" aria-hidden="true">
+    <svg className={cn("logo-mark", still && "is-still")} width={size} height={size} viewBox={`0 0 ${view} ${view}`} aria-hidden="true">
       <defs>
-        <linearGradient id={gradient} x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
+        <linearGradient id={`${id}-g`} x1="4" y1="2" x2="60" y2="62" gradientUnits="userSpaceOnUse">
           <stop className="lm-stop-a" offset="0" />
-          <stop className="lm-stop-b" offset="1" />
+          <stop className="lm-stop-b" offset=".55" />
+          <stop className="lm-stop-c" offset="1" />
         </linearGradient>
+        <radialGradient id={`${id}-w`} cx="64.6%" cy="30.2%" r="41.3%">
+          <stop className="lm-glow-a" offset="0" />
+          <stop className="lm-glow-b" offset="1" />
+        </radialGradient>
+        <linearGradient id={`${id}-s`} x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0" stopColor="#fff" stopOpacity="0" />
+          <stop offset=".5" stopColor="#fff" stopOpacity=".4" />
+          <stop offset="1" stopColor="#fff" stopOpacity="0" />
+        </linearGradient>
+        <clipPath id={`${id}-c`}><rect width={view} height={view} rx={radius} /></clipPath>
       </defs>
-      <rect width="32" height="32" rx="9" fill={`url(#${gradient})`} />
-      <circle className="lm-ripple" cx="9" cy="16" r="3" />
-      <circle className="lm-ripple lm-ripple-2" cx="9" cy="16" r="3" />
-      <path className="lm-wave-track" d="M9 16 C 13 7, 17 25, 23.5 16" />
-      <path className="lm-wave" d="M9 16 C 13 7, 17 25, 23.5 16" pathLength="100" />
-      <circle className="lm-node" cx="9" cy="16" r="3.2" />
-      <circle className="lm-dot lm-dot-1" cx="25" cy="9.5" r="1.7" />
-      <circle className="lm-dot lm-dot-2" cx="26" cy="16" r="1.9" />
-      <circle className="lm-dot lm-dot-3" cx="25" cy="22.5" r="1.7" />
+      <rect width={view} height={view} rx={radius} fill={`url(#${id}-g)`} />
+      <g clipPath={`url(#${id}-c)`}><rect className="lm-glow" x="-16" y="-16" width="96" height="96" fill={`url(#${id}-w)`} /></g>
+      <g transform={lean}>
+        <path className="lm-stem" d={stem} pathLength="100" strokeWidth={stroke} />
+        <path className="lm-arm" d={arm} pathLength="100" strokeWidth={stroke} />
+      </g>
+      <circle className="lm-ring" cx={spark.cx} cy={spark.cy} r={spark.r} />
+      <circle className="lm-spark" cx={spark.cx} cy={spark.cy} r={spark.r} />
+      <g clipPath={`url(#${id}-c)`}><rect className="lm-shine" x="-36" y="-24" width="24" height="112" fill={`url(#${id}-s)`} /></g>
     </svg>
   );
 }
