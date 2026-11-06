@@ -27,6 +27,8 @@ const cases: Case[] = [
   ["promotions tab", { from: "Deals <hello@shop.com>", subject: "Creators wanted 50% off", snippet: "", labels: ["INBOX", "CATEGORY_PROMOTIONS"] }, null],
   ["auto reply", { from: "sara@glowskin.co", subject: "Out of office", snippet: "", headers: { "auto-submitted": "auto-replied" } }, null],
   ["colleague", { from: "Ana <ana@mimibridge.com>", subject: "Brand looking for creators", snippet: "", body: "Our brand client is looking for creators for an influencer campaign." }, null],
+  ["brand lead in spam", { from: "Sara Lee <sara@glowskin.co>", subject: "Influencer campaign for our serum", snippet: "", labels: ["SPAM"], body: "Hi! I'm the influencer marketing manager at Glowskin. We're looking for 5 beauty creators for an influencer campaign. Budget is $20k." }, "brand_needs_creators"],
+  ["spam pitch stays out", { from: "Seth <seth@faircrest-studios.store>", subject: "Dhurim, am I mistaken?", snippet: "", labels: ["SPAM"], body: "We help agencies book more clients — worth a quick chat?" }, null],
   ["fake re: thread", { from: "Pete <pete@connexos.co.uk>", subject: "Re: That Reliable?", snippet: "", headers: { "in-reply-to": "<x@y>" }, body: "Our brand is looking for creators for an influencer campaign." }, null],
   ["personal", { from: "Mom <mom@gmail.com>", subject: "Dinner sunday?", snippet: "Are you coming for dinner?" }, null],
   ["own", { from: "dhurim@mimibridge.com", subject: "talent", snippet: "", body: "I'm a YouTuber looking for management" }, null],

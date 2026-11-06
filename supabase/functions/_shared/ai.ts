@@ -6,57 +6,112 @@ import type { LeadCategory } from "./leadScanner.ts";
 // shows, what a creator's email says about prices / audience / an agreed price,
 // and (Claude only) a second opinion on inbound leads.
 //
-// Two providers, same prompts, same JSON schemas, same validation:
-//   • Claude  — when the ANTHROPIC_API_KEY secret is set.
-//   • Gemini  — otherwise, when GEMINI_API_KEYS (comma/space separated, up to 20)
-//               or GEMINI_API_KEY is set. One model only (GEMINI_MODEL, default
-//               gemini-3.8-flash): when a key hits its quota the next key is
-//               used with the SAME model — quality never drops to a lite model.
-//               Default is gemini-3.5-flash: 3.8 is better on paper but was
-//               returning 503 (overloaded) for every call in Nov 2026. Override
-//               with GEMINI_MODEL when the newer model is stable.
-//               Both key formats are accepted: legacy AIza… traffic keys and
-//               the newer AQ.… authentication keys (the dot is valid).
-//               When every key is out, the work waits in a queue for the next
-//               run (QuotaExhausted is thrown so callers stop cleanly).
-//               Keys are only ever identified by a SHA-256 prefix in the database.
+// Several providers, one chain. Each piece of work goes to the first provider
+// that can do it and isn't cooling down; quota, a bad key, a missing model, a
+// timeout or an unreadable answer moves the SAME work to the next one, so
+// nothing stalls halfway. Default order (AI_ORDER changes it): free first, paid last.
+//   • claude      ANTHROPIC_API_KEY                      (text, images, PDFs)
+//   • gemini      GEMINI_API_KEYS / GEMINI_API_KEY       (text, images, PDFs) — GEMINI_MODEL
+//   • groq        GROQ_API_KEYS / GROQ_API_KEY           (text, images)       — GROQ_MODEL, GROQ_VISION_MODEL
+//   • cloudflare  CLOUDFLARE_ACCOUNT_ID + CLOUDFLARE_AI_TOKEN (text, images) — CLOUDFLARE_MODEL, CLOUDFLARE_VISION_MODEL
+//   • openrouter  OPENROUTER_API_KEYS / OPENROUTER_API_KEY (text, images, PDFs) — OPENROUTER_MODEL, OPENROUTER_VISION_MODEL
+// PDFs only go to providers that read PDFs; images to vision models.
+// Cooldowns per provider+model+key survive between runs (ai_key_state, keyed
+// by a SHA-256 prefix — a key itself is never stored or logged). When every
+// capable route is cooling down, QuotaExhausted is thrown and the work waits
+// in its queue for the next run.
 //
 // Safety model — everything the model reads is UNTRUSTED (anyone can email
 // you, a PDF can say "ignore your instructions"):
 //   • The content goes in as data; the system prompt says to extract only and to
 //     report any instructions it finds instead of following them.
-//   • Output is forced into a JSON schema — no free text reaches the CRM, no
-//     tools are offered, nothing is executed.
+//   • Output is forced into JSON (a schema where the provider supports it) — no
+//     free text reaches the CRM, no tools are offered, nothing is executed.
 //   • Every number is range-checked and every enum validated again here.
 //   • Nothing changes unless the model is confident AND the document is about the
 //     right creator; the rules engine keeps the final say on leads.
 // Per-user daily cap in the caller (ai_usage table).
 
 const CLAUDE_MODEL = "claude-opus-5-5";
-const GEMINI_MODEL = () => (Deno.env.get("GEMINI_MODEL") || "gemini-3.5-flash").replace(/[^\w.-]/g, "");
+const env = (name: string) => (Deno.env.get(name) || "").trim();
+const modelEnv = (name: string, fallback: string) => (env(name) || fallback).replace(/[^\w.:@/-]/g, "");
 let client: Anthropic | null = null;
-const api = () => (client ??= new Anthropic({ apiKey: Deno.env.get("ANTHROPIC_API_KEY")!, maxRetries: 2, timeout: 60_000 }));
+const api = () => (client ??= new Anthropic({ apiKey: env("ANTHROPIC_API_KEY"), maxRetries: 2, timeout: 60_000 }));
 
-const geminiKeys = () => Array.from(new Set(`${Deno.env.get("GEMINI_API_KEYS") || ""} ${Deno.env.get("GEMINI_API_KEY") || ""}`
+const keysOf = (...names: string[]) => Array.from(new Set(names.map(env).join(" ")
   .split(/[\s,;]+/)
   .map((k) => k.trim().replace(/^["']+|["']+$/g, ""))
-  // AQ. keys contain a dot; AIza keys do not. Accept both, plus a little room
-  // for future formats, while still rejecting empty/absurd values.
-  .filter((k) => /^[\w.-]{20,200}$/.test(k)))).slice(0, 20);
-export type AiProvider = "claude" | "gemini" | null;
-export const aiProvider = (): AiProvider => (Deno.env.get("ANTHROPIC_API_KEY") ? "claude" : geminiKeys().length ? "gemini" : null);
-export const aiEnabled = () => aiProvider() !== null;
-export const aiKeyCount = () => (aiProvider() === "claude" ? 1 : geminiKeys().length);
-export const aiModel = () => (aiProvider() === "claude" ? CLAUDE_MODEL : aiProvider() === "gemini" ? GEMINI_MODEL() : "");
+  // AQ. (Gemini) keys contain a dot; others don't. Room for future formats, no absurd values.
+  .filter((k) => /^[\w.-]{20,300}$/.test(k)))).slice(0, 20);
 
-/** Every key is out of quota right now — keep the work queued for a later run. */
+export type AiProvider = "claude" | "gemini" | "groq" | "cloudflare" | "openrouter";
+type Need = "text" | "image" | "pdf";
+type Format = "schema" | "cf-schema" | "object";
+type Route = { provider: AiProvider; model: string; key: string; url: string; can: Need[]; format: Format };
+
+const DEFAULTS = {
+  gemini: "gemini-3.5-flash",
+  groq: "llama-3.3-70b-versatile",
+  groqVision: "meta-llama/llama-4-scout-17b-16e-instruct",
+  cloudflare: "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+  cloudflareVision: "@cf/meta/llama-4-scout-17b-16e-instruct",
+  openrouter: "openai/gpt-oss-120b",
+  openrouterVision: "google/gemini-2.5-flash-lite",
+};
+const ORDER: AiProvider[] = ["claude", "gemini", "groq", "cloudflare", "openrouter"];
+const order = (): AiProvider[] => {
+  const asked = env("AI_ORDER").toLowerCase().split(/[\s,;]+/).filter((p): p is AiProvider => (ORDER as string[]).includes(p));
+  return [...asked, ...ORDER.filter((p) => !asked.includes(p))];
+};
+
+/** Every model the chain can use, in order. Vision models are separate routes. */
+function routes(): Route[] {
+  const out: Route[] = [];
+  for (const p of order()) {
+    if (p === "claude" && env("ANTHROPIC_API_KEY")) out.push({ provider: p, model: CLAUDE_MODEL, key: env("ANTHROPIC_API_KEY"), url: "", can: ["text", "image", "pdf"], format: "schema" });
+    if (p === "gemini") for (const key of keysOf("GEMINI_API_KEYS", "GEMINI_API_KEY")) out.push({ provider: p, model: modelEnv("GEMINI_MODEL", DEFAULTS.gemini), key, url: "", can: ["text", "image", "pdf"], format: "schema" });
+    if (p === "groq") {
+      const url = "https://api.groq.com/openai/v1/chat/completions";
+      const text = modelEnv("GROQ_MODEL", DEFAULTS.groq);
+      const vision = modelEnv("GROQ_VISION_MODEL", DEFAULTS.groqVision);
+      for (const key of keysOf("GROQ_API_KEYS", "GROQ_API_KEY")) {
+        // Groq enforces JSON schemas only on its gpt-oss models; the others get JSON mode + the schema in the prompt.
+        out.push({ provider: p, model: text, key, url, can: ["text"], format: /gpt-oss/.test(text) ? "schema" : "object" });
+        if (vision && vision !== "none") out.push({ provider: p, model: vision, key, url, can: ["image"], format: "object" });
+      }
+    }
+    if (p === "cloudflare") {
+      const account = env("CLOUDFLARE_ACCOUNT_ID").replace(/[^a-f0-9]/gi, "");
+      const url = `https://api.cloudflare.com/client/v4/accounts/${account}/ai/v1/chat/completions`;
+      const vision = modelEnv("CLOUDFLARE_VISION_MODEL", DEFAULTS.cloudflareVision);
+      if (account.length >= 16) for (const key of keysOf("CLOUDFLARE_AI_TOKENS", "CLOUDFLARE_AI_TOKEN")) {
+        out.push({ provider: p, model: modelEnv("CLOUDFLARE_MODEL", DEFAULTS.cloudflare), key, url, can: ["text"], format: "cf-schema" });
+        if (vision && vision !== "none") out.push({ provider: p, model: vision, key, url, can: ["image"], format: "cf-schema" });
+      }
+    }
+    if (p === "openrouter") {
+      const url = "https://openrouter.ai/api/v1/chat/completions";
+      const vision = modelEnv("OPENROUTER_VISION_MODEL", DEFAULTS.openrouterVision);
+      for (const key of keysOf("OPENROUTER_API_KEYS", "OPENROUTER_API_KEY")) {
+        out.push({ provider: p, model: modelEnv("OPENROUTER_MODEL", DEFAULTS.openrouter), key, url, can: ["text"], format: "schema" });
+        if (vision && vision !== "none") out.push({ provider: p, model: vision, key, url, can: ["image", "pdf", "text"], format: "schema" });
+      }
+    }
+  }
+  return out;
+}
+
+export const aiProvider = (): AiProvider | null => routes()[0]?.provider ?? null;
+export const aiEnabled = () => routes().length > 0;
+export const aiKeyCount = () => new Set(routes().map((r) => `${r.provider}:${r.key}`)).size;
+export const aiModel = () => routes()[0]?.model || "";
+
+/** Every capable route is cooling down right now — keep the work queued for a later run. */
 export class QuotaExhausted extends Error {
   constructor(public until: number) { super("AI quota used up for now"); }
 }
 
-// ---- Gemini key pool -------------------------------------------------------------
-// Cooldowns survive between runs through a small server-only table
-// (ai_key_state: key hash → cooldown_until). Without it they live in memory.
+// ---- cooldowns -----------------------------------------------------------------------
 type KeyStore = { load: () => Promise<Map<string, number>>; save: (hash: string, until: number, note: string) => Promise<void> };
 let store: KeyStore | null = null;
 let cooldown: Map<string, number> | null = null;
@@ -71,7 +126,15 @@ export function useKeyStore(admin: { from: (t: string) => any }) {
   };
   cooldown = null;
 }
-const keyHash = async (key: string) => Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(key))), (x) => x.toString(16).padStart(2, "0")).join("").slice(0, 24);
+const sha = async (text: string) => Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text))), (x) => x.toString(16).padStart(2, "0")).join("").slice(0, 24);
+/** Gemini keys keep their old id (cooldowns already stored); other routes are per provider + model + key. */
+const routeId = (r: Route) => (r.provider === "gemini" ? sha(r.key) : sha(`${r.provider}|${r.model}|${r.key}`));
+const loadCooldowns = async () => (cooldown ??= store ? await store.load().catch(() => new Map()) : new Map());
+const park = async (r: Route, until: number, note: string) => {
+  const id = await routeId(r);
+  (await loadCooldowns()).set(id, until);
+  await store?.save(id, until, `${r.provider} ${r.model}: ${note}`).catch(() => null);
+};
 /** Next midnight in California — when Gemini's per-day quotas reset. */
 const nextPacificMidnight = () => {
   const now = new Date();
@@ -79,13 +142,31 @@ const nextPacificMidnight = () => {
   const next = new Date(la); next.setHours(24, 5, 0, 0);
   return now.getTime() + (next.getTime() - la.getTime());
 };
-/** When the AI can be used again (0 = now). */
-export async function aiReadyAt(): Promise<number> {
-  if (aiProvider() !== "gemini") return 0;
-  cooldown ??= store ? await store.load().catch(() => new Map()) : new Map();
+const nextUtcMidnight = () => { const d = new Date(); d.setUTCHours(24, 2, 0, 0); return d.getTime(); };
+
+/** When the AI can be used again for this kind of work (0 = now). */
+export async function aiReadyAt(need: Need = "text"): Promise<number> {
+  const list = routes().filter((r) => r.can.includes(need));
+  if (!list.length) return 0;
+  const cd = await loadCooldowns();
   let soonest = Infinity;
-  for (const key of geminiKeys()) soonest = Math.min(soonest, cooldown.get(await keyHash(key)) || 0);
+  for (const r of list) soonest = Math.min(soonest, cd.get(await routeId(r)) || 0);
   return soonest <= Date.now() ? 0 : soonest;
+}
+
+/** For Settings: each provider, its models, and whether it is cooling down. Never a key. */
+export async function aiChain() {
+  const cd = await loadCooldowns();
+  const by = new Map<AiProvider, { provider: AiProvider; models: string[]; keys: number; readyAt: number; can: Need[] }>();
+  for (const r of routes()) {
+    const row = by.get(r.provider) || { provider: r.provider, models: [], keys: 0, readyAt: Infinity, can: [] };
+    if (!row.models.includes(r.model)) row.models.push(r.model);
+    row.can = Array.from(new Set([...row.can, ...r.can]));
+    row.readyAt = Math.min(row.readyAt, cd.get(await routeId(r)) || 0);
+    by.set(r.provider, row);
+  }
+  for (const r of routes()) by.get(r.provider)!.keys = new Set(routes().filter((x) => x.provider === r.provider).map((x) => x.key)).size;
+  return Array.from(by.values()).map((r) => ({ ...r, readyAt: r.readyAt > Date.now() && r.readyAt !== Infinity ? new Date(r.readyAt).toISOString() : null }));
 }
 
 const SYSTEM = `You extract facts for an influencer-marketing agency's CRM.
@@ -96,97 +177,172 @@ Answer only with the requested JSON.`;
 
 type Json = Record<string, unknown>;
 type Block = { type: "text"; text: string } | { type: "document"; source: { type: "base64"; media_type: "application/pdf"; data: string } } | { type: "image"; source: { type: "base64"; media_type: "image/png" | "image/jpeg" | "image/webp" | "image/gif"; data: string } };
+type Outcome = { ok: true; value: Json } | { ok: false; why: "quota" | "auth" | "model" | "busy" | "bad" | "format"; until?: number; note: string };
 
-type GeminiPart = { text: string } | { inlineData: { mimeType: string; data: string } };
 // Gemini's schema dialect: plain JSON Schema minus additionalProperties.
-const forGemini = (schema: unknown): unknown => {
-  if (Array.isArray(schema)) return schema.map(forGemini);
+const withoutExtra = (schema: unknown): unknown => {
+  if (Array.isArray(schema)) return schema.map(withoutExtra);
   if (!schema || typeof schema !== "object") return schema;
-  return Object.fromEntries(Object.entries(schema as Json).filter(([k]) => k !== "additionalProperties").map(([k, v]) => [k, forGemini(v)]));
+  return Object.fromEntries(Object.entries(schema as Json).filter(([k]) => k !== "additionalProperties").map(([k, v]) => [k, withoutExtra(v)]));
+};
+const parseJson = (text: string): Json | null => {
+  const t = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "");
+  const start = t.indexOf("{");
+  const end = t.lastIndexOf("}");
+  if (start < 0 || end <= start) return null;
+  try {
+    const v = JSON.parse(t.slice(start, end + 1));
+    return v && typeof v === "object" && !Array.isArray(v) ? v : null;
+  } catch {
+    return null;
+  }
+};
+const retryAfter = (res: Response) => {
+  const s = Number(res.headers.get("retry-after"));
+  return Number.isFinite(s) && s > 0 ? Math.min(s, 86400) * 1000 : 0;
 };
 
-async function askGemini(parts: GeminiPart[], schema: Json, maxTokens: number, thinking: "low" | "medium" | "high"): Promise<Json | null> {
-  cooldown ??= store ? await store.load().catch(() => new Map()) : new Map();
-  const keys = geminiKeys();
-  let soonest = Infinity;
-  for (const key of keys) {
-    const hash = await keyHash(key);
-    const until = cooldown.get(hash) || 0;
-    if (until > Date.now()) { soonest = Math.min(soonest, until); continue; }
-    const send = () => fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL()}:generateContent`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-goog-api-key": key },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: SYSTEM }] },
-        contents: [{ role: "user", parts }],
-        generationConfig: { responseMimeType: "application/json", responseJsonSchema: forGemini(schema), maxOutputTokens: maxTokens + 6000, temperature: 0, thinkingConfig: { thinkingLevel: thinking } },
-      }),
-      signal: AbortSignal.timeout(30_000),
-    }).catch(() => null);
-    let res = await send();
-    // 503 is common on a newly released model: one quick retry, then let the
-    // caller fall back to rules rather than stalling the whole sync.
-    if (res && (res.status === 503 || res.status >= 500)) {
-      await new Promise((r) => setTimeout(r, 1000));
-      res = await send();
-    }
-    if (!res) continue;
-    if (res.status === 429 || res.status === 403 || res.status === 401) {
-      // Out of quota (per minute or per day), or a bad/disabled key: park it and try the next one.
-      const err = await res.json().catch(() => ({})) as { error?: { message?: string; details?: { "@type"?: string; retryDelay?: string; violations?: { quotaId?: string }[] }[] } };
-      const details = err.error?.details || [];
-      const perDay = details.some((d) => (d.violations || []).some((v) => /PerDay/i.test(v.quotaId || "")));
-      const delay = Number((details.find((d) => d.retryDelay)?.retryDelay || "").replace(/s$/, "")) || 0;
-      const until = res.status !== 429 ? Date.now() + 6 * 3600_000 : perDay ? nextPacificMidnight() : Date.now() + Math.max(60, delay + 5) * 1000;
-      cooldown.set(hash, until);
-      soonest = Math.min(soonest, until);
-      await store?.save(hash, until, `${res.status} ${perDay ? "daily quota" : ""} ${err.error?.message || ""}`).catch(() => null);
-      continue;
-    }
-    if (!res.ok) return null; // 400 (e.g. unreadable file) / 5xx: give up on this item, not on the key
-    const body = await res.json().catch(() => null) as { candidates?: { finishReason?: string; content?: { parts?: { text?: string; thought?: boolean }[] } }[]; promptFeedback?: { blockReason?: string } } | null;
-    const cand = body?.candidates?.[0];
-    if (!cand || body?.promptFeedback?.blockReason || (cand.finishReason && cand.finishReason !== "STOP")) return null;
-    const text = (cand.content?.parts || []).filter((p) => !p.thought && p.text).map((p) => p.text).join("");
-    try {
-      const parsed = JSON.parse(text);
-      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
-    } catch {
-      return null;
-    }
+async function callGemini(r: Route, content: Block[], schema: Json, maxTokens: number, thinking: "low" | "medium" | "high"): Promise<Outcome> {
+  const parts = content.map((b) => (b.type === "text" ? { text: b.text } : { inlineData: { mimeType: b.source.media_type, data: b.source.data } }));
+  const send = () => fetch(`https://generativelanguage.googleapis.com/v1beta/models/${r.model}:generateContent`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-goog-api-key": r.key },
+    body: JSON.stringify({
+      systemInstruction: { parts: [{ text: SYSTEM }] },
+      contents: [{ role: "user", parts }],
+      generationConfig: { responseMimeType: "application/json", responseJsonSchema: withoutExtra(schema), maxOutputTokens: maxTokens + 6000, temperature: 0, thinkingConfig: { thinkingLevel: thinking } },
+    }),
+    signal: AbortSignal.timeout(content.some((b) => b.type !== "text") ? 60_000 : 30_000),
+  }).catch(() => null);
+  let res = await send();
+  if (res && res.status >= 500) { await new Promise((ok) => setTimeout(ok, 1000)); res = await send(); }
+  if (!res) return { ok: false, why: "busy", note: "no answer" };
+  if (res.status === 429 || res.status === 403 || res.status === 401) {
+    const err = await res.json().catch(() => ({})) as { error?: { message?: string; details?: { retryDelay?: string; violations?: { quotaId?: string }[] }[] } };
+    const details = err.error?.details || [];
+    const perDay = details.some((d) => (d.violations || []).some((v) => /PerDay/i.test(v.quotaId || "")));
+    const delay = Number((details.find((d) => d.retryDelay)?.retryDelay || "").replace(/s$/, "")) || 0;
+    if (res.status !== 429) return { ok: false, why: "auth", until: Date.now() + 6 * 3600_000, note: `${res.status} ${err.error?.message || ""}` };
+    return { ok: false, why: "quota", until: perDay ? nextPacificMidnight() : Date.now() + Math.max(60, delay + 5) * 1000, note: `429 ${perDay ? "daily quota" : ""} ${err.error?.message || ""}` };
   }
-  throw new QuotaExhausted(soonest === Infinity ? Date.now() + 3600_000 : soonest);
+  if (res.status === 404) return { ok: false, why: "model", until: Date.now() + 24 * 3600_000, note: "model not found" };
+  if (res.status >= 500) return { ok: false, why: "busy", note: `${res.status}` };
+  if (!res.ok) return { ok: false, why: "bad", note: `${res.status}` }; // e.g. unreadable file: another provider may read it
+  const body = await res.json().catch(() => null) as { candidates?: { finishReason?: string; content?: { parts?: { text?: string; thought?: boolean }[] } }[]; promptFeedback?: { blockReason?: string } } | null;
+  const cand = body?.candidates?.[0];
+  if (!cand || body?.promptFeedback?.blockReason || (cand.finishReason && cand.finishReason !== "STOP")) return { ok: false, why: "bad", note: cand?.finishReason || "blocked" };
+  const value = parseJson((cand.content?.parts || []).filter((p) => !p.thought && p.text).map((p) => p.text).join(""));
+  return value ? { ok: true, value } : { ok: false, why: "bad", note: "not JSON" };
 }
 
-const toGemini = (content: Block[]): GeminiPart[] => content.map((b) => (b.type === "text" ? { text: b.text } : { inlineData: { mimeType: b.source.media_type, data: b.source.data } }));
-
-async function ask(content: Block[], schema: Json, maxTokens = 2000, thinking: "low" | "medium" | "high" = "low"): Promise<Json | null> {
-  if (aiProvider() === "gemini") return askGemini(toGemini(content), schema, maxTokens, thinking);
-  const body = {
-    model: CLAUDE_MODEL,
-    max_tokens: maxTokens,
-    system: SYSTEM,
-    output_config: { effort: "low", format: { type: "json_schema", schema } },
-    messages: [{ role: "user", content }],
+/** Groq, Cloudflare Workers AI and OpenRouter all speak the OpenAI chat format. */
+async function callOpenAi(r: Route, content: Block[], schema: Json, maxTokens: number, format: Format): Promise<Outcome> {
+  const parts: Json[] = [];
+  for (const b of content) {
+    if (b.type === "text") parts.push({ type: "text", text: b.text });
+    else if (b.type === "image") parts.push({ type: "image_url", image_url: { url: `data:${b.source.media_type};base64,${b.source.data}` } });
+    else parts.push({ type: "file", file: { filename: "document.pdf", file_data: `data:application/pdf;base64,${b.source.data}` } });
+  }
+  if (format === "object") parts.push({ type: "text", text: `Answer with ONE JSON object and nothing else. It must match this JSON Schema exactly (every listed property present; use 0, "" or [] when unknown):\n${JSON.stringify(withoutExtra(schema))}` });
+  const onlyText = parts.every((p) => p.type === "text");
+  const body: Json = {
+    model: r.model,
+    temperature: 0,
+    max_tokens: maxTokens + (/gpt-oss|r1|qwq|thinking/i.test(r.model) ? 3000 : 500),
+    messages: [{ role: "system", content: SYSTEM }, { role: "user", content: onlyText && r.provider === "cloudflare" ? parts.map((p) => p.text).join("\n\n") : parts }],
+    response_format: format === "object" ? { type: "json_object" } : format === "cf-schema" ? { type: "json_schema", json_schema: withoutExtra(schema) } : { type: "json_schema", json_schema: { name: "extraction", strict: false, schema: withoutExtra(schema) } },
   };
+  if (r.provider === "openrouter") {
+    body.provider = { require_parameters: true, data_collection: "deny" };
+    if (/gpt-oss/.test(r.model)) body.reasoning = { effort: "low" };
+  }
+  if (r.provider === "groq" && /gpt-oss/.test(r.model)) body.reasoning_effort = "low";
+  const headers: Record<string, string> = { "Content-Type": "application/json", Authorization: `Bearer ${r.key}` };
+  if (r.provider === "openrouter") { headers["HTTP-Referer"] = "https://influenceflow.app"; headers["X-Title"] = "InfluenceFlow CRM"; }
+  const res = await fetch(r.url, { method: "POST", headers, body: JSON.stringify(body), signal: AbortSignal.timeout(onlyText ? 35_000 : 60_000) }).catch(() => null);
+  if (!res) return { ok: false, why: "busy", note: "no answer" };
+  const text = res.ok ? "" : (await res.text().catch(() => "")).replace(/\s+/g, " ").slice(0, 300);
+  if (res.status === 401 || res.status === 403) {
+    // Cloudflare: a model the free plan can't use answers 403 (5035) — that model only.
+    return { ok: false, why: /5035|paid plan/i.test(text) ? "model" : "auth", until: Date.now() + 6 * 3600_000, note: `${res.status} ${text}` };
+  }
+  if (res.status === 402) return { ok: false, why: "quota", until: Date.now() + 6 * 3600_000, note: "402 out of credits" };
+  if (res.status === 429 || /daily free allocation|neurons|tokens per day|TPD|RPD|requests per day/i.test(text)) {
+    const daily = /per day|daily|TPD|RPD|neurons/i.test(text);
+    const wait = retryAfter(res);
+    return { ok: false, why: "quota", until: wait ? Date.now() + wait + 2000 : daily ? nextUtcMidnight() : Date.now() + 65_000, note: `${res.status} ${text}` };
+  }
+  if (res.status === 404 || /model_not_found|model_decommissioned|does not exist|not a valid model|No endpoints found|No allowed providers/i.test(text)) return { ok: false, why: "model", until: Date.now() + 24 * 3600_000, note: `${res.status} ${text}` };
+  if (res.status === 400 && format !== "object" && /response_format|json_schema|structured|schema/i.test(text)) return { ok: false, why: "format", note: text };
+  if (res.status >= 500) return { ok: false, why: "busy", note: `${res.status} ${text}` };
+  if (!res.ok) return { ok: false, why: "bad", note: `${res.status} ${text}` };
+  const data = await res.json().catch(() => null) as { choices?: { finish_reason?: string; message?: { content?: unknown } }[] } | null;
+  const choice = data?.choices?.[0];
+  if (!choice || choice.finish_reason === "length" || choice.finish_reason === "content_filter") return { ok: false, why: "bad", note: choice?.finish_reason || "empty" };
+  const c = choice.message?.content;
+  const value = c && typeof c === "object" && !Array.isArray(c) ? (c as Json) : typeof c === "string" ? parseJson(c) : null;
+  return value ? { ok: true, value } : { ok: false, why: "bad", note: "not JSON" };
+}
+
+async function callClaude(content: Block[], schema: Json, maxTokens: number): Promise<Outcome> {
+  const body = { model: CLAUDE_MODEL, max_tokens: maxTokens, system: SYSTEM, output_config: { effort: "low", format: { type: "json_schema", schema } }, messages: [{ role: "user", content }] };
   let res: { stop_reason?: string | null; content: { type: string; text?: string }[] };
   try {
     // A policy decline is retried on Anthropic's recommended fallback model.
     // deno-lint-ignore no-explicit-any
     res = await (api().beta.messages.create as any)({ ...body, betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" });
   } catch (e) {
-    if (!(e instanceof Anthropic.BadRequestError)) throw e;
-    // deno-lint-ignore no-explicit-any
-    res = await (api().messages.create as any)(body);
+    if (e instanceof Anthropic.RateLimitError) return { ok: false, why: "quota", until: Date.now() + 120_000, note: "429" };
+    if (e instanceof Anthropic.AuthenticationError || e instanceof Anthropic.PermissionDeniedError) return { ok: false, why: "auth", until: Date.now() + 6 * 3600_000, note: "key rejected" };
+    if (!(e instanceof Anthropic.BadRequestError)) return { ok: false, why: "busy", note: e instanceof Error ? e.message.slice(0, 120) : "error" };
+    try {
+      // deno-lint-ignore no-explicit-any
+      res = await (api().messages.create as any)(body);
+    } catch {
+      return { ok: false, why: "bad", note: "rejected" };
+    }
   }
-  if (res.stop_reason === "refusal" || res.stop_reason === "max_tokens") return null;
-  const text = res.content.find((b) => b.type === "text")?.text || "";
-  try {
-    const parsed = JSON.parse(text);
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
-  } catch {
-    return null;
+  if (res.stop_reason === "refusal" || res.stop_reason === "max_tokens") return { ok: false, why: "bad", note: String(res.stop_reason) };
+  const value = parseJson(res.content.find((b) => b.type === "text")?.text || "");
+  return value ? { ok: true, value } : { ok: false, why: "bad", note: "not JSON" };
+}
+
+/** Last route each kind of work used (for the status line). */
+export const lastUsed: { provider: AiProvider | null; model: string } = { provider: null, model: "" };
+
+/**
+ * One piece of work down the chain. The first capable route that answers with
+ * valid JSON wins; anything else hands the SAME work to the next route.
+ */
+async function ask(content: Block[], schema: Json, maxTokens = 2000, thinking: "low" | "medium" | "high" = "low", only?: AiProvider): Promise<Json | null> {
+  const need: Need = content.some((b) => b.type === "document") ? "pdf" : content.some((b) => b.type === "image") ? "image" : "text";
+  const list = routes().filter((r) => r.can.includes(need) && (!only || r.provider === only));
+  if (!list.length) return null;
+  const cd = await loadCooldowns();
+  let soonest = Infinity;
+  let answered = false;
+  for (const r of list) {
+    const until = cd.get(await routeId(r)) || 0;
+    if (until > Date.now()) { soonest = Math.min(soonest, until); continue; }
+    let out: Outcome;
+    try {
+      if (r.provider === "claude") out = await callClaude(content, schema, maxTokens);
+      else if (r.provider === "gemini") out = await callGemini(r, content, schema, maxTokens, thinking);
+      else {
+        out = await callOpenAi(r, content, schema, maxTokens, r.format);
+        // The model can't take a schema: JSON mode with the schema in the prompt instead.
+        if (!out.ok && out.why === "format") out = await callOpenAi(r, content, schema, maxTokens, "object");
+      }
+    } catch (e) {
+      out = { ok: false, why: "busy", note: e instanceof Error ? e.message.slice(0, 120) : "error" };
+    }
+    if (out.ok) { lastUsed.provider = r.provider; lastUsed.model = r.model; return out.value; }
+    if (out.until) { await park(r, out.until, `${out.why} ${out.note}`); if (out.why === "quota") soonest = Math.min(soonest, out.until); }
+    if (out.why === "bad") answered = true;
   }
+  // Someone could have answered and none gave usable JSON: this item is the problem, not the quota.
+  if (answered) return null;
+  throw new QuotaExhausted(soonest === Infinity ? Date.now() + 15 * 60_000 : soonest);
 }
 
 const untrusted = (label: string, text: string) => ({ type: "text" as const, text: `<untrusted kind="${label}">\n${text.slice(0, 12000).replace(/<\/?untrusted[^>]*>/gi, "")}\n</untrusted>` });
@@ -197,47 +353,41 @@ const num = (v: unknown, max: number) => {
 const str = (v: unknown, max = 200) => (typeof v === "string" ? v.replace(/[\u0000-\u001f]/g, " ").trim().slice(0, max) : "");
 const obj = (props: Json, required = Object.keys(props)) => ({ type: "object", additionalProperties: false, properties: props, required });
 
-/** One tiny direct call — proves the configured key can actually reach the model. */
-export async function testAi(modelOverride?: string, structured = false): Promise<{ ok: boolean; provider: AiProvider; model: string; ms: number; status?: number; error?: string }> {
-  const provider = aiProvider();
-  const model = modelOverride && /^[\w.-]{2,60}$/.test(modelOverride) ? modelOverride : aiModel();
-  if (provider !== "gemini") return { ok: false, provider, model, ms: 0, error: provider ? "Test currently supports Gemini only." : "No AI key configured." };
-  const key = geminiKeys()[0];
-  if (!key) return { ok: false, provider, model, ms: 0, error: "No AI key configured." };
-  if (structured) {
-    const started = Date.now();
-    try {
-      const out = await ask(
-        [{ type: "text", text: 'Return exactly {"ok":true} as JSON. Do not add any other field.' }],
-        obj({ ok: { type: "boolean" } }),
-        50,
-      );
-      return out?.ok === true
-        ? { ok: true, provider, model: aiModel(), ms: Date.now() - started }
-        : { ok: false, provider, model: aiModel(), ms: Date.now() - started, error: "The model did not return the expected JSON." };
-    } catch (e) {
-      return {
-        ok: false, provider, model: aiModel(), ms: Date.now() - started,
-        error: e instanceof QuotaExhausted ? "All keys are cooling down." : e instanceof Error ? e.message.slice(0, 200) : "AI call failed.",
-      };
+// A 16×16 red PNG: proves a vision model really reads images.
+const RED_PNG = "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAFklEQVR4nGO4KyhIEmIY1TCqYfhqAABd+f8BJ3/PcwAAAABJRU5ErkJggg==";
+
+/** Try every provider for real (text, and images where it has a vision model). Nothing is kept. */
+export async function testAi(): Promise<{ provider: AiProvider; model: string; need: Need; ok: boolean; ms: number; error?: string }[]> {
+  const results: { provider: AiProvider; model: string; need: Need; ok: boolean; ms: number; error?: string }[] = [];
+  const seen = new Set<string>();
+  for (const r of routes()) {
+    for (const need of r.can.filter((n) => n !== "pdf")) {
+      const id = `${r.provider}|${r.model}|${need}`;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      const started = Date.now();
+      const content: Block[] = need === "image"
+        ? [{ type: "text", text: "What is the main colour of this image? Answer {\"colour\": \"...\"}." }, { type: "image", source: { type: "base64", media_type: "image/png", data: RED_PNG } }]
+        : [{ type: "text", text: 'Return {"colour": "blue"}.' }];
+      let out: Outcome;
+      try {
+        out = r.provider === "claude" ? await callClaude(content, obj({ colour: { type: "string" } }), 50)
+          : r.provider === "gemini" ? await callGemini(r, content, obj({ colour: { type: "string" } }), 50, "low")
+          : await callOpenAi(r, content, obj({ colour: { type: "string" } }), 50, r.format);
+        if (!out.ok && out.why === "format") out = await callOpenAi(r, content, obj({ colour: { type: "string" } }), 50, "object");
+      } catch (e) {
+        out = { ok: false, why: "busy", note: e instanceof Error ? e.message : "error" };
+      }
+      const colour = out.ok ? String(out.value.colour || "").toLowerCase() : "";
+      const ok = out.ok && (need === "image" ? /red/.test(colour) : /blue/.test(colour));
+      if (!out.ok && out.until) await park(r, out.until, `${out.why} ${out.note}`);
+      // Error text from providers can echo the request; keep it short and key-free.
+      results.push({ provider: r.provider, model: r.model, need, ok, ms: Date.now() - started, ...(ok ? {} : { error: (out.ok ? `answered "${colour}"` : `${out.why}: ${out.note}`).replace(r.key, "•••").slice(0, 200) }) });
     }
   }
-  const started = Date.now();
-  try {
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-goog-api-key": key },
-      body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: "Reply with OK" }] }] }),
-      signal: AbortSignal.timeout(30_000),
-    });
-    const text = await res.text();
-    return res.ok
-      ? { ok: true, provider, model, ms: Date.now() - started, status: res.status }
-      : { ok: false, provider, model, ms: Date.now() - started, status: res.status, error: text.replace(/\s+/g, " ").slice(0, 300) };
-  } catch (e) {
-    return { ok: false, provider, model, ms: Date.now() - started, error: e instanceof Error ? `${e.name}: ${e.message}`.slice(0, 200) : "AI call failed." };
-  }
+  return results;
 }
+
 const RATE_ITEM = obj({ key: { type: "string", enum: RATE_KEYS }, amount: { type: "number" }, currency: { type: "string" } });
 const rateList = (v: unknown) =>
   (Array.isArray(v) ? v : [])

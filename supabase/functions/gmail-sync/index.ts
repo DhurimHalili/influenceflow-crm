@@ -1,9 +1,9 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { isSealed, openToken, sealToken } from "../_shared/googleTokens.ts";
-import { aiEnabled, aiKeyCount, aiModel, aiProvider, aiReadyAt, classifyLead, testAi, useKeyStore } from "../_shared/ai.ts";
-import { decodeEntities, precheck, scanForLead, type Lead, type ScanInput } from "../_shared/leadScanner.ts";
-import { classifyIncoming, myReplyIntent, type IncomingKind } from "../_shared/replyReader.ts";
+import { aiChain, aiEnabled, aiKeyCount, aiModel, aiProvider, aiReadyAt, classifyLead, testAi, useKeyStore } from "../_shared/ai.ts";
+import { decodeEntities, isWarmup, precheck, scanForLead, type Lead, type ScanInput } from "../_shared/leadScanner.ts";
+import { classifyIncoming, myReplyIntent, referralOf, type IncomingKind, type TeamRole } from "../_shared/replyReader.ts";
 import { analyzeStoredFile, bodyOf, drainQueue, gmailAttachment, processCreatorMail, processMyMail, sniff, type Fetcher, type FullMessage } from "./intel.ts";
 
 // Gmail ⇄ CRM sync, for every mailbox a user connected (an agency often runs
@@ -57,14 +57,14 @@ const EMAIL_RE = /[A-Z0-9._%+'-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
 const VALID_EMAIL = /^[^\s@<>(),;:"]+@[^\s@<>(),;:"]+\.[^\s@<>(),;:"]+$/;
 const BACKFILL_DAYS = 180;
 const LEAD_LOOKBACK_DAYS = 30;
-const USER_MIN_INTERVAL_MS = 60_000;
-const RUN_BUDGET_MS = 110_000;
+const USER_MIN_INTERVAL_MS = 30_000;
 const SENDS_PER_DAY = 400; // per mailbox, well under Gmail's own limits
 const MAX_MAILBOXES = 5;
 
 type Admin = SupabaseClient;
-type TokenRow = { id: string; user_id: string; access_token: string | null; refresh_token: string; expiry: string | null; email: string | null; scopes: string; history_id: string | null; last_sync_at: string | null; backfilled: string[] | null; sync_error?: string; connected_at?: string | null; updated_at?: string | null; send_day?: string | null; send_count?: number; leads_scanned_at?: string | null; coverage?: unknown };
-type Entity = { type: "creator" | "brand"; id: string };
+type TokenRow = { id: string; user_id: string; access_token: string | null; refresh_token: string; expiry: string | null; email: string | null; scopes: string; history_id: string | null; last_sync_at: string | null; backfilled: string[] | null; sync_error?: string; connected_at?: string | null; updated_at?: string | null; send_day?: string | null; send_count?: number; leads_scanned_at?: string | null; coverage?: unknown; lead_queue?: string[] | null; read_at?: string | null };
+type Entity = { type: "creator" | "brand"; id: string; name?: string };
+type TeamMember = { email: string; role?: string; removed?: boolean };
 type Meta = { id: string; threadId: string; labelIds?: string[]; snippet?: string; internalDate?: string; payload?: { headers?: { name: string; value: string }[] } };
 type EventRow = { user_id: string; gmail_id: string; thread_id: string; direction: "out" | "in"; entity_type: "creator" | "brand"; entity_id: string; counterpart: string; subject: string; snippet: string; at: string; mailbox: string; message_key: string; scheduled: boolean; reply_kind: IncomingKind; in_reply_to: string };
 /** Gmail thread → the CRM records already in it (per mailbox: thread ids belong to one). */
@@ -137,15 +137,15 @@ async function accessToken(admin: Admin, row: TokenRow): Promise<string> {
 }
 
 // Gmail allows each mailbox 250 quota units a second and a handful of requests
-// at once. Every call is paced per mailbox to ~100 units/s (a message read is 5,
-// a thread 10, a send 100), so a sync never trips the limit instead of
-// tripping it and backing off.
+// at once. Every call is paced per mailbox to ~200 units/s (a message read is 5,
+// a thread 10, a send 100) — as fast as Gmail allows with a safety margin, so
+// a sync never trips the limit instead of tripping it and backing off.
 const pacing = new Map<string, number>();
 const unitsFor = (path: string, init?: RequestInit) => (init?.method === "POST" ? (path.includes("/send") ? 100 : 5) : path.startsWith("/threads/") ? 10 : path.startsWith("/history") ? 2 : 5);
 async function pace(token: string, units: number) {
   const now = Date.now();
   const at = Math.max(now, pacing.get(token) || 0);
-  pacing.set(token, at + units * 10);
+  pacing.set(token, at + units * 5);
   if (pacing.size > 50) for (const [k, v] of pacing) if (v < now) pacing.delete(k);
   if (at > now) await sleep(at - now);
 }
@@ -200,8 +200,8 @@ async function gmail<T>(token: string, path: string, init?: RequestInit, attempt
 
 async function addressBook(admin: Admin, userId: string, own: Set<string>) {
   const [creators, brands, contacts] = await Promise.all([
-    admin.from("creators").select("id, contact_email, secondary_email").eq("user_id", userId).is("archived_at", null),
-    admin.from("brands").select("id, contact_email, secondary_email").eq("user_id", userId).is("archived_at", null),
+    admin.from("creators").select("id, name, contact_email, secondary_email, team").eq("user_id", userId).is("archived_at", null),
+    admin.from("brands").select("id, name, contact_email, secondary_email").eq("user_id", userId).is("archived_at", null),
     admin.from("brand_contacts").select("brand_id, email").eq("user_id", userId),
   ]);
   const map = new Map<string, Entity[]>();
@@ -213,8 +213,14 @@ async function addressBook(admin: Admin, userId: string, own: Set<string>) {
       map.set(e, list);
     }
   };
-  for (const c of creators.data || []) { add(c.contact_email, { type: "creator", id: c.id }); add(c.secondary_email, { type: "creator", id: c.id }); }
-  for (const b of brands.data || []) { add(b.contact_email, { type: "brand", id: b.id }); add(b.secondary_email, { type: "brand", id: b.id }); }
+  for (const c of creators.data || []) {
+    const me: Entity = { type: "creator", id: c.id, name: c.name || "" };
+    add(c.contact_email, me);
+    add(c.secondary_email, me);
+    // Their manager / agent / team: mail with them counts for this creator.
+    for (const t of (Array.isArray(c.team) ? c.team : []) as TeamMember[]) if (t && typeof t.email === "string" && !t.removed) add(t.email, me);
+  }
+  for (const b of brands.data || []) { add(b.contact_email, { type: "brand", id: b.id, name: b.name || "" }); add(b.secondary_email, { type: "brand", id: b.id, name: b.name || "" }); }
   for (const p of contacts.data || []) if (p.brand_id) add(p.email, { type: "brand", id: p.brand_id });
   return map;
 }
@@ -226,10 +232,12 @@ const sentAt = (meta: Meta) => (meta.internalDate ? new Date(Number(meta.interna
 /** Dated more than a minute ahead: a scheduled send that hasn't gone out. */
 const isFuture = (meta: Meta) => Number(meta.internalDate || 0) > Date.now() + 60_000;
 
-function eventsFor(meta: Meta, userId: string, book: Map<string, Entity[]>, own: Set<string>, mailbox: string, threads?: ThreadBook): EventRow[] {
+function eventsFor(meta: Meta, userId: string, book: Map<string, Entity[]>, own: Set<string>, mailbox: string, threads?: ThreadBook, directOnly = false): EventRow[] {
   const labels = meta.labelIds || [];
-  if (labels.some((l) => l === "DRAFT" || l === "SPAM" || l === "TRASH" || l === "CHAT")) return [];
+  if (labels.some((l) => l === "DRAFT" || l === "TRASH" || l === "CHAT")) return [];
   const out = isOutgoing(meta, own);
+  // A reply from someone you know that Gmail put in spam is still their reply.
+  if (labels.includes("SPAM") && (out || !counterpartsKnown(meta, book, own))) return [];
   // Waiting in Gmail's Scheduled folder: your touch, but not sent yet. Gmail
   // dates a scheduled email at its send time, so a date in the future means
   // scheduled even when the label hasn't caught up yet.
@@ -248,16 +256,41 @@ function eventsFor(meta: Meta, userId: string, book: Map<string, Entity[]>, own:
     const reply_kind: IncomingKind = out ? "" : classifyIncoming({ headers: headersOf(meta), subject, text: snippet, fromOther });
     rows.push({ user_id: userId, gmail_id: meta.id, thread_id: meta.threadId || "", direction: out ? "out" : "in", entity_type: entity.type, entity_id: entity.id, counterpart: email, subject, snippet, at, mailbox, message_key: messageKey(meta), scheduled, reply_kind, in_reply_to: replyToKey(meta) });
   };
-  for (const email of counterparts) for (const entity of book.get(email) || []) push(entity, email, false);
+  for (const email of counterparts) for (const entity of narrow(book.get(email) || [], meta, threads)) push(entity, email, false);
   // Nobody known on it, but it belongs to a conversation you're tracking: their
   // manager, agency or team answered from another address (or you wrote to them).
   // Your own colleagues (same company domain) are never "their side".
-  if (!rows.length && meta.threadId && threads?.has(meta.threadId)) {
+  if (!directOnly && !rows.length && meta.threadId && threads?.has(meta.threadId)) {
     const team = ownDomains(own);
     const other = counterparts.find((e) => !team.has(e.split("@")[1] || "") && !/(^|[.@])(mailer-daemon|postmaster)/i.test(e));
     if (other) for (const entity of threads.get(meta.threadId) || []) push(entity, other, true);
   }
   return rows;
+}
+
+function counterpartsKnown(meta: Meta, book: Map<string, Entity[]>, own: Set<string>) {
+  return addresses(header(meta, "From")).some((e) => !own.has(e) && book.has(e));
+}
+
+/**
+ * One address can belong to several records (an agency manager for three of
+ * your creators). Count the email only for the one(s) it is about: the
+ * records already in this Gmail thread, else the ones named in the subject or
+ * preview, else all of them.
+ */
+function narrow(list: Entity[], meta: Meta, threads?: ThreadBook): Entity[] {
+  if (list.length < 2) return list;
+  const inThread = (threads?.get(meta.threadId || "") || []).map((e) => e.id);
+  const byThread = list.filter((e) => inThread.includes(e.id));
+  if (byThread.length) return byThread;
+  const text = ` ${decodeEntities(`${header(meta, "Subject")} ${meta.snippet || ""}`).toLowerCase()} `;
+  const named = list.filter((e) => {
+    const name = (e.name || "").toLowerCase().trim();
+    if (name.length < 3) return false;
+    const first = name.split(/\s+/)[0];
+    return text.includes(name) || (first.length >= 4 && new RegExp(`[^a-z]${first.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}[^a-z]`).test(text));
+  });
+  return named.length ? named : list;
 }
 
 /** Records already tracked in these threads of this mailbox. */
@@ -276,8 +309,8 @@ async function threadBook(admin: Admin, userId: string, mailbox: string, threadI
 
 /** Match a batch: people you know first, then the rest of their threads (a manager answering for a creator). */
 async function matchAll(admin: Admin, userId: string, metas: Meta[], book: Map<string, Entity[]>, own: Set<string>, mailbox: string) {
-  const direct = metas.flatMap((m) => eventsFor(m, userId, book, own, mailbox));
   const threads = await threadBook(admin, userId, mailbox, metas.map((m) => m.threadId));
+  const direct = metas.flatMap((m) => eventsFor(m, userId, book, own, mailbox, threads, true));
   for (const r of direct) {
     const list = threads.get(r.thread_id) || [];
     if (!list.some((e) => e.id === r.entity_id)) list.push({ type: r.entity_type, id: r.entity_id });
@@ -319,12 +352,14 @@ async function listIds(token: string, q: string, maxPages: number) {
 const META_HEADERS = ["From", "To", "Cc", "Subject", "Date", "Message-ID", "Reply-To", "List-Unsubscribe", "List-Id", "Precedence", "Auto-Submitted", "X-Autoreply", "X-Autorespond", "In-Reply-To", "References"];
 const META_PATH = (id: string) => `/messages/${id}?format=metadata&${META_HEADERS.map((h) => `metadataHeaders=${h}`).join("&")}`;
 
-async function fetchMetas(token: string, ids: string[], deadline: number) {
+async function fetchMetas(token: string, ids: string[], deadline: number, tried?: Set<string>) {
   const metas: Meta[] = [];
   for (let i = 0; i < ids.length; i += 5) {
     if (Date.now() > deadline) break;
     try {
-      const batch = await Promise.all(ids.slice(i, i + 5).map((id) => gmail<Meta>(token, META_PATH(id)).catch((e) => (e instanceof GmailError && e.status === 404 ? null : Promise.reject(e)))));
+      const slice = ids.slice(i, i + 5);
+      const batch = await Promise.all(slice.map((id) => gmail<Meta>(token, META_PATH(id)).catch((e) => (e instanceof GmailError && e.status === 404 ? null : Promise.reject(e)))));
+      slice.forEach((id) => tried?.add(id));
       metas.push(...(batch.filter(Boolean) as Meta[]));
     } catch (e) {
       // Still limited after the retries: keep what was read; the rest comes next run.
@@ -540,11 +575,14 @@ async function recheckScheduled(admin: Admin, userId: string, token: string, mai
   const waiting = listed || [];
   const waitingSet = new Set(waiting);
   for (const part of chunk(waiting, 200)) await admin.from("email_events").update({ scheduled: true }).eq("user_id", userId).eq("mailbox", mailbox).eq("direction", "out").eq("scheduled", false).in("gmail_id", part);
-  const { data, error } = await admin.from("email_events").select("gmail_id, entity_id, entity_type, direction").eq("user_id", userId).eq("mailbox", mailbox).eq("scheduled", true).limit(300);
-  if (error || !data?.length) return { sent: 0, cancelled: 0 };
+  const { data, error } = await admin.from("email_events").select("gmail_id, entity_id, entity_type, direction, at").eq("user_id", userId).eq("mailbox", mailbox).eq("scheduled", true).limit(300);
+  if (error || !data?.length) return { sent: 0, cancelled: 0, waiting };
   let sent = 0;
   const gone: string[] = [];
-  for (const ids of chunk(Array.from(new Set(data.map((r) => r.gmail_id as string))), 10)) {
+  const nowIso = new Date().toISOString();
+  // Still listed under Scheduled with its send time ahead: nothing to re-read.
+  const check = Array.from(new Set(data.filter((r) => listed === null || !waitingSet.has(r.gmail_id) || r.at <= nowIso).map((r) => r.gmail_id as string)));
+  for (const ids of chunk(check, 10)) {
     if (Date.now() > deadline) break;
     await Promise.all(ids.map(async (id) => {
       const meta = await gmail<Meta>(token, META_PATH(id)).catch((e) => (e instanceof GmailError && e.status === 404 ? null : undefined));
@@ -558,11 +596,11 @@ async function recheckScheduled(admin: Admin, userId: string, token: string, mai
       if (!upd && !stillScheduled) sent++;
     }));
   }
-  if (!gone.length) return { sent, cancelled: 0 };
+  if (!gone.length) return { sent, cancelled: 0, waiting };
   await admin.from("email_events").delete().eq("user_id", userId).in("gmail_id", gone);
   const records = Array.from(new Map(data.filter((r) => gone.includes(r.gmail_id) && r.direction === "out").map((r) => [r.entity_id as string, r.entity_type as "creator" | "brand"])).entries());
   for (const [id, type] of records) await undoScheduledStatus(admin, userId, type, id);
-  return { sent, cancelled: gone.length };
+  return { sent, cancelled: gone.length, waiting };
 }
 
 // Gmail moved New → Contacted (or Inbound → Replied) because of an email that
@@ -697,15 +735,19 @@ async function trackLeadReplies(admin: Admin, userId: string, token: string, met
 //   untracked — sent to people the CRM doesn't know; listed so you can add them
 //               (adding one pulls in their whole history on the next sync)
 //   pending   — not read yet (a big backlog drains over the next runs)
+//   warmup    — sends by a warm-up tool (TrulyInbox and others), recognised by
+//               their body in the read phase and left out of everything
 const COVERAGE_DAYS = 2;
 type Untracked = { id: string; to: string[]; at: string; subject: string };
-type Coverage = { at: string; days: number; sent: number; tracked: number; pending: number; untracked: Untracked[] };
+type Coverage = { at: string; days: number; sent: number; tracked: number; pending: number; warmup: number; warm: string[]; quiet: string[]; untracked: Untracked[] };
 const readCoverage = (value: unknown): Coverage => {
   const v = (value && typeof value === "object" ? value : {}) as Partial<Coverage>;
   const untracked = (Array.isArray(v.untracked) ? v.untracked : [])
     .filter((u): u is Untracked => !!u && typeof u.id === "string" && Array.isArray(u.to))
     .map((u) => ({ id: u.id, to: u.to.filter((e) => typeof e === "string").slice(0, 5), at: String(u.at || ""), subject: String(u.subject || "").slice(0, 120) }));
-  return { at: String(v.at || ""), days: COVERAGE_DAYS, sent: Number(v.sent) || 0, tracked: Number(v.tracked) || 0, pending: Number(v.pending) || 0, untracked };
+  const warm = (Array.isArray(v.warm) ? v.warm : []).filter((id): id is string => typeof id === "string").slice(-500);
+  const quiet = (Array.isArray(v.quiet) ? v.quiet : []).filter((id): id is string => typeof id === "string").slice(-500);
+  return { at: String(v.at || ""), days: COVERAGE_DAYS, sent: Number(v.sent) || 0, tracked: Number(v.tracked) || 0, pending: Number(v.pending) || 0, warmup: Number(v.warmup) || 0, warm, quiet, untracked };
 };
 
 async function measureCoverage(admin: Admin, userId: string, sweep: string[], metas: Meta[], prev: Coverage, own: Set<string>, book: Map<string, Entity[]>): Promise<Coverage> {
@@ -720,16 +762,20 @@ async function measureCoverage(admin: Admin, userId: string, sweep: string[], me
   const leads = new Set((leadRows || []).map((l) => String(l.email).toLowerCase()));
   const fetched = new Map(metas.map((m) => [m.id, m]));
   const before = new Map(prev.untracked.map((u) => [u.id, u]));
-  let sent = 0, tracked = 0, pending = 0;
+  let sent = 0, tracked = 0, pending = 0, warmup = 0;
   const untracked: Untracked[] = [];
+  const warm = new Set(prev.warm);
+  const quiet: string[] = [];
   for (const id of sweep) {
+    if (prev.quiet.includes(id)) continue;
     if (stored.has(id)) { sent++; tracked++; continue; }
+    if (warm.has(id)) { warmup++; continue; }
     const meta = fetched.get(id);
     const known = meta
       ? { id, to: [...addresses(header(meta, "To")), ...addresses(header(meta, "Cc"))].filter(outside).slice(0, 5), at: sentAt(meta), subject: decodeEntities(header(meta, "Subject")).slice(0, 120) }
       : before.get(id);
     if (!known) { pending++; sent++; continue; }
-    if (!known.to.length) continue; // only to yourself or your team: not outreach
+    if (!known.to.length) { quiet.push(id); continue; } // only to yourself or your team: not outreach
     sent++;
     if (known.to.some((e) => leads.has(e))) { tracked++; continue; }
     // In your CRM (just added — the next sync's backfill brings it in — or the
@@ -737,62 +783,101 @@ async function measureCoverage(admin: Admin, userId: string, sweep: string[], me
     if (known.to.some((e) => book.has(e))) { tracked++; continue; }
     untracked.push(known);
   }
-  return { at: new Date().toISOString(), days: COVERAGE_DAYS, sent, tracked, pending, untracked: untracked.sort((a, b) => b.at.localeCompare(a.at)).slice(0, 200) };
+  // Only warm-up ids still inside the window are worth remembering.
+  const inWindow = new Set(sweep);
+  return { at: new Date().toISOString(), days: COVERAGE_DAYS, sent, tracked, pending, warmup, warm: prev.warm.filter((id) => inWindow.has(id)), quiet: [...prev.quiet.filter((id) => inWindow.has(id)), ...quiet].slice(-500), untracked: untracked.sort((a, b) => b.at.localeCompare(a.at)).slice(0, 200) };
 }
 
 // ----- one mailbox's sync -------------------------------------------------------
+//
+// Two phases, so tracking never waits behind heavy reading:
+//   track — every minute (and on "Sync now"): new mail via Gmail's history,
+//           scheduled sends, a sweep of Sent, new contacts' older mail. Headers
+//           only, saved as it goes, statuses moved, position committed. Seconds.
+//   read  — every few minutes, after track: full emails (prices, media kits,
+//           leads, managers pointing elsewhere), AI, older backlog, self-heal.
+//           If it is cut off, nothing tracked is lost.
+// A short lease per mailbox and phase keeps two runs from doing the same work.
 
-async function syncMailbox(admin: Admin, row: TokenRow, own: Set<string>, book: Map<string, Entity[]>, deadline: number) {
+const TRACK_LEASE_MS = 90_000;
+const READ_LEASE_MS = 150_000;
+const READ_EVERY_MS = 4 * 60_000;
+const LEAD_QUEUE_MAX = 200;
+
+async function lease(admin: Admin, id: string, column: "track_lock_until" | "read_lock_until", ms: number) {
+  const now = new Date().toISOString();
+  const { data, error } = await admin.from("gmail_tokens").update({ [column]: new Date(Date.now() + ms).toISOString() }).eq("id", id).or(`${column}.is.null,${column}.lt.${now}`).select("id");
+  // Before the migration the column doesn't exist: run without a lease.
+  if (error) return /does not exist|schema cache/i.test(error.message);
+  return (data || []).length > 0;
+}
+const release = (admin: Admin, id: string, column: "track_lock_until" | "read_lock_until") => admin.from("gmail_tokens").update({ [column]: null }).eq("id", id);
+
+/** Link a manager / agent / team address to a creator, once, and say so. Never your own address, never one you removed. */
+async function linkTeam(admin: Admin, userId: string, creatorId: string, email: string, role: TeamRole, why: string, own: Set<string>) {
+  const e = email.toLowerCase().trim();
+  if (!VALID_EMAIL.test(e) || own.has(e) || ownDomains(own).has(e.split("@")[1] || "")) return false;
+  const { data: c } = await admin.from("creators").select("id, name, contact_email, secondary_email, team, archived_at").eq("id", creatorId).eq("user_id", userId).maybeSingle();
+  if (!c || c.archived_at) return false;
+  if ([...addresses(c.contact_email || ""), ...addresses(c.secondary_email || "")].includes(e)) return false;
+  const team = (Array.isArray(c.team) ? c.team : []) as (TeamMember & Record<string, unknown>)[];
+  if (team.some((t) => t && t.email === e) || team.length >= 12) return false;
+  const next = [...team, { email: e, role, name: "", source: "gmail", why: why.slice(0, 160), at: new Date().toISOString() }];
+  const { error } = await admin.from("creators").update({ team: next }).eq("id", creatorId).eq("user_id", userId);
+  if (error) return false;
+  const label = role === "team" ? "someone on their team" : `their ${role}`;
+  await admin.from("activities").insert({ user_id: userId, text: `Gmail: linked ${label} (${e}) to ${c.name} — ${why}. Emails with them now count for ${c.name}.`.slice(0, 500), at: new Date().toISOString(), entity_type: "creator", entity_id: creatorId });
+  return true;
+}
+
+/** Managers pointed to in a creator's words, and other addresses that answered in their thread. */
+async function learnTeams(admin: Admin, userId: string, rows: EventRow[], own: Set<string>, book: Map<string, Entity[]>) {
+  let linked = 0;
+  for (const r of rows) {
+    if (r.direction !== "in" || r.entity_type !== "creator") continue;
+    const ref = referralOf(r.snippet || "", [...own, r.counterpart]);
+    if (ref && !book.get(ref.email)?.some((x) => x.id === r.entity_id) && (await linkTeam(admin, userId, r.entity_id, ref.email, ref.role, `they pointed you to them in “${r.subject || "(no subject)"}”`, own))) linked++;
+    // Answered from an address that isn't theirs, inside their thread: their side.
+    if ((r.reply_kind === "team" || r.reply_kind === "managed_no") && !book.has(r.counterpart) && (await linkTeam(admin, userId, r.entity_id, r.counterpart, "team", `answered in your thread “${r.subject || "(no subject)"}”`, own))) linked++;
+  }
+  return linked;
+}
+
+async function trackMailbox(admin: Admin, row: TokenRow, own: Set<string>, book: Map<string, Entity[]>, deadline: number) {
   const token = await accessToken(admin, row);
   if (!(row.scopes || "").includes("gmail.readonly")) throw new GmailError("Gmail read access wasn't granted — reconnect this mailbox and tick “Read your email”.", 403, true);
   const mailbox = mailboxOf(row);
-  // 0. Scheduled sends from earlier runs: gone out, still waiting, or cancelled?
-  //    (First, so a cancelled one is gone before its sent twin is stored.)
-  const scheduled = await recheckScheduled(admin, row.user_id, token, mailbox, deadline - 60_000).catch(() => ({ sent: 0, cancelled: 0 }));
-  const all = Array.from(book.keys());
   const done = new Set((row.backfilled || []).map((e) => e.toLowerCase()));
-  const fresh = all.filter((e) => !done.has(e));
-  const ids = new Set<string>();
+  // Today's mail first, older backlog after: a new contact's history never pushes today's sends out.
+  const urgent = new Set<string>();
+  const later: { marker: string[]; ids: string[] }[] = [];
   let complete = true;
 
-  // 1. New addresses (or a first connection): look back over the last months.
-  const backfilled: string[] = [];
-  for (const group of chunk(fresh, 15)) {
-    if (Date.now() > deadline) { complete = false; break; }
-    (await listIds(token, searchFor(group, BACKFILL_DAYS), 5)).forEach((id) => ids.add(id));
-    backfilled.push(...group);
-  }
+  // 0. Scheduled sends: gone out, still waiting, or cancelled? New ones are picked up here too.
+  const scheduled = await recheckScheduled(admin, row.user_id, token, mailbox, deadline - 5_000).catch(() => ({ sent: 0, cancelled: 0, waiting: [] as string[] }));
+  scheduled.waiting.forEach((id) => urgent.add(id));
 
-  // 1b. Once per mailbox: files creators shared through Google Drive (sent by Google, not by them).
-  if (!done.has(DRIVE_SHARES_DONE) && Date.now() < deadline) {
-    (await listIds(token, `from:(drive-shares-dm-noreply@google.com OR drive-shares-noreply@google.com) newer_than:${BACKFILL_DAYS}d`, 2)).forEach((id) => ids.add(id));
-    backfilled.push(DRIVE_SHARES_DONE);
-  }
-
-  // 2. First time: look through the last month of the primary inbox for people
-  //    who reached out and aren't in the CRM yet.
-  let leadsScanned = !!row.leads_scanned_at;
-  if (!leadsScanned && Date.now() < deadline) {
-    (await listIds(token, `in:inbox newer_than:${LEAD_LOOKBACK_DAYS}d -category:promotions -category:social -category:forums -in:chats`, 2)).forEach((id) => ids.add(id));
-    leadsScanned = true;
-  }
-
-  // 3. Everything since the last run, via Gmail's change history.
+  // 1. Everything since the last run, via Gmail's change history. Records are
+  //    kept in order: when a run can't read everything, the position still
+  //    moves forward past what it did read, so a busy mailbox (warm-up
+  //    traffic, newsletters) can never get stuck re-reading the same mail.
   let historyId = row.history_id;
+  const records: { id: string; ids: string[] }[] = [];
   if (historyId) {
     try {
       let pageToken = "";
       for (let page = 0; page < 20; page++) {
-        // messageAdded = new mail; labelAdded catches mail that only became
-        // "sent" later — a draft you sent, or a scheduled email going out.
+        // messageAdded = new mail (spam included); labelAdded catches mail that
+        // only became "sent" later — a draft you sent, a scheduled email going out.
         const params = new URLSearchParams({ startHistoryId: historyId, maxResults: "500" });
         params.append("historyTypes", "messageAdded");
         params.append("historyTypes", "labelAdded");
         if (pageToken) params.set("pageToken", pageToken);
-        const res = await gmail<{ history?: { messagesAdded?: { message: { id: string } }[]; labelsAdded?: { message: { id: string }; labelIds?: string[] }[] }[]; nextPageToken?: string; historyId?: string }>(token, `/history?${params}`);
+        const res = await gmail<{ history?: { id: string; messagesAdded?: { message: { id: string } }[]; labelsAdded?: { message: { id: string }; labelIds?: string[] }[] }[]; nextPageToken?: string }>(token, `/history?${params}`);
         for (const h of res.history || []) {
-          for (const m of h.messagesAdded || []) ids.add(m.message.id);
-          for (const l of h.labelsAdded || []) if ((l.labelIds || []).some((x) => x === "SENT" || x === "SCHEDULED" || x === "INBOX")) ids.add(l.message.id);
+          const ids = [...(h.messagesAdded || []).map((m) => m.message.id), ...(h.labelsAdded || []).filter((l) => (l.labelIds || []).some((x) => x === "SENT" || x === "SCHEDULED" || x === "INBOX")).map((l) => l.message.id)];
+          ids.forEach((id) => urgent.add(id));
+          records.push({ id: String(h.id), ids });
         }
         if (!res.nextPageToken) break;
         pageToken = res.nextPageToken;
@@ -801,122 +886,176 @@ async function syncMailbox(admin: Admin, row: TokenRow, own: Set<string>, book: 
     } catch (e) {
       // Limited mid-way: keep what came in; the old history id stays, so nothing is skipped.
       if (e instanceof GmailError && e.retryable) complete = false;
-      // History too old (or reset): fall back to a short search on every address.
       else if (!(e instanceof GmailError) || e.status !== 404) throw e;
       else {
-      historyId = null;
-      for (const group of chunk(all, 15)) {
-        if (Date.now() > deadline) { complete = false; break; }
-        (await listIds(token, searchFor(group, 10), 3)).forEach((id) => ids.add(id));
-      }
+        // History too old (or reset): a short search on every address instead.
+        historyId = null;
+        for (const group of chunk(Array.from(book.keys()), 15)) {
+          if (Date.now() > deadline) { complete = false; break; }
+          (await listIds(token, searchFor(group, 10), 3)).forEach((id) => urgent.add(id));
+        }
       }
     }
   }
 
-  // 3b. Safety net, every run: everything you sent in the last 2 days. Anything
-  //     the history missed is picked up here. Emails already checked that
-  //     aren't to anyone in your CRM are skipped (they're listed in the
-  //     tracking check instead).
+  // 2. Safety net, every run: everything you sent in the last 2 days.
   const prevCoverage = readCoverage(row.coverage);
-  const checkedBefore = new Set(prevCoverage.untracked.map((u) => u.id));
-  const sweep = Date.now() < deadline - 10_000 ? await listIds(token, `in:sent newer_than:${COVERAGE_DAYS}d`, 3).catch(() => null) : null;
-  for (const id of sweep || []) if (!checkedBefore.has(id)) ids.add(id);
+  const checkedBefore = new Set([...prevCoverage.untracked.map((u) => u.id), ...prevCoverage.warm, ...prevCoverage.quiet]);
+  const sweep = await listIds(token, `in:sent newer_than:${COVERAGE_DAYS}d`, 3).catch(() => null);
+  for (const id of sweep || []) if (!checkedBefore.has(id)) urgent.add(id);
 
-  // 4. Skip messages already stored, read the rest (headers only), match them.
-  const list = Array.from(ids);
+  // 3. New addresses (a record you just added, a manager just linked): their last months of mail.
+  const fresh = Array.from(book.keys()).filter((e) => !done.has(e));
+  for (const group of chunk(fresh, 15)) {
+    if (Date.now() > deadline - 8_000) { complete = false; break; }
+    later.push({ marker: group, ids: await listIds(token, searchFor(group, BACKFILL_DAYS), 5) });
+  }
+  if (!done.has(DRIVE_SHARES_DONE) && Date.now() < deadline - 8_000) {
+    later.push({ marker: [DRIVE_SHARES_DONE], ids: await listIds(token, `from:(drive-shares-dm-noreply@google.com OR drive-shares-noreply@google.com) newer_than:${BACKFILL_DAYS}d`, 2) });
+  }
+
+  // 4. Skip what's stored; read the rest (headers only), urgent first; match and save.
+  const all = Array.from(new Set([...urgent, ...later.flatMap((g) => g.ids)]));
   const known = new Set<string>();
-  for (const part of chunk(list, 300)) {
+  for (const part of chunk(all, 300)) {
     const { data } = await admin.from("email_events").select("gmail_id").eq("user_id", row.user_id).in("gmail_id", part);
     (data || []).forEach((r) => known.add(r.gmail_id));
   }
-  // A long history (or a mailbox that was offline for a while) can contain
-  // thousands of messages. Gmail's per-minute query quota is shared by every
-  // mailbox of the user, so process a bounded batch: the stored ids are
-  // skipped next run, which makes the backlog drain without re-fetching it.
   const MAX_NEW_PER_RUN = 300;
-  const todoAll = list.filter((id) => !known.has(id));
+  const todoAll = all.filter((id) => !known.has(id));
   const todo = todoAll.slice(0, MAX_NEW_PER_RUN);
   if (todoAll.length > todo.length) complete = false;
-  const metas = await fetchMetas(token, todo, deadline);
-  if (metas.length < todo.length) complete = false;
+  const tried = new Set<string>();
+  const metas = await fetchMetas(token, todo, deadline, tried);
+  if (tried.size < todo.length) complete = false;
   const matched = await matchAll(admin, row.user_id, metas, book, own, mailbox);
   const rows = await dropCrossMailboxDuplicates(admin, row.user_id, matched);
   await storeEvents(admin, rows);
-
-  // 4b. Once per mailbox: replies that came back from another address (a
-  //     manager or agency answering for a creator) before threads were matched.
-  const threadScan = await scanOldThreads(admin, row, token, own, mailbox, done, deadline - 40_000).catch(() => ({ rows: [] as EventRow[], marker: [] as string[] }));
-  rows.push(...threadScan.rows);
-  backfilled.push(...threadScan.marker);
-
-  // 4c. Your answers to people who emailed you first (inbound leads).
-  const leadReplies = await trackLeadReplies(admin, row.user_id, token, metas.filter((m) => !matched.some((r) => r.gmail_id === m.id)), own, mailbox, done.has(LEAD_REPLIES_DONE), deadline - 30_000).catch(() => ({ updated: 0, backfilled: false }));
-  if (leadReplies.backfilled) backfilled.push(LEAD_REPLIES_DONE);
-
-  // 5. Mail from people who aren't in the CRM: is it a real enquiry?
   const matchedIds = new Set(matched.map((r) => r.gmail_id));
-  const found = await findLeads(admin, row.user_id, token, metas.filter((m) => !matchedIds.has(m.id)), own, book, deadline).catch(() => []);
-  const leads = await storeLeads(admin, row.user_id, mailbox, found).catch(() => 0);
 
-  // 5a. Once per mailbox: read every creator email again with the better price
-  //     rules (durations, bundles, extended integrations) and your own replies.
-  //     The backfill below works through them, a slice per run.
+  // 5. Your answers to people who emailed you first; their enquiries wait for the read phase.
+  const leadReplies = await trackLeadReplies(admin, row.user_id, token, metas.filter((m) => !matchedIds.has(m.id)), own, mailbox, true, deadline).catch(() => ({ updated: 0, backfilled: false }));
+  const candidates = metas.filter((m) => !matchedIds.has(m.id) && !isOutgoing(m, own) && precheck(scanInput(m, own)).ok).map((m) => m.id);
+
+  // 6. Managers and teams the mail revealed, then statuses.
+  const linked = await learnTeams(admin, row.user_id, rows, own, book).catch(() => 0);
+  const changed = await applyStatuses(admin, row.user_id, Array.from(new Set(rows.map((r) => r.entity_id))));
+
+  // 7. Commit. A backfill group counts as done only when every one of its emails was read.
+  const seen = (id: string) => known.has(id) || tried.has(id);
+  const finished = later.filter((g) => g.ids.every(seen)).flatMap((g) => g.marker);
+  const now = new Date().toISOString();
+  const patch: Record<string, unknown> = { last_sync_at: now, updated_at: now, sync_error: "", backfilled: Array.from(new Set([...done, ...finished])).slice(-5000) };
+  if (candidates.length) patch.lead_queue = Array.from(new Set([...(row.lead_queue || []), ...candidates])).slice(-LEAD_QUEUE_MAX);
+  if (sweep) {
+    const coverage = await measureCoverage(admin, row.user_id, sweep, metas, prevCoverage, own, book).catch(() => null);
+    if (coverage) patch.coverage = coverage;
+  }
+  if (complete || !row.history_id) {
+    const profile = await gmail<{ historyId?: string }>(token, "/profile");
+    if (complete || !historyId) patch.history_id = profile.historyId || historyId;
+  } else if (historyId && records.length) {
+    // Not everything was read: move past the records whose mail all was.
+    let upTo = "";
+    for (const r of records) {
+      if (!r.ids.every(seen)) break;
+      upTo = r.id;
+    }
+    if (upTo && BigInt(upTo) > BigInt(historyId)) patch.history_id = upTo;
+  }
+  let { error } = await admin.from("gmail_tokens").update(patch).eq("id", row.id);
+  if (error && /lead_queue/.test(error.message)) { delete patch.lead_queue; ({ error } = await admin.from("gmail_tokens").update(patch).eq("id", row.id)); }
+  Object.assign(row, patch);
+  return { mailbox, messages: metas.length, events: rows.length, leads: leadReplies.updated, linked, statusChanges: changed, scheduledChanges: scheduled.sent + scheduled.cancelled, complete, pending: todoAll.length - tried.size };
+}
+
+async function readMailbox(admin: Admin, row: TokenRow, own: Set<string>, book: Map<string, Entity[]>, deadline: number) {
+  const token = await accessToken(admin, row);
+  const mailbox = mailboxOf(row);
+  const done = new Set((row.backfilled || []).map((e) => e.toLowerCase()));
+  const markers: string[] = [];
+  const patch: Record<string, unknown> = {};
+
+  // a. Once per mailbox: read every creator email again with the better price rules.
   if (!done.has(REREAD_DONE)) {
     const { error: reset } = await admin.from("email_events").update({ intel_at: null }).eq("user_id", row.user_id).eq("mailbox", mailbox).eq("entity_type", "creator");
-    if (!reset) backfilled.push(REREAD_DONE);
+    if (!reset) markers.push(REREAD_DONE);
   }
 
-  // 5b. New mail from creators in the CRM: media kits, prices, agreed rates (newest first, capped per run).
-  const budget = { files: 8, ai: 12, bytes: 24 * 1024 * 1024 };
+  // b. Inbound leads: the first month (inbox AND spam) once, then whatever track queued.
+  let queue = [...(row.lead_queue || [])];
+  if (!row.leads_scanned_at && Date.now() < deadline - 20_000) {
+    const ids = await listIds(token, `{in:inbox in:spam} newer_than:${LEAD_LOOKBACK_DAYS}d -category:promotions -category:social -category:forums -in:chats`, 2).catch(() => null);
+    if (ids) { queue = Array.from(new Set([...queue, ...ids])).slice(-LEAD_QUEUE_MAX); patch.leads_scanned_at = new Date().toISOString(); }
+  }
+  let leads = 0;
+  if (queue.length && Date.now() < deadline - 15_000) {
+    const take = queue.slice(0, 12);
+    const metas = await fetchMetas(token, take, deadline - 10_000);
+    const found = await findLeads(admin, row.user_id, token, metas, own, book, deadline - 8_000).catch(() => []);
+    leads = await storeLeads(admin, row.user_id, mailbox, found).catch(() => 0);
+    queue = queue.slice(take.length);
+  }
+  patch.lead_queue = queue;
+
+  // c. Once per mailbox: your older answers to leads, and replies from other addresses in your threads.
+  if (!done.has(LEAD_REPLIES_DONE) && Date.now() < deadline - 20_000) {
+    const r = await trackLeadReplies(admin, row.user_id, token, [], own, mailbox, false, deadline - 15_000).catch(() => ({ updated: 0, backfilled: false }));
+    if (r.backfilled) markers.push(LEAD_REPLIES_DONE);
+    leads += r.updated;
+  }
+  const threadScan = await scanOldThreads(admin, row, token, own, mailbox, done, deadline - 20_000).catch(() => ({ rows: [] as EventRow[], marker: [] as string[] }));
+  markers.push(...threadScan.marker);
+
+  // d. Creators' mail: media kits, prices, agreed rates, a manager they point you to. Newest first.
+  const budget = { files: 4, ai: 8, bytes: 10 * 1024 * 1024 };
   const get: Fetcher = (path) => gmail(token, path);
   const { data: prof } = await admin.from("profiles").select("preferences").eq("id", row.user_id).maybeSingle();
   const currency = String(((prof?.preferences || {}) as { currency?: string }).currency || "USD").toUpperCase();
-  // Newest 15, then read oldest first: their price list before your "looks good".
-  const creatorMail = Array.from(new Map(rows.filter((r) => r.entity_type === "creator" && !r.scheduled).sort((a, b) => b.at.localeCompare(a.at)).map((r) => [r.gmail_id, r])).values()).slice(0, 15).reverse();
+  const { data: recentMail } = await admin.from("email_events").select("gmail_id, entity_id, direction, at").eq("user_id", row.user_id).eq("mailbox", mailbox).eq("entity_type", "creator").eq("scheduled", false).is("intel_at", null).gte("at", new Date(Date.now() - 3 * 86400000).toISOString()).order("at", { ascending: false }).limit(10);
   let filesSaved = 0;
   const checked: string[] = [];
-  for (const ev of creatorMail) {
-    if (Date.now() > deadline) break;
-    if (!(await claim(admin, row.user_id, ev.gmail_id))) continue; // another sync has it
+  for (const ev of (recentMail || []).reverse()) {
+    if (Date.now() > deadline - 10_000) break;
+    if (!(await claim(admin, row.user_id, ev.gmail_id))) continue;
     const message = await gmail<FullMessage>(token, `/messages/${ev.gmail_id}?format=full`).catch(() => null);
-    if (!message) { await unclaim(admin, row.user_id, ev.gmail_id); continue; } // picked up again by the backfill
+    if (!message) { await unclaim(admin, row.user_id, ev.gmail_id); continue; }
+    if (ev.direction === "in") {
+      const ref = referralOf(bodyOf(message).text, [...own, ...addresses(message.payload?.headers?.find((h) => h.name.toLowerCase() === "from")?.value || "")]);
+      if (ref) await linkTeam(admin, row.user_id, ev.entity_id, ref.email, ref.role, "they pointed you to them in their email", own).catch(() => false);
+    }
     const read = ev.direction === "out" ? processMyMail : processCreatorMail;
     const res = await read({ admin, userId: row.user_id, mailbox, currency, message, creatorId: ev.entity_id, get, budget }).catch(() => ({ files: 0, changes: 0, deferred: false }));
     filesSaved += res.files;
     if (res.deferred) await unclaim(admin, row.user_id, ev.gmail_id);
     else checked.push(ev.gmail_id);
   }
-
-  // 5c. Older mail from creators that was never checked (kits sent before this
-  //     existed): roster and live deals first, each creator's mail oldest → newest.
-  filesSaved += await backfillCreatorMail({ admin, userId: row.user_id, mailbox, currency, get, budget, deadline: deadline - 15_000, checked });
+  filesSaved += await backfillCreatorMail({ admin, userId: row.user_id, mailbox, currency, get, budget, deadline: deadline - 12_000, checked, max: 8 }).catch(() => 0);
   for (const part of chunk(checked, 200)) await admin.from("email_events").update({ intel_at: new Date().toISOString() }).eq("user_id", row.user_id).in("gmail_id", part);
 
-  // 5d. Files waiting for the AI (it was off or out of quota when they arrived).
-  const aiRead = budget.ai > 0 && (await aiReadyAt()) === 0 ? await drainQueue({ admin, userId: row.user_id, currency, mailbox, get, max: Math.min(4, budget.ai), deadline: deadline - 10_000 }).catch(() => 0) : 0;
+  // e. Files waiting for the AI.
+  const aiRead = budget.ai > 0 && Date.now() < deadline - 10_000 ? await drainQueue({ admin, userId: row.user_id, currency, mailbox, get, max: Math.min(3, budget.ai), deadline: deadline - 8_000 }).catch(() => 0) : 0;
 
-  // 6. Move statuses (self-healing: also re-checks anything with recent mail).
+  // f. Tracking check: sends to people outside the CRM that are really warm-up traffic.
+  const coverage = readCoverage(row.coverage);
+  const unsure = coverage.untracked.filter((u) => !coverage.warm.includes(u.id)).slice(0, 15);
+  const warmNow: string[] = [];
+  for (const u of unsure) {
+    if (Date.now() > deadline - 6_000) break;
+    const full = await gmail<FullMessage>(token, `/messages/${u.id}?format=full`).catch(() => null);
+    if (full && isWarmup(bodyOf(full).text)) warmNow.push(u.id);
+  }
+  if (warmNow.length) patch.coverage = { ...coverage, warm: [...coverage.warm, ...warmNow].slice(-500), untracked: coverage.untracked.filter((u) => !warmNow.includes(u.id)), sent: Math.max(0, coverage.sent - warmNow.length), warmup: coverage.warmup + warmNow.length };
+
+  // g. Self-heal: statuses of anything with mail in the last 14 days.
   const { data: recent } = await admin.from("email_events").select("entity_id").eq("user_id", row.user_id).gte("at", new Date(Date.now() - 14 * 86400000).toISOString()).limit(2000);
-  const touched = Array.from(new Set([...rows.map((r) => r.entity_id), ...(recent || []).map((r) => r.entity_id)]));
-  const changed = await applyStatuses(admin, row.user_id, touched);
+  const changed = Date.now() < deadline - 3_000 ? await applyStatuses(admin, row.user_id, Array.from(new Set([...(recent || []).map((r) => r.entity_id), ...threadScan.rows.map((r) => r.entity_id)]))) : 0;
 
-  // 7. Remember where we got to. An unfinished run keeps the old history id so
-  //    the next run picks up exactly where this one stopped.
-  const now = new Date().toISOString();
-  // A new thread-scan cursor replaces the old one.
-  const keep = backfilled.some((b) => b.startsWith(THREAD_SCAN_AT)) ? Array.from(done).filter((b) => !b.startsWith(THREAD_SCAN_AT)) : Array.from(done);
-  const patch: Record<string, unknown> = { last_sync_at: now, updated_at: now, sync_error: "", backfilled: Array.from(new Set([...keep, ...backfilled])).slice(-5000) };
-  if (sweep) {
-    const coverage = await measureCoverage(admin, row.user_id, sweep, metas, prevCoverage, own, book).catch(() => null);
-    if (coverage) patch.coverage = coverage;
-  }
-  if (leadsScanned && !row.leads_scanned_at && complete) patch.leads_scanned_at = new Date().toISOString();
-  if (complete || !row.history_id) {
-    const profile = await gmail<{ historyId?: string; emailAddress?: string }>(token, "/profile");
-    if (complete || !historyId) patch.history_id = profile.historyId || historyId;
-  }
-  await admin.from("gmail_tokens").update(patch).eq("id", row.id);
-  return { mailbox, messages: metas.length, events: rows.length, leads: leads + leadReplies.updated, files: filesSaved, aiRead, statusChanges: changed, scheduledChanges: scheduled.sent + scheduled.cancelled, complete };
+  if (markers.length) patch.backfilled = Array.from(new Set([...(markers.some((b) => b.startsWith(THREAD_SCAN_AT)) ? Array.from(done).filter((b) => !b.startsWith(THREAD_SCAN_AT)) : Array.from(done)), ...markers])).slice(-5000);
+  patch.read_at = new Date().toISOString();
+  let { error } = await admin.from("gmail_tokens").update(patch).eq("id", row.id);
+  if (error && /lead_queue|read_at/.test(error.message)) { delete patch.lead_queue; delete patch.read_at; ({ error } = await admin.from("gmail_tokens").update(patch).eq("id", row.id)); }
+  return { mailbox, leads, files: filesSaved, aiRead, statusChanges: changed, events: threadScan.rows.length };
 }
 
 async function recordError(admin: Admin, row: TokenRow, e: unknown) {
@@ -928,27 +1067,49 @@ async function recordError(admin: Admin, row: TokenRow, e: unknown) {
   return message;
 }
 
-async function syncUser(admin: Admin, rows: TokenRow[], allRows: TokenRow[], deadline: number, force: boolean) {
+type SyncError = { mailbox: string; error: string; reconnect: boolean; status: number; retryable: boolean };
+const errorOf = async (admin: Admin, row: TokenRow, e: unknown): Promise<SyncError> => ({ mailbox: mailboxOf(row), error: await recordError(admin, row, e), reconnect: e instanceof GmailError && e.reconnect, status: e instanceof GmailError ? e.status : 0, retryable: e instanceof GmailError && e.retryable });
+
+/** Track every mailbox of one user (each gets its own time, the least recent first), then read the ones due. */
+async function syncUser(admin: Admin, rows: TokenRow[], allRows: TokenRow[], deadline: number, opts: { force: boolean; read: "now" | "due" | "later" }) {
   const own = new Set(allRows.map(mailboxOf).filter(Boolean));
   const book = await addressBook(admin, allRows[0].user_id, own);
   const results: Record<string, unknown>[] = [];
-  const errors: { mailbox: string; error: string; reconnect: boolean; status: number; retryable: boolean }[] = [];
-  // Each connected mailbox is its own Google account with its own quota, and
-  // every call is paced (see pace()), so mailboxes sync one after another in
-  // the same run; the one touched least recently goes first.
+  const errors: SyncError[] = [];
+  const queue = [...rows].sort((a, b) => (a.last_sync_at || "").localeCompare(b.last_sync_at || ""));
   let deferred = 0;
-  const queue = [...rows].sort((a, b) => (a.updated_at || a.last_sync_at || a.connected_at || "").localeCompare(b.updated_at || b.last_sync_at || b.connected_at || ""));
   for (let i = 0; i < queue.length; i++) {
     const row = queue[i];
-    if (Date.now() > deadline - 5_000) { deferred = queue.length - i; break; }
-    if (!force && row.last_sync_at && Date.now() - new Date(row.last_sync_at).getTime() < USER_MIN_INTERVAL_MS) continue;
+    const left = deadline - Date.now();
+    if (left < 6_000) { deferred = queue.length - i; break; }
+    if (!opts.force && row.last_sync_at && Date.now() - new Date(row.last_sync_at).getTime() < USER_MIN_INTERVAL_MS - 10_000) continue;
+    if (!(await lease(admin, row.id, "track_lock_until", TRACK_LEASE_MS))) continue; // another run is tracking it right now
     try {
-      results.push(await syncMailbox(admin, row, own, book, deadline));
+      // A fair share of the time for each mailbox still waiting, so none starves.
+      results.push(await trackMailbox(admin, row, own, book, Date.now() + Math.max(8_000, Math.floor(left / (queue.length - i)))));
     } catch (e) {
-      errors.push({ mailbox: mailboxOf(row), error: await recordError(admin, row, e), reconnect: e instanceof GmailError && e.reconnect, status: e instanceof GmailError ? e.status : 0, retryable: e instanceof GmailError && e.retryable });
+      errors.push(await errorOf(admin, row, e));
+    } finally {
+      await release(admin, row.id, "track_lock_until");
     }
   }
-  return { results, errors, deferred };
+  const readAll = async (until: number) => {
+    const due = [...rows].filter((r) => opts.read === "now" || !r.read_at || Date.now() - new Date(r.read_at).getTime() >= READ_EVERY_MS).sort((a, b) => (a.read_at || "").localeCompare(b.read_at || ""));
+    const out: Record<string, unknown>[] = [];
+    for (const row of due) {
+      if (until - Date.now() < 15_000) break;
+      if (!(await lease(admin, row.id, "read_lock_until", READ_LEASE_MS))) continue;
+      try {
+        out.push(await readMailbox(admin, row, own, book, Math.min(until, Date.now() + 45_000)));
+      } catch {
+        // reading is best effort; tracking already saved everything that counts
+      } finally {
+        await release(admin, row.id, "read_lock_until");
+      }
+    }
+    return out;
+  };
+  return { results, errors, deferred, readAll };
 }
 
 // ----- sending ------------------------------------------------------------------
@@ -1062,23 +1223,37 @@ Deno.serve(async (req) => {
     }
     if (!allowed) return json({ error: "Unauthorized" }, 401);
     if (!configured) return json({ skipped: "not configured" });
-    const deadline = Date.now() + RUN_BUDGET_MS;
-    const { data } = await admin.from("gmail_tokens").select("*").order("updated_at", { ascending: true, nullsFirst: true }).limit(500);
+    // Runs every minute: first TRACK every mailbox (seconds each, least
+    // recently synced first), then READ the ones due with the time left.
+    const started = Date.now();
+    const trackUntil = started + 38_000;
+    const readUntil = started + 55_000;
+    const { data } = await admin.from("gmail_tokens").select("*").order("last_sync_at", { ascending: true, nullsFirst: true }).limit(500);
+    const { data: members } = await admin.from("profiles").select("id, access").in("id", Array.from(new Set(((data || []) as TokenRow[]).map((r) => r.user_id))));
+    const approved = new Set((members || []).filter((m) => !m.access || m.access === "approved").map((m) => m.id));
     const byUser = new Map<string, TokenRow[]>();
-    for (const row of (data || []) as TokenRow[]) byUser.set(row.user_id, [...(byUser.get(row.user_id) || []), row]);
-    let mailboxes = 0;
-    for (const rows of byUser.values()) {
-      if (Date.now() > deadline - 10_000) break;
-      const due = rows.filter((r) => !r.updated_at || Date.now() - new Date(r.updated_at).getTime() >= 4 * 60_000);
-      if (!due.length) continue;
+    for (const row of (data || []) as TokenRow[]) if (approved.has(row.user_id)) byUser.set(row.user_id, [...(byUser.get(row.user_id) || []), row]);
+    let tracked = 0, read = 0;
+    const readers: ((until: number) => Promise<Record<string, unknown>[]>)[] = [];
+    const users = Array.from(byUser.values());
+    for (let i = 0; i < users.length; i++) {
+      const rows = users[i];
+      const left = trackUntil - Date.now();
+      if (left < 6_000) break;
+      const due = rows.filter((r) => !r.last_sync_at || Date.now() - new Date(r.last_sync_at).getTime() >= 45_000);
       try {
-        const { results } = await syncUser(admin, due, rows, Math.min(deadline, Date.now() + 45_000), true);
-        mailboxes += results.length;
+        const run = await syncUser(admin, due, rows, Date.now() + Math.max(10_000, Math.floor(left / (users.length - i))), { force: true, read: "due" });
+        tracked += run.results.length;
+        readers.push(run.readAll);
       } catch {
         // one user's trouble never stops everyone else's sync
       }
     }
-    return json({ users: byUser.size, mailboxes });
+    for (const readAll of readers) {
+      if (readUntil - Date.now() < 15_000) break;
+      read += (await readAll(readUntil).catch(() => [])).length;
+    }
+    return json({ users: byUser.size, tracked, read, ms: Date.now() - started });
   }
 
   const auth = req.headers.get("Authorization") || "";
@@ -1147,15 +1322,16 @@ Deno.serve(async (req) => {
   if (action === "status") {
     const mailboxes = rows.map(publicMailbox);
     const readyAt = await aiReadyAt().catch(() => 0);
-    const ai = { ai: aiEnabled(), aiProvider: aiProvider(), aiModel: aiModel(), aiKeys: aiKeyCount(), aiReadyAt: readyAt ? new Date(readyAt).toISOString() : null };
+    const ai = { ai: aiEnabled(), aiProvider: aiProvider(), aiModel: aiModel(), aiKeys: aiKeyCount(), aiReadyAt: readyAt ? new Date(readyAt).toISOString() : null, aiChain: await aiChain().catch(() => []) };
     if (!first) return json({ configured, connected: false, mailboxes, ...ai });
     // Top-level fields describe the first mailbox (older app versions read them).
     return json({ configured, connected: true, ...publicMailbox(first), mailboxes, maxMailboxes: MAX_MAILBOXES, ...ai });
   }
 
   if (action === "ai_test") {
-    const result = await testAi(typeof input.model === "string" ? input.model : undefined, input.structured === true);
-    return json(result, result.ok ? 200 : 502);
+    // Each provider and model, for real: a tiny text question and (where there's a vision model) a tiny image.
+    const results = await testAi();
+    return json({ ok: results.length > 0 && results.some((r) => r.ok), results });
   }
 
   if (action === "disconnect") {
@@ -1180,7 +1356,13 @@ Deno.serve(async (req) => {
   if (!first) return json({ error: "Connect Gmail first.", code: "not_connected" }, 409);
 
   if (action === "sync") {
-    const { results, errors, deferred } = await syncUser(admin, rows, rows, Date.now() + RUN_BUDGET_MS, input.force === true);
+    // Track now and answer; the heavier reading carries on after the answer.
+    const { results, errors, deferred, readAll } = await syncUser(admin, rows, rows, Date.now() + 40_000, { force: input.force === true, read: "due" });
+    const later = readAll(Date.now() + 60_000).catch(() => []);
+    // deno-lint-ignore no-explicit-any
+    const runtime = (globalThis as any).EdgeRuntime as { waitUntil?: (p: Promise<unknown>) => void } | undefined;
+    if (runtime?.waitUntil) runtime.waitUntil(later);
+    else await later;
     const sum = (key: string) => results.reduce((s, r) => s + Number(r[key] || 0), 0);
     if (!results.length && !errors.length) return json({ skipped: true, deferred });
     const failed = errors.length > 0 && !results.length;

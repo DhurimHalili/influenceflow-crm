@@ -27,7 +27,7 @@ export type Mailbox = {
 };
 
 /** Emails in Gmail's Sent folder over the last `days` days vs what the CRM tracks. */
-export type Coverage = { at: string; days: number; sent: number; tracked: number; pending: number; untracked: { id: string; to: string[]; at: string; subject: string }[] };
+export type Coverage = { at: string; days: number; sent: number; tracked: number; pending: number; warmup: number; untracked: { id: string; to: string[]; at: string; subject: string }[] };
 
 const toCoverage = (v: unknown): Coverage | null => {
   if (!v || typeof v !== "object") return null;
@@ -36,7 +36,7 @@ const toCoverage = (v: unknown): Coverage | null => {
   const untracked = (Array.isArray(c.untracked) ? c.untracked : [])
     .filter((u): u is Record<string, unknown> => !!u && typeof u === "object" && typeof (u as { id?: unknown }).id === "string")
     .map((u) => ({ id: String(u.id), to: (Array.isArray(u.to) ? u.to : []).map(String).slice(0, 5), at: String(u.at || ""), subject: decodeEntities(String(u.subject || "")) }));
-  return { at: c.at, days: Number(c.days) || 2, sent: Number(c.sent) || 0, tracked: Number(c.tracked) || 0, pending: Number(c.pending) || 0, untracked };
+  return { at: c.at, days: Number(c.days) || 2, sent: Number(c.sent) || 0, tracked: Number(c.tracked) || 0, pending: Number(c.pending) || 0, warmup: Number(c.warmup) || 0, untracked };
 };
 
 export type GmailStatus = {
@@ -47,8 +47,10 @@ export type GmailStatus = {
   maxMailboxes: number;
   /** The server can read media kits / emails with AI (Gemini keys or ANTHROPIC_API_KEY set). */
   ai: boolean;
-  aiProvider?: "claude" | "gemini" | null;
+  aiProvider?: AiProviderName | null;
   aiModel?: string;
+  /** Every AI provider the server can use, in the order it tries them. */
+  aiChain?: AiLink[];
   /** How many API keys the server rotates through. */
   aiKeys?: number;
   /** Every key is out of quota until this time (null = ready now). */
@@ -79,10 +81,16 @@ type GmailValue = GmailStatus & {
 
 const empty: GmailStatus = { loaded: false, configured: false, connected: false, mailboxes: [], maxMailboxes: 5, ai: false, canRead: false, canSend: false, lastSyncAt: null, error: "" };
 const GmailContext = createContext<GmailValue | null>(null);
-const AUTO_SYNC_MS = 3 * 60 * 1000;
-const FOCUS_SYNC_AFTER_MS = 60 * 1000;
+const AUTO_SYNC_MS = 2 * 60 * 1000;
+// Back from Gmail after sending something: track again right away.
+const FOCUS_SYNC_AFTER_MS = 20 * 1000;
+// The server syncs every mailbox every minute on its own; this notices what it stored.
+const FRESH_CHECK_MS = 20 * 1000;
 
 // Edge-function errors carry a JSON body with a friendly message.
+export type AiProviderName = "claude" | "gemini" | "groq" | "cloudflare" | "openrouter";
+export type AiLink = { provider: AiProviderName; models: string[]; keys: number; readyAt: string | null; can: ("text" | "image" | "pdf")[] };
+
 async function invoke<T>(name: string, body: Record<string, unknown>): Promise<{ data?: T; error?: string; status?: number }> {
   const { data, error } = await supabase.functions.invoke(name, { body });
   if (!error) return { data: data as T };
@@ -138,10 +146,10 @@ export function GmailProvider({ children }: { children: ReactNode }) {
 
   const refreshStatus = useCallback(async () => {
     if (!hasSupabase || !user) return setStatus(empty);
-    const res = await invoke<{ configured?: boolean; mailboxes?: Record<string, unknown>[]; maxMailboxes?: number; ai?: boolean; aiProvider?: "claude" | "gemini" | null; aiModel?: string; aiKeys?: number; aiReadyAt?: string | null }>("gmail-sync", { action: "status" });
+    const res = await invoke<{ configured?: boolean; mailboxes?: Record<string, unknown>[]; maxMailboxes?: number; ai?: boolean; aiProvider?: AiProviderName | null; aiModel?: string; aiKeys?: number; aiReadyAt?: string | null; aiChain?: AiLink[] }>("gmail-sync", { action: "status" });
     if (res.data) {
       const mailboxes = (res.data.mailboxes || []).map(toMailbox);
-      setStatus({ ...empty, loaded: true, configured: !!res.data.configured, mailboxes, maxMailboxes: res.data.maxMailboxes || 5, ai: !!res.data.ai, aiProvider: res.data.aiProvider ?? null, aiModel: res.data.aiModel || "", aiKeys: Number(res.data.aiKeys) || 0, aiReadyAt: res.data.aiReadyAt || null, ...summarize(mailboxes) });
+      setStatus({ ...empty, loaded: true, configured: !!res.data.configured, mailboxes, maxMailboxes: res.data.maxMailboxes || 5, ai: !!res.data.ai, aiProvider: res.data.aiProvider ?? null, aiModel: res.data.aiModel || "", aiKeys: Number(res.data.aiKeys) || 0, aiReadyAt: res.data.aiReadyAt || null, aiChain: Array.isArray(res.data.aiChain) ? res.data.aiChain : [], ...summarize(mailboxes) });
     } else setStatus({ ...empty, loaded: true, error: res.status === 404 ? "" : res.error || "" });
   }, [user]);
 
@@ -150,6 +158,24 @@ export function GmailProvider({ children }: { children: ReactNode }) {
     const { data: rows, error } = await supabase.from("inbound_leads").select("*").eq("user_id", user.id).order("last_at", { ascending: false }).limit(300);
     if (!error) setLeads((rows || []).map((r) => toLead(r as Record<string, unknown>)));
   }, [user]);
+
+  // What the server last stored for you (new mail, a cancelled send, a status Gmail moved).
+  // When it changes, the workspace reloads — whoever ran the sync.
+  const lastPulse = useRef("");
+  const checkFresh = useCallback(async () => {
+    if (!hasSupabase || !user) return;
+    const [ev, act] = await Promise.all([
+      supabase.from("email_events").select("created_at", { count: "exact" }).eq("user_id", user.id).order("created_at", { ascending: false }).limit(1),
+      supabase.from("activities").select("at").eq("user_id", user.id).like("text", "Gmail:%").order("at", { ascending: false }).limit(1),
+    ]);
+    if (ev.error) return;
+    const pulse = `${ev.count ?? 0}|${(ev.data?.[0] as { created_at?: string } | undefined)?.created_at || ""}|${(act.data?.[0] as { at?: string } | undefined)?.at || ""}`;
+    if (lastPulse.current && pulse !== lastPulse.current) {
+      refresh.current();
+      void refreshLeads();
+    }
+    lastPulse.current = pulse;
+  }, [user, refreshLeads]);
 
   const syncNow = useCallback(async (force = false) => {
     if (busy.current) return { ok: true };
@@ -171,17 +197,25 @@ export function GmailProvider({ children }: { children: ReactNode }) {
       // New mail or a moved status: bring the fresh rows in right away.
       if (res.data && ((res.data.events || 0) > 0 || (res.data.statusChanges || 0) > 0 || (res.data.scheduledChanges || 0) > 0)) refresh.current();
       if (res.data && (res.data.leads || 0) > 0) void refreshLeads();
+      void checkFresh();
       const partial = res.data?.errors?.[0];
       return partial ? { ok: false, message: `${partial.mailbox}: ${partial.error}` } : { ok: true, message: waiting || undefined };
     } finally {
       busy.current = false;
       setSyncing(false);
     }
-  }, [refreshStatus, refreshLeads]);
+  }, [refreshStatus, refreshLeads, checkFresh]);
 
   useEffect(() => {
     void refreshStatus();
   }, [refreshStatus]);
+
+  useEffect(() => {
+    if (!hasSupabase || !user) return;
+    void checkFresh();
+    const tick = window.setInterval(() => { if (document.visibilityState === "visible") void checkFresh(); }, FRESH_CHECK_MS);
+    return () => window.clearInterval(tick);
+  }, [user, checkFresh]);
 
   // Automatic syncs while the app is open.
   const active = status.connected && status.canRead;

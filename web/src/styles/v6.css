@@ -204,3 +204,43 @@
 .yt-progress button { flex: none; min-height: 26px; padding: 0 10px; border: 1px solid var(--line); border-radius: 999px; background: transparent; color: var(--text); font: 650 12px inherit; cursor: pointer; }
 @media (max-width: 680px) { .yt-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } .yt-progress i { display: none; } .yt-progress { bottom: 76px; } }
 @media (prefers-reduced-motion: reduce) { .cf-spin { animation: none; } .yt-progress i em { transition: none; } }
+
+/* A creator's team (manager, agent, agency…) inside the contact block. */
+.contact-block > .team-block { grid-column: 1 / -1; display: grid; gap: 8px; padding-top: 12px; border-top: 1px solid var(--line); min-width: 0; }
+.team-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.team-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.team-list li { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-solid); }
+.team-ico { flex: none; width: 26px; height: 26px; display: grid; place-items: center; border-radius: 8px; color: var(--accent); background: var(--accent-soft); }
+.team-main { display: grid; gap: 2px; min-width: 0; flex: 1; }
+.team-line { display: flex; align-items: center; gap: 8px; min-width: 0; flex-wrap: wrap; }
+.team-line a { display: inline-flex; align-items: center; gap: 5px; min-width: 0; color: var(--text); font-weight: 650; font-size: 13px; overflow-wrap: anywhere; text-decoration: none; }
+.team-line a:hover { color: var(--accent); }
+.team-main small { color: var(--muted); font-size: 11.5px; line-height: 1.35; overflow-wrap: anywhere; text-transform: none; letter-spacing: 0; }
+.team-role { flex: none; padding: 1px 8px; border-radius: 999px; font-style: normal; font-size: 10.5px; font-weight: 750; text-transform: uppercase; letter-spacing: .5px; color: var(--accent); background: var(--accent-soft); }
+.team-x { flex: none; width: 30px; height: 30px; display: grid; place-items: center; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--muted); cursor: pointer; transition: color .15s ease-out, border-color .15s ease-out; }
+.team-x:hover { color: var(--danger); border-color: var(--line); }
+.team-x:focus-visible, .team-line a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.team-empty { margin: 0; color: var(--muted); font-size: 12.5px; line-height: 1.45; }
+.team-form { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.team-field input, .team-field select { min-height: 36px; padding: 0 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-solid); color: var(--text); font: inherit; font-size: 13px; }
+.team-field input { width: min(260px, 100%); }
+.team-field { min-width: 0; max-width: 100%; }
+.team-field input:focus-visible, .team-field select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-color: var(--accent); }
+.team-field input[aria-invalid="true"] { border-color: var(--danger); }
+.team-error { flex-basis: 100%; margin: 0; color: var(--danger); font-size: 12px; }
+@media (max-width: 520px) { .team-field, .team-field input { width: 100%; } }
+@media (prefers-reduced-motion: reduce) { .team-x { transition: none; } }
+
+/* AI providers in Settings. */
+.ai-chain { display: grid; gap: 6px; margin: 10px 0 0; padding: 0; list-style: none; }
+.ai-chain li { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-solid); min-width: 0; }
+.ai-chain b { min-width: 0; font-size: 13px; }
+.ai-chain small { color: var(--muted); font-size: 11.5px; overflow-wrap: anywhere; min-width: 0; }
+.ai-chain .ai-step { flex: none; width: 22px; height: 22px; display: grid; place-items: center; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-size: 11px; font-weight: 800; }
+.ai-chain .ai-state { margin-left: auto; font-size: 11.5px; font-weight: 700; }
+.ai-chain .ai-state.ok { color: var(--success); }
+.ai-chain .ai-state.wait { color: var(--warning); }
+.ai-chain .ai-state.bad { color: var(--danger); }
+.ai-actions { margin-top: 10px; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.ob-check-warm { color: var(--muted); }
