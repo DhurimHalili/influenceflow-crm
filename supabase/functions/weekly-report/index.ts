@@ -116,6 +116,11 @@ Deno.serve(async (req) => {
     const { data: ok } = given.length >= 32 ? await admin.rpc("gmail_cron_secret_ok", { p_secret: given }) : { data: false };
     if (ok !== true) return json({ error: "Unauthorized" }, 401);
     // Health check (server only): the numbers for one member, no names, nothing sent.
+    // Mailer check (server only): logs in to SMTP, sends nothing.
+    if (input.verify_smtp === true) {
+      if (!SMTP_PASSWORD) return json({ smtp: "not_configured" });
+      try { transport ||= nodemailer.createTransport({ host: SMTP_HOST, port: 465, secure: true, auth: { user: SMTP_USER, pass: SMTP_PASSWORD } }); await transport.verify(); return json({ smtp: "ok" }); } catch (e) { return json({ smtp: why(e) }); }
+    }
     if (typeof input.dry_run === "string" && /^[0-9a-f-]{36}$/i.test(input.dry_run)) {
       const r = await reportFor(admin, input.dry_run, input.which === "this" ? "this" : "last");
       return json({ configured: !!SMTP_PASSWORD, range: r.range, tz: r.timeZone, sent: r.sent, goal: r.goalTotal, days: r.days.map((d) => [d.label, d.sent, d.status]), emails: r.emails, repliers: r.repliers, wins: r.wins, negotiations: r.negotiations, next: r.next, verdict: r.verdict.tone });

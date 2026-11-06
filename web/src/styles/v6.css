@@ -333,18 +333,22 @@
 .crit-chip.crit-hard { --c: var(--crit-hard); }
 .crit-chip.crit-slight { background: color-mix(in srgb, var(--crit-slight-bg) 22%, transparent); }
 
-/* Rows that fell outside: yellow for slightly below, red for below. */
-.data-table tr.crit-row-slight td { background: color-mix(in srgb, var(--crit-slight-bg) 9%, transparent); }
-.data-table tr.crit-row-hard td { background: color-mix(in srgb, var(--crit-hard) 7%, transparent); }
-.data-table tr.crit-row-slight td:last-child { box-shadow: inset -3px 0 var(--crit-slight-bg); }
-.data-table tr.crit-row-hard td:last-child { box-shadow: inset -3px 0 var(--crit-hard); }
-.data-table tr.crit-row-over td:last-child { box-shadow: inset -3px 0 color-mix(in srgb, var(--crit-over) 70%, transparent); }
-.creator-card.crit-row-slight { box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--crit-slight-bg) 75%, transparent), 0 6px 18px -12px color-mix(in srgb, var(--crit-slight-bg) 70%, transparent); background: linear-gradient(180deg, color-mix(in srgb, var(--crit-slight-bg) 9%, var(--surface-solid)), var(--surface-solid) 55%); }
-.creator-card.crit-row-hard { box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--crit-hard) 60%, transparent), 0 6px 18px -12px color-mix(in srgb, var(--crit-hard) 70%, transparent); background: linear-gradient(180deg, color-mix(in srgb, var(--crit-hard) 8%, var(--surface-solid)), var(--surface-solid) 55%); }
-.creator-card.crit-row-over { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--crit-over) 45%, transparent); }
-.kanban-item.crit-row-slight { box-shadow: inset 3px 0 var(--crit-slight-bg); }
-.kanban-item.crit-row-hard { box-shadow: inset 3px 0 var(--crit-hard); }
-.kanban-item.crit-row-over { box-shadow: inset 3px 0 var(--crit-over); }
+/* Outside criteria: the judged numbers carry the colour — yellow for slightly
+   below, red for below, blue for above. The row edge, the card's top stripe and
+   the kanban side bar belong to priority (urgent / soon), so the two never
+   stack into a double red. */
+.performance-cell.crit-slight, .performance-cell.crit-hard, .performance-cell.crit-over,
+.kb-perf.crit-slight, .kb-perf.crit-hard, .kb-perf.crit-over { --c: var(--crit-hard); margin: -4px -8px; padding: 4px 8px 5px; border-radius: 9px; background: color-mix(in srgb, var(--c) 8%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c) 18%, transparent); }
+.performance-cell.crit-slight, .kb-perf.crit-slight { --c: var(--crit-slight-bg); background: color-mix(in srgb, var(--c) 14%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c) 40%, transparent); }
+.performance-cell.crit-over, .kb-perf.crit-over { --c: var(--crit-over); }
+.performance-cell { display: inline-flex; flex-direction: column; align-items: flex-start; }
+.kb-perf { display: flex !important; flex-wrap: wrap; gap: 2px 8px; margin: 6px 0 0 !important; }
+.crit-miss { color: var(--crit-hard) !important; font-weight: 750; }
+.crit-slight .crit-miss { color: var(--crit-slight) !important; }
+.crit-miss::after { content: " ↓"; font-weight: 800; }
+.cc-stats.crit-slight, .cc-stats.crit-hard, .cc-stats.crit-over { --c: var(--crit-hard); border-color: color-mix(in srgb, var(--c) 40%, var(--line)); background: color-mix(in srgb, var(--c) 6%, transparent); }
+.cc-stats.crit-slight { --c: var(--crit-slight-bg); border-color: color-mix(in srgb, var(--c) 65%, var(--line)); background: color-mix(in srgb, var(--c) 11%, transparent); }
+.cc-stats.crit-over { --c: var(--crit-over); }
 .kanban-item .crit-chip, .kanban-item .nocontact-mark { margin: 6px 6px 0 0; }
 .cc-score .crit-chip { margin-top: 0; }
 
