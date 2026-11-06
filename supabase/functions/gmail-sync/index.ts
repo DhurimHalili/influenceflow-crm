@@ -625,6 +625,70 @@ async function undoScheduledStatus(admin: Admin, userId: string, type: "creator"
   await admin.from("activities").insert({ user_id: userId, text: `Gmail: the scheduled email to ${record.name} was cancelled — moved back to ${back === "new" ? "New" : "Inbound"}`.slice(0, 500), at: new Date().toISOString(), entity_type: type, entity_id: id });
 }
 
+// ----- cancelling scheduled sends ----------------------------------------------
+
+// Cancel one of the user's scheduled sends: Gmail cancels a scheduled message
+// when it is trashed (it stays in Trash for 30 days; nothing is deleted
+// forever). Only a row of theirs that is still scheduled, in a mailbox of
+// theirs that granted gmail.modify, and only while Gmail still holds it unsent.
+async function cancelScheduledSend(admin: Admin, userId: string, rows: TokenRow[], gmailId: string, why: "manual" | "replied"): Promise<{ ok: true } | { error: string; status: number; code?: string }> {
+  const { data: ev } = await admin.from("email_events").select("gmail_id, mailbox, scheduled, direction, entity_id, entity_type").eq("user_id", userId).eq("gmail_id", gmailId).eq("direction", "out").limit(1).maybeSingle();
+  if (!ev) return { error: "That email isn't in your CRM.", status: 404 };
+  if (!ev.scheduled) return { error: "That email has already gone out.", status: 409 };
+  const row = rows.find((r) => mailboxOf(r) === ev.mailbox);
+  if (!row) return { error: `Reconnect ${ev.mailbox} to cancel it from here.`, status: 409 };
+  if (!(row.scopes || "").includes("gmail.modify")) return { error: `Reconnect ${ev.mailbox} and allow “Manage drafts and send” to cancel from the CRM.`, code: "needs_modify", status: 403 };
+  try {
+    const token = await accessToken(admin, row);
+    // Not found = already gone in Gmail; any other trouble stops here so nothing is forgotten that would still send.
+    const meta = await gmail<Meta>(token, META_PATH(gmailId)).catch((e) => (e instanceof GmailError && e.status === 404 ? null : Promise.reject(e)));
+    const labels = meta?.labelIds || [];
+    if (meta && !(isFuture(meta) || (labels.includes("SCHEDULED") && !labels.includes("SENT")))) return { error: "That email has already gone out.", status: 409 };
+    if (meta) await gmail(token, `/messages/${gmailId}/trash`, { method: "POST" });
+    await admin.from("email_events").delete().eq("user_id", userId).eq("gmail_id", gmailId);
+    await undoScheduledStatus(admin, userId, ev.entity_type, ev.entity_id);
+    const text = why === "replied" ? "Gmail: they replied before your scheduled follow-up went out, so it was cancelled (it's in Gmail's Trash for 30 days)" : "Cancelled a scheduled email (it's in Gmail's Trash for 30 days)";
+    await admin.from("activities").insert({ user_id: userId, text, at: new Date().toISOString(), entity_type: ev.entity_type, entity_id: ev.entity_id });
+    return { ok: true };
+  } catch (e) {
+    const status = e instanceof GmailError && e.status >= 400 && e.status < 500 ? e.status : 502;
+    return { error: e instanceof Error ? e.message : "Couldn't cancel it", status };
+  }
+}
+
+// A scheduled follow-up that bumps your own earlier email (its In-Reply-To is
+// an email you sent) and they answered after you scheduled it: it would land
+// after their reply ("crossed"). Cancelled for you unless the member turned
+// followup_rules.auto_cancel_crossed off. Auto-replies don't count as answers.
+// Same rule as markCrossed in web/src/lib/followupEngine.ts.
+async function autoCancelCrossed(admin: Admin, userId: string, rows: TokenRow[]) {
+  const { data: pending } = await admin.from("email_events").select("gmail_id, entity_id, in_reply_to, at, created_at").eq("user_id", userId).eq("direction", "out").eq("scheduled", true).gt("at", new Date().toISOString()).neq("in_reply_to", "").limit(200);
+  if (!pending?.length) return 0;
+  const { data: prof } = await admin.from("profiles").select("preferences").eq("id", userId).maybeSingle();
+  const rules = ((prof?.preferences || {}) as { followup_rules?: { auto_cancel_crossed?: boolean } }).followup_rules;
+  if (rules?.auto_cancel_crossed === false) return 0;
+  const ids = Array.from(new Set(pending.map((p) => p.entity_id as string)));
+  const { data: mail } = await admin.from("email_events").select("entity_id, direction, at, reply_kind, message_key").eq("user_id", userId).in("entity_id", ids).limit(5000);
+  const ms = (v: string) => new Date(v).getTime();
+  const done = new Set<string>();
+  let cancelled = 0;
+  for (const p of pending) {
+    if (done.has(p.gmail_id)) continue;
+    const mine = (mail || []).filter((m) => m.entity_id === p.entity_id);
+    const bumped = mine.find((m) => m.message_key && m.message_key === p.in_reply_to);
+    if (!bumped || bumped.direction !== "out") continue;
+    // Only when the reply came in after the CRM already saw the scheduled email,
+    // i.e. you scheduled it before they answered. One you wrote after reading
+    // their reply stays: the app flags it and you decide.
+    const crossed = mine.some((m) => m.direction === "in" && m.reply_kind !== "auto" && ms(m.at) > ms(bumped.at) && ms(m.at) < ms(p.at) && ms(m.at) > ms(p.created_at));
+    if (!crossed) continue;
+    done.add(p.gmail_id);
+    const res = await cancelScheduledSend(admin, userId, rows, p.gmail_id, "replied");
+    if ("ok" in res) cancelled++;
+  }
+  return cancelled;
+}
+
 // ----- replies from another address (older mail) -----------------------------------
 
 // Before threads were matched, a manager's or agency's answer from an address
@@ -1093,6 +1157,8 @@ async function syncUser(admin: Admin, rows: TokenRow[], allRows: TokenRow[], dea
       await release(admin, row.id, "track_lock_until");
     }
   }
+  // Their reply just landed before a scheduled bump of yours went out: cancel it now.
+  if (deadline - Date.now() > 5_000) await autoCancelCrossed(admin, allRows[0].user_id, allRows).catch(() => 0);
   const readAll = async (until: number) => {
     const due = [...rows].filter((r) => opts.read === "now" || !r.read_at || Date.now() - new Date(r.read_at).getTime() >= READ_EVERY_MS).sort((a, b) => (a.read_at || "").localeCompare(b.read_at || ""));
     const out: Record<string, unknown>[] = [];
@@ -1479,27 +1545,8 @@ Deno.serve(async (req) => {
     // it stays in Trash for 30 days (nothing is deleted forever).
     const gmailId = typeof input.gmailId === "string" && /^[0-9a-f]{6,40}$/i.test(input.gmailId) ? input.gmailId : "";
     if (!gmailId) return json({ error: "Invalid email" }, 400);
-    const { data: ev } = await admin.from("email_events").select("gmail_id, mailbox, scheduled, direction, entity_id, entity_type").eq("user_id", userId).eq("gmail_id", gmailId).eq("direction", "out").limit(1).maybeSingle();
-    if (!ev) return json({ error: "That email isn't in your CRM." }, 404);
-    if (!ev.scheduled) return json({ error: "That email has already gone out." }, 409);
-    const row = rows.find((r) => mailboxOf(r) === ev.mailbox);
-    if (!row) return json({ error: `Reconnect ${ev.mailbox} to cancel it from here.` }, 409);
-    if (!(row.scopes || "").includes("gmail.modify")) return json({ error: `Reconnect ${ev.mailbox} and allow “Manage drafts and send” to cancel from the CRM.`, code: "needs_modify" }, 403);
-    try {
-      const token = await accessToken(admin, row);
-      // Not found = already gone in Gmail; any other trouble stops here so nothing is forgotten that would still send.
-      const meta = await gmail<Meta>(token, META_PATH(gmailId)).catch((e) => (e instanceof GmailError && e.status === 404 ? null : Promise.reject(e)));
-      const labels = meta?.labelIds || [];
-      if (meta && !(isFuture(meta) || (labels.includes("SCHEDULED") && !labels.includes("SENT")))) return json({ error: "That email has already gone out." }, 409);
-      if (meta) await gmail(token, `/messages/${gmailId}/trash`, { method: "POST" });
-      await admin.from("email_events").delete().eq("user_id", userId).eq("gmail_id", gmailId);
-      await undoScheduledStatus(admin, userId, ev.entity_type, ev.entity_id);
-      await admin.from("activities").insert({ user_id: userId, text: `Cancelled a scheduled email (it's in Gmail's Trash for 30 days)`, at: new Date().toISOString(), entity_type: ev.entity_type, entity_id: ev.entity_id });
-      return json({ ok: true });
-    } catch (e) {
-      const status = e instanceof GmailError && e.status >= 400 && e.status < 500 ? e.status : 502;
-      return json({ error: e instanceof Error ? e.message : "Couldn't cancel it" }, status);
-    }
+    const res = await cancelScheduledSend(admin, userId, rows, gmailId, "manual");
+    return "ok" in res ? json({ ok: true }) : json({ error: res.error, ...(res.code ? { code: res.code } : {}) }, res.status);
   }
 
   if (action === "send") {

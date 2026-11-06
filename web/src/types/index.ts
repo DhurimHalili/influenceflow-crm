@@ -137,6 +137,8 @@ export interface FollowupRules {
   thread_cap?: number;
   /** Business days to wait after the last allowed follow-up before "start a new thread". */
   new_thread_gap?: number;
+  /** When they reply before a scheduled follow-up goes out, cancel it in Gmail (default on). */
+  auto_cancel_crossed?: boolean;
 }
 
 export type PaymentStatus = "unpaid" | "invoiced" | "paid";
