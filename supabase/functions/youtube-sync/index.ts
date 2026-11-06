@@ -16,8 +16,10 @@ import { channelFacts, youtubeConfigured, YouTubeQuota, type ChannelFacts } from
 // What a refresh may change: subscribers and the YouTube facts always; name,
 // email, country, niche, average views and engagement rate while they're
 // empty or still exactly what YouTube put there last time (youtube.auto).
-// Change one yourself and it's yours: refreshes leave it alone (youtube.kept
-// says which, so the profile can tell you). Suggested stars (engagement,
+// Change one yourself and it's yours: the hourly refresh leaves it alone
+// (youtube.kept says which, so the profile can tell you). Pressing Refresh
+// yourself (refresh with force: true — the "Refresh YouTube" buttons) takes
+// YouTube's values for all of them again, except an email you already have. Suggested stars (engagement,
 // consistency, audience) follow the same rule: a star you never set (0) or
 // one still equal to YouTube's last suggestion is refreshed; one you picked
 // stays. Niche fit is always yours.
@@ -47,7 +49,7 @@ const countryName = (code: string) => {
 };
 
 /** What a refresh writes (see the top of the file). Stars are never touched. */
-export function patchFor(c: Pick<CreatorRow, "name" | "country" | "contact_email" | "niche" | "avg_views" | "engagement_rate" | "socials" | "youtube" | StarField>, f: ChannelFacts) {
+export function patchFor(c: Pick<CreatorRow, "name" | "country" | "contact_email" | "niche" | "avg_views" | "engagement_rate" | "socials" | "youtube" | StarField>, f: ChannelFacts, opts: { force?: boolean } = {}) {
   // Only the first YouTube link (the one that was read) gets the subscriber count.
   const first = (c.socials || []).findIndex((s) => s && s.platform === "YouTube" && (s.url || s.handle));
   const socials = (c.socials || []).map((s, i) => (i === first ? { ...s, url: s.url || f.url, handle: s.handle || f.handle, followers: f.subscribers || s.followers || 0 } : s));
@@ -67,7 +69,8 @@ export function patchFor(c: Pick<CreatorRow, "name" | "country" | "contact_email
     const value = fresh[k];
     if (value === undefined || blank(k, value)) continue;
     const current = c[k];
-    const free = blank(k, current) || (prevAuto[k] !== undefined && same(k, current, prevAuto[k])) || (legacy && NUMERIC.has(k));
+    // A refresh you asked for takes YouTube's value back — never over an email you have.
+    const free = blank(k, current) || (prevAuto[k] !== undefined && same(k, current, prevAuto[k])) || (legacy && NUMERIC.has(k)) || (opts.force === true && k !== "contact_email");
     if (free) { patch[k] = value; auto[k] = String(value); }
     else if (!same(k, current, value)) kept.push(k);
   }
@@ -158,7 +161,7 @@ Deno.serve(async (req) => {
     for (const c of items) {
       try {
         const f = await channelFacts(c.link, new Date(), { includeRecent: input.recent === true });
-        results.push(f ? { id: c.id, ok: true, patch: patchFor(c, f) } : { id: c.id, ok: false, error: "Couldn't find that YouTube channel" });
+        results.push(f ? { id: c.id, ok: true, patch: patchFor(c, f, { force: input.force === true }) } : { id: c.id, ok: false, error: "Couldn't find that YouTube channel" });
       } catch (e) {
         if (e instanceof YouTubeQuota) return json({ results, error: "YouTube's daily limit is reached — the rest refresh after midnight Pacific time.", quota: true }, 429);
         results.push({ id: c.id, ok: false, error: e instanceof Error ? e.message : "YouTube didn't answer" });
