@@ -1,5 +1,5 @@
 import type { Activity, Brand, BrandContact, Campaign, Creator, InboundLead } from "../types";
-import type { Received, Segment, Sent } from "./outreach";
+import type { Received, Segment, Sent } from "./outreach.ts";
 
 // The numbers on the dashboard — one module, so every tile, chart and list
 // agrees, and every number can be opened to show exactly what it counted.

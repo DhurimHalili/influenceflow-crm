@@ -1,6 +1,6 @@
 import type { Brand, BrandContact, Creator, EmailEvent, Followup, InboundLead } from "../types";
-import { timeline, type Touch } from "./followupEngine";
-import { parseDay } from "./utils";
+import { timeline, type Touch } from "./followupEngine.ts";
+import { parseDay } from "./days.ts";
 
 // Everything you sent — and every reply you got — from every source, counted
 // once. The one log behind the dashboard, the daily chart, Reports and the

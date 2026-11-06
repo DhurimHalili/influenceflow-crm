@@ -10,6 +10,8 @@ import { ENTITY_STATUSES, STATUS_LABELS, type Creator, type EntityStatus, type P
 import { SocialBadge } from "./SocialIcon";
 import { CountryPicker } from "./CountryPicker";
 import { appendSocials, Fold, rowsToSocials, SecondaryEmailField, secondaryEmailError, socialRow, socialRowError, SocialsEditor, socialsToRows, useFolds, type SocialDraft } from "./FormKit";
+import { CriteriaCard, useCriteria } from "./Marks";
+import { judge } from "../lib/criteria";
 import type { RateCard, YouTubeFacts } from "../types";
 import { useYouTube, type ChannelFacts } from "../contexts/YouTubeContext";
 import { COUNTRIES } from "../lib/countries";
@@ -170,7 +172,7 @@ export function CreatorFields({ draft, setDraft, mode }: Props) {
     const niche = f.niche ? niches.find((n) => n.toLowerCase() === f.niche.toLowerCase()) || f.niche : "";
     const fresh: Partial<Record<AutoKey, string>> = { name: f.title, contact_email: f.emails[0] || "", country: countryNameOf(f.country), niche, ...(f.sampled ? { avg_views: String(f.avgViews), engagement_rate: String(f.engagementRate) } : {}) };
     const prevAuto = d.youtube?.auto || {};
-    const auto: Partial<Record<AutoKey, string>> = { ...prevAuto };
+    const auto: NonNullable<NonNullable<CreatorDraft["youtube"]>["auto"]> = { ...prevAuto };
     const LABEL: Record<AutoKey, string> = { name: "name", contact_email: "email", country: "country", niche: "niche", avg_views: "avg views", engagement_rate: "engagement" };
     for (const k of Object.keys(fresh) as AutoKey[]) {
       const value = fresh[k];
@@ -182,10 +184,14 @@ export function CreatorFields({ draft, setDraft, mode }: Props) {
     }
     next.guess = {};
     if (f.subscribers) filled.push("subscribers");
-    if (f.stars.engagement) next.stars_engagement = f.stars.engagement;
-    if (f.stars.consistency) next.stars_consistency = f.stars.consistency;
-    if (f.stars.demographics) next.stars_demographics = f.stars.demographics;
-    if (f.stars.engagement || f.stars.consistency || f.stars.demographics) filled.push("stars");
+    // Stars you never set (0) or YouTube's last suggestion are filled; stars you picked stay.
+    let starred = false;
+    for (const [k, value] of [["stars_engagement", f.stars.engagement], ["stars_consistency", f.stars.consistency], ["stars_demographics", f.stars.demographics]] as const) {
+      if (!(value > 0)) continue;
+      const current = Number(d[k]) || 0;
+      if (current === 0 || (prevAuto[k] !== undefined && Number(prevAuto[k]) === current)) { next[k] = value; auto[k] = String(value); starred = true; }
+    }
+    if (starred) filled.push("stars");
     next.youtube = { channel_id: f.channelId, handle: f.handle, title: f.title, url: f.url, country: f.country, subscribers: f.subscribers, hidden_subscribers: f.hiddenSubscribers, video_count: f.videoCount, total_views: f.totalViews, avg_views: f.avgViews, engagement_rate: f.engagementRate, sampled: f.sampled, uploads_90d: f.uploads90d, last_upload_at: f.lastUploadAt, emails: f.emails, business_email_hidden: f.businessEmailHidden, niche: f.niche, sub_niche: f.subNiche, includes_recent: f.includesRecent, sample: f.sample, at: f.at, auto, kept: [] };
     next.youtube_dirty = true;
     next.youtube_synced_at = f.at;
@@ -252,6 +258,7 @@ export function CreatorFields({ draft, setDraft, mode }: Props) {
       {!ytBusy && pasteNote && <p className={`cf-paste-note ${pasteNote.ok ? "ok" : "warn"}`}>{pasteNote.ok && <Check size={13} />}{pasteNote.text}</p>}
       {!ytBusy && ytFacts && ytFacts.businessEmailHidden && !draft.contact_email.trim() && <p className="cf-paste-note warn">No email in the channel description. YouTube may show one behind “View email address” — <a href={`${ytFacts.url}/about`} target="_blank" rel="noreferrer">open their About page <ExternalLink size={11} /></a></p>}
     </div>}
+    <DraftVerdict draft={draft} />
 
     <div className="form-grid cf-essentials">
       <div className="cf-auto"><Input label="Full name" value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} required autoFocus={mode === "add"} placeholder="Maya Chen" /><AutoHint field="name" draft={draft} setDraft={setDraft} /></div>
@@ -307,4 +314,14 @@ function AutoHint({ field, draft, setDraft }: { field: AutoKey; draft: CreatorDr
   }
   if (sameAuto(field, draft[field], auto)) return <span className="yt-hint yt" title="Refreshes with the channel until you change it"><i aria-hidden="true" />From YouTube · stays fresh</span>;
   return <span className="yt-hint mine" role="status"><i aria-hidden="true" />Your edit — YouTube won't change it{yours && !blankAuto(field, yours) ? <> <button type="button" onClick={() => setDraft({ ...draft, [field]: yours, youtube: { ...draft.youtube, auto: { ...(draft.youtube?.auto || {}), [field]: yours } }, youtube_dirty: true })}>Use YouTube's{field === "avg_views" ? ` (${compact(Number(yours))})` : field === "engagement_rate" ? ` (${yours}%)` : ""}</button></> : null}</span>;
+}
+
+/** Live check against your YouTube criteria while you add or edit (numbers you type count). */
+function DraftVerdict({ draft }: { draft: CreatorDraft }) {
+  const criteria = useCriteria();
+  const yt = draft.socials.find((r) => r.platform === "YouTube" && r.text.trim());
+  const subs = Number(draft.youtube?.subscribers) || Number(yt?.followers) || 0;
+  const verdict = judge({ views: Number(draft.avg_views) || 0, er: Number(draft.engagement_rate) || 0, subs, youtube: !!yt || !!draft.youtube?.channel_id }, criteria);
+  if (verdict.level === "none") return null;
+  return <div className="cf-verdict" aria-live="polite"><CriteriaCard verdict={verdict} /></div>;
 }

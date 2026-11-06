@@ -1,3 +1,4 @@
+import { normalizeCriteria } from "./criteria";
 import type { Currency, FollowupRules, PayoutModel, RateCard, WorkspacePreferences } from "../types";
 
 export const CURRENCIES: { value: Currency; label: string }[] = [
@@ -104,6 +105,9 @@ export const normalizePreferences = (value: unknown): WorkspacePreferences => {
     coach: v.coach !== false,
     youtube_auto: v.youtube_auto !== false,
     youtube_recent: v.youtube_recent === true,
+    youtube_criteria: normalizeCriteria(v.youtube_criteria),
+    weekly_report: v.weekly_report === "off" || v.weekly_report === "sunday" ? v.weekly_report : "monday",
+    timezone: typeof v.timezone === "string" && /^[A-Za-z_]+(?:\/[A-Za-z0-9_+\-]+){0,3}$/.test(v.timezone) && v.timezone.length <= 64 ? v.timezone : undefined,
   };
 };
 
