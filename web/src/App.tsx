@@ -6,6 +6,8 @@ import { DataProvider } from "./contexts/DataContext";
 import { ToastProvider } from "./contexts/ToastContext";
 import { UpdateWatcher } from "./components/UpdateWatcher";
 import { GmailProvider } from "./contexts/GmailContext";
+import { YouTubeProvider } from "./contexts/YouTubeContext";
+import { AccessProvider, AccessWaiting, useAccess } from "./contexts/AccessContext";
 
 const AppShell = lazy(() => import("./components/AppShell"));
 const LandingPage = lazy(() => import("./pages/PublicPages").then((module) => ({ default: module.LandingPage })));
@@ -16,6 +18,7 @@ const UpdatePasswordPage = lazy(() => import("./pages/PublicPages").then((module
 const LegalPage = lazy(() => import("./pages/PublicPages").then((module) => ({ default: module.LegalPage })));
 const HelpPage = lazy(() => import("./pages/PublicPages").then((module) => ({ default: module.HelpPage })));
 const DashboardPage = lazy(() => import("./pages/DashboardPage"));
+const MembersPage = lazy(() => import("./pages/MembersPage"));
 const ReportsPage = lazy(() => import("./pages/ReportsPage"));
 const LeadsPage = lazy(() => import("./pages/LeadsPage"));
 const InvoicesPage = lazy(() => import("./components/Money").then((m) => ({ default: m.InvoicesPage })));
@@ -44,6 +47,14 @@ function RequireAuth({ children }: { children: ReactNode }) {
   // (e.g. a URL opened the instant sign-out finishes) the page is never blank.
   if (!user)
     return <><Navigate to="/login" state={{ from: location }} replace /><LoginPage returnTo={location.pathname} /></>;
+  return <AccessProvider><AccessGate>{children}</AccessGate></AccessProvider>;
+}
+
+/** Private circle: only approved members get past this point. */
+function AccessGate({ children }: { children: ReactNode }) {
+  const { loaded, access } = useAccess();
+  if (!loaded) return <LoadingScreen />;
+  if (access !== "approved") return <AccessWaiting />;
   return children;
 }
 
@@ -58,6 +69,7 @@ export default function App() {
         <ToastProvider>
           <DataProvider>
             <GmailProvider>
+            <YouTubeProvider>
             <UpdateWatcher />
             <Suspense fallback={<LoadingScreen />}>
               <Routes>
@@ -84,6 +96,7 @@ export default function App() {
                   <Route path="invoices" element={<InvoicesPage />} />
                   <Route path="pitch" element={<PitchPage />} />
                   <Route path="settings" element={<SettingsPage />} />
+                  <Route path="members" element={<MembersPage />} />
                   <Route path="themes" element={<ThemesPage />} />
                   <Route path="deleted" element={<DeletedPage />} />
                   <Route path="help" element={<HelpPage embedded />} />
@@ -92,6 +105,7 @@ export default function App() {
                 <Route path="*" element={<NotFound />} />
               </Routes>
             </Suspense>
+            </YouTubeProvider>
             </GmailProvider>
           </DataProvider>
         </ToastProvider>

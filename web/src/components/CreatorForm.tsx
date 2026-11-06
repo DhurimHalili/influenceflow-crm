@@ -1,5 +1,5 @@
 import { ArchiveRestore, Check, ClipboardPaste, ExternalLink, RotateCcw, UserCheck, Wand2 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useData } from "../contexts/DataContext";
 import { useToast } from "../contexts/ToastContext";
@@ -10,7 +10,9 @@ import { ENTITY_STATUSES, STATUS_LABELS, type Creator, type EntityStatus, type P
 import { SocialBadge } from "./SocialIcon";
 import { CountryPicker } from "./CountryPicker";
 import { appendSocials, Fold, rowsToSocials, SecondaryEmailField, secondaryEmailError, socialRow, socialRowError, SocialsEditor, socialsToRows, useFolds, type SocialDraft } from "./FormKit";
-import type { RateCard } from "../types";
+import type { RateCard, YouTubeFacts } from "../types";
+import { useYouTube, type ChannelFacts } from "../contexts/YouTubeContext";
+import { COUNTRIES } from "../lib/countries";
 
 export { socialRow, socialRowError, type SocialDraft };
 import { Avatar, Input, Select, StarInput, Stars, Textarea } from "./ui";
@@ -27,6 +29,9 @@ export type CreatorDraft = {
   socials: SocialDraft[];
   /** Only set by imports that carry rate columns. */
   rates?: RateCard;
+  /** Filled by the YouTube quick fill: saved with the record, so it isn't read twice. */
+  youtube?: YouTubeFacts;
+  youtube_synced_at?: string;
 };
 
 export const emptyDraft: CreatorDraft = { name: "", contact_email: "", secondary_email: "", secondary_email_label: "", channel_link: "", niche: "", country: "", avg_views: "", engagement_rate: "", stars_consistency: 0, stars_demographics: 0, stars_niche: 0, stars_engagement: 0, priority: "none", next_action_date: "", platform: "YouTube", pipeline_status: "new", date_contacted: "", notes: "", next_action: "", socials: [] };
@@ -52,6 +57,7 @@ export const draftToCreator = (draft: CreatorDraft) => {
     platform: main ? asPlatform(main.platform) : draft.platform,
     // "New" means nobody reached out yet, so it never carries a contact date.
     pipeline_status: draft.pipeline_status, date_contacted: OUTREACH_STAGES.includes(draft.pipeline_status) ? draft.date_contacted || today() : null, notes: draft.notes, next_action: draft.next_action,
+    ...(draft.youtube_synced_at ? { youtube: draft.youtube, youtube_synced_at: draft.youtube_synced_at } : {}),
   };
 };
 
@@ -119,6 +125,40 @@ export function CreatorFields({ draft, setDraft, mode }: Props) {
   const [pasteText, setPasteText] = useState("");
   const [pasteNote, setPasteNote] = useState<{ ok: boolean; text: string } | null>(null);
   const [handleChoice, setHandleChoice] = useState("");
+  // ----- YouTube quick fill: the channel's numbers, country, email and suggested stars.
+  const yt = useYouTube();
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+  const [ytBusy, setYtBusy] = useState(false);
+  const [ytFacts, setYtFacts] = useState<ChannelFacts | null>(null);
+  const fillFromYouTube = async (link: string) => {
+    if (!yt.enabled || !link) return;
+    setYtBusy(true);
+    const res = await yt.lookup(link);
+    setYtBusy(false);
+    if (!res.facts) { setPasteNote({ ok: false, text: res.error || "Couldn't read that YouTube channel — fill the numbers in by hand." }); return; }
+    const f = res.facts;
+    // Read from the latest draft: anything typed while YouTube answered is kept.
+    const d = draftRef.current;
+    const firstYt = d.socials.findIndex((r) => r.platform === "YouTube");
+    const country = COUNTRIES.find((c) => c.code === f.country)?.name || "";
+    const filled: string[] = [];
+    const next: CreatorDraft = { ...d, socials: d.socials.map((r, i) => (i === firstYt && f.subscribers ? { ...r, followers: String(f.subscribers) } : r)) };
+    if (!d.name.trim() && f.title) { next.name = f.title; filled.push("name"); }
+    if (!d.country.trim() && country) { next.country = country; filled.push("country"); }
+    if (!d.contact_email.trim() && f.emails[0]) { next.contact_email = f.emails[0]; filled.push("email"); }
+    if (f.sampled) { next.avg_views = String(f.avgViews); next.engagement_rate = String(f.engagementRate); filled.push("avg views", "engagement"); }
+    if (f.subscribers) filled.push("subscribers");
+    if (f.stars.engagement) next.stars_engagement = f.stars.engagement;
+    if (f.stars.consistency) next.stars_consistency = f.stars.consistency;
+    if (f.stars.demographics) next.stars_demographics = f.stars.demographics;
+    if (f.stars.engagement || f.stars.consistency || f.stars.demographics) filled.push("stars");
+    next.youtube = { channel_id: f.channelId, handle: f.handle, title: f.title, url: f.url, country: f.country, subscribers: f.subscribers, hidden_subscribers: f.hiddenSubscribers, video_count: f.videoCount, total_views: f.totalViews, avg_views: f.avgViews, engagement_rate: f.engagementRate, sampled: f.sampled, uploads_90d: f.uploads90d, last_upload_at: f.lastUploadAt, emails: f.emails, business_email_hidden: f.businessEmailHidden, at: f.at };
+    next.youtube_synced_at = f.at;
+    setDraft(next);
+    setYtFacts(f);
+    setPasteNote({ ok: true, text: `From YouTube: ${filled.join(", ")} — check and change anything you like` });
+  };
   const applyPaste = (text: string) => {
     const found = extractFromText(text);
     const bareHandle = !found.socials.length && /^@?[\w.]{2,40}$/.test(text.trim()) ? text.trim().replace(/^@/, "") : found.handles[0] && !found.socials.length ? found.handles[0] : "";
@@ -136,6 +176,8 @@ export function CreatorFields({ draft, setDraft, mode }: Props) {
     setPasteText("");
     setHandleChoice("");
     setPasteNote(filled.length ? { ok: true, text: `Added ${filled.join(", ")}` } : { ok: false, text: "Those profiles are already on this record." });
+    const ytLink = found.socials.find((x) => x.platform === "YouTube");
+    if (ytLink) void fillFromYouTube(ytLink.url);
   };
   const chooseHandle = (platform: SocialPlatform) => {
     const row = socialRow(platform, `@${handleChoice}`);
@@ -146,6 +188,7 @@ export function CreatorFields({ draft, setDraft, mode }: Props) {
     setHandleChoice("");
     setPasteText("");
     setPasteNote({ ok: true, text: note });
+    if (platform === "YouTube") void fillFromYouTube(`@${handleChoice}`);
   };
 
   // ----- summaries for folded sections
@@ -171,7 +214,9 @@ export function CreatorFields({ draft, setDraft, mode }: Props) {
         {pasteText.trim() && <button type="button" onClick={() => applyPaste(pasteText)}><ClipboardPaste size={14} /> Fill</button>}
       </label>
       {handleChoice && <div className="cf-handle-choice"><span>Which network is <b>@{handleChoice}</b> on?</span>{SOCIAL_ORDER.filter((p) => p !== "Website" && p !== "WhatsApp").slice(0, 8).map((p) => <button type="button" key={p} onClick={() => chooseHandle(p)} style={{ ["--tone" as string]: SOCIAL_META[p].color }}><SocialBadge platform={p} size={18} /> {SOCIAL_META[p].label}</button>)}</div>}
-      {pasteNote && <p className={`cf-paste-note ${pasteNote.ok ? "ok" : "warn"}`}>{pasteNote.ok && <Check size={13} />}{pasteNote.text}</p>}
+      {ytBusy && <p className="cf-paste-note busy" role="status"><span className="cf-spin" aria-hidden="true" /> Reading the YouTube channel — last 12 videos, engagement, country…</p>}
+      {!ytBusy && pasteNote && <p className={`cf-paste-note ${pasteNote.ok ? "ok" : "warn"}`}>{pasteNote.ok && <Check size={13} />}{pasteNote.text}</p>}
+      {!ytBusy && ytFacts && ytFacts.businessEmailHidden && !draft.contact_email.trim() && <p className="cf-paste-note warn">No email in the channel description. YouTube may show one behind “View email address” — <a href={`${ytFacts.url}/about`} target="_blank" rel="noreferrer">open their About page <ExternalLink size={11} /></a></p>}
     </div>}
 
     <div className="form-grid cf-essentials">

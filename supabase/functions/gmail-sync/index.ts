@@ -819,7 +819,7 @@ async function syncMailbox(admin: Admin, row: TokenRow, own: Set<string>, book: 
   //     tracking check instead).
   const prevCoverage = readCoverage(row.coverage);
   const checkedBefore = new Set(prevCoverage.untracked.map((u) => u.id));
-  const sweep = Date.now() < deadline - 50_000 ? await listIds(token, `in:sent newer_than:${COVERAGE_DAYS}d`, 3).catch(() => null) : null;
+  const sweep = Date.now() < deadline - 10_000 ? await listIds(token, `in:sent newer_than:${COVERAGE_DAYS}d`, 3).catch(() => null) : null;
   for (const id of sweep || []) if (!checkedBefore.has(id)) ids.add(id);
 
   // 4. Skip messages already stored, read the rest (headers only), match them.
@@ -1086,6 +1086,9 @@ Deno.serve(async (req) => {
   const { data: userData, error: userError } = await createClient(supabaseUrl, Deno.env.get("SUPABASE_ANON_KEY")!, { global: { headers: { Authorization: auth } } }).auth.getUser();
   if (userError || !userData.user) return json({ error: "Unauthorized" }, 401);
   const userId = userData.user.id;
+  // Private circle: only approved members use Gmail through the CRM.
+  const { data: member } = await admin.from("profiles").select("access").eq("id", userId).maybeSingle();
+  if (member && member.access && member.access !== "approved") return json({ error: "Your access is waiting for the owner's approval.", code: "not_approved" }, 403);
   const { data } = await admin.from("gmail_tokens").select("*").eq("user_id", userId).order("connected_at", { ascending: true, nullsFirst: true }).limit(MAX_MAILBOXES);
   const rows = (data || []) as TokenRow[];
   const first = rows[0];

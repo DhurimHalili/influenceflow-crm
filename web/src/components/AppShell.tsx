@@ -1,7 +1,7 @@
 import { AnimatePresence, motion } from "framer-motion";
 import {
   Archive, BarChart3, Building2, CalendarDays, Check, ChevronRight, CircleDollarSign, Clock3, Cloud, CloudOff, Command, HelpCircle, Inbox, LoaderCircle,
-  Keyboard, LayoutDashboard, LifeBuoy, LogOut, Menu, MessageCircle, MonitorX, Moon, Palette, Plus, Search, SearchX, Settings, ShieldCheck, Sun,
+  Keyboard, LayoutDashboard, LifeBuoy, LogOut, UserCheck, Menu, MessageCircle, MonitorX, Moon, Palette, Plus, Search, SearchX, Settings, ShieldCheck, Sun,
   Sparkles, TrendingUp, UserX, Users, Wallet, X,
   Receipt,
 } from "lucide-react";
@@ -9,6 +9,8 @@ import { useInvoicesToChase } from "./Money";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
+import { useAccess } from "../contexts/AccessContext";
+import { supabase } from "../lib/supabase";
 import { useData } from "../contexts/DataContext";
 import { useGmail } from "../contexts/GmailContext";
 import { useToast } from "../contexts/ToastContext";
@@ -16,6 +18,7 @@ import { Avatar, Button, Logo, LogoMark, Modal } from "./ui";
 import { useChase } from "../hooks/useChase";
 import { useLeadActions } from "../hooks/useLeadActions";
 import { CoachLayer, CoachRing } from "./Coach";
+import { YouTubeProgress } from "./YouTubeStats";
 import { isPastDay, isTodayDay, LOSS_REASONS } from "../lib/utils";
 import type { SearchResult, ThemeName } from "../types";
 
@@ -41,6 +44,7 @@ const navSections = [
   { label: "Workspace", items: [
     { to: "/app/themes", label: "Themes", icon: Palette },
     { to: "/app/settings", label: "Settings", icon: Settings },
+    { to: "/app/members", label: "Members", icon: UserCheck, owner: true },
     { to: "/app/help", label: "Help center", icon: LifeBuoy },
     { to: "/app/deleted", label: "Archive", icon: Archive },
   ] },
@@ -62,6 +66,16 @@ export default function AppShell() {
   const invoicesDue = useInvoicesToChase().length;
   const { toast } = useToast();
   const navigate = useNavigate();
+  const { isOwner } = useAccess();
+  // The owner sees how many sign-ups are waiting for approval.
+  const [waitingMembers, setWaitingMembers] = useState(0);
+  useEffect(() => {
+    if (!isOwner) return;
+    const check = () => void supabase.rpc("admin_members").then(({ data }) => setWaitingMembers(((data || []) as { access: string }[]).filter((m) => m.access === "pending").length));
+    check();
+    const id = window.setInterval(check, 120_000);
+    return () => window.clearInterval(id);
+  }, [isOwner]);
   const location = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -285,7 +299,7 @@ export default function AppShell() {
       <div className="sidebar-top"><Logo /><button className="mobile-close" onClick={() => setMobileOpen(false)}><X size={19} /></button></div>
       <nav className="side-nav">
         {navSections.map((section) => (
-          <div className="nav-section" key={section.label}><span className="nav-label">{section.label}</span>{section.items.map((item) => <NavLink key={item.to} to={item.to} end={"end" in item ? item.end : false} className={({ isActive }) => isActive ? "active" : ""}><item.icon size={17} strokeWidth={1.8} /><span>{item.label}</span>{item.label === "Calendar" && dueToday > 0 && <b className="nav-due" title={`${dueToday} due today or overdue`}>{dueToday}</b>}{(item.label === "Influencers" || item.label === "Brands") && (() => { const kind = item.label === "Influencers" ? "creator" : "brand"; const n = chase.due.filter((c) => c.type === kind).length + chase.reply.filter((c) => c.type === kind).length; return n > 0 ? <b className="nav-due nav-follow" title={`${n} need a follow-up or a reply`}>{n}</b> : null; })()}{item.label === "Invoices" && invoicesDue > 0 && <b className="nav-due" title={`${invoicesDue} invoice${invoicesDue === 1 ? "" : "s"} to chase today`}>{invoicesDue}</b>}{item.label === "Inbound leads" && newLeads > 0 && <b className="nav-due nav-leads" title={`${newLeads} new inbound lead${newLeads === 1 ? "" : "s"} to review`}>{newLeads}</b>}{item.label === "Archive" && <b>{data.creators.filter((x) => x.archived_at).length + data.brands.filter((x) => x.archived_at).length + data.campaigns.filter((x) => x.archived_at).length || ""}</b>}</NavLink>)}</div>
+          <div className="nav-section" key={section.label}><span className="nav-label">{section.label}</span>{section.items.filter((item) => !("owner" in item) || isOwner).map((item) => <NavLink key={item.to} to={item.to} end={"end" in item ? item.end : false} className={({ isActive }) => isActive ? "active" : ""}><item.icon size={17} strokeWidth={1.8} /><span>{item.label}</span>{item.label === "Calendar" && dueToday > 0 && <b className="nav-due" title={`${dueToday} due today or overdue`}>{dueToday}</b>}{(item.label === "Influencers" || item.label === "Brands") && (() => { const kind = item.label === "Influencers" ? "creator" : "brand"; const n = chase.due.filter((c) => c.type === kind).length + chase.reply.filter((c) => c.type === kind).length; return n > 0 ? <b className="nav-due nav-follow" title={`${n} need a follow-up or a reply`}>{n}</b> : null; })()}{item.label === "Invoices" && invoicesDue > 0 && <b className="nav-due" title={`${invoicesDue} invoice${invoicesDue === 1 ? "" : "s"} to chase today`}>{invoicesDue}</b>}{item.label === "Inbound leads" && newLeads > 0 && <b className="nav-due nav-leads" title={`${newLeads} new inbound lead${newLeads === 1 ? "" : "s"} to review`}>{newLeads}</b>}{item.label === "Members" && waitingMembers > 0 && <b className="nav-due nav-leads" title={`${waitingMembers} ${waitingMembers === 1 ? "person is" : "people are"} waiting for your approval`}>{waitingMembers}</b>}{item.label === "Archive" && <b>{data.creators.filter((x) => x.archived_at).length + data.brands.filter((x) => x.archived_at).length + data.campaigns.filter((x) => x.archived_at).length || ""}</b>}</NavLink>)}</div>
         ))}
       </nav>
       <div className="user-footer">
@@ -392,6 +406,7 @@ export default function AppShell() {
         <div className="modal-actions">{onboardingStep > 0 && <Button variant="ghost" onClick={() => setOnboardingStep((step) => step - 1)}>Back</Button>}<Button onClick={() => onboardingStep < 2 ? setOnboardingStep((step) => step + 1) : completeOnboarding()} disabled={onboardingStep === 1 && !displayName.trim()}>{onboardingStep === 2 ? "Open my workspace" : onboardingStep === 0 ? "Let's build it" : "Continue"}<ChevronRight size={16} /></Button></div>
       </Modal>
     <CoachLayer />
+    <YouTubeProgress />
     </div>
   );
 }

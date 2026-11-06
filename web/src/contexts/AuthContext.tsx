@@ -3,7 +3,7 @@ import type { Session, User } from "@supabase/supabase-js";
 import { authRedirectUrl, hasSupabase, pendingAuthRedirect, supabase } from "../lib/supabase";
 import { clearSessionState } from "../hooks/useSessionState";
 
-export type AuthResult = { error: string | null; code?: "invalid_credentials" | "locked" | "network" | "not_confirmed" | "exists" | "rate_limited" | "invalid_email" | "other"; attemptsLeft?: number };
+export type AuthResult = { error: string | null; code?: "invalid_credentials" | "locked" | "network" | "not_confirmed" | "exists" | "rate_limited" | "invalid_email" | "pending" | "revoked" | "other"; attemptsLeft?: number };
 
 type AuthContextValue = {
   user: User | null;
@@ -70,6 +70,9 @@ const isNetworkError = (message: string) => /failed to fetch|network|load failed
 // Turns Supabase's terse errors into something a person can act on.
 const friendly = (message: string, status?: number): AuthResult => {
   const m = message || "";
+  // The access hook (private circle): the server's own words say exactly what's going on.
+  if (/waiting for the owner/i.test(m)) return { error: "Your request to join is in. The owner approves every member by hand — you'll get an email as soon as you're in.", code: "pending" };
+  if (/access to this crm was removed/i.test(m)) return { error: "Your access to this CRM was removed. Ask the owner if you think this is a mistake.", code: "revoked" };
   if (isNetworkError(m)) return { error: "Can't reach the server. Check your internet connection and try again.", code: "network" };
   if (/invalid login credentials/i.test(m)) return { error: "That email and password don't match an account. Check for typos (or a different email you signed up with), or reset your password.", code: "invalid_credentials" };
   if (/email not confirmed/i.test(m)) return { error: "This email isn't confirmed yet. Open the confirmation email we sent, then sign in.", code: "not_confirmed" };

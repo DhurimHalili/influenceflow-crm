@@ -48,6 +48,7 @@ export const DEFAULT_PREFERENCES: WorkspacePreferences = {
   start_page: "dashboard",
   daily_email_goal: 50,
   coach: true,
+  youtube_auto: true,
 };
 
 export const EMPTY_RATES: RateCard = { video: 0, extended: 0, dedicated: 0, bundle: 0, short: 0, post: 0, carousel: 0, story: 0, stream: 0, podcast: 0, ugc: 0, link_in_bio: 0, usage_rights: 0, exclusivity: 0 };
@@ -101,6 +102,7 @@ export const normalizePreferences = (value: unknown): WorkspacePreferences => {
     start_page: v.start_page === "influencers" || v.start_page === "calendar" ? v.start_page : "dashboard",
     daily_email_goal: Number.isFinite(Number(v.daily_email_goal)) && Number(v.daily_email_goal) >= 5 && Number(v.daily_email_goal) <= 500 ? Math.round(Number(v.daily_email_goal)) : 50,
     coach: v.coach !== false,
+    youtube_auto: v.youtube_auto !== false,
   };
 };
 
