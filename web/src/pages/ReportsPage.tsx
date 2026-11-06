@@ -5,6 +5,7 @@ import { Link } from "react-router-dom";
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Metric, PageHeader, Tabs } from "../components/ui";
 import { WeeklyReportButton } from "../components/WeeklyReport";
+import { MailboxName, mailboxTone } from "../components/MailboxBits";
 import { useData } from "../contexts/DataContext";
 import { useGmail } from "../contexts/GmailContext";
 import { useSessionState } from "../hooks/useSessionState";
@@ -44,9 +45,18 @@ export default function ReportsPage() {
   const gmail = useGmail();
   const [range, setRange] = useSessionState("reports.range", "90");
   const [who, setWho] = useSessionState("reports.who", "creator");
+  const [boxPick, setBox] = useSessionState("reports.mailbox", "");
   const rules = data.profile.preferences?.followup_rules || DEFAULT_FOLLOWUP_RULES;
   const from = range === "all" ? 0 : Date.now() - Number(range) * 86400000;
 
+  // Your mailboxes, busiest first (connected ones and any that show up in your mail).
+  const mailboxes = useMemo(() => {
+    const n = new Map<string, number>();
+    for (const e of data.emailEvents || []) if (e.mailbox && e.direction === "out") n.set(e.mailbox.toLowerCase(), (n.get(e.mailbox.toLowerCase()) || 0) + 1);
+    for (const m of gmail.mailboxes) if (!n.has(m.email.toLowerCase())) n.set(m.email.toLowerCase(), 0);
+    return [...n.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([m]) => m);
+  }, [data.emailEvents, gmail.mailboxes]);
+  const box = mailboxes.includes(boxPick) ? boxPick : "";
   const report = useMemo(() => {
     const events = data.emailEvents || [];
     const acts = new Map<string, Activity[]>();
@@ -58,7 +68,7 @@ export default function ReportsPage() {
       ...data.creators.filter((c) => !c.archived_at).map((c) => ({ type: "creator" as const, record: c, niche: c.niche || "No niche", country: c.country || "Not set" })),
       ...data.brands.filter((b) => !b.archived_at).map((b) => ({ type: "brand" as const, record: b, niche: b.brand_type || "No industry", country: (b.brief?.markets || [])[0] || "Not set" })),
     ];
-    const people = items.map((item) => {
+    const all = items.map((item) => {
       // An out-of-office or a management auto-decline isn't a reply.
       const all = timeline({ type: item.type, record: item.record as Creator }, data.followups, events);
       const managedNo = all.some((t) => t.dir === "in" && t.kind === "managed_no");
@@ -81,7 +91,8 @@ export default function ReportsPage() {
       const wonAct = history.filter((a) => rankFromText(a.text) === 4).map((a) => a.at).sort()[0];
       const wonAt = rank === 4 ? wonAct || item.record.status_updated_at : null;
       const startAt = first?.at || null;
-      const mailbox = firstOut ? events.find((e) => e.entity_id === item.record.id && e.direction === "out" && e.at === firstOut.at)?.mailbox || "" : "";
+      // The mailbox that opened the conversation (or, for someone who wrote first, the one they wrote to).
+      const mailbox = ((firstOut ? events.find((e) => e.entity_id === item.record.id && e.direction === "out" && e.at === firstOut.at)?.mailbox : first?.mailbox) || "").toLowerCase();
       // How their first real answer read, which thread it came in, and whether they ever answered.
       // A record you moved on by hand (they answered on WhatsApp, a call…) has
       // no logged reply to read: its stage says how it went.
@@ -94,6 +105,8 @@ export default function ReportsPage() {
       const ghosted = !inbound && tone === null && !managedNo && !!lastOut && Date.now() - new Date(lastOut.at).getTime() > 7 * 86400000;
       return { ...item, first, firstOut, firstIn, inbound, outsBefore, rank, wonAt, startAt, mailbox, lost: lostNow, tone, managedNo, ghosted, threads: threadsStarted.length, replyInNewThread };
     }).filter((p) => p.startAt && new Date(p.startAt).getTime() >= from);
+    const homeOf = new Map(all.map((p) => [p.record.id, p.mailbox]));
+    const people = box ? all.filter((p) => p.mailbox === box) : all;
 
     const outreach = people.filter((p) => !p.inbound);
     const inbound = people.filter((p) => p.inbound);
@@ -149,7 +162,7 @@ export default function ReportsPage() {
 
     // Money: agreed deals (live or delivered) started — or created — in the
     // range. A deal still being negotiated isn't revenue yet; cancelled never is.
-    const agreed = data.campaigns.filter((c) => !c.archived_at && (c.status === "active" || c.status === "completed"));
+    const agreed = data.campaigns.filter((c) => !c.archived_at && (c.status === "active" || c.status === "completed") && (!box || homeOf.get(c.brand_id || "") === box));
     const campaigns = agreed.filter((c) => new Date(c.start_date || c.created_at).getTime() >= from);
     const months = new Map<string, { name: string; Revenue: number; Profit: number }>();
     for (let i = 0; i < 12; i++) {
@@ -173,8 +186,8 @@ export default function ReportsPage() {
       brandRows.set(name, row);
     }
 
-    const boxes = mailboxStats(events, gmail.leads, gmail.mailboxes.map((m) => m.email), range === "all" ? null : Number(range)).map((s) => ({ ...s, won: cohort.filter((p) => p.mailbox.toLowerCase() === s.mailbox && p.rank >= 4).length }));
-    const leadsIn = gmail.leads.filter((l) => new Date(l.first_at).getTime() >= from && (who === "creator" ? l.kind === "creator" : l.kind !== "creator"));
+    const boxes = mailboxStats(events, gmail.leads, gmail.mailboxes.map((m) => m.email), range === "all" ? null : Number(range)).map((s) => ({ ...s, won: side(all.filter((p) => !p.inbound)).filter((p) => p.mailbox === s.mailbox && p.rank >= 4).length }));
+    const leadsIn = gmail.leads.filter((l) => new Date(l.first_at).getTime() >= from && (who === "creator" ? l.kind === "creator" : l.kind !== "creator") && (!box || l.mailbox.toLowerCase() === box));
 
     return {
       funnel,
@@ -204,7 +217,7 @@ export default function ReportsPage() {
       boxes,
       gmail: events.length > 0,
     };
-  }, [data.creators, data.brands, data.campaigns, data.followups, data.emailEvents, data.activities, gmail.leads, gmail.mailboxes, from, rules, who, range]);
+  }, [data.creators, data.brands, data.campaigns, data.followups, data.emailEvents, data.activities, gmail.leads, gmail.mailboxes, from, rules, who, range, box]);
 
   const top = report.funnel[0].value;
   const conversion = pct(report.wonCount, report.contacted);
@@ -213,6 +226,12 @@ export default function ReportsPage() {
 
   return <div className="reports-page">
     <PageHeader eyebrow="Insights" title="Reports" description="From first email to signed deal — what converts, how fast, and where the money comes from." actions={<><WeeklyReportButton /><Tabs active={range} onChange={setRange} tabs={RANGES} /></>} />
+
+    {mailboxes.length > 1 && <div className="ob-boxes report-boxes" role="radiogroup" aria-label="Show reports for a mailbox">
+      <button type="button" role="radio" aria-checked={!box} className={!box ? "on" : ""} onClick={() => setBox("")}><Inbox size={13} /> All mailboxes <b>{mailboxes.length}</b></button>
+      {mailboxes.map((m, i) => <button type="button" key={m} role="radio" aria-checked={box === m} className={`mbx-${mailboxTone(i)}${box === m ? " on" : ""}`} onClick={() => setBox(box === m ? "" : m)} title={`Only the people ${m} emailed first`}><i className="mbx-dot" aria-hidden="true" /><MailboxName email={m} /></button>)}
+    </div>}
+    {box && <p className="ob-scope"><span className={`mbx-${mailboxTone(mailboxes.indexOf(box))}`}><i className="mbx-dot" aria-hidden="true" /></span><span>Only the people <b>{box}</b> emailed first (or who wrote to it first) — their replies, deals and money. The mailbox table below still compares every mailbox.</span><button type="button" onClick={() => setBox("")}>Show all mailboxes</button></p>}
 
     <section className="dash-panel funnel-hero">
       <div className="funnel-hero-head">
@@ -255,7 +274,7 @@ export default function ReportsPage() {
         {report.lossReasons.length > 0 && <div className="loss-bars">{report.lossReasons.slice(0, 4).map(([r, n]) => <div key={r}><span>{lossReasonLabel(r)}</span><i><em style={{ width: `${pct(n, report.losses)}%` }} /></i><b>{n}</b></div>)}</div>}
       </div>
 
-      {report.boxes.length > 0 && <div className="dash-panel report-table wide mailbox-report"><div className="panel-heading"><div><span>Gmail · {range === "all" ? "all time" : `last ${RANGES.find((r) => r.value === range)?.label.toLowerCase()}`}</span><h2>Your mailboxes</h2></div><Link to="/app/settings#gmail">Manage</Link></div><table><thead><tr><th>Mailbox</th><th title="Every email that went out from this mailbox in the range — first emails, follow-ups and answers, each message once">Emails sent</th><th>People reached</th><th>Reply rate</th><th>{who === "creator" ? "Roster" : "Signed"} from it</th><th>Inbound leads</th></tr></thead><tbody>{report.boxes.map((b, i) => <tr key={b.mailbox}><td><span className="mbx-cell">{i === 0 && b.sent > 0 && report.boxes.length > 1 && <Trophy size={12} />}{b.mailbox}</span></td><td><b>{b.sent}</b></td><td>{b.reached}</td><td><span className="rate-bar"><i style={{ width: `${b.replyRate}%` }} />{b.reached ? `${b.replyRate}%` : "—"}</span></td><td>{b.won}</td><td>{b.leads}</td></tr>)}</tbody></table></div>}
+      {report.boxes.length > 0 && <div className="dash-panel report-table wide mailbox-report"><div className="panel-heading"><div><span>Gmail · {range === "all" ? "all time" : `last ${RANGES.find((r) => r.value === range)?.label.toLowerCase()}`}</span><h2>Your mailboxes</h2></div><Link to="/app/settings#gmail">Manage</Link></div><table><thead><tr><th>Mailbox</th><th title="Every email that went out from this mailbox in the range — first emails, follow-ups and answers, each message once">Emails sent</th><th>People reached</th><th>Reply rate</th><th>{who === "creator" ? "Roster" : "Signed"} from it</th><th>Inbound leads</th></tr></thead><tbody>{report.boxes.map((b, i) => { const tone = mailboxTone(mailboxes.indexOf(b.mailbox)); const topSent = Math.max(1, ...report.boxes.map((x) => x.sent)); const peak = Math.max(1, ...b.daily); return <tr key={b.mailbox} className={`mbx-${tone}${box === b.mailbox ? " is-picked" : ""}`}><td><button type="button" className="mbx-cell" onClick={() => setBox(box === b.mailbox ? "" : b.mailbox)} title={box === b.mailbox ? "Show all mailboxes" : `Show only ${b.mailbox}`}><i className="mbx-dot" aria-hidden="true" /><MailboxName email={b.mailbox} />{i === 0 && b.sent > 0 && report.boxes.length > 1 && <Trophy size={12} className="mbx-top" />}</button></td><td><span className="mbx-sent"><b>{b.sent}</b><i aria-hidden="true"><em style={{ width: `${(b.sent / topSent) * 100}%` }} /></i><span className="mbx-spark" aria-hidden="true">{b.daily.slice(-14).map((n, k) => <i key={k} style={{ height: `${Math.max(8, (n / peak) * 100)}%`, opacity: n ? 1 : 0.25 }} />)}</span></span></td><td>{b.reached}</td><td><span className="rate-bar"><i style={{ width: `${b.replyRate}%` }} />{b.reached ? `${b.replyRate}%` : "—"}</span></td><td>{b.won}</td><td>{b.leads}</td></tr>; })}</tbody></table></div>}
 
       <BestTimeCard />
       <div className="dash-panel wide"><div className="panel-heading"><div><span>Money</span><h2>Revenue & profit · 12 months</h2></div><BarChart3 size={16} /></div><div className="report-chart"><ResponsiveContainer width="100%" height="100%"><BarChart data={report.months} margin={{ top: 10, right: 8, left: 0, bottom: 0 }}><CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--line)" /><XAxis dataKey="name" tick={{ fontSize: 11, fill: "var(--muted)" }} axisLine={false} tickLine={false} /><YAxis tick={{ fontSize: 11, fill: "var(--muted)" }} axisLine={false} tickLine={false} tickFormatter={(v) => (v >= 1000 ? `${Math.round(v / 1000)}k` : String(v))} /><Tooltip formatter={(v) => money(Number(v))} cursor={{ fill: "var(--surface-alt)" }} contentStyle={{ borderRadius: 10, border: "1px solid var(--line)", background: "var(--surface-solid)" }} /><Legend wrapperStyle={{ fontSize: 12 }} /><Bar dataKey="Revenue" fill="color-mix(in srgb, var(--accent) 35%, var(--line))" radius={[6, 6, 0, 0]} /><Bar dataKey="Profit" fill="var(--success)" radius={[6, 6, 0, 0]} /></BarChart></ResponsiveContainer></div></div>

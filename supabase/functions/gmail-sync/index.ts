@@ -1,7 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { isSealed, openToken, sealToken } from "../_shared/googleTokens.ts";
-import { aiChain, aiEnabled, aiKeyCount, aiModel, aiProvider, aiReadyAt, classifyLead, testAi, useKeyStore } from "../_shared/ai.ts";
+import { aiChain, aiEnabled, aiKeyCount, aiModel, aiProvider, aiReadyAt, classifyLead, planImport, QuotaExhausted, testAi, useKeyStore } from "../_shared/ai.ts";
 import { decodeEntities, isWarmup, precheck, scanForLead, type Lead, type ScanInput } from "../_shared/leadScanner.ts";
 import { classifyIncoming, myReplyIntent, referralOf, type IncomingKind, type TeamRole } from "../_shared/replyReader.ts";
 import { analyzeStoredFile, bodyOf, drainQueue, gmailAttachment, processCreatorMail, processMyMail, sniff, type Fetcher, type FullMessage } from "./intel.ts";
@@ -1492,6 +1492,24 @@ Deno.serve(async (req) => {
     if (!first) return json({ configured, connected: false, mailboxes, ...ai });
     // Top-level fields describe the first mailbox (older app versions read them).
     return json({ configured, connected: true, ...publicMailbox(first), mailboxes, maxMailboxes: MAX_MAILBOXES, ...ai });
+  }
+
+  if (action === "import_assist") {
+    // Spreadsheet import: only headers, a few masked sample values and status
+    // words come in; the answer is checked against the CRM's own field list.
+    if (!aiEnabled()) return json({ error: "AI isn't set up on the server.", code: "no_ai" }, 503);
+    const kind = input.kind === "brand" ? "brand" : "creator";
+    const text = (v: unknown, max: number) => String(v ?? "").replace(/[\u0000-\u001f]/g, " ").slice(0, max);
+    const headers = (Array.isArray(input.headers) ? input.headers : []).slice(0, 60).map((h) => text(h, 60));
+    const columns = (Array.isArray(input.columns) ? input.columns : []).slice(0, 40).map((c) => (c && typeof c === "object" ? c as Record<string, unknown> : {})).filter((c) => Number.isInteger(c.index) && Number(c.index) >= 0 && Number(c.index) < 500).map((c) => ({ index: Number(c.index), header: text(c.header, 60), samples: (Array.isArray(c.samples) ? c.samples : []).slice(0, 4).map((v) => text(v, 60)) }));
+    const statuses = (Array.isArray(input.statuses) ? input.statuses : []).slice(0, 40).map((v) => text(v, 60)).filter(Boolean);
+    if (!columns.length && !statuses.length) return json({ ok: true, columns: [], statuses: [] });
+    try {
+      const plan = await planImport({ kind, headers, columns, statuses });
+      return plan ? json({ ok: true, ...plan }) : json({ error: "The AI couldn't read the sheet — the rules' plan is kept." }, 502);
+    } catch (e) {
+      return json({ error: e instanceof QuotaExhausted ? "Every AI provider is out of quota for now — the rules' plan is kept." : "The AI didn't answer — the rules' plan is kept." }, e instanceof QuotaExhausted ? 429 : 502);
+    }
   }
 
   if (action === "ai_test") {

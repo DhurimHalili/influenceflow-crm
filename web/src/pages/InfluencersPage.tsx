@@ -1,9 +1,10 @@
 import Papa from "papaparse";
-import { Archive, ArrowDownAZ, BadgeCheck, CircleSlash, MailPlus, TriangleAlert, CalendarClock, CalendarX, Users, ClipboardCopy, FileText, Link2, ArrowLeft, ArrowRight, Columns3, Download, ExternalLink, FileSpreadsheet, Filter, Flag, Globe2, Inbox, LayoutGrid, List, Mail, Merge, Pencil, Plus, RotateCcw, Send, SlidersHorizontal, Sparkles, Star, Reply, Upload, X } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from "react";
+import { Archive, ArrowDownAZ, BadgeCheck, CircleSlash, MailPlus, TriangleAlert, CalendarClock, CalendarX, Users, ClipboardCopy, FileText, Link2, ArrowLeft, ArrowRight, Columns3, Download, ExternalLink, Filter, Flag, Globe2, Inbox, LayoutGrid, List, Mail, Merge, Pencil, Plus, RotateCcw, Send, SlidersHorizontal, Sparkles, Star, Reply, Upload, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { WriteEmail } from "../components/WriteEmail";
 import { KanbanBoard } from "../components/KanbanBoard";
+import { ImportReport, SmartImport, type ImportSummary } from "../components/SmartImport";
 import { ExportDialog } from "../components/ExportDialog";
 import { CREATOR_HEADERS, CREATOR_PRESETS, creatorRow } from "../lib/exports";
 import { cpm, EMPTY_RATES, RATE_FIELDS } from "../lib/prefs";
@@ -401,7 +402,7 @@ function CreatorCards({ creators, cyclePriority, setStatus }: { creators: Creato
 type ImportRow = CreatorDraft & { row: number; errors: string[]; duplicate: boolean };
 
 // Spreadsheet columns that hold one network's handle or link.
-const SOCIAL_COLUMNS: Record<string, SocialPlatform> = { instagram: "Instagram", ig: "Instagram", tiktok: "TikTok", tik_tok: "TikTok", youtube: "YouTube", yt: "YouTube", x: "X", twitter: "X", x_twitter: "X", twitch: "Twitch", kick: "Kick", linkedin: "LinkedIn", facebook: "Facebook", fb: "Facebook", snapchat: "Snapchat", pinterest: "Pinterest", threads: "Threads", website: "Website", link_in_bio: "Website" };
+const SOCIAL_COLUMNS: Record<string, SocialPlatform> = { instagram: "Instagram", ig: "Instagram", tiktok: "TikTok", tik_tok: "TikTok", youtube: "YouTube", yt: "YouTube", x: "X", twitter: "X", x_twitter: "X", twitch: "Twitch", kick: "Kick", linkedin: "LinkedIn", facebook: "Facebook", fb: "Facebook", snapchat: "Snapchat", pinterest: "Pinterest", threads: "Threads", whatsapp: "WhatsApp", website: "Website", link_in_bio: "Website" };
 
 // "Rate: integrated" → rate:_integrated; older exports wrote "Rate: video".
 const RATE_IMPORT: [keyof RateCard, string[]][] = RATE_FIELDS.map((f) => [f.key, [`rate:_${f.short.toLowerCase().replace(/[ /]+/g, "_")}`, `rate_${f.key}`, ...(f.key === "video" ? ["rate:_video", "rate:_integrated_video"] : [])]]);
@@ -413,11 +414,11 @@ const CREATOR_IMPORT_HEADERS = ["name", "full_name", "influencer", "creator", "e
 function ImportCreators({ open, onClose: close }: { open: boolean; onClose: () => void }) {
   const data = useData();
   const { toast } = useToast();
-  const [mode, setMode] = useState("paste");
-  const [text, setText] = useState("");
+  const youtube = useYouTube();
   const [rows, setRows] = useState<ImportRow[]>([]);
+  const [summary, setSummary] = useState<ImportSummary | null>(null);
   // Closing always discards an unconfirmed preview, so reopening starts fresh.
-  const onClose = () => { setRows([]); setText(""); close(); };
+  const onClose = () => { setRows([]); setSummary(null); close(); };
   const preview = (raw: string) => {
     const parsed = Papa.parse<string[]>(raw.trim(), { skipEmptyLines: true }).data;
     const hasHeader = looksLikeHeader(parsed[0], CREATOR_IMPORT_HEADERS);
@@ -483,10 +484,17 @@ function ImportCreators({ open, onClose: close }: { open: boolean; onClose: () =
     });
     setRows(next);
   };
-  const file = (event: ChangeEvent<HTMLInputElement>) => { const selected = event.target.files?.[0]; if (selected) selected.text().then(preview).catch(() => toast("Could not read that file", "error")); };
-  const confirm = () => { const valid = rows.filter((row) => !row.errors.length && !row.duplicate); data.addCreators(valid.map(({ row: _row, errors: _errors, duplicate: _duplicate, ...item }) => draftToCreator(item))); toast(`${valid.length} influencers imported. ${rows.length - valid.length} flagged rows skipped.`); setRows([]); setText(""); onClose(); };
+  const confirm = () => {
+    const valid = rows.filter((row) => !row.errors.length && !row.duplicate);
+    const ids = data.addCreators(valid.map(({ row: _row, errors: _errors, duplicate: _duplicate, ...item }) => draftToCreator(item)));
+    // Everyone with a YouTube channel gets read right away: real name, numbers, country, niche, a missing email.
+    const withChannel = ids.filter((_, i) => youtube.channelOf(draftSocials(valid[i])));
+    if (youtube.enabled && withChannel.length) window.setTimeout(() => void youtube.refresh(withChannel), 400);
+    toast(`${valid.length} influencer${valid.length === 1 ? "" : "s"} imported${rows.length - valid.length ? ` · ${rows.length - valid.length} flagged row${rows.length - valid.length === 1 ? "" : "s"} skipped` : ""}${youtube.enabled && withChannel.length ? ` · reading ${withChannel.length} YouTube channel${withChannel.length === 1 ? "" : "s"}` : ""}`);
+    setRows([]); setSummary(null); onClose();
+  };
   const template = () => download("influenceflow-influencer-template.csv", CSV_BOM + "Name,Email,Email 2,Email 2 is,Channel,Instagram,TikTok,X,Niche,Country,Platform,Avg views,Engagement %,Audience,Niche fit,Engagement stars,Consistency,Rate: integrated,Rate: dedicated,Rate: short,Priority,Status,Date contacted,Action due,Next action,Notes\nMaya Chen,maya@example.com,team@mayamgmt.com,Manager,https://youtube.com/@maya,@maya.chen,@mayachen,,Design,United States,YouTube,150000,8.4,4,5,4,5,2000,6000,800,Urgent,Contacted,2026-09-01,2026-09-05,Send intro,Add context here", "text/csv");
-  return <Modal open={open} onClose={onClose} title="Import influencers" description="Preview, validate, and deduplicate before records reach your pipeline." wide><div className="import-flow"><Tabs active={mode} onChange={setMode} tabs={[{ value: "paste", label: "Paste rows" }, { value: "file", label: "Upload CSV" }]} />{!rows.length ? <>{mode === "paste" ? <div className="paste-zone"><Textarea value={text} onChange={(event) => setText(event.target.value)} rows={9} placeholder={`Maya Chen, https://youtube.com/@maya\nTheo Brooks, theo@example.com, Travel\nNora James, nora@example.com, Wellness, TikTok`} /><p>Accepted: Name + channel, or Name + email + niche. Extra links on a row become extra socials; columns named Instagram, TikTok, X, Twitch… are picked up too. Header rows are detected automatically.</p></div> : <label className="upload-zone"><FileSpreadsheet size={28} /><strong>Choose a CSV file</strong><span>CSV up to 5 MB. Nothing is imported before confirmation.</span><input type="file" accept=".csv,.tsv,.txt,text/csv,text/plain" onChange={file} /></label>}<button className="template-link" onClick={template}><Download size={14} /> Download CSV template</button><div className="modal-actions"><Button variant="ghost" onClick={onClose}>Cancel</Button>{mode === "paste" && <Button onClick={() => preview(text)} disabled={!text.trim()}>Preview rows</Button>}</div></> : <><div className="import-summary"><span><b>{rows.length}</b> parsed</span><span className="valid"><b>{rows.filter((row) => !row.errors.length && !row.duplicate).length}</b> ready</span><span className="invalid"><b>{rows.filter((row) => row.errors.length).length}</b> invalid</span><span className="duplicate"><b>{rows.filter((row) => row.duplicate).length}</b> duplicates</span></div><div className="import-table-wrap"><table className="import-table"><thead><tr><th>Row</th><th>Name</th><th>Email / socials</th><th>Niche</th><th>Result</th></tr></thead><tbody>{rows.map((row) => <tr key={row.row} className={row.errors.length || row.duplicate ? "row-invalid" : ""}><td>{row.row}</td><td>{row.name || "Missing"}</td><td>{row.contact_email || row.channel_link || "-"}{row.socials.length > 1 && <small className="import-socials"> +{row.socials.length - 1} more social{row.socials.length > 2 ? "s" : ""}</small>}</td><td>{row.niche || "-"}</td><td>{row.errors.length ? <span className="validation-error">{row.errors.join(", ")}</span> : row.duplicate ? <span className="validation-duplicate">Duplicate: review manually</span> : <span className="validation-valid">Ready</span>}</td></tr>)}</tbody></table></div><div className="modal-actions"><Button variant="ghost" onClick={() => setRows([])}>Back</Button><Button onClick={confirm} disabled={!rows.some((row) => !row.errors.length && !row.duplicate)}>Import {rows.filter((row) => !row.errors.length && !row.duplicate).length} valid rows</Button></div></>}</div></Modal>;
+  return <Modal open={open} onClose={onClose} title="Import influencers" description="Bring any sheet — Excel, Google Sheets or CSV, your own columns and words. You check the plan, nothing is imported until you confirm." wide><div className="import-flow"><div hidden={rows.length > 0}><SmartImport kind="creator" template={template} onReady={(csv, sum) => { setSummary(sum); preview(csv); }} /></div>{rows.length > 0 && <>{summary && <ImportReport summary={summary} youtube={rows.filter((row) => !row.errors.length && !row.duplicate && youtube.channelOf(draftSocials(row)) ).length} />}<div className="import-summary"><span><b>{rows.length}</b> parsed</span><span className="valid"><b>{rows.filter((row) => !row.errors.length && !row.duplicate).length}</b> ready</span><span className="invalid"><b>{rows.filter((row) => row.errors.length).length}</b> invalid</span><span className="duplicate"><b>{rows.filter((row) => row.duplicate).length}</b> duplicates</span></div><div className="import-table-wrap"><table className="import-table"><thead><tr><th>Row</th><th>Name</th><th>Email / socials</th><th>Status</th><th>Result</th></tr></thead><tbody>{rows.map((row) => <tr key={row.row} className={row.errors.length || row.duplicate ? "row-invalid" : ""}><td>{summary?.rowNumbers[row.row - 2] ?? row.row}</td><td>{row.name || "Missing"}</td><td>{row.contact_email || row.channel_link || "-"}{row.socials.length > 1 && <small className="import-socials"> +{row.socials.length - 1} more social{row.socials.length > 2 ? "s" : ""}</small>}</td><td><StatusBadge status={row.pipeline_status} /></td><td>{row.errors.length ? <span className="validation-error">{row.errors.join(", ")}</span> : row.duplicate ? <span className="validation-duplicate">Duplicate: review manually</span> : <span className="validation-valid">Ready</span>}</td></tr>)}</tbody></table></div><div className="modal-actions"><Button variant="ghost" onClick={() => setRows([])}>Back</Button><Button onClick={confirm} disabled={!rows.some((row) => !row.errors.length && !row.duplicate)}>Import {rows.filter((row) => !row.errors.length && !row.duplicate).length} valid rows</Button></div></>}</div></Modal>;
 }
 
 export function InfluencerDetailPage() {

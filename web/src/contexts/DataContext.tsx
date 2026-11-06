@@ -48,7 +48,8 @@ type DataContextValue = WorkspaceData & {
   resetWorkspace: () => void;
   addCreator: (value: NewCreator) => Creator;
   updateCreator: (id: string, value: Partial<Creator>, opts?: UpdateOpts) => void;
-  addCreators: (values: NewCreator[]) => number;
+  /** Adds them all at once; returns the new ids in order. */
+  addCreators: (values: NewCreator[]) => string[];
   findCreatorDuplicates: (name: string, link: string, ignoreId?: string, links?: string[]) => DuplicateMatch[];
   mergeCreators: (keepId: string, removeId: string, merged: Partial<Creator>) => void;
   addBrand: (value: NewBrand) => Brand;
@@ -569,7 +570,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       lost_at: null,
     }));
     setData((current) => addActivity({ ...current, creators: [...additions, ...current.creators] }, `${additions.length} influencers imported`, "system"));
-    return additions.length;
+    return additions.map((a) => a.id);
   };
 
   const queueLoss = (item: LossItem) =>
