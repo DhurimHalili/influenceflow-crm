@@ -26,6 +26,12 @@ type Who = "creator" | "brand";
 const replied = (r: { repliedLogged: number }) => r.repliedLogged;
 const RANGES = [{ value: "30", label: "30 days" }, { value: "90", label: "90 days" }, { value: "365", label: "12 months" }, { value: "all", label: "All time" }];
 const pct = (a: number, b: number) => (b ? Math.round((a / b) * 100) : 0);
+/** A headline rate: one decimal under 10%, so 4.5% and 4.9% don't both read "5%". */
+const rateText = (a: number, b: number) => {
+  if (!b) return "0";
+  const v = (a / b) * 100;
+  return v > 0 && v < 10 ? String(Math.round(v * 10) / 10) : String(Math.round(v));
+};
 const median = (values: number[]) => {
   if (!values.length) return 0;
   const s = [...values].sort((a, b) => a - b);
@@ -68,7 +74,7 @@ export default function ReportsPage() {
       ...data.creators.filter((c) => !c.archived_at).map((c) => ({ type: "creator" as const, record: c, niche: c.niche || "No niche", country: c.country || "Not set" })),
       ...data.brands.filter((b) => !b.archived_at).map((b) => ({ type: "brand" as const, record: b, niche: b.brand_type || "No industry", country: (b.brief?.markets || [])[0] || "Not set" })),
     ];
-    const all = items.map((item) => {
+    const everyone = items.map((item) => {
       // An out-of-office or a management auto-decline isn't a reply.
       const all = timeline({ type: item.type, record: item.record as Creator }, data.followups, events);
       const managedNo = all.some((t) => t.dir === "in" && t.kind === "managed_no");
@@ -92,7 +98,8 @@ export default function ReportsPage() {
       const wonAt = rank === 4 ? wonAct || item.record.status_updated_at : null;
       const startAt = first?.at || null;
       // The mailbox that opened the conversation (or, for someone who wrote first, the one they wrote to).
-      const mailbox = ((firstOut ? events.find((e) => e.entity_id === item.record.id && e.direction === "out" && e.at === firstOut.at)?.mailbox : first?.mailbox) || "").toLowerCase();
+      // A hand-logged first touch (a DM, a call) has no mailbox: the first real email decides.
+      const mailbox = ((inbound ? first?.mailbox || touches.find((t) => t.mailbox)?.mailbox : touches.find((t) => t.dir === "out" && t.mailbox)?.mailbox) || "").toLowerCase();
       // How their first real answer read, which thread it came in, and whether they ever answered.
       // A record you moved on by hand (they answered on WhatsApp, a call…) has
       // no logged reply to read: its stage says how it went.
@@ -104,8 +111,11 @@ export default function ReportsPage() {
       const lastOut = [...touches].reverse().find((t) => t.dir === "out");
       const ghosted = !inbound && tone === null && !managedNo && !!lastOut && Date.now() - new Date(lastOut.at).getTime() > 7 * 86400000;
       return { ...item, first, firstOut, firstIn, inbound, outsBefore, rank, wonAt, startAt, mailbox, lost: lostNow, tone, managedNo, ghosted, threads: threadsStarted.length, replyInNewThread };
-    }).filter((p) => p.startAt && new Date(p.startAt).getTime() >= from);
-    const homeOf = new Map(all.map((p) => [p.record.id, p.mailbox]));
+    });
+    // Whose mailbox a record belongs to doesn't depend on the date range: a deal
+    // signed this month with a brand first emailed last year still counts for that mailbox.
+    const homeOf = new Map(everyone.map((p) => [p.record.id, p.mailbox]));
+    const all = everyone.filter((p) => p.startAt && new Date(p.startAt).getTime() >= from);
     const people = box ? all.filter((p) => p.mailbox === box) : all;
 
     const outreach = people.filter((p) => !p.inbound);
@@ -220,7 +230,7 @@ export default function ReportsPage() {
   }, [data.creators, data.brands, data.campaigns, data.followups, data.emailEvents, data.activities, gmail.leads, gmail.mailboxes, from, rules, who, range, box]);
 
   const top = report.funnel[0].value;
-  const conversion = pct(report.wonCount, report.contacted);
+  const conversion = rateText(report.wonCount, report.contacted);
   const wonWord = who === "creator" ? "roster" : "signed";
   const table = (title: string, rows: Row[], label: string) => <div className="dash-panel report-table"><div className="panel-heading"><div><span>{who === "creator" ? "Influencers" : "Brands"}</span><h2>{title}</h2></div></div>{rows.length ? <table><thead><tr><th>{label}</th><th>Reached</th><th>Reply rate</th><th>{who === "creator" ? "Roster" : "Signed"}</th></tr></thead><tbody>{rows.map((r) => <tr key={r.key}><td>{r.key}</td><td>{r.contacted}</td><td><span className="rate-bar"><i style={{ width: `${pct(r.replied, r.contacted)}%` }} />{pct(r.replied, r.contacted)}%</span></td><td><b>{r.won}</b> <small className="muted">{pct(r.won, r.contacted)}%</small></td></tr>)}</tbody></table> : <p className="muted-copy">No outreach in this range yet.</p>}</div>;
 
