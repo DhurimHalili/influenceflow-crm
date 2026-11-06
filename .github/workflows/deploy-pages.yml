@@ -42,12 +42,23 @@ jobs:
           rm -rf ./assets ./index.html
           cp -r web/dist/* ./
           cp web/dist/index.html ./index.html
+      # Publish only what the site serves. Uploading the whole checkout shipped
+      # web/node_modules (thousands of files) and Pages timed out processing it.
+      - name: Assemble site
+        run: |
+          mkdir -p _site
+          rsync -a \
+            --exclude '.git' --exclude '.github' --exclude '_site' \
+            --exclude 'web' --exclude 'supabase' --exclude 'scripts' --exclude 'security' \
+            --exclude 'node_modules' --exclude '*.env' --exclude '.env*' \
+            ./ _site/
+          du -sh _site && find _site -type f | wc -l
       - name: Setup Pages
         uses: actions/configure-pages@v5
       - name: Upload site
         uses: actions/upload-pages-artifact@v3
         with:
-          path: .
+          path: _site
       - name: Deploy
         id: deployment
         uses: actions/deploy-pages@v4
