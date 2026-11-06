@@ -6,6 +6,8 @@ import { useData } from "./DataContext";
 // YouTube numbers for influencers, from the youtube-sync function.
 //   lookup(link)   — quick fill: the channel's facts and suggested stars, nothing saved
 //   refresh(ids)   — fresh numbers for some or all influencers, 10 at a time.
+//                    {force: true} (the Refresh buttons) takes YouTube's values
+//                    back even where you changed them — never your email.
 // A refresh runs here, above the pages, so it keeps going when you open an
 // influencer or switch tabs; the progress shows wherever you are. Each result
 // is saved through the normal edit path (updateCreator), so it can never
@@ -26,7 +28,7 @@ type Value = {
   enabled: boolean;
   progress: Progress;
   lookup: (input: string) => Promise<{ facts?: ChannelFacts; error?: string }>;
-  refresh: (ids: string[], opts?: { quiet?: boolean }) => Promise<{ done: number; failed: number; message: string }>;
+  refresh: (ids: string[], opts?: { quiet?: boolean; force?: boolean }) => Promise<{ done: number; failed: number; message: string }>;
   cancel: () => void;
   /** The YouTube link or @handle on a record, or "". */
   channelOf: (socials: SocialLink[] | undefined) => string;
@@ -71,7 +73,7 @@ export function YouTubeProvider({ children }: { children: ReactNode }) {
     return res.data?.facts ? { facts: res.data.facts } : { error: res.error || "Couldn't read that channel." };
   }, []);
 
-  const refresh = useCallback(async (ids: string[], opts?: { quiet?: boolean }) => {
+  const refresh = useCallback(async (ids: string[], opts?: { quiet?: boolean; force?: boolean }) => {
     const wanted = Array.from(new Set(ids)).filter((id) => channelOf(dataRef.current.creators.find((c) => c.id === id)?.socials));
     if (!wanted.length) return { done: 0, failed: 0, message: "None of them has a YouTube channel on their profile." };
     if (running.current) return { done: 0, failed: 0, message: "A YouTube refresh is already running." };
@@ -85,7 +87,7 @@ export function YouTubeProvider({ children }: { children: ReactNode }) {
       // What's on screen right now: a record saved a moment ago may not be in the database yet.
       const items = batch.map((id) => dataRef.current.creators.find((c) => c.id === id)).filter((c): c is Creator => !!c && !c.archived_at)
         .map((c) => ({ id: c.id, link: channelOf(c.socials), name: c.name, country: c.country || "", contact_email: c.contact_email, niche: c.niche || "", avg_views: c.avg_views || 0, engagement_rate: c.engagement_rate || 0, stars_engagement: c.stars_engagement || 0, stars_consistency: c.stars_consistency || 0, stars_demographics: c.stars_demographics || 0, youtube: c.youtube ? { auto: c.youtube.auto } : null, socials: c.socials || [] }));
-      const res = items.length ? await call<{ results?: { id: string; ok: boolean; patch?: Partial<Creator>; error?: string }[]; quota?: boolean }>({ action: "refresh", items, recent: recentRef.current }) : { data: { results: [] } };
+      const res = items.length ? await call<{ results?: { id: string; ok: boolean; patch?: Partial<Creator>; error?: string }[]; quota?: boolean }>({ action: "refresh", items, recent: recentRef.current, force: opts?.force === true }) : { data: { results: [] } };
       for (const r of res.data?.results || []) {
         const record = dataRef.current.creators.find((c) => c.id === r.id);
         if (r.ok && r.patch && record && !record.archived_at) {

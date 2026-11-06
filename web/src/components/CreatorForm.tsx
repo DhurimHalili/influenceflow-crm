@@ -275,7 +275,7 @@ export function CreatorFields({ draft, setDraft, mode }: Props) {
     <Fold id="performance" title="Audience & performance" open={open.includes("performance")} onToggle={toggle} filled={perfBits.length > 0} summary={perfBits.join(" · ") || "Views and engagement — optional"}>
       <div className="form-grid">
         <div className="cf-auto"><Input label="Average views" type="number" min="0" value={draft.avg_views} onChange={(event) => setDraft({ ...draft, avg_views: event.target.value })} placeholder="e.g. 120000" /><AutoHint field="avg_views" draft={draft} setDraft={setDraft} /></div>
-        <div className="cf-auto"><Input label="Engagement rate (%)" type="number" min="0" step="0.1" value={draft.engagement_rate} onChange={(event) => setDraft({ ...draft, engagement_rate: event.target.value })} hint={erContext(Number(draft.engagement_rate), main ? asPlatform(main.platform) : draft.platform)} /><AutoHint field="engagement_rate" draft={draft} setDraft={setDraft} /></div>
+        <div className="cf-auto"><Input label="Engagement rate (%)" type="number" min="0" step="any" inputMode="decimal" value={draft.engagement_rate} onChange={(event) => setDraft({ ...draft, engagement_rate: event.target.value })} hint={erContext(Number(draft.engagement_rate), main ? asPlatform(main.platform) : draft.platform)} /><AutoHint field="engagement_rate" draft={draft} setDraft={setDraft} /></div>
       </div>
     </Fold>
 
@@ -313,7 +313,7 @@ function AutoHint({ field, draft, setDraft }: { field: AutoKey; draft: CreatorDr
     return <span className="yt-hint mine"><i aria-hidden="true" />Yours — YouTube says {field === "avg_views" ? compact(Number(yours)) : yours}{field === "engagement_rate" ? "%" : ""} <button type="button" onClick={() => setDraft({ ...draft, [field]: yours, youtube: { ...draft.youtube, auto: { ...(draft.youtube?.auto || {}), [field]: yours } }, youtube_dirty: true })}>Use it</button></span>;
   }
   if (sameAuto(field, draft[field], auto)) return <span className="yt-hint yt" title="Refreshes with the channel until you change it"><i aria-hidden="true" />From YouTube · stays fresh</span>;
-  return <span className="yt-hint mine" role="status"><i aria-hidden="true" />Your edit — YouTube won't change it{yours && !blankAuto(field, yours) ? <> <button type="button" onClick={() => setDraft({ ...draft, [field]: yours, youtube: { ...draft.youtube, auto: { ...(draft.youtube?.auto || {}), [field]: yours } }, youtube_dirty: true })}>Use YouTube's{field === "avg_views" ? ` (${compact(Number(yours))})` : field === "engagement_rate" ? ` (${yours}%)` : ""}</button></> : null}</span>;
+  return <span className="yt-hint mine" role="status"><i aria-hidden="true" />Your edit — the hourly refresh keeps it{yours && !blankAuto(field, yours) ? <> <button type="button" onClick={() => setDraft({ ...draft, [field]: yours, youtube: { ...draft.youtube, auto: { ...(draft.youtube?.auto || {}), [field]: yours } }, youtube_dirty: true })}>Use YouTube's{field === "avg_views" ? ` (${compact(Number(yours))})` : field === "engagement_rate" ? ` (${yours}%)` : ""}</button></> : null}</span>;
 }
 
 /** Live check against your YouTube criteria while you add or edit (numbers you type count). */

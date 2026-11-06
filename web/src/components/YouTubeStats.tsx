@@ -23,10 +23,10 @@ export function YouTubeRefreshAll() {
   if (p.running && p.total > 1) return <Button variant="secondary" onClick={yt.cancel} title="Stop after the current batch — the rest refresh within the hour"><Square size={13} /> Stop · {p.done + p.failed}/{p.total}</Button>;
   const run = async () => {
     if (!ids.length) return toast("None of your influencers has a YouTube channel on their profile yet.", "info");
-    const res = await yt.refresh(ids);
+    const res = await yt.refresh(ids, { force: true });
     toast(res.message && !res.done ? res.message : `YouTube stats updated for ${res.done} influencer${res.done === 1 ? "" : "s"}${res.failed ? ` · ${res.failed} couldn't be read` : ""}${res.message ? ` — ${res.message}` : ""}`, res.done ? "success" : "error");
   };
-  return <Button variant="secondary" onClick={() => void run()} title={`Read fresh numbers for ${ids.length} influencer${ids.length === 1 ? "" : "s"} with a YouTube channel`}><RefreshCw size={15} /> Refresh YouTube</Button>;
+  return <Button variant="secondary" onClick={() => void run()} title={`Read fresh numbers for ${ids.length} influencer${ids.length === 1 ? "" : "s"} with a YouTube channel — YouTube’s values replace your edits (emails stay)`}><RefreshCw size={15} /> Refresh YouTube</Button>;
 }
 
 /** Profile header: refresh this one influencer's YouTube numbers only. */
@@ -36,10 +36,10 @@ export function YouTubeRefreshOne({ creator }: { creator: Creator }) {
   if (!yt.channelOf(creator.socials)) return null;
   const busy = yt.progress.ids.has(creator.id);
   const run = async () => {
-    const res = await yt.refresh([creator.id], { quiet: true });
+    const res = await yt.refresh([creator.id], { quiet: true, force: true });
     toast(res.done ? `${creator.name}'s YouTube numbers are fresh` : res.message || "Couldn't read the channel — check the YouTube link on the profile.", res.done ? "success" : "error");
   };
-  return <Button variant="secondary" onClick={() => void run()} loading={busy} disabled={busy || (yt.progress.running && yt.progress.total > 1)} title={`Read ${creator.name}'s channel again now — only this influencer`}><RefreshCw size={15} /> {busy ? "Reading…" : "Refresh YouTube"}</Button>;
+  return <Button variant="secondary" onClick={() => void run()} loading={busy} disabled={busy || (yt.progress.running && yt.progress.total > 1)} title={`Read ${creator.name}'s channel again now — YouTube’s values replace your edits (the email stays)`}><RefreshCw size={15} /> {busy ? "Reading…" : "Refresh YouTube"}</Button>;
 }
 
 /** A small pill wherever you are while a big refresh runs. */
@@ -65,7 +65,7 @@ export function YouTubePanel({ creator }: { creator: Creator }) {
   const f = creator.youtube || {};
   const busy = yt.progress.ids.has(creator.id);
   const refresh = async () => {
-    const res = await yt.refresh([creator.id], { quiet: true });
+    const res = await yt.refresh([creator.id], { quiet: true, force: true });
     toast(res.done ? "YouTube numbers updated" : res.message || "Couldn't read the channel — check the YouTube link on the profile.", res.done ? "success" : "error");
   };
   const at = creator.youtube_synced_at;
@@ -80,7 +80,7 @@ export function YouTubePanel({ creator }: { creator: Creator }) {
         <div><small>Uploads</small><strong>{f.uploads_90d ?? 0}</strong><em>in the last 90 days</em></div>
       </div>
       {f.sample && f.sample.length > 0 && <VideoSample sample={f.sample} avg={f.avg_views || 0} recent={!!f.includes_recent} />}
-      {(f.niche || (f.kept || []).length > 0) && <p className="yt-facts">{f.niche && <span className="yt-chip">{f.niche}{f.sub_niche ? ` · ${f.sub_niche}` : ""}</span>}{(f.kept || []).length > 0 && <span className="yt-kept">Kept your {(f.kept || []).map((k) => KEPT_LABEL[k] || k).join(", ")} — YouTube says otherwise, your edit wins</span>}</p>}
+      {(f.niche || (f.kept || []).length > 0) && <p className="yt-facts">{f.niche && <span className="yt-chip">{f.niche}{f.sub_niche ? ` · ${f.sub_niche}` : ""}</span>}{(f.kept || []).length > 0 && <span className="yt-kept">Kept your {(f.kept || []).map((k) => KEPT_LABEL[k] || k).join(", ")} — the hourly refresh leaves your edit; press Refresh to take YouTube's</span>}</p>}
       <p className="yt-foot">Updated {relativeTime(at)} · refreshes every hour{!yt.enabled && " (off in Settings)"} · <a href={f.url || link} target="_blank" rel="noreferrer">Open channel <ExternalLink size={11} /></a>
         {f.business_email_hidden && !creator.contact_email && <> · No email in the description — <a href={`${f.url || link}/about`} target="_blank" rel="noreferrer">check “View email address” <ExternalLink size={11} /></a></>}</p>
     </> : <p className="yt-foot">{busy ? "Reading the channel — last 12 videos, engagement, subscribers…" : yt.enabled ? "Not read yet — press Refresh, or it happens within the hour." : <>Automatic YouTube stats are off. <Link to="/app/settings#youtube">Turn them on</Link> or press Refresh.</>}</p>}
