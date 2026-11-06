@@ -31,6 +31,13 @@
     </style>
     <script>
       (function () {
+        // Anti-clickjacking: Pages can't send X-Frame-Options / frame-ancestors,
+        // so a framed copy of the app blanks itself and breaks out instead.
+        if (window.top !== window.self) {
+          document.documentElement.style.display = 'none'
+          try { window.top.location.replace(window.self.location.href) } catch (e) {}
+          return
+        }
         var h = location.hash || ''
         if (h.indexOf('/login') !== -1 || h.indexOf('/signup') !== -1 || h.indexOf('/app') !== -1 || h.indexOf('/kit/') !== -1) {
           document.documentElement.setAttribute('data-app-boot', '1')
@@ -58,11 +65,11 @@
         <li>Private workspaces, bulk import, search and export</li>
       </ul>
       <p>
-        <a href="./#/signup">Sign up free</a> ·
-        <a href="./#/login">Log in</a> ·
-        <a href="./privacy.html">Privacy Policy</a> ·
-        <a href="./terms.html">Terms of Service</a> ·
-        <a href="./home.html">About InfluenceFlow</a>
+        <a href="/influenceflow-crm/#/signup">Sign up free</a> ·
+        <a href="/influenceflow-crm/#/login">Log in</a> ·
+        <a href="/influenceflow-crm/privacy.html">Privacy Policy</a> ·
+        <a href="/influenceflow-crm/terms.html">Terms of Service</a> ·
+        <a href="/influenceflow-crm/home.html">About InfluenceFlow</a>
       </p>
       <p>Built by Dhurim Halili · <a href="https://concepts-ew8.pages.dev/">Portfolio</a></p>
     </div>

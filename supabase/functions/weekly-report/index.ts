@@ -37,7 +37,7 @@ async function all(admin: SupabaseClient, table: string, userId: string, opts: {
     q = opts.order ? q.order(opts.order, { ascending: false }).order("id") : q.order("id");
     const { data, error } = await q.range(from, Math.min(from + 1000, max) - 1);
     if (error) throw new Error(`load ${table}`);
-    rows.push(...((data || []) as Row[]));
+    rows.push(...((data || []) as unknown as Row[]));
     if (!data || data.length < 1000) break;
   }
   return rows;
@@ -103,7 +103,7 @@ const why = (e: unknown) => {
 
 Deno.serve(async (req) => {
   const origin = req.headers.get("Origin") || "";
-  const cors = { "Access-Control-Allow-Origin": ALLOWED_ORIGINS.has(origin) ? origin : new URL(APP_URL).origin, "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type", "Access-Control-Allow-Methods": "POST, OPTIONS", Vary: "Origin" };
+  const cors = { "Access-Control-Allow-Origin": ALLOWED_ORIGINS.has(origin) ? origin : new URL(APP_URL).origin, "X-Content-Type-Options": "nosniff", "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type", "Access-Control-Allow-Methods": "POST, OPTIONS", Vary: "Origin" };
   const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...cors, "Content-Type": "application/json", "Cache-Control": "no-store" } });
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);

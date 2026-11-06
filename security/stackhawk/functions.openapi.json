@@ -1,0 +1,1105 @@
+{
+ "openapi": "3.0.3",
+ "info": {
+  "title": "InfluenceFlow edge functions (staging)",
+  "version": "1"
+ },
+ "servers": [
+  {
+   "url": "/"
+  }
+ ],
+ "paths": {
+  "/functions/v1/admin-users/set_access": {
+   "post": {
+    "operationId": "admin_users_set_access",
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "action": {
+          "type": "string",
+          "example": "set_access"
+         },
+         "userId": {
+          "type": "string",
+          "example": "0000000a-0000-4000-8000-0000000000ee"
+         },
+         "access": {
+          "type": "string",
+          "example": "approved"
+         }
+        }
+       },
+       "example": {
+        "action": "set_access",
+        "userId": "0000000a-0000-4000-8000-0000000000ee",
+        "access": "approved"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "ok"
+     },
+     "401": {
+      "description": "not signed in"
+     },
+     "403": {
+      "description": "not allowed"
+     }
+    }
+   }
+  },
+  "/functions/v1/admin-users/send_reset": {
+   "post": {
+    "operationId": "admin_users_send_reset",
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "action": {
+          "type": "string",
+          "example": "send_reset"
+         },
+         "userId": {
+          "type": "string",
+          "example": "0000000a-0000-4000-8000-0000000000ee"
+         }
+        }
+       },
+       "example": {
+        "action": "send_reset",
+        "userId": "0000000a-0000-4000-8000-0000000000ee"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "ok"
+     },
+     "401": {
+      "description": "not signed in"
+     },
+     "403": {
+      "description": "not allowed"
+     }
+    }
+   }
+  },
+  "/functions/v1/admin-users/reset_link": {
+   "post": {
+    "operationId": "admin_users_reset_link",
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "action": {
+          "type": "string",
+          "example": "reset_link"
+         },
+         "userId": {
+          "type": "string",
+          "example": "0000000a-0000-4000-8000-0000000000ee"
+         }
+        }
+       },
+       "example": {
+        "action": "reset_link",
+        "userId": "0000000a-0000-4000-8000-0000000000ee"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "ok"
+     },
+     "401": {
+      "description": "not signed in"
+     },
+     "403": {
+      "description": "not allowed"
+     }
+    }
+   }
+  },
+  "/functions/v1/admin-users/delete": {
+   "post": {
+    "operationId": "admin_users_delete",
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "action": {
+          "type": "string",
+          "example": "delete"
+         },
+         "userId": {
+          "type": "string",
+          "example": "0000000a-0000-4000-8000-0000000000ee"
+         }
+        }
+       },
+       "example": {
+        "action": "delete",
+        "userId": "0000000a-0000-4000-8000-0000000000ee"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "ok"
+     },
+     "401": {
+      "description": "not signed in"
+     },
+     "403": {
+      "description": "not allowed"
+     }
+    }
+   }
+  },
+  "/functions/v1/gmail-oauth-start/start": {
+   "post": {
+    "operationId": "gmail_oauth_start_start",
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "action": {
+          "type": "string",
+          "example": "start"
+         },
+         "redirect": {
+          "type": "string",
+          "example": "/app/settings"
+         }
+        }
+       },
+       "example": {
+        "action": "start",
+        "redirect": "/app/settings"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "ok"
+     },
+     "401": {
+      "description": "not signed in"
+     },
+     "403": {
+      "description": "not allowed"
+     }
+    }
+   }
+  },
+  "/functions/v1/youtube-sync/lookup": {
+   "post": {
+    "operationId": "youtube_sync_lookup",
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "action": {
+          "type": "string",
+          "example": "lookup"
+         },
+         "input": {
+          "type": "string",
+          "example": "https://www.youtube.com/@example"
+         }
+        }
+       },
+       "example": {
+        "action": "lookup",
+        "input": "https://www.youtube.com/@example"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "ok"
+     },
+     "401": {
+      "description": "not signed in"
+     },
+     "403": {
+      "description": "not allowed"
+     }
+    }
+   }
+  },
+  "/functions/v1/youtube-sync/refresh": {
+   "post": {
+    "operationId": "youtube_sync_refresh",
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "action": {
+          "type": "string",
+          "example": "refresh"
+         },
+         "items": {
+          "type": "array",
+          "items": {
+           "type": "object",
+           "properties": {
+            "id": {
+             "type": "string",
+             "example": "c0000000-0000-4000-8000-0000000000b1"
+            }
+           }
+          },
+          "example": [
+           {
+            "id": "c0000000-0000-4000-8000-0000000000b1"
+           }
+          ]
+         },
+         "force": {
+          "type": "boolean",
+          "example": true
+         }
+        }
+       },
+       "example": {
+        "action": "refresh",
+        "items": [
+         {
+          "id": "c0000000-0000-4000-8000-0000000000b1"
+         }
+        ],
+        "force": true
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "ok"
+     },
+     "401": {
+      "description": "not signed in"
+     },
+     "403": {
+      "description": "not allowed"
+     }
+    }
+   }
+  },
+  "/functions/v1/youtube-sync/cron": {
+   "post": {
+    "operationId": "youtube_sync_cron",
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "action": {
+          "type": "string",
+          "example": "cron"
+         }
+        }
+       },
+       "example": {
+        "action": "cron"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "ok"
+     },
+     "401": {
+      "description": "not signed in"
+     },
+     "403": {
+      "description": "not allowed"
+     }
+    }
+   }
+  },
+  "/functions/v1/weekly-report/status": {
+   "post": {
+    "operationId": "weekly_report_status",
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "action": {
+          "type": "string",
+          "example": "status"
+         }
+        }
+       },
+       "example": {
+        "action": "status"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "ok"
+     },
+     "401": {
+      "description": "not signed in"
+     },
+     "403": {
+      "description": "not allowed"
+     }
+    }
+   }
+  },
+  "/functions/v1/weekly-report/send_now": {
+   "post": {
+    "operationId": "weekly_report_send_now",
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "action": {
+          "type": "string",
+          "example": "send_now"
+         },
+         "which": {
+          "type": "string",
+          "example": "last"
+         }
+        }
+       },
+       "example": {
+        "action": "send_now",
+        "which": "last"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "ok"
+     },
+     "401": {
+      "description": "not signed in"
+     },
+     "403": {
+      "description": "not allowed"
+     }
+    }
+   }
+  },
+  "/functions/v1/weekly-report/preview": {
+   "post": {
+    "operationId": "weekly_report_preview",
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "action": {
+          "type": "string",
+          "example": "preview"
+         },
+         "dry_run": {
+          "type": "boolean",
+          "example": true
+         },
+         "verify_smtp": {
+          "type": "boolean",
+          "example": true
+         }
+        }
+       },
+       "example": {
+        "action": "preview",
+        "dry_run": true,
+        "verify_smtp": true
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "ok"
+     },
+     "401": {
+      "description": "not signed in"
+     },
+     "403": {
+      "description": "not allowed"
+     }
+    }
+   }
+  },
+  "/functions/v1/weekly-report/cron": {
+   "post": {
+    "operationId": "weekly_report_cron",
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "action": {
+          "type": "string",
+          "example": "cron"
+         }
+        }
+       },
+       "example": {
+        "action": "cron"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "ok"
+     },
+     "401": {
+      "description": "not signed in"
+     },
+     "403": {
+      "description": "not allowed"
+     }
+    }
+   }
+  },
+  "/functions/v1/gmail-sync/status": {
+   "post": {
+    "operationId": "gmail_sync_status",
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "action": {
+          "type": "string",
+          "example": "status"
+         }
+        }
+       },
+       "example": {
+        "action": "status"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "ok"
+     },
+     "401": {
+      "description": "not signed in"
+     },
+     "403": {
+      "description": "not allowed"
+     }
+    }
+   }
+  },
+  "/functions/v1/gmail-sync/health": {
+   "post": {
+    "operationId": "gmail_sync_health",
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "action": {
+          "type": "string",
+          "example": "health"
+         }
+        }
+       },
+       "example": {
+        "action": "health"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "ok"
+     },
+     "401": {
+      "description": "not signed in"
+     },
+     "403": {
+      "description": "not allowed"
+     }
+    }
+   }
+  },
+  "/functions/v1/gmail-sync/sync": {
+   "post": {
+    "operationId": "gmail_sync_sync",
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "action": {
+          "type": "string",
+          "example": "sync"
+         },
+         "mailboxId": {
+          "type": "string",
+          "example": "00000000-0000-4000-8000-000000000000"
+         },
+         "all": {
+          "type": "boolean",
+          "example": true
+         }
+        }
+       },
+       "example": {
+        "action": "sync",
+        "mailboxId": "00000000-0000-4000-8000-000000000000",
+        "all": true
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "ok"
+     },
+     "401": {
+      "description": "not signed in"
+     },
+     "403": {
+      "description": "not allowed"
+     }
+    }
+   }
+  },
+  "/functions/v1/gmail-sync/send": {
+   "post": {
+    "operationId": "gmail_sync_send",
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "action": {
+          "type": "string",
+          "example": "send"
+         },
+         "mailboxId": {
+          "type": "string",
+          "example": "00000000-0000-4000-8000-000000000000"
+         },
+         "to": {
+          "type": "string",
+          "example": "someone@example.com"
+         },
+         "subject": {
+          "type": "string",
+          "example": "Hello"
+         },
+         "body": {
+          "type": "string",
+          "example": "Test"
+         }
+        }
+       },
+       "example": {
+        "action": "send",
+        "mailboxId": "00000000-0000-4000-8000-000000000000",
+        "to": "someone@example.com",
+        "subject": "Hello",
+        "body": "Test"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "ok"
+     },
+     "401": {
+      "description": "not signed in"
+     },
+     "403": {
+      "description": "not allowed"
+     }
+    }
+   }
+  },
+  "/functions/v1/gmail-sync/disconnect": {
+   "post": {
+    "operationId": "gmail_sync_disconnect",
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "action": {
+          "type": "string",
+          "example": "disconnect"
+         },
+         "mailboxId": {
+          "type": "string",
+          "example": "00000000-0000-4000-8000-000000000000"
+         }
+        }
+       },
+       "example": {
+        "action": "disconnect",
+        "mailboxId": "00000000-0000-4000-8000-000000000000"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "ok"
+     },
+     "401": {
+      "description": "not signed in"
+     },
+     "403": {
+      "description": "not allowed"
+     }
+    }
+   }
+  },
+  "/functions/v1/gmail-sync/cancel_scheduled": {
+   "post": {
+    "operationId": "gmail_sync_cancel_scheduled",
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "action": {
+          "type": "string",
+          "example": "cancel_scheduled"
+         },
+         "mailboxId": {
+          "type": "string",
+          "example": "00000000-0000-4000-8000-000000000000"
+         },
+         "gmailId": {
+          "type": "string",
+          "example": "18c0000000000000"
+         }
+        }
+       },
+       "example": {
+        "action": "cancel_scheduled",
+        "mailboxId": "00000000-0000-4000-8000-000000000000",
+        "gmailId": "18c0000000000000"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "ok"
+     },
+     "401": {
+      "description": "not signed in"
+     },
+     "403": {
+      "description": "not allowed"
+     }
+    }
+   }
+  },
+  "/functions/v1/gmail-sync/download_file": {
+   "post": {
+    "operationId": "gmail_sync_download_file",
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "action": {
+          "type": "string",
+          "example": "download_file"
+         },
+         "id": {
+          "type": "string",
+          "example": "c0000000-0000-4000-8000-0000000000b1"
+         },
+         "gmailId": {
+          "type": "string",
+          "example": "18c0000000000000"
+         }
+        }
+       },
+       "example": {
+        "action": "download_file",
+        "id": "c0000000-0000-4000-8000-0000000000b1",
+        "gmailId": "18c0000000000000"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "ok"
+     },
+     "401": {
+      "description": "not signed in"
+     },
+     "403": {
+      "description": "not allowed"
+     }
+    }
+   }
+  },
+  "/functions/v1/gmail-sync/analyze_file": {
+   "post": {
+    "operationId": "gmail_sync_analyze_file",
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "action": {
+          "type": "string",
+          "example": "analyze_file"
+         },
+         "id": {
+          "type": "string",
+          "example": "c0000000-0000-4000-8000-0000000000b1"
+         }
+        }
+       },
+       "example": {
+        "action": "analyze_file",
+        "id": "c0000000-0000-4000-8000-0000000000b1"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "ok"
+     },
+     "401": {
+      "description": "not signed in"
+     },
+     "403": {
+      "description": "not allowed"
+     }
+    }
+   }
+  },
+  "/functions/v1/gmail-sync/rescan_creator": {
+   "post": {
+    "operationId": "gmail_sync_rescan_creator",
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "action": {
+          "type": "string",
+          "example": "rescan_creator"
+         },
+         "id": {
+          "type": "string",
+          "example": "c0000000-0000-4000-8000-0000000000b1"
+         },
+         "force": {
+          "type": "boolean",
+          "example": true
+         }
+        }
+       },
+       "example": {
+        "action": "rescan_creator",
+        "id": "c0000000-0000-4000-8000-0000000000b1",
+        "force": true
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "ok"
+     },
+     "401": {
+      "description": "not signed in"
+     },
+     "403": {
+      "description": "not allowed"
+     }
+    }
+   }
+  },
+  "/functions/v1/gmail-sync/import_assist": {
+   "post": {
+    "operationId": "gmail_sync_import_assist",
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "action": {
+          "type": "string",
+          "example": "import_assist"
+         },
+         "headers": {
+          "type": "array",
+          "items": {
+           "type": "string",
+           "example": "Name"
+          },
+          "example": [
+           "Name",
+           "Email"
+          ]
+         },
+         "columns": {
+          "type": "array",
+          "items": {
+           "type": "string"
+          },
+          "example": []
+         },
+         "statuses": {
+          "type": "array",
+          "items": {
+           "type": "string",
+           "example": "reached"
+          },
+          "example": [
+           "reached"
+          ]
+         }
+        }
+       },
+       "example": {
+        "action": "import_assist",
+        "headers": [
+         "Name",
+         "Email"
+        ],
+        "columns": [],
+        "statuses": [
+         "reached"
+        ]
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "ok"
+     },
+     "401": {
+      "description": "not signed in"
+     },
+     "403": {
+      "description": "not allowed"
+     }
+    }
+   }
+  },
+  "/functions/v1/gmail-sync/ai_test": {
+   "post": {
+    "operationId": "gmail_sync_ai_test",
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "action": {
+          "type": "string",
+          "example": "ai_test"
+         }
+        }
+       },
+       "example": {
+        "action": "ai_test"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "ok"
+     },
+     "401": {
+      "description": "not signed in"
+     },
+     "403": {
+      "description": "not allowed"
+     }
+    }
+   }
+  },
+  "/functions/v1/gmail-sync/ai_check": {
+   "post": {
+    "operationId": "gmail_sync_ai_check",
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "action": {
+          "type": "string",
+          "example": "ai_check"
+         },
+         "list": {
+          "type": "string",
+          "example": "groq"
+         }
+        }
+       },
+       "example": {
+        "action": "ai_check",
+        "list": "groq"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "ok"
+     },
+     "401": {
+      "description": "not signed in"
+     },
+     "403": {
+      "description": "not allowed"
+     }
+    }
+   }
+  },
+  "/functions/v1/gmail-sync/cron": {
+   "post": {
+    "operationId": "gmail_sync_cron",
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "action": {
+          "type": "string",
+          "example": "cron"
+         }
+        }
+       },
+       "example": {
+        "action": "cron"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "ok"
+     },
+     "401": {
+      "description": "not signed in"
+     },
+     "403": {
+      "description": "not allowed"
+     }
+    }
+   }
+  },
+  "/functions/v1/gmail-oauth-callback": {
+   "get": {
+    "operationId": "gmail_oauth_callback",
+    "parameters": [
+     {
+      "name": "code",
+      "in": "query",
+      "schema": {
+       "type": "string",
+       "example": "4/0Ab-test"
+      }
+     },
+     {
+      "name": "state",
+      "in": "query",
+      "schema": {
+       "type": "string",
+       "example": "nonce-test"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "page"
+     }
+    }
+   }
+  }
+ }
+}
