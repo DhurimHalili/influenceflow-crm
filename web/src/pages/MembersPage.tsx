@@ -8,7 +8,8 @@ import { relativeTime } from "../lib/utils";
 import { Button, Modal, PageHeader } from "../components/ui";
 
 // The owner's control room for the private circle: who asked to join, who is
-// in, who was removed. Approving emails them from the owner's own Gmail.
+// in, who was removed. Approving emails them through Supabase's mailer
+// (custom SMTP: dhurimhalili2005@gmail.com) — never the outreach mailboxes.
 // Access lives in the database (admin_set_access / admin_members — owner
 // only); reset links and deletion go through the admin-users function.
 

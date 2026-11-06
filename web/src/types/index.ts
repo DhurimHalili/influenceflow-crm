@@ -191,6 +191,8 @@ export interface YouTubeFacts {
   niche?: string; sub_niche?: string;
   /** Average views included videos younger than a day (Settings choice). */
   includes_recent?: boolean;
+  /** The videos behind avg views, newest first; cut = the highest/lowest left out. */
+  sample?: { id: string; title: string; views: number; at: string; cut?: "high" | "low" }[];
   /** The values YouTube last wrote into the record's own fields. A field that still equals its value is refreshed; one you changed is yours. */
   auto?: Partial<Record<"name" | "contact_email" | "country" | "niche" | "avg_views" | "engagement_rate", string>>;
   /** Fields where your value differs from YouTube's and was kept. */

@@ -18,6 +18,7 @@ export type ChannelFacts = {
   avgViews: number; engagementRate: number; sampled: number; uploads90d: number; lastUploadAt: string;
   emails: string[]; businessEmailHidden: boolean; stars: { engagement: number; consistency: number; demographics: number }; at: string;
   niche: string; subNiche: string; includesRecent: boolean;
+  sample: { id: string; title: string; views: number; at: string; cut?: "high" | "low" }[];
 };
 export type Progress = { total: number; done: number; failed: number; running: boolean; ids: Set<string>; message: string };
 

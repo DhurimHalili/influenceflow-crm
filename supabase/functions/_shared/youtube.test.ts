@@ -1,5 +1,5 @@
 // Run: node --experimental-strip-types supabase/functions/_shared/youtube.test.ts
-import { emailsIn, middleMean, nicheOf, parseChannelRef, seconds, starsFor } from "./youtube.ts";
+import { averageOf, emailsIn, middleMean, nicheOf, parseChannelRef, seconds, starsFor, type Video } from "./youtube.ts";
 
 let fail = 0;
 const eq = (name: string, got: unknown, want: unknown) => {
@@ -33,5 +33,18 @@ eq("no email", emailsIn("Subscribe for more!"), []);
 eq("stars: strong US channel", starsFor({ engagementRate: 6.2, uploads90d: 14, country: "US", sampled: 10 }), { engagement: 5, consistency: 5, demographics: 5 });
 eq("stars: quiet channel, unknown country", starsFor({ engagementRate: 1.3, uploads90d: 1, country: "", sampled: 10 }), { engagement: 2, consistency: 1, demographics: 0 });
 eq("stars: no videos sampled", starsFor({ engagementRate: 0, uploads90d: 0, country: "DE", sampled: 0 }), { engagement: 0, consistency: 1, demographics: 4 });
+
+// A real channel (Andrew Tsai, Nov 2026): Videos tab + a 4-hour live stream 2 weeks ago.
+const NOW = new Date("2026-11-06T08:18:00Z");
+const ago = (h: number) => new Date(NOW.getTime() - h * 3600000).toISOString();
+const vid = (id: string, views: number, hours: number, extra: Partial<Video> = {}): Video => ({ id, title: id, views, likes: Math.round(views / 50), comments: 0, secs: 480, at: ago(hours), live: "none", stream: false, tags: [], ...extra });
+const tab = [vid("new1", 21_000, 9), vid("new2", 14_000, 14), vid("a", 141_000, 72), vid("b", 134_000, 96), vid("c", 82_000, 192), vid("d", 125_000, 216), vid("e", 100_000, 240), vid("f", 305_000, 288), vid("g", 37_000, 312), vid("h", 56_000, 336), vid("i", 160_000, 500), vid("j", 567_000, 504), vid("k", 380_000, 650), vid("l", 152_000, 670), vid("m", 90_000, 800)].map((v) => ({ ...v, videosTab: true }));
+const stream = vid("live", 46_000, 340, { stream: true, secs: 14_600 });
+eq("Videos tab: 12 settled long videos, highest + lowest out → 163.5K", averageOf(tab, NOW).avgViews, 163_500);
+eq("Videos tab: cuts marked", averageOf(tab, NOW).sample.filter((v) => v.cut).map((v) => `${v.id}:${v.cut}`), ["g:low", "j:high"]);
+eq("uploads list: a past live stream never counts", averageOf([...tab.map((v) => ({ ...v, videosTab: false })), stream], NOW).avgViews, 163_500);
+eq("uploads list: Shorts (3 min or less) never count", averageOf([...tab.map((v) => ({ ...v, videosTab: false })), vid("short", 1_000_000, 100, { secs: 45 })], NOW).avgViews, 163_500);
+eq("include brand-new videos when asked", averageOf(tab, NOW, { includeRecent: true }).sample.map((v) => v.id).slice(0, 2), ["new1", "new2"]);
+eq("Shorts-only channel uses any length, still no streams", averageOf([vid("s1", 10, 30, { secs: 30 }), vid("s2", 20, 40, { secs: 30 }), vid("s3", 30, 50, { secs: 30 }), vid("s4", 40, 60, { secs: 30 }), vid("st", 9_999, 70, { stream: true })], NOW).avgViews, 25);
 
 if (fail) { console.log(`${fail} failed`); (globalThis as { process?: { exit(n: number): void } }).process?.exit(1); } else console.log("all youtube tests pass");
