@@ -4,6 +4,7 @@ import { AlertCircle, ArrowRight, ArrowUpRight, BarChart3, Building2, CalendarDa
 import { Link, useNavigate } from "react-router-dom";
 import { useData } from "../contexts/DataContext";
 import { Button, EmptyState, Metric, PageHeader } from "../components/ui";
+import { DuplicateAlert } from "../components/Duplicates";
 import { useChase } from "../hooks/useChase";
 import { useGmail } from "../contexts/GmailContext";
 import { CoachCard } from "../components/Coach";
@@ -168,6 +169,8 @@ export default function DashboardPage() {
 
   return <div className="dashboard-page">
     <PageHeader eyebrow="Private workspace" title={`Good ${new Date().getHours() < 12 ? "morning" : new Date().getHours() < 18 ? "afternoon" : "evening"}, ${data.profile.display_name?.split(" ")[0] || "there"}.`} description={nudgeOfDay()} actions={<Button onClick={() => navigate("/app/campaigns?new=1")}><Plus size={16} /> New campaign</Button>} />
+    <DuplicateAlert kind="creator" compact />
+    <DuplicateAlert kind="brand" compact />
 
     <CoachCard />
     <TeamBoard />

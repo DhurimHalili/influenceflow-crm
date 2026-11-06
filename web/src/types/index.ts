@@ -71,6 +71,8 @@ export interface WorkspacePreferences {
   weekly_report?: "monday" | "sunday" | "off";
   /** Your time zone (IANA, from the browser) — the weekly report's days and send time. */
   timezone?: string;
+  /** Record pairs you said are different people / companies ("creator:idA|idB"); never flagged as duplicates again. */
+  not_duplicates?: string[];
 }
 
 /** Minimums and maximums an influencer is checked against (see lib/criteria). */
