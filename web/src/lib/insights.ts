@@ -32,8 +32,11 @@ const partOf = (d: Date) => {
 /** Your emails and their replies with one person, in time order, one per Gmail message. */
 const threadOf = (events: EmailEvent[], id: string) => {
   const seen = new Set<string>();
-  // Scheduled sends haven't gone out: no reply timing from them yet.
-  return events.filter((e) => e.entity_id === id && !e.scheduled && !seen.has(e.gmail_id) && seen.add(e.gmail_id)).sort((a, b) => a.at.localeCompare(b.at));
+  // Scheduled sends haven't gone out: no reply timing from them yet. An
+  // out-of-office or a management auto-decline isn't an answer (same rule as
+  // the dashboard and Reports), so it doesn't end the wait either.
+  const real = (e: EmailEvent) => e.direction === "out" || (e.reply_kind !== "auto" && e.reply_kind !== "managed_no");
+  return events.filter((e) => e.entity_id === id && !e.scheduled && real(e) && !seen.has(e.gmail_id) && seen.add(e.gmail_id)).sort((a, b) => a.at.localeCompare(b.at));
 };
 
 export function replySpeed(events: EmailEvent[], creatorId: string): ReplySpeed | null {
@@ -75,6 +78,7 @@ export function bestTimes(events: EmailEvent[]): { cells: TimeCell[]; best: Time
   const cells = new Map<string, TimeCell>();
   let total = 0;
   let replied = 0;
+  const now = Date.now();
   for (const id of byEntity.keys()) {
     const list = threadOf(events, id);
     for (let i = 0; i < list.length; i++) {
@@ -83,6 +87,8 @@ export function bestTimes(events: EmailEvent[]): { cells: TimeCell[]; best: Time
       const at = new Date(e.at);
       const reply = list.slice(i + 1).find((x) => x.direction === "in");
       const got = !!reply && new Date(reply.at).getTime() - at.getTime() <= 5 * 24 * H;
+      // Sent under 5 days ago and not answered yet: too early to call it a miss.
+      if (!got && now - at.getTime() < 5 * 24 * H) continue;
       const key = `${at.getDay()}|${partOf(at).key}`;
       const cell = cells.get(key) || { day: at.getDay(), part: partOf(at).key, sent: 0, replied: 0, rate: 0 };
       cell.sent++;

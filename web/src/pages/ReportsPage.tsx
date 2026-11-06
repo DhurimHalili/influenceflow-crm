@@ -22,6 +22,7 @@ import type { Activity, Brand, Creator, EntityStatus } from "../types";
 
 type Row = { key: string; contacted: number; replied: number; won: number };
 type Who = "creator" | "brand";
+const replied = (r: { repliedLogged: number }) => r.repliedLogged;
 const RANGES = [{ value: "30", label: "30 days" }, { value: "90", label: "90 days" }, { value: "365", label: "12 months" }, { value: "all", label: "All time" }];
 const pct = (a: number, b: number) => (b ? Math.round((a / b) * 100) : 0);
 const median = (values: number[]) => {
@@ -82,13 +83,16 @@ export default function ReportsPage() {
       const startAt = first?.at || null;
       const mailbox = firstOut ? events.find((e) => e.entity_id === item.record.id && e.direction === "out" && e.at === firstOut.at)?.mailbox || "" : "";
       // How their first real answer read, which thread it came in, and whether they ever answered.
-      const tone: "yes" | "no" | "neutral" | null = !firstIn ? null : firstIn.kind === "no" || declined(firstIn.detail) ? "no" : rank >= 3 || replyTone(firstIn.detail) === "yes" ? "yes" : "neutral";
+      // A record you moved on by hand (they answered on WhatsApp, a call…) has
+      // no logged reply to read: its stage says how it went.
+      const lostNow = !!item.record.lost_at && item.record.pipeline_status === "denied";
+      const tone: "yes" | "no" | "neutral" | null = firstIn ? (firstIn.kind === "no" || declined(firstIn.detail) ? "no" : rank >= 3 || replyTone(firstIn.detail) === "yes" ? "yes" : "neutral") : rank >= 2 ? (lostNow ? "no" : rank >= 3 ? "yes" : "neutral") : null;
       const threadsStarted = Array.from(new Set(touches.filter((t) => t.dir === "out" && t.source === "gmail" && t.threadId).map((t) => t.threadId!)));
       const replyThread = firstIn?.threadId || "";
       const replyInNewThread = !!replyThread && threadsStarted.length > 1 && replyThread !== threadsStarted[0];
       const lastOut = [...touches].reverse().find((t) => t.dir === "out");
-      const ghosted = !inbound && !firstIn && !managedNo && !!lastOut && Date.now() - new Date(lastOut.at).getTime() > 7 * 86400000;
-      return { ...item, first, firstOut, firstIn, inbound, outsBefore, rank, wonAt, startAt, mailbox, lost: !!item.record.lost_at && item.record.pipeline_status === "denied", tone, managedNo, ghosted, threads: threadsStarted.length, replyInNewThread };
+      const ghosted = !inbound && tone === null && !managedNo && !!lastOut && Date.now() - new Date(lastOut.at).getTime() > 7 * 86400000;
+      return { ...item, first, firstOut, firstIn, inbound, outsBefore, rank, wonAt, startAt, mailbox, lost: lostNow, tone, managedNo, ghosted, threads: threadsStarted.length, replyInNewThread };
     }).filter((p) => p.startAt && new Date(p.startAt).getTime() >= from);
 
     const outreach = people.filter((p) => !p.inbound);
@@ -104,10 +108,10 @@ export default function ReportsPage() {
     ];
     const inboundSide = side(inbound);
     const closeDays = side(people).filter((p) => p.wonAt && p.startAt).map((p) => Math.max(0, (new Date(p.wonAt!).getTime() - new Date(p.startAt!).getTime()) / 86400000));
-    const replied = outreach.filter((p) => p.firstIn && p.firstOut);
+    const replied = cohort.filter((p) => p.firstIn && p.firstOut);
     const replyDays = replied.map((p) => businessDaysBetween(new Date(p.firstOut!.at), new Date(p.firstIn!.at), rules));
     // Which message they answered, and how: a new thread is its own bucket.
-    const sideReplied = side(replied);
+    const sideReplied = replied;
     const bucket = (p: (typeof replied)[number]) => (p.replyInNewThread ? 6 : Math.min(5, Math.max(1, p.outsBefore)));
     const byRound = [1, 2, 3, 4, 5, 6].map((b) => {
       const list = sideReplied.filter((p) => bucket(p) === b);
@@ -118,9 +122,9 @@ export default function ReportsPage() {
       interested: cohortSide.filter((p) => p.tone === "yes").length,
       declined: cohortSide.filter((p) => p.tone === "no").length,
       unclear: cohortSide.filter((p) => p.tone === "neutral").length,
-      managed: cohortSide.filter((p) => !p.firstIn && p.managedNo).length,
+      managed: cohortSide.filter((p) => p.tone === null && p.managedNo).length,
       ghosted: cohortSide.filter((p) => p.ghosted).length,
-      waiting: cohortSide.filter((p) => !p.firstIn && !p.managedNo && !p.ghosted).length,
+      waiting: cohortSide.filter((p) => p.tone === null && !p.managedNo && !p.ghosted).length,
       newThreads: cohortSide.filter((p) => p.threads > 1).length,
       newThreadReplies: cohortSide.filter((p) => p.replyInNewThread).length,
       oldThreadReplies: cohortSide.filter((p) => p.threads > 1 && p.firstIn && !p.replyInNewThread).length,
@@ -143,8 +147,10 @@ export default function ReportsPage() {
       return Array.from(map.values()).sort((a, b) => b.contacted - a.contacted).slice(0, 10);
     };
 
-    // Money: campaigns started (or created) in the range, cancelled ones left out.
-    const campaigns = data.campaigns.filter((c) => !c.archived_at && c.status !== "cancelled" && new Date(c.start_date || c.created_at).getTime() >= from);
+    // Money: agreed deals (live or delivered) started — or created — in the
+    // range. A deal still being negotiated isn't revenue yet; cancelled never is.
+    const agreed = data.campaigns.filter((c) => !c.archived_at && (c.status === "active" || c.status === "completed"));
+    const campaigns = agreed.filter((c) => new Date(c.start_date || c.created_at).getTime() >= from);
     const months = new Map<string, { name: string; Revenue: number; Profit: number }>();
     for (let i = 0; i < 12; i++) {
       const d = new Date();
@@ -153,7 +159,7 @@ export default function ReportsPage() {
       const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
       months.set(key, { name: new Intl.DateTimeFormat("en-US", { month: "short" }).format(d), Revenue: 0, Profit: 0 });
     }
-    for (const c of data.campaigns.filter((c) => !c.archived_at && c.status !== "cancelled")) {
+    for (const c of agreed) {
       const m = months.get((c.start_date || c.created_at).slice(0, 7));
       if (m) { m.Revenue += c.agreed_payment || 0; m.Profit += profitOf(c); }
     }
@@ -167,18 +173,19 @@ export default function ReportsPage() {
       brandRows.set(name, row);
     }
 
-    const boxes = mailboxStats(events, gmail.leads, gmail.mailboxes.map((m) => m.email), range === "all" ? null : Number(range)).map((s) => ({ ...s, won: outreach.filter((p) => p.mailbox === s.mailbox && p.rank >= 4).length }));
-    const leadsIn = gmail.leads.filter((l) => new Date(l.first_at).getTime() >= from);
+    const boxes = mailboxStats(events, gmail.leads, gmail.mailboxes.map((m) => m.email), range === "all" ? null : Number(range)).map((s) => ({ ...s, won: cohort.filter((p) => p.mailbox.toLowerCase() === s.mailbox && p.rank >= 4).length }));
+    const leadsIn = gmail.leads.filter((l) => new Date(l.first_at).getTime() >= from && (who === "creator" ? l.kind === "creator" : l.kind !== "creator"));
 
     return {
       funnel,
       contacted: cohort.length,
       repliedCount: stage(2),
       wonCount: stage(4),
-      allContacted: outreach.length,
-      replyRate: pct(outreach.filter((p) => p.rank >= 2).length, outreach.length),
+      allContacted: cohort.length,
+      replyRate: pct(stage(2), cohort.length),
       medianReply: median(replyDays),
       afterFollowup: pct(replied.filter((p) => p.outsBefore > 1).length, replied.length),
+      repliedLogged: replied.length,
       closeDays: median(closeDays),
       closedCount: closeDays.length,
       inbound: { count: inboundSide.length, won: inboundSide.filter((p) => p.rank >= 4).length, leads: leadsIn.length, leadsAdded: leadsIn.filter((l) => l.status === "added").length },
@@ -221,8 +228,8 @@ export default function ReportsPage() {
 
     <section className="metric-row report-metrics">
       <Metric label="Reply rate" value={report.allContacted ? `${report.replyRate}%` : "—"} detail={`${report.allContacted} reached out to`} icon={<Reply size={15} />} />
-      <Metric label="Typical reply time" value={report.medianReply || report.replyRate ? `${report.medianReply} business day${report.medianReply === 1 ? "" : "s"}` : "—"} detail="median, first email → first reply" icon={<Clock3 size={15} />} />
-      <Metric label="Won by following up" value={report.replyRate ? `${report.afterFollowup}%` : "—"} detail="of replies came after a follow-up" icon={<Target size={15} />} />
+      <Metric label="Typical reply time" value={replied(report) ? `${report.medianReply} business day${report.medianReply === 1 ? "" : "s"}` : "—"} detail="median, first email → first reply" icon={<Clock3 size={15} />} />
+      <Metric label="Replied after a follow-up" value={replied(report) ? `${report.afterFollowup}%` : "—"} detail={`of ${replied(report)} logged repl${replied(report) === 1 ? "y" : "ies"} needed a follow-up first`} icon={<Target size={15} />} />
       <Metric label="Time to close" value={report.closedCount ? `${report.closeDays} days` : "—"} detail={`median, first contact → ${wonWord}`} icon={<Trophy size={15} />} />
       <Metric label="Profit" value={money(report.profit)} detail={`${money(report.revenue)} revenue · ${report.deals} deal${report.deals === 1 ? "" : "s"}`} icon={<HandCoins size={15} />} />
     </section>

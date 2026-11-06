@@ -9,6 +9,7 @@ import { useGmail } from "../contexts/GmailContext";
 import { CoachCard } from "../components/Coach";
 import { OutreachBoard } from "../components/OutreachBoard";
 import { TeamBoard } from "../components/Team";
+import { computePayout, profitOf } from "../lib/deal";
 import { flagFor } from "../lib/followupEngine";
 import { leadName, leadWaitingHours } from "../hooks/useLeadActions";
 import { currencySymbol, dateLabel, daysAgoLabel, daysSince, dueLabel, isOverdue, isPastDay, isTodayDay, money, relativeTime, timeLabel } from "../lib/utils";
@@ -81,9 +82,13 @@ export default function DashboardPage() {
   const brands = data.brands.filter((item) => !item.archived_at);
   const campaigns = data.campaigns.filter((item) => !item.archived_at);
   const active = campaigns.filter((item) => item.status === "active");
-  const activeValue = active.reduce((sum, item) => sum + item.agreed_payment, 0);
-  const agencyRevenue = active.reduce((sum, item) => sum + item.agreed_payment - item.creator_payout, 0);
-  const creatorPayout = active.reduce((sum, item) => sum + item.creator_payout, 0);
+  // Same deal math as the campaign page and Reports (lib/deal).
+  const activeValue = active.reduce((sum, item) => sum + (Number(item.agreed_payment) || 0), 0);
+  const agencyRevenue = active.reduce((sum, item) => sum + profitOf(item), 0);
+  const creatorPayout = active.reduce((sum, item) => sum + computePayout(item), 0);
+  // Money still owed: agreed deals (live or delivered) the brand hasn't paid. A
+  // deal still being negotiated isn't owed yet; a cancelled one never is.
+  const owed = campaigns.filter((item) => (item.status === "active" || item.status === "completed") && item.payment_status !== "paid");
   const completed = campaigns.filter((item) => item.status === "completed");
   const today = new Date().toDateString();
   const todayMeetings = data.meetings.filter((item) => new Date(item.starts_at).toDateString() === today).sort((a, b) => a.starts_at.localeCompare(b.starts_at));
@@ -108,7 +113,7 @@ export default function DashboardPage() {
         total: 0,
       });
     }
-    campaigns.forEach((item) => {
+    campaigns.filter((item) => item.status !== "cancelled").forEach((item) => {
       const d = new Date(item.created_at);
       if (Number.isNaN(d.getTime())) return;
       const bucket = buckets.find((b) => b.key === `${d.getFullYear()}-${d.getMonth()}`);
@@ -129,7 +134,7 @@ export default function DashboardPage() {
       seen.add(item.to);
       out.push(item);
     };
-    campaigns.filter((item) => item.status !== "cancelled" && item.payment_status !== "paid" && item.invoice_due && isPastDay(item.invoice_due)).forEach((item) => push({ id: `inv-${item.id}`, type: `Invoice · ${dueLabel(item.invoice_due)}`, title: item.name, detail: `${data.brands.find((b) => b.id === item.brand_id)?.name || "Brand"} owes ${money(item.agreed_payment)}`, to: `/app/campaigns?id=${item.id}&billing=1`, urgent: true, rank: 0 }));
+    owed.filter((item) => item.invoice_due && isPastDay(item.invoice_due)).forEach((item) => push({ id: `inv-${item.id}`, type: `Invoice · ${dueLabel(item.invoice_due)}`, title: item.name, detail: `${data.brands.find((b) => b.id === item.brand_id)?.name || "Brand"} owes ${money(item.agreed_payment)}`, to: `/app/campaigns?id=${item.id}&billing=1`, urgent: true, rank: 0 }));
     // Someone reached out to you: reply fast, the longest-waiting first.
     [...creators.map((c) => ({ ...c, kind: "Influencer", to: `/app/influencers/${c.id}` })), ...brands.map((b) => ({ ...b, kind: "Brand", to: `/app/brands/${b.id}` }))]
       .filter((item) => item.pipeline_status === "inbound")
@@ -172,7 +177,7 @@ export default function DashboardPage() {
         <Metric label="Active deal value" value={money(activeValue)} detail={<><span className="positive"><TrendingUp size={13} /> {active.length} live deals</span></>} icon={<DollarSign size={15} />} />
         <Metric label="Your profit" value={money(agencyRevenue)} detail={`${activeValue ? Math.round(agencyRevenue / activeValue * 100) : 0}% margin on live deals`} icon={<Sparkles size={15} />} />
         <Metric label="Creator payouts" value={money(creatorPayout)} detail="Across active campaigns" icon={<Users size={15} />} />
-        <Metric label="Outstanding invoices" value={money(campaigns.filter((item) => item.status !== "cancelled" && item.payment_status !== "paid").reduce((sum, item) => sum + item.agreed_payment, 0))} detail={(() => { const late = campaigns.filter((item) => item.status !== "cancelled" && item.payment_status !== "paid" && item.invoice_due && isPastDay(item.invoice_due)).length; return late ? <span className="negative">{late} overdue</span> : `${campaigns.filter((item) => item.payment_status === "paid").length} paid campaigns`; })()} icon={<BarChart3 size={15} />} />
+        <Metric label="Outstanding invoices" value={money(owed.reduce((sum, item) => sum + (Number(item.agreed_payment) || 0), 0))} detail={(() => { const late = owed.filter((item) => item.invoice_due && isPastDay(item.invoice_due)).length; return late ? <span className="negative">{late} overdue</span> : `${campaigns.filter((item) => item.payment_status === "paid").length} paid campaigns`; })()} icon={<BarChart3 size={15} />} />
       </section>
 
       <OutreachBoard />
