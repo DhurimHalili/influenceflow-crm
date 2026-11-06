@@ -2,10 +2,10 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { blankWorkspace } from "../lib/seed";
 import { EMPTY_RATES, normalizePreferences, normalizeRates } from "../lib/prefs";
 import { normalize, OUTREACH_STAGES, setActiveCurrency, overallStars, RATING_DIMS, ratedCount, sanitize, today, uid } from "../lib/utils";
-import { hasSupabase } from "../lib/supabase";
+import { hasSupabase, supabase } from "../lib/supabase";
 import { loadCloudWorkspace, persistCloudWorkspace } from "../services/supabaseWorkspace";
 import { mergeWorkspace, sameRecord, toBase } from "../lib/sync";
-import type { Activity, Brand, BrandContact, Campaign, Creator, Followup, Meeting, Profile, WorkspaceData } from "../types";
+import type { Activity, Brand, BrandContact, Campaign, Creator, Followup, Meeting, Profile, TeamMember, WorkspaceData } from "../types";
 import { useAuth } from "./AuthContext";
 import { socialKey } from "../lib/socials";
 import { mergeBriefs } from "../lib/brandBrief";
@@ -51,13 +51,14 @@ type DataContextValue = WorkspaceData & {
   /** Adds them all at once; returns the new ids in order. */
   addCreators: (values: NewCreator[]) => string[];
   findCreatorDuplicates: (name: string, link: string, ignoreId?: string, links?: string[]) => DuplicateMatch[];
-  mergeCreators: (keepId: string, removeId: string, merged: Partial<Creator>) => void;
+  /** Moves Gmail history, files, links and follow-ups to the kept copy first (server), then removes the other. Resolves false if the move failed (nothing removed). */
+  mergeCreators: (keepId: string, removeId: string, merged: Partial<Creator>) => Promise<boolean>;
   addBrand: (value: NewBrand) => Brand;
   updateBrand: (id: string, value: Partial<Brand>, opts?: UpdateOpts) => void;
   completeAction: (kind: "creator" | "brand", id: string) => void;
   addBrands: (values: NewBrand[]) => number;
   findBrandDuplicates: (name: string, domain: string, ignoreId?: string, links?: string[]) => DuplicateMatch[];
-  mergeBrands: (keepId: string, removeId: string, merged: Partial<Brand>) => void;
+  mergeBrands: (keepId: string, removeId: string, merged: Partial<Brand>) => Promise<boolean>;
   addContact: (value: NewContact) => BrandContact;
   updateContact: (id: string, value: Partial<BrandContact>) => void;
   deleteContact: (id: string) => void;
@@ -85,6 +86,32 @@ type DataContextValue = WorkspaceData & {
   reviewLoss: (kind: LossItem["kind"], id: string) => void;
   importBackup: (value: WorkspaceData) => void;
   log: (text: string, entity_type?: Activity["entity_type"], entity_id?: string) => void;
+};
+
+/**
+ * After a merge, every address either copy had must still lead to the kept
+ * record (Gmail matches mail by address). One that isn't its email / email 2
+ * or already on its team joins the team, marked as from the merge.
+ */
+const keepAddresses = (kept: Creator, copies: (Creator | undefined)[]): TeamMember[] | undefined => {
+  const team = [...(kept.team || [])];
+  const has = new Set([kept.contact_email, kept.secondary_email, ...team.map((t) => t.email)].map((e) => (e || "").trim().toLowerCase()).filter(Boolean));
+  for (const copy of copies) {
+    if (!copy) continue;
+    for (const raw of [copy.contact_email, copy.secondary_email]) {
+      const email = (raw || "").trim().toLowerCase();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || has.has(email)) continue;
+      has.add(email);
+      team.push({ email, role: "team", source: "manual", why: `Kept from merging ${copy.name}`.slice(0, 120), at: new Date().toISOString() });
+    }
+    for (const t of copy.team || []) {
+      const email = (t.email || "").trim().toLowerCase();
+      if (!email || has.has(email)) continue;
+      has.add(email);
+      team.push(t);
+    }
+  }
+  return team.length ? team : kept.team;
 };
 
 const DataContext = createContext<DataContextValue | null>(null);
@@ -660,7 +687,16 @@ export function DataProvider({ children }: { children: ReactNode }) {
     if (toDenied && lostStamp && before) queueLoss({ kind: "creator", id, name: before.name });
   };
 
-  const mergeCreators = (keepId: string, removeId: string, merged: Partial<Creator>) =>
+  /** Server first: the duplicate's Gmail history, files, follow-ups and links move to the kept record before the duplicate is deleted. */
+  const moveHistory = async (kind: "creator" | "brand", keepId: string, removeId: string) => {
+    if (!hasSupabase || userId === "guest") return true;
+    const { error } = await supabase.rpc("merge_records", { p_kind: kind, p_keep: keepId, p_remove: removeId });
+    if (error) console.warn("[merge] history not moved", error.code);
+    return !error;
+  };
+
+  const mergeCreators = async (keepId: string, removeId: string, merged: Partial<Creator>) => {
+    if (!(await moveHistory("creator", keepId, removeId))) return false;
     setData((current) => {
       const removed = current.creators.find((item) => item.id === removeId);
       const kept = current.creators.find((item) => item.id === keepId);
@@ -693,8 +729,14 @@ export function DataProvider({ children }: { children: ReactNode }) {
       const creatorsWithHistory = creators.map((item) =>
         item.id === keepId ? { ...item, followup_count: keptFollowups.length || (item.followup_count || 0) + (removed?.followup_count || 0), last_followup_at: lastFollowup || item.last_followup_at || removed?.last_followup_at || null } : item,
       );
-      return addActivity({ ...current, creators: creatorsWithHistory, campaigns, meetings, followups, activities }, `Merged ${removed?.name} into ${kept?.name}; links and history preserved`, "creator", keepId);
+      // An address that only the duplicate had keeps counting for them: Gmail
+      // matches mail by address, so it moves to their team instead of vanishing.
+      const finalCreators = creatorsWithHistory.map((item) => (item.id === keepId ? { ...item, team: keepAddresses(item, [kept, removed]) } : item));
+      const emailEvents = (current.emailEvents || []).filter((e) => !(e.entity_id === removeId && (current.emailEvents || []).some((k) => k.entity_id === keepId && k.gmail_id === e.gmail_id))).map((e) => (e.entity_id === removeId ? { ...e, entity_id: keepId } : e));
+      return addActivity({ ...current, creators: finalCreators, campaigns, meetings, followups, activities, emailEvents }, `Merged ${removed?.name} into ${kept?.name}; emails, files and history moved over`, "creator", keepId);
     });
+    return true;
+  };
 
   const findBrandDuplicates = useCallback(
     (name: string, domain: string, ignoreId?: string, links: string[] = []) => {
@@ -807,7 +849,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
     if (toDenied && lostStamp && before) queueLoss({ kind: "brand", id, name: before.name });
   };
 
-  const mergeBrands = (keepId: string, removeId: string, merged: Partial<Brand>) =>
+  const mergeBrands = async (keepId: string, removeId: string, merged: Partial<Brand>) => {
+    if (!(await moveHistory("brand", keepId, removeId))) return false;
     setData((current) => {
       const removed = current.brands.find((item) => item.id === removeId);
       const kept = current.brands.find((item) => item.id === keepId);
@@ -818,8 +861,21 @@ export function DataProvider({ children }: { children: ReactNode }) {
       const meetings = current.meetings.map((meeting) =>
         meeting.related_type === "brand" && meeting.related_id === removeId ? { ...meeting, related_id: keepId } : meeting,
       );
-      return addActivity({ ...current, brands, contacts, campaigns, meetings }, `Merged ${removed?.name} into ${kept?.name}; links preserved`, "brand", keepId);
+      // Follow-ups, the timeline and Gmail history move too (they used to stay behind on the deleted copy).
+      const followups = current.followups.map((f) => (f.brand_id === removeId ? { ...f, brand_id: keepId } : f));
+      current.activities.filter((a) => a.entity_id === removeId).forEach((a) => syncedActivities.current.delete(a.id));
+      const activities = current.activities.map((a) => (a.entity_id === removeId ? { ...a, entity_id: keepId } : a));
+      const emailEvents = (current.emailEvents || []).filter((e) => !(e.entity_id === removeId && (current.emailEvents || []).some((k) => k.entity_id === keepId && k.gmail_id === e.gmail_id))).map((e) => (e.entity_id === removeId ? { ...e, entity_id: keepId } : e));
+      const lost = [kept?.contact_email, kept?.secondary_email, removed?.contact_email, removed?.secondary_email].map((e) => (e || "").trim()).filter((e, i, all) => e && all.findIndex((x) => x.toLowerCase() === e.toLowerCase()) === i);
+      // An address that drops off the kept brand becomes one of its contacts, so Gmail still files that mail here.
+      const keptNow = brands.find((item) => item.id === keepId);
+      const have = new Set([keptNow?.contact_email, keptNow?.secondary_email, ...contacts.filter((c) => c.brand_id === keepId).map((c) => c.email)].map((e) => (e || "").trim().toLowerCase()));
+      const stamp = new Date().toISOString();
+      const extraContacts: BrandContact[] = lost.filter((e) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e) && !have.has(e.toLowerCase())).map((email) => ({ id: uid(), user_id: userId, brand_id: keepId, first_name: sanitize(email.split("@")[0]).slice(0, 60), last_name: "", title: "", email: email.toLowerCase(), linkedin_url: "", pipeline_status: keptNow?.pipeline_status || "contacted", date_contacted: keptNow?.date_contacted || null, notes: `Kept from merging ${removed?.name || "a duplicate"}`, lost_reason: "", lost_at: null, created_at: stamp }));
+      return addActivity({ ...current, brands, contacts: [...extraContacts, ...contacts], campaigns, meetings, followups, activities, emailEvents }, `Merged ${removed?.name} into ${kept?.name}; contacts, emails and history moved over`, "brand", keepId);
     });
+    return true;
+  };
 
   const addContact = (value: NewContact) => {
     const contact: BrandContact = {

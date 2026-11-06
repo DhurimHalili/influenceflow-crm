@@ -278,19 +278,28 @@ function counterpartsKnown(meta: Meta, book: Map<string, Entity[]>, own: Set<str
  * records already in this Gmail thread, else the ones named in the subject or
  * preview, else all of them.
  */
+const NAME_STOP = new Set(["the", "and", "official", "channel", "tv", "studio", "studios", "media", "with", "for"]);
+
 function narrow(list: Entity[], meta: Meta, threads?: ThreadBook): Entity[] {
   if (list.length < 2) return list;
   const inThread = (threads?.get(meta.threadId || "") || []).map((e) => e.id);
   const byThread = list.filter((e) => inThread.includes(e.id));
   if (byThread.length) return byThread;
   const text = ` ${decodeEntities(`${header(meta, "Subject")} ${meta.snippet || ""}`).toLowerCase()} `;
+  const word = (w: string) => new RegExp(`[^\\p{L}\\p{N}]${w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}[^\\p{L}\\p{N}]`, "u").test(text);
   const named = list.filter((e) => {
     const name = (e.name || "").toLowerCase().trim();
     if (name.length < 3) return false;
     const first = name.split(/\s+/)[0];
-    return text.includes(name) || (first.length >= 4 && new RegExp(`[^a-z]${first.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}[^a-z]`).test(text));
+    return text.includes(name) || (first.length >= 4 && word(first));
   });
-  return named.length ? named : list;
+  if (named.length) return named;
+  // Two channels sharing one inbox ("Out of Spec Reviews" / "Out of Spec BITS"):
+  // the word only one of them has decides which one the email is about.
+  const words = (e: Entity) => new Set((e.name || "").toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 3 && !NAME_STOP.has(w)));
+  const sets = list.map(words);
+  const own = list.filter((_, i) => [...sets[i]].some((w) => sets.every((s, j) => j === i || !s.has(w)) && word(w)));
+  return own.length ? own : list;
 }
 
 /** Records already tracked in these threads of this mailbox. */
