@@ -1,0 +1,78 @@
+# StackHawk DAST config for the Supabase backend (database REST API + edge functions).
+# TARGET IS THE STAGING PROJECT ONLY (xxhblarkcaqzhwrtdqgn): fake seed users, fake data,
+# no Gmail / AI / SMTP / YouTube secrets, so nothing can leave Supabase.
+# Never point APP_HOST at production (oyyuugucxqtenuqbbbur).
+#
+# Credentials come from the gitignored .hawk-profiles.env:
+#   set -a; . ./.hawk-profiles.env; set +a
+#   hawk scan stackhawk-api.yml --profile-scan-mode=primary-full --full-scan-profile=user-a
+#
+# Specs: security/stackhawk/supabase-rest.openapi.json (build-rest-spec.mjs, from the catalog)
+#        security/stackhawk/functions.openapi.json   (build-functions-spec.mjs, one path per action)
+app:
+  applicationId: ${APP_ID:0e4f80a6-0250-45b8-a1f0-b355ec251a27}
+  env: ${APP_ENV:Staging}
+  host: ${APP_HOST:https://xxhblarkcaqzhwrtdqgn.supabase.co}
+  openApiConf:
+    filePaths:
+      - security/stackhawk/supabase-rest.openapi.json
+      - security/stackhawk/functions.openapi.json
+  # Supabase-run auth/storage internals are not our code (and auth is rate limited).
+  excludePaths:
+    - "/auth/v1/(?!user$).*"
+    - "/storage/v1/.*"
+  authentication:
+    usernamePassword:
+      type: JSON
+      loginPath: /auth/v1/token?grant_type=password
+      usernameField: email
+      passwordField: password
+      scanUsername: ${HAWK_PROFILE_USER_A_USERNAME}
+      scanPassword: ${HAWK_PROFILE_USER_A_PASSWORD}
+    tokenExtraction:
+      type: TOKEN_PATH
+      value: "access_token"
+    tokenAuthorization:
+      type: HEADER
+      value: Authorization
+      tokenType: Bearer
+    testPath:
+      path: /auth/v1/user
+      type: HEADER
+      success: ".*200.*"
+    profiles:
+      - name: owner
+        isPrivileged: true
+        userNamePassword:
+          username: ${HAWK_PROFILE_OWNER_USERNAME}
+          password: ${HAWK_PROFILE_OWNER_PASSWORD}
+      - name: user-a
+        userNamePassword:
+          username: ${HAWK_PROFILE_USER_A_USERNAME}
+          password: ${HAWK_PROFILE_USER_A_PASSWORD}
+      - name: user-b
+        userNamePassword:
+          username: ${HAWK_PROFILE_USER_B_USERNAME}
+          password: ${HAWK_PROFILE_USER_B_PASSWORD}
+      - name: pending
+        userNamePassword:
+          username: ${HAWK_PROFILE_PENDING_USERNAME}
+          password: ${HAWK_PROFILE_PENDING_PASSWORD}
+hawk:
+  spider:
+    base: false
+hawkAddOn:
+  replacer:
+    rules:
+      # Supabase's gateway needs the public anon key on every request (it is not a secret).
+      - matchString: apikey
+        replacement: ${STAGING_ANON_KEY}
+tags:
+  - name: _STACKHAWK_AGENT
+    value: ${HAWK_AGENT:none}
+  - name: git_origin
+    value: dhurimhalili/influenceflow-crm
+  - name: _STACKHAWK_GIT_COMMIT_SHA
+    value: ${COMMIT_SHA:none}
+  - name: _STACKHAWK_GIT_BRANCH
+    value: ${BRANCH_NAME:none}

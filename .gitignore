@@ -18,3 +18,7 @@ yt-email-agent/
 .email-agent-keys
 email-agent-preview.html
 .mimosa/
+
+# StackHawk seed accounts (staging only)
+.data-seed-credentials.env
+.hawk-profiles.env

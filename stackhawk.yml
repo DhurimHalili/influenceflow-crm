@@ -1,0 +1,37 @@
+# StackHawk DAST config for the InfluenceFlow CRM web app (React SPA).
+# Target = local `vite preview` of web/dist (same build GitHub Pages serves).
+# Backend is hosted Supabase (PostgREST + edge functions) - out of scope here:
+# no local Supabase stack on this PC, and active scans must not hit production data.
+app:
+  applicationId: ${APP_ID:c151cd27-6a9c-4a0c-9cf5-82b117df6e3f}
+  env: ${APP_ENV:Development}
+  host: ${APP_HOST:http://localhost:4173}
+  # SPA routes are client-side; scan only the app's base path.
+  includePaths:
+    - "/influenceflow-crm.*"
+hawk:
+  spider:
+    base: true
+    ajax: true
+    ajaxBrowser: CHROME_HEADLESS
+    maxDurationMinutes: 5
+    seedPaths:
+      - /influenceflow-crm/
+      - /influenceflow-crm/login
+      - /influenceflow-crm/signup
+      - /influenceflow-crm/forgot-password
+      - /influenceflow-crm/update-password
+      - /influenceflow-crm/privacy
+      - /influenceflow-crm/terms
+      - /influenceflow-crm/help
+      - /influenceflow-crm/kit/test
+      - /influenceflow-crm/version.json
+tags:
+  - name: _STACKHAWK_AGENT
+    value: ${HAWK_AGENT:none}
+  - name: git_origin
+    value: dhurimhalili/influenceflow-crm
+  - name: _STACKHAWK_GIT_COMMIT_SHA
+    value: ${COMMIT_SHA:none}
+  - name: _STACKHAWK_GIT_BRANCH
+    value: ${BRANCH_NAME:none}

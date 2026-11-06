@@ -272,7 +272,7 @@ export async function channelFacts(input: string, now = new Date(), opts: { incl
   // The Videos tab first; the full uploads list only when it is missing or too
   // thin (a Shorts-only channel), and then streams are filtered out by hand.
   const longIds = longList ? await listed(longList).catch(() => []) : [];
-  let videos = longIds.length ? (await read(longIds)).map((v) => ({ ...v, videosTab: true })) : [];
+  let videos: Video[] = longIds.length ? (await read(longIds)).map((v) => ({ ...v, videosTab: true })) : [];
   let avg = averageOf(videos, now, opts);
   if (avg.sampled < 4 && uploads) {
     const all = await read(await listed(uploads).catch(() => []));
