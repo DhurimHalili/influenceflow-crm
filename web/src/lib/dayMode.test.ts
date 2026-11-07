@@ -20,4 +20,8 @@ eq("scouting counts today's adds, not archived ones", foundToday([{ created_at: 
 eq("every line is picked", new Set(Array.from({ length: 70 }, (_, i) => pickLine("scout", i / 70).title)).size, BRIEF_LINES.scout.length);
 const banned = /\b(bless|holy|pray|church|god|sabbath|amen|face|smile|cat|dog|bird|lion|bear|damn|hell)\b/i;
 eq("no faces, animals, religious words or rough slang", [...BRIEF_LINES.light, ...BRIEF_LINES.scout].filter((l) => banned.test(`${l.title} ${l.line}`)).map((l) => l.title), []);
+const untrue = /\b(nap|naps|napping|sleep|sleeping|asleep|coffee|resting|vacation|holiday|break)\b/i;
+eq("no line pretends follow-ups or the inbox are sleeping or on a break", [...BRIEF_LINES.light, ...BRIEF_LINES.scout].filter((l) => untrue.test(`${l.title} ${l.line}`)).map((l) => l.title), []);
+eq("the day is filled in", pickLine("light", 4 / 7 + 0.01, "tomorrow").title, "Tomorrow-you will chase. Today-you discovers.");
+eq("no placeholder left", [...Array(7).keys()].flatMap((i) => [pickLine("light", i / 7 + 0.01, "Monday"), pickLine("scout", i / 7 + 0.01, "Monday")]).filter((l) => /[{}]/.test(l.title + l.line)).length, 0);
 if (fail) { console.log(`${fail} failed`); (globalThis as { process?: { exit(n: number): void } }).process?.exit(1); } else console.log("all day mode tests pass");

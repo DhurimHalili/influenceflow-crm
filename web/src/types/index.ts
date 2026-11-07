@@ -488,8 +488,8 @@ export interface EmailEvent {
   mailbox?: string;
   /** Waiting in Gmail's Scheduled folder (not sent yet); `at` may be the send time. */
   scheduled?: boolean;
-  /** From their side: '' reply · 'no' they passed · 'team' their manager/agency · 'auto' autoresponder · 'managed_no' management/auto declined. */
-  reply_kind?: "" | "no" | "team" | "auto" | "managed_no";
+  /** From their side: '' reply · 'no' they clearly passed · 'maybe_no' reads like a no, not certain · 'team' their manager/agency · 'auto' autoresponder · 'managed_no' management/auto declined. (A reply you confirmed was not a no loads as ''.) */
+  reply_kind?: "" | "no" | "maybe_no" | "team" | "auto" | "managed_no";
   /** This email's Message-ID and the one it answers (lowercase, no <>). */
   message_key?: string;
   in_reply_to?: string;

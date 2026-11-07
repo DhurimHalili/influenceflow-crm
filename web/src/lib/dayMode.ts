@@ -73,29 +73,36 @@ export const foundToday = (creators: { created_at: string; archived_at?: string 
 };
 
 // The weekend briefing: a different line each time. Plain words, light humour —
-// nothing about faces, animals or anyone's holy days.
+// nothing about faces, animals or anyone's holy days. Every line is literally
+// true: follow-ups are paused (not "napping"), nothing goes out on a scout day.
+// {day} / {Day} = when they come back ("Monday", or "tomorrow" if Sunday is a
+// normal day in Settings → Weekends).
 export const BRIEF_LINES: Record<Exclude<DayMode, "normal">, { title: string; line: string }[]> = {
   light: [
-    { title: "New names only today.", line: "Old threads are on a coffee break until Monday. Fresh inboxes are wide open." },
     { title: "Follow-ups are off duty. You're not.", line: "First emails and replies — that's the whole menu today." },
-    { title: "No chasing. Just catching.", line: "Open new doors today; knocking twice can wait for Monday." },
-    { title: "Half the rules, all of the wins.", line: "Pitch someone new, answer whoever wrote. Leave the follow-up pile alone." },
-    { title: "Monday-you will chase. Today-you discovers.", line: "Find the next big one and say hello. The reminders keep the rest." },
+    { title: "No chasing. Just catching.", line: "Open new doors today; knocking twice waits for {day}." },
+    { title: "Hello, yes. Hello again, {day}.", line: "First emails and replies go out today. Follow-ups are parked for {day}, right where you left them." },
+    { title: "Half the rules, all of the wins.", line: "Pitch someone new, answer whoever wrote. Follow-ups are on hold until {day}." },
+    { title: "{Day}-you will chase. Today-you discovers.", line: "Find the next big one and say hello. Every follow-up is saved for {day}." },
     { title: "Light day, sharp aim.", line: "One great first email beats ten nudges. Make today's count." },
-    { title: "The follow-up pile is taking a nap.", line: "Let it sleep. Write to someone who's never heard of you yet." },
+    { title: "Fresh names only.", line: "Follow-ups sit this one out and come back {day}. New inboxes are wide open." },
   ],
   scout: [
-    { title: "Outbox closed. Radar open.", line: "No emails today — just find the people you'll pitch on Monday." },
-    { title: "Today you're a talent scout, not a mail carrier.", line: "Add them to the CRM now; the emails can wait." },
-    { title: "Find them today. Wow them Monday.", line: "Every great Monday starts with a full list." },
+    { title: "Outbox closed. Radar open.", line: "No emails today — just find the people you'll pitch {day}." },
+    { title: "Today you're a talent scout, not a mail carrier.", line: "Add them to the CRM now; the emails go out {day}." },
+    { title: "Find them today. Wow them {day}.", line: "A full list today means a fast start {day}." },
     { title: "Send nothing. Find everything.", line: "Channels, numbers, contact info — line them up for the week." },
-    { title: "Treasure-hunting day.", line: "The inbox is resting. Your shortlist isn't." },
-    { title: "Pipeline's hungry. Feed it.", line: "Scout, add, rate. Monday-you gets a head start." },
-    { title: "Quiet inbox, loud shortlist.", line: "Hit your scouting goal and Monday writes itself." },
+    { title: "Treasure-hunting day.", line: "No emails go out today. Every good channel you add is a pitch ready for {day}." },
+    { title: "Pipeline's hungry. Feed it.", line: "Scout, add, rate. {Day}-you gets a head start." },
+    { title: "Zero emails. Full shortlist.", line: "Hit your scouting goal and {day}'s list is already waiting." },
   ],
 };
 
-export const pickLine = (mode: Exclude<DayMode, "normal">, seed = Math.random()) => {
+const fill = (text: string, day: string) => text.replace(/\{day\}/g, day).replace(/\{Day\}/g, day.charAt(0).toUpperCase() + day.slice(1));
+
+/** A random line, with {day} filled in ("Monday" / "tomorrow"). */
+export const pickLine = (mode: Exclude<DayMode, "normal">, seed = Math.random(), day = "Monday") => {
   const list = BRIEF_LINES[mode];
-  return list[Math.floor(seed * list.length) % list.length];
+  const l = list[Math.floor(seed * list.length) % list.length];
+  return { title: fill(l.title, day), line: fill(l.line, day) };
 };

@@ -1,5 +1,5 @@
 // Run: node --experimental-strip-types supabase/functions/_shared/replyReader.test.ts
-import { classifyIncoming, myReplyIntent, quotedOwnDate, referralOf, replyTone, stripQuoted } from "./replyReader.ts";
+import { classifyIncoming, declineLevel, myReplyIntent, quotedOwnDate, referralOf, replyTone, stripQuoted } from "./replyReader.ts";
 
 let fail = 0;
 const check = (name: string, got: unknown, want: unknown) => {
@@ -19,6 +19,36 @@ check("creator personal no", classifyIncoming({ text: "Thanks for reaching out b
 check("conditional no is not a no", classifyIncoming({ text: "Sounds cool. If it's not a fit for you no worries, send details!" }), "");
 check("question is not a no", classifyIncoming({ text: "Are you not interested in shorts too?" }), "");
 check("quoted no ignored", classifyIncoming({ text: "Sure, send the brief. On Mon, Nov 2, 2026 at 3:52 PM Mitchell <m@x.com> wrote: we will pass on this" }), "");
+
+// ---- clear no vs maybe-no ---------------------------------------------------------------
+const han = "Hi, Not at the moment. Thanks, Han On Wed, Nov 4, 2026 at 11:00 PM Dhurim Halili <dhurimi@mimibridge.com> wrote: It seems you missed my email. Are you interested in this brand partnership opportunity?";
+check("'Not at the moment.' (real reply) = no", classifyIncoming({ subject: "Re: A standoff?", text: han }), "no");
+check("preview cut before 'wrote:' still drops the quote", declineLevel("Sounds great, send the brief! On Wed, Nov 4, 2026 at 11:00 PM Dhurim Halili <dhurimi@mimibr"), "");
+check("bare No.", classifyIncoming({ text: "Hi, No. Thanks" }), "no");
+check("Nope", classifyIncoming({ text: "Nope" }), "no");
+check("Nah, thanks", classifyIncoming({ text: "Hey Dhurim, nah thanks." }), "no");
+check("No problem is not a no", classifyIncoming({ text: "No problem, send it over." }), "");
+check("No worries is not a no", classifyIncoming({ text: "Hi! No worries at all, what's the budget?" }), "");
+check("No way! is not a no", classifyIncoming({ text: "No way! I love TRYX." }), "");
+check("curly apostrophe", classifyIncoming({ text: "I\u2019m not interested, thanks." }), "no");
+check("not really interested", classifyIncoming({ text: "Not really interested in this one." }), "no");
+check("not this time", classifyIncoming({ text: "Thanks, but not this time." }), "no");
+check("doesn't fit my channel", classifyIncoming({ text: "Appreciate it but it doesn't fit my channel." }), "no");
+check("I'll pass", classifyIncoming({ text: "I'll pass, thanks" }), "no");
+check("we don't do sponsored", classifyIncoming({ text: "We don't do sponsored videos." }), "no");
+check("no + asks for kit = maybe", classifyIncoming({ text: "Not right now, but send me your media kit for later." }), "maybe_no");
+check("probably not = maybe", classifyIncoming({ text: "Probably not, to be honest." }), "maybe_no");
+check("I don't think so = maybe", classifyIncoming({ text: "Hi, I don't think so." }), "maybe_no");
+check("maybe later = maybe", classifyIncoming({ text: "Maybe later in the year." }), "maybe_no");
+check("too busy = maybe", classifyIncoming({ text: "I'm too busy with uploads this month." }), "maybe_no");
+check("fully booked = maybe", classifyIncoming({ text: "We're fully booked until January." }), "maybe_no");
+check("reach out next year = maybe", classifyIncoming({ text: "Reach out again next year." }), "maybe_no");
+check("booked a call is not a maybe", classifyIncoming({ text: "I booked a call slot for Tuesday." }), "");
+check("let me get back to you = normal", classifyIncoming({ text: "Let me get back to you next week." }), "");
+check("interested = normal", classifyIncoming({ text: "Yes, interested! What's the budget?" }), "");
+check("team says not at the moment = managed_no", classifyIncoming({ fromOther: true, text: "Not at the moment, thanks." }), "managed_no");
+check("thanks for the kit + no = no", classifyIncoming({ text: "Thanks for the media kit. We're not interested at this time." }), "no");
+check("team says maybe later = team", classifyIncoming({ fromOther: true, text: "Maybe later in the year." }), "team");
 
 // ---- your reply to an inbound lead ----------------------------------------------------
 check("asks for media kit", myReplyIntent("Thanks for getting back to me. Could you send over your media kit and rate card? On Mon, Nov 2, 2026 at 15:52 mitchell fane <a@b.com> wrote: Yes, I would be interested."), "yes");
