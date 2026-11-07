@@ -75,7 +75,12 @@ export function CoachRing() {
   if (!enabled) return null;
   return <div className="coach-top">
     <button type="button" className={`coach-top-btn${stats.value >= stats.target ? " done" : ""}${stats.unit === "found" ? " is-scout" : ""}`} onClick={() => setOpen((v) => !v)} aria-expanded={open} title={stats.unit === "found" ? `Scout day: ${stats.value} of ${stats.target} new influencers found` : `${stats.sentToday} of ${stats.goal} emails today${stats.scheduled ? ` · ${stats.scheduled} scheduled` : ""}`}><Ring value={stats.value} goal={stats.target} size={28} /><span>{stats.unit === "found" && <Radar size={12} className="coach-top-unit" aria-hidden="true" />}{stats.value}<small>/{stats.target}</small></span></button>
-    <AnimatePresence>{open && <motion.div className="coach-pop" initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }}>
+    <AnimatePresence>{open && <motion.div className="coach-pop" role="dialog" aria-label="Today's goal" initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.15 }}>
+      <div className="coach-pop-head">
+        <Ring value={stats.value} goal={stats.target} size={46} />
+        <span><b>{stats.value}<small> / {stats.target}</small></b><em>{stats.unit === "found" ? "new influencers found today" : `emails today${stats.scheduled ? ` · ${stats.scheduled} scheduled` : ""}`}</em></span>
+        <button type="button" className="coach-pop-x" onClick={() => setOpen(false)} aria-label="Close"><X size={15} /></button>
+      </div>
       <strong>{nudge.title}</strong><p>{nudge.body}</p>
       {nudge.cta && <button type="button" className="btn btn-primary btn-sm" onClick={() => { setOpen(false); navigate(nudge.cta!.to); }}>{nudge.cta.label} <ArrowRight size={14} /></button>}
     </motion.div>}</AnimatePresence>

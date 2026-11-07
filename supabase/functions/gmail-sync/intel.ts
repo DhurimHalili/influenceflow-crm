@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { aiEnabled, hasAudience, QuotaExhausted, readAttachment, readCreatorEmail, type AudienceFacts, type FileReading } from "../_shared/ai.ts";
 import { decodeEntities } from "../_shared/leadScanner.ts";
-import { negotiate, normalizeRateHistory, normalizeRateMeta, setListPrices, type RateEvent, type RateKey, type RateMetaMap, type Rates } from "../_shared/negotiation.ts";
+import { backfillList, negotiate, normalizeRateHistory, normalizeRateMeta, setListPrices, type RateEvent, type RateKey, type RateMetaMap, type Rates } from "../_shared/negotiation.ts";
 import { isPlainYes, mentionsMoneyOrAudience, moneyMentions, ownText, readMine, readOffer, readPrices, statesAudience, type PriceHit } from "../_shared/priceReader.ts";
 import { listPrice } from "../_shared/negotiation.ts";
 
@@ -123,6 +123,8 @@ class Profile {
   /** The furthest stage this mail proves: Negotiating (prices on the table) or Roster (a price agreed). */
   stage: { status: "negotiating" | "roster"; at: string; why: string } | null = null;
   private manual: Set<RateKey>;
+  /** Prices read from their analyzed media kits / rate cards (oldest first). */
+  kits: { at: string; rates: { key: RateKey; amount: number; currency: string }[] }[] = [];
   constructor(public c: CreatorRow, private admin: Admin, private userId: string, private currency: string) {
     this.rates = { ...(c.rates || {}) };
     this.meta = normalizeRateMeta(c.rate_meta);
@@ -153,9 +155,36 @@ class Profile {
     this.activities.push(`${this.c.name}: ${label}${done.event.summary.replace(/^New asking prices: /, "")}`);
     return true;
   }
+  /** Their kit's asking price for each key (latest kit sent on or before `at`, else the latest one). */
+  kitAsking(at?: string) {
+    const out: Partial<Record<RateKey, number>> = {};
+    const kits = [...this.kits].sort((a, b) => a.at.localeCompare(b.at));
+    const before = at ? kits.filter((k) => k.at <= at) : kits;
+    for (const k of (before.length ? before : kits)) Object.assign(out, this.money(k.rates));
+    return out;
+  }
+  /** A deal agreed with no asking price on file gets the kit's price as its list (and its real %). */
+  fixFromKits(label = "") {
+    const asking = this.kitAsking();
+    if (!Object.keys(asking).length) return false;
+    const done = backfillList(this.rates, this.meta, asking, { source: "media_kit", evidence: "Asking price from their media kit" });
+    if (!done.event) return false;
+    this.rates = done.rates; this.meta = done.meta; this.history.unshift(done.event); this.touched = true;
+    this.activities.push(`${this.c.name}: ${label}${done.event.summary}`);
+    return true;
+  }
   agree(list: { key: RateKey; amount: number; currency: string }[], at: string, evidence: string, historical: boolean, label: string) {
     const prices = this.allowed(this.money(list), at, historical);
     if (!Object.keys(prices).length) return false;
+    // No asking price on file for what they agreed, but their media kit has one:
+    // that's the price you negotiated from.
+    const asking = this.kitAsking(at);
+    const missing = Object.fromEntries((Object.keys(prices) as RateKey[]).filter((k) => !listPrice(this.rates, this.meta, k) && asking[k]).map((k) => [k, asking[k]!])) as Partial<Record<RateKey, number>>;
+    if (Object.keys(missing).length) {
+      const kitAt = [...this.kits].filter((k) => k.at <= at).map((k) => k.at).sort().pop() || at;
+      const listed = setListPrices(this.rates, this.meta, missing, { at: kitAt < at ? kitAt : at, source: "media_kit", evidence: "Asking price from their media kit" });
+      if (listed.event) { this.rates = listed.rates; this.meta = listed.meta; this.history.unshift(listed.event); this.touched = true; }
+    }
     const done = negotiate(this.rates, this.meta, prices, { at, source: "email", evidence });
     if (!done.event) return false;
     this.rates = done.rates; this.meta = done.meta; this.history.unshift(done.event); this.touched = true;
@@ -209,8 +238,47 @@ class Profile {
 }
 
 async function loadProfile(admin: Admin, userId: string, creatorId: string, currency: string) {
-  const { data } = await admin.from("creators").select("id, name, rates, rate_meta, rate_history, audience, socials, pipeline_status").eq("id", creatorId).eq("user_id", userId).maybeSingle();
-  return data ? new Profile(data as CreatorRow, admin, userId, currency) : null;
+  const [{ data }, { data: kits }] = await Promise.all([
+    admin.from("creators").select("id, name, rates, rate_meta, rate_history, audience, socials, pipeline_status").eq("id", creatorId).eq("user_id", userId).maybeSingle(),
+    admin.from("creator_files").select("received_at, created_at, analysis").eq("user_id", userId).eq("creator_id", creatorId).eq("status", "analyzed").in("kind", ["media_kit", "rate_card", "stats_screenshot"]).limit(20),
+  ]);
+  if (!data) return null;
+  const p = new Profile(data as CreatorRow, admin, userId, currency);
+  p.kits = kitsOf(kits || []);
+  return p;
+}
+
+type KitRow = { received_at: string | null; created_at: string; analysis: { rates?: unknown } | null };
+const kitsOf = (rows: KitRow[]) =>
+  rows.map((r) => ({
+    at: r.received_at || r.created_at,
+    rates: (Array.isArray(r.analysis?.rates) ? r.analysis!.rates : [])
+      .map((x) => x as { key?: unknown; amount?: unknown; currency?: unknown })
+      .filter((x) => typeof x.key === "string" && Number(x.amount) > 0)
+      .map((x) => ({ key: x.key as RateKey, amount: Number(x.amount), currency: String(x.currency || "").toUpperCase() })),
+  })).filter((k) => k.rates.length);
+
+/**
+ * Deals agreed before their media kit's prices were on file read "0 %". Every
+ * read run: any creator with an analyzed kit and a deal with no real asking
+ * price gets the kit's price as the list (the agreed price never changes).
+ */
+export async function repairKitLists(admin: Admin, userId: string, currency: string, max = 20) {
+  const { data: files } = await admin.from("creator_files").select("creator_id").eq("user_id", userId).eq("status", "analyzed").in("kind", ["media_kit", "rate_card", "stats_screenshot"]).limit(500);
+  const ids = Array.from(new Set((files || []).map((f) => f.creator_id)));
+  if (!ids.length) return 0;
+  const { data: rows } = await admin.from("creators").select("id, rates, rate_meta").eq("user_id", userId).in("id", ids);
+  const needs = (rows || []).filter((r) => {
+    const meta = normalizeRateMeta(r.rate_meta);
+    const rates = (r.rates || {}) as Partial<Rates>;
+    return (Object.keys(meta) as RateKey[]).some((k) => meta[k]?.status === "negotiated" && Number(rates[k]) > 0 && (!Number(meta[k]?.list) || Number(meta[k]?.list) === Number(rates[k])));
+  }).slice(0, max);
+  let fixed = 0;
+  for (const r of needs) {
+    const p = await loadProfile(admin, userId, r.id, currency);
+    if (p?.fixFromKits("deal price checked against their media kit — ")) { await p.save(); fixed++; }
+  }
+  return fixed;
 }
 
 const verdictOf = (r: FileReading, name: string) =>
@@ -243,6 +311,9 @@ async function readFile(admin: Admin, p: Profile, file: FileRow, bytes: Uint8Arr
     p.activities.push(`${p.c.name}'s audience updated from their ${reading.kind === "stats_screenshot" ? "stats screenshot" : "media kit"} (verified)`);
   }
   const priced = p.listPrices(reading.rates, at, "media_kit", file.filename, historical, "prices from their kit — ");
+  // A deal already agreed on a price this kit lists: now it has its asking price (and its real %).
+  p.kits = [...p.kits, { at, rates: reading.rates }];
+  p.fixFromKits("deal price checked against their media kit — ");
   return { verdict: priced ? `${verdict} · prices updated` : verdict, useful };
 }
 
