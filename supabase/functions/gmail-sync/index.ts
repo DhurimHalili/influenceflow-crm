@@ -1,9 +1,9 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { isSealed, openToken, sealToken } from "../_shared/googleTokens.ts";
-import { aiChain, aiEnabled, aiKeyCount, aiModel, aiProvider, aiReadyAt, classifyLead, planImport, QuotaExhausted, testAi, useKeyStore } from "../_shared/ai.ts";
+import { aiChain, aiEnabled, aiKeyCount, aiModel, aiProvider, aiReadyAt, classifyLead, planImport, QuotaExhausted, readReply, testAi, useKeyStore } from "../_shared/ai.ts";
 import { decodeEntities, isWarmup, precheck, scanForLead, type Lead, type ScanInput } from "../_shared/leadScanner.ts";
-import { classifyIncoming, myReplyIntent, READER_VERSION, referralOf, type IncomingKind, type TeamRole } from "../_shared/replyReader.ts";
+import { classifyIncoming, mergeReading, myReplyIntent, READER_VERSION, referralOf, stripQuoted, type IncomingKind, type TeamRole } from "../_shared/replyReader.ts";
 import { analyzeStoredFile, bodyOf, drainQueue, gmailAttachment, processCreatorMail, processMyMail, sniff, type Fetcher, type FullMessage } from "./intel.ts";
 
 // Gmail ⇄ CRM sync, for every mailbox a user connected (an agency often runs
@@ -256,7 +256,7 @@ function eventsFor(meta: Meta, userId: string, book: Map<string, Entity[]>, own:
   const push = (entity: Entity, email: string, fromOther: boolean) => {
     if (seen.has(entity.id)) return;
     seen.add(entity.id);
-    const reply_kind: IncomingKind = out ? "" : classifyIncoming({ headers: headersOf(meta), subject, text: snippet, fromOther });
+    const reply_kind: IncomingKind = out ? "" : classifyIncoming({ headers: headersOf(meta), subject, text: snippet, fromOther, from: email });
     rows.push({ user_id: userId, gmail_id: meta.id, thread_id: meta.threadId || "", direction: out ? "out" : "in", entity_type: entity.type, entity_id: entity.id, counterpart: email, subject, snippet, at, mailbox, message_key: messageKey(meta), scheduled, reply_kind, in_reply_to: replyToKey(meta), kind_v: READER_VERSION });
   };
   for (const email of counterparts) for (const entity of narrow(book.get(email) || [], meta, threads)) push(entity, email, false);
@@ -476,7 +476,12 @@ const DENIABLE = new Set(["contacted", "no_reply", "replied", "inbound"]);
 /** A new email this long after you marked them Denied reopens the conversation. */
 const REOPEN_AFTER_MS = 14 * 86400000;
 
-async function applyStatuses(admin: Admin, userId: string, entityIds: string[]) {
+/**
+ * `forceFrom` (per record): re-read from just before this time, even past a status
+ * you set by hand — used once, when a reply's meaning changed (new rules or
+ * the AI), so "Please lose my email" read as a no now really counts.
+ */
+async function applyStatuses(admin: Admin, userId: string, entityIds: string[], forceFrom?: Map<string, number>) {
   if (!entityIds.length) return 0;
   let changed = 0;
   const nowIso = new Date().toISOString();
@@ -490,12 +495,13 @@ async function applyStatuses(admin: Admin, userId: string, entityIds: string[]) 
     const records = [...(creators || []).map((r) => ({ ...r, table: "creators" as const, kind: "creator" as const })), ...(brands || []).map((r) => ({ ...r, table: "brands" as const, kind: "brand" as const }))];
     for (const record of records) {
       if (record.archived_at) continue;
-      const changedAt = record.status_updated_at ? new Date(record.status_updated_at).getTime() : 0;
+      const forced = forceFrom?.get(record.id);
+      const changedAt = forced ?? (record.status_updated_at ? new Date(record.status_updated_at).getTime() : 0);
       // A status Gmail set may be re-read against the email that set it (a reply
       // first read as a plain answer and now known to be a "no"); one you set by
       // hand is only ever moved by newer mail.
-      const byGmail = record.status_source === "gmail";
-      let since = changedAt;
+      const byGmail = forced !== undefined || record.status_source === "gmail";
+      let sinceT = changedAt;
       let status = record.pipeline_status as string;
       let at: string | null = null;
       let why = "";
@@ -509,7 +515,7 @@ async function applyStatuses(admin: Admin, userId: string, entityIds: string[]) 
         if (ev.direction === "in" && (ev.reply_kind === "auto" || ev.reply_kind === "managed_no")) continue;
         // Writing again to someone who passed, weeks later (not a quick "thanks
         // anyway"), reopens the conversation: the follow-ups start over.
-        const reopen = status === "denied" && ev.direction === "out" && !ev.scheduled && t - since >= REOPEN_AFTER_MS ? "contacted" : "";
+        const reopen = status === "denied" && ev.direction === "out" && !ev.scheduled && t - sinceT >= REOPEN_AFTER_MS ? "contacted" : "";
         // They clearly said no → Denied. A Denied that Gmail set from their "no"
         // goes back to Replied when they write again without saying no.
         const saidNo = ev.direction === "in" && ev.reply_kind === "no" && DENIABLE.has(status) ? "denied" : "";
@@ -517,7 +523,7 @@ async function applyStatuses(admin: Admin, userId: string, entityIds: string[]) 
         const next = reopen || saidNo || unsaid || NEXT[status]?.[ev.direction as "out" | "in"];
         if (next && next !== status) {
           status = next;
-          since = t;
+          sinceT = t;
           // A scheduled email carries its future send time; a status change is never dated ahead.
           at = ev.at > nowIso ? nowIso : ev.at;
           const via = ev.mailbox ? ` (${ev.mailbox})` : "";
@@ -527,8 +533,8 @@ async function applyStatuses(admin: Admin, userId: string, entityIds: string[]) 
       }
       if (!at || status === record.pipeline_status) continue;
       const patch: Record<string, unknown> = { pipeline_status: status, status_updated_at: at, status_source: "gmail" };
-      if (status === "denied") { patch.lost_at = at; if (!record.lost_reason) patch.lost_reason = "Said no by email"; }
-      if (record.pipeline_status === "denied" && status !== "denied" && record.lost_reason === "Said no by email") { patch.lost_reason = ""; patch.lost_at = null; }
+      if (status === "denied") { patch.lost_at = at; if (!record.lost_reason) patch.lost_reason = SAID_NO; }
+      if (record.pipeline_status === "denied" && status !== "denied" && record.lost_reason === SAID_NO) { patch.lost_reason = ""; patch.lost_at = null; }
       if (!record.date_contacted) patch.date_contacted = (first || at).slice(0, 10);
       const { error } = await admin.from(record.table).update(patch).eq("id", record.id).eq("user_id", userId).eq("pipeline_status", record.pipeline_status);
       if (error) continue;
@@ -547,25 +553,117 @@ async function applyStatuses(admin: Admin, userId: string, entityIds: string[]) 
  * "Not at the moment." stored as a plain answer becomes a "no" and the
  * record moves to Denied. Your own verdicts (kind_v 32767) are never touched.
  */
+type KindChange = { entityId: string; at: string; from: string; to: string };
+
 async function rereadReplies(admin: Admin, userId: string) {
-  const { data, error } = await admin.from("email_events").select("id, entity_id, subject, snippet, reply_kind").eq("user_id", userId).eq("direction", "in").lt("kind_v", READER_VERSION).limit(400);
+  const { data, error } = await admin.from("email_events").select("id, entity_id, counterpart, subject, snippet, reply_kind, at, reply_ai_at").eq("user_id", userId).eq("direction", "in").lt("kind_v", READER_VERSION).limit(400);
   if (error || !data?.length) return 0;
   const groups = new Map<string, string[]>();
-  const touched = new Set<string>();
+  const changes: KindChange[] = [];
   for (const r of data) {
     let kind = String(r.reply_kind || "");
-    // Header-based 'auto', management declines and your 'ok' stay as they are.
-    if (["", "no", "maybe_no", "team"].includes(kind)) {
-      const next = classifyIncoming({ subject: r.subject || "", text: r.snippet || "", fromOther: kind === "team" });
-      if (next !== kind) { kind = next; touched.add(r.entity_id); }
+    // Header-based 'auto', management declines, your 'ok' and an AI verdict stay as they are.
+    if (["", "no", "maybe_no", "team"].includes(kind) && !r.reply_ai_at) {
+      const next = classifyIncoming({ subject: r.subject || "", text: r.snippet || "", fromOther: kind === "team", from: r.counterpart || "" });
+      if (next !== kind) { changes.push({ entityId: r.entity_id, at: r.at, from: kind, to: next }); kind = next; }
     }
     groups.set(kind, [...(groups.get(kind) || []), r.id]);
   }
   for (const [kind, ids] of groups) {
     for (const part of chunk(ids, 200)) await admin.from("email_events").update({ reply_kind: kind, kind_v: READER_VERSION }).eq("user_id", userId).in("id", part).lt("kind_v", READER_VERSION);
   }
-  if (touched.size) await applyStatuses(admin, userId, [...touched]);
-  return touched.size;
+  await afterKindChange(admin, userId, changes);
+  return changes.length;
+}
+
+const SAID_NO = "Said no by email";
+
+/**
+ * When an AI has quota: a second opinion on each person's latest reply in an
+ * early stage (and on every Denied Gmail set from a "no") — did they turn it
+ * down, and did THEY write it or their team / an autoresponder. Reads the
+ * full message (signature included), one Gmail call + one small AI call per
+ * reply, once (`email_events.reply_ai_at`). Your own verdicts are never read.
+ */
+async function aiReadReplies(admin: Admin, userId: string, token: string, mailbox: string, budget: { ai: number }, deadline: number) {
+  if (!aiEnabled() || budget.ai <= 0 || Date.now() > deadline - 8_000) return 0;
+  if ((await aiReadyAt("text").catch(() => 0)) > Date.now()) return 0;
+  const { data } = await admin.from("email_events").select("id, gmail_id, entity_id, counterpart, subject, reply_kind, at").eq("user_id", userId).eq("mailbox", mailbox).eq("direction", "in").is("reply_ai_at", null).in("reply_kind", ["", "no", "maybe_no", "team"]).lt("kind_v", 32767).gte("at", new Date(Date.now() - 60 * 86400000).toISOString()).order("at", { ascending: false }).limit(40);
+  if (!data?.length) return 0;
+  const ids = Array.from(new Set(data.map((r) => r.entity_id)));
+  const [{ data: creators }, { data: brands }] = await Promise.all([
+    admin.from("creators").select("id, name, pipeline_status, status_source, lost_reason").eq("user_id", userId).in("id", ids),
+    admin.from("brands").select("id, name, pipeline_status, status_source, lost_reason").eq("user_id", userId).in("id", ids),
+  ]);
+  const recs = new Map([...(creators || []), ...(brands || [])].map((r) => [r.id, r]));
+  const now = new Date().toISOString();
+  const seen = new Set<string>();
+  const skip: string[] = [];
+  const changes: KindChange[] = [];
+  for (const ev of data) {
+    const rec = recs.get(ev.entity_id);
+    // Only the latest reply per person, and only where the answer can move or undo something.
+    const live = rec && (DENIABLE.has(rec.pipeline_status) || (rec.pipeline_status === "denied" && rec.status_source === "gmail" && rec.lost_reason === SAID_NO));
+    if (!live || seen.has(ev.entity_id)) { skip.push(ev.id); continue; }
+    seen.add(ev.entity_id);
+    if (budget.ai <= 0 || Date.now() > deadline - 6_000) break;
+    const full = await gmail<FullMessage>(token, `/messages/${ev.gmail_id}?format=full`).catch(() => null);
+    if (!full) continue;
+    const from = full.payload?.headers?.find((h) => h.name.toLowerCase() === "from")?.value || ev.counterpart || "";
+    let reading;
+    try {
+      reading = await readReply({ creator: rec!.name, from, subject: ev.subject || "", body: stripQuoted(bodyOf(full).text) });
+    } catch (e) {
+      if (e instanceof QuotaExhausted) break;
+      continue;
+    }
+    budget.ai--;
+    const rule = String(ev.reply_kind || "") as IncomingKind;
+    const next = mergeReading(rule, reading);
+    await admin.from("email_events").update({ reply_kind: next, reply_ai_at: now }).eq("user_id", userId).eq("id", ev.id).lt("kind_v", 32767);
+    if (next !== rule) changes.push({ entityId: ev.entity_id, at: ev.at, from: rule, to: next });
+  }
+  for (const part of chunk(skip, 200)) await admin.from("email_events").update({ reply_ai_at: now }).eq("user_id", userId).in("id", part);
+  await afterKindChange(admin, userId, changes);
+  return changes.length;
+}
+
+/**
+ * A reply's meaning changed after it arrived (better rules, or the AI):
+ *  - it is now a clear no → read the record again from that reply, even past a
+ *    status you set by hand (Replied, Contacted…) — but only while it is still
+ *    their latest real message. Negotiating / Roster / Signed never move.
+ *  - it was the no that made Gmail mark them Denied and isn't a no any more
+ *    (it came from their team, or it wasn't a no) → that Denied is undone and
+ *    the record is read again from just before the reply.
+ */
+async function afterKindChange(admin: Admin, userId: string, changes: KindChange[]) {
+  if (!changes.length) return 0;
+  const ids = Array.from(new Set(changes.map((c) => c.entityId)));
+  const since = new Map<string, number>();
+  const [{ data: creators }, { data: brands }, { data: mail }] = await Promise.all([
+    admin.from("creators").select("id, name, pipeline_status, status_source, lost_reason").eq("user_id", userId).in("id", ids),
+    admin.from("brands").select("id, name, pipeline_status, status_source, lost_reason").eq("user_id", userId).in("id", ids),
+    admin.from("email_events").select("entity_id, direction, at, reply_kind, scheduled").eq("user_id", userId).in("entity_id", ids),
+  ]);
+  const records = [...(creators || []).map((r) => ({ ...r, table: "creators" as const, kind: "creator" as const })), ...(brands || []).map((r) => ({ ...r, table: "brands" as const, kind: "brand" as const }))];
+  for (const rec of records) {
+    const mine = changes.filter((c) => c.entityId === rec.id);
+    const events = (mail || []).filter((e) => e.entity_id === rec.id);
+    const lastIn = events.filter((e) => e.direction === "in" && e.reply_kind !== "auto").sort((a, b) => b.at.localeCompare(a.at))[0];
+    const newNo = mine.filter((c) => c.to === "no" && c.from !== "no").sort((a, b) => b.at.localeCompare(a.at))[0];
+    const gone = mine.filter((c) => c.from === "no" && c.to !== "no").sort((a, b) => a.at.localeCompare(b.at))[0];
+    if (newNo && lastIn && lastIn.at === newNo.at && DENIABLE.has(rec.pipeline_status)) {
+      since.set(rec.id, new Date(newNo.at).getTime() - 1);
+    } else if (gone && rec.pipeline_status === "denied" && rec.status_source === "gmail" && rec.lost_reason === SAID_NO && !events.some((e) => e.direction === "in" && e.reply_kind === "no")) {
+      const at = new Date(new Date(gone.at).getTime() - 1).toISOString();
+      const { error } = await admin.from(rec.table).update({ pipeline_status: "contacted", status_updated_at: at, status_source: "gmail", lost_reason: "", lost_at: null }).eq("id", rec.id).eq("user_id", userId).eq("pipeline_status", "denied");
+      if (error) continue;
+      await admin.from("activities").insert({ user_id: userId, text: `Gmail: ${rec.name} is no longer Denied — ${gone.to === "managed_no" ? "the no came from their team, not them: reach them on another channel" : "their reply wasn't a no"}`.slice(0, 500), at: new Date().toISOString(), entity_type: rec.kind, entity_id: rec.id });
+      since.set(rec.id, new Date(at).getTime());
+    }
+  }
+  return since.size ? applyStatuses(admin, userId, [...since.keys()], since) : 0;
 }
 
 // ----- creators' older mail --------------------------------------------------------
@@ -1153,6 +1251,9 @@ async function readMailbox(admin: Admin, row: TokenRow, own: Set<string>, book: 
   }
   filesSaved += await backfillCreatorMail({ admin, userId: row.user_id, mailbox, currency, get, budget, deadline: deadline - 12_000, checked, max: 8 }).catch(() => 0);
   for (const part of chunk(checked, 200)) await admin.from("email_events").update({ intel_at: new Date().toISOString() }).eq("user_id", row.user_id).in("gmail_id", part);
+
+  // d2. AI second opinion on replies (said no? who wrote it?), when there's quota.
+  await aiReadReplies(admin, row.user_id, token, mailbox, budget, deadline - 10_000).catch(() => 0);
 
   // e. Files waiting for the AI.
   const aiRead = budget.ai > 0 && Date.now() < deadline - 10_000 ? await drainQueue({ admin, userId: row.user_id, currency, mailbox, get, max: Math.min(3, budget.ai), deadline: deadline - 8_000 }).catch(() => 0) : 0;
