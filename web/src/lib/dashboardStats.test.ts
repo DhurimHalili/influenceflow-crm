@@ -45,6 +45,8 @@ eq("new conversations", c("first"), 1);
 eq("answers", c("answers"), 1);
 eq("replies: auto-replies never count", c("replies"), 1);
 eq("still scheduled", st.scheduled("all").length, 1);
+eq("scheduled ahead says what it is and who it goes to", st.scheduledAhead("all", t).map((x) => [x.role, x.name !== "", x.to]), [["followup", true, "/app/influencers/c1"]]);
+eq("nothing ahead after its send time", st.scheduledAhead("all", t + 3 * H).length, 0);
 eq("influencers only: emails", c("emails", "creator"), 2);
 eq("brands only: emails", c("emails", "brand"), 2);
 eq("negotiations from Gmail moves and manual moves", [c("negotiations", "creator"), c("negotiations", "brand")], [1, 1]);

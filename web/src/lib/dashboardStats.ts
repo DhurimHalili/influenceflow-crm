@@ -258,7 +258,13 @@ export function makeStats(all: DashInput) {
     return { email, other };
   };
 
-  return { rows, count, emailMix, replyRate, repliers, scheduled, followupChannels };
+  /** Emails waiting in Gmail's Scheduled folder that send at or after `from`, with who and what kind. */
+  const scheduledAhead = (view: View, from: number) =>
+    input.sent
+      .filter((x) => x.scheduled && x.channel === "email" && matches(view, x.segment) && new Date(x.at).getTime() >= from)
+      .sort((x, y) => x.at.localeCompare(y.at))
+      .map((x) => ({ key: x.key, at: x.at, role: x.role, mailbox: x.mailbox, segment: x.segment, ...who(x) }));
+  return { rows, count, emailMix, replyRate, repliers, scheduled, scheduledAhead, followupChannels };
 }
 
 export type Stats = ReturnType<typeof makeStats>;
