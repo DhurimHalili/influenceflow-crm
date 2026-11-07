@@ -59,6 +59,8 @@ type DataContextValue = WorkspaceData & {
   addBrands: (values: NewBrand[]) => number;
   findBrandDuplicates: (name: string, domain: string, ignoreId?: string, links?: string[]) => DuplicateMatch[];
   mergeBrands: (keepId: string, removeId: string, merged: Partial<Brand>) => Promise<boolean>;
+  /** Your verdict on a reply Gmail read as a (maybe) no: 'no' = they said no, 'ok' = they didn't. Saved on the server so Gmail never reads it again. */
+  confirmReply: (eventId: string, verdict: "no" | "ok") => Promise<boolean>;
   addContact: (value: NewContact) => BrandContact;
   updateContact: (id: string, value: Partial<BrandContact>) => void;
   deleteContact: (id: string) => void;
@@ -695,6 +697,15 @@ export function DataProvider({ children }: { children: ReactNode }) {
     return !error;
   };
 
+  const confirmReply = async (eventId: string, verdict: "no" | "ok") => {
+    if (hasSupabase && userId !== "guest") {
+      const { error } = await supabase.rpc("confirm_reply", { p_event: eventId, p_verdict: verdict });
+      if (error) { console.warn("[reply] verdict not saved", error.code); return false; }
+    }
+    setData((current) => ({ ...current, emailEvents: (current.emailEvents || []).map((e) => (e.id === eventId ? { ...e, reply_kind: verdict === "ok" ? "" : "no" } : e)) }));
+    return true;
+  };
+
   const mergeCreators = async (keepId: string, removeId: string, merged: Partial<Creator>) => {
     if (!(await moveHistory("creator", keepId, removeId))) return false;
     setData((current) => {
@@ -1301,6 +1312,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       addBrands,
       findBrandDuplicates,
       mergeBrands,
+      confirmReply,
       addContact,
       updateContact,
       deleteContact,

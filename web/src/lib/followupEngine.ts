@@ -196,7 +196,7 @@ export function timeline(target: Target, followups: Followup[], events: EmailEve
   return touches;
 }
 
-const IN_LABEL: Record<string, string> = { "": "They emailed", no: "They passed", team: "Their team replied", auto: "Auto-reply", managed_no: "Declined for them" };
+const IN_LABEL: Record<string, string> = { "": "They emailed", no: "They said no", maybe_no: "Reads like a no", team: "Their team replied", auto: "Auto-reply", managed_no: "Declined for them" };
 
 /**
  * A follow-up that bumps your own earlier email ("you might have missed my
@@ -351,7 +351,8 @@ export function flagFor(state: FollowupState): Flag | null {
       return { tone: "due", short: state.overdueDays > 0 ? `Follow up · ${state.overdueDays}d late` : "Follow up today", long: `No reply to ${roundLabel(state.sent ?? state.round, state.last.channel)} — send your ${nextFollowupLabel(state.sent ?? state.round)}${state.overdueDays > 0 ? ` (due ${state.overdueDays} business day${state.overdueDays === 1 ? "" : "s"} ago)` : " today"}` };
     case "reply-needed":
       if (state.thread && (state.thread.otherReply || state.last.threadId !== state.thread.newest) && state.last.source === "gmail") return { tone: "reply", short: state.days > 0 ? `Old thread reply · ${state.days}d` : "Replied in old thread", long: `They answered in an older email thread${state.days > 0 ? ` ${state.days} business day${state.days === 1 ? "" : "s"} ago` : " today"}, not in your newest one — reply there, then choose which thread to continue in` };
-      if (state.last.kind === "no") return { tone: "reply", short: "They passed", long: `They said no ${state.days > 0 ? `${state.days} business day${state.days === 1 ? "" : "s"} ago` : "today"} — thank them and mark them Denied; you'll get a reminder to reach back in a month` };
+      if (state.last.kind === "no") return { tone: "reply", short: state.days > 0 ? `Reply · ${state.days}d` : "Reply needed", long: `They said no ${state.days > 0 ? `${state.days} business day${state.days === 1 ? "" : "s"} ago` : "today"} while the deal was open — thank them and mark them Denied; you'll get a reminder to reach back in a month` };
+      if (state.last.kind === "maybe_no") return { tone: "reply", short: state.days > 0 ? `Reply · ${state.days}d` : "Reply needed", long: `Their reply ${state.days > 0 ? `${state.days} business day${state.days === 1 ? "" : "s"} ago` : "today"} reads like a no, but it isn't certain — answer them, or open the profile and decide` };
       return { tone: "reply", short: state.days > 0 ? `Reply · ${state.days}d` : "Reply needed", long: `${state.last.kind === "team" ? "Their team" : "They"} wrote ${state.days > 0 ? `${state.days} business day${state.days === 1 ? "" : "s"} ago` : "today"} — your turn to answer` };
     case "waiting": {
       if (state.last.scheduled) {

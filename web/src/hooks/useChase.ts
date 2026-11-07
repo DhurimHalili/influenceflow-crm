@@ -3,6 +3,9 @@ import { useData } from "../contexts/DataContext";
 import { chaseList, type Chase } from "../lib/followupEngine";
 import { dayShort, dayWord, followupsPaused, followupsResume, modeOn, normalizeWeekend, sendingPaused, sendingResumes, type DayMode } from "../lib/dayMode";
 import { DEFAULT_FOLLOWUP_RULES } from "../lib/prefs";
+import { latestReplies, noVerdict, notInterested, type NoLevel, type NoVerdict } from "../lib/saidNo";
+
+export type NoEntry = { verdict: NoVerdict | null; group: NoLevel | "denied"; type: "creator" | "brand"; denied: boolean };
 
 /** Re-render at local midnight so "due today" flips without a reload. */
 export function useToday() {
@@ -69,7 +72,18 @@ export function useChase() {
     const managed = list.filter((c) => c.state.kind === "managed");
     /** Said no a while ago: time to try again. */
     const reach = list.filter((c) => c.state.kind === "reach-back");
-    return { list, byId, due, reply, cancel, managed, reach, rules, today, parked };
+    /** Said no by email (clear or maybe), or marked Denied: the "Not interested" list. */
+    const last = latestReplies(data.emailEvents || []);
+    const no = new Map<string, NoEntry>();
+    for (const [type, records] of [["creator", data.creators], ["brand", data.brands]] as const) {
+      for (const r of records) {
+        if (r.archived_at) continue;
+        const verdict = noVerdict(r, last.get(r.id));
+        const group = notInterested(r, verdict);
+        if (group) no.set(r.id, { verdict, group, type, denied: r.pipeline_status === "denied" });
+      }
+    }
+    return { list, byId, due, reply, cancel, managed, reach, rules, today, parked, no };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data.creators, data.brands, data.followups, data.emailEvents, rules, day, today]);
 }

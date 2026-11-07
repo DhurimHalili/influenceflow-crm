@@ -3,7 +3,7 @@ import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { isSealed, openToken, sealToken } from "../_shared/googleTokens.ts";
 import { aiChain, aiEnabled, aiKeyCount, aiModel, aiProvider, aiReadyAt, classifyLead, planImport, QuotaExhausted, testAi, useKeyStore } from "../_shared/ai.ts";
 import { decodeEntities, isWarmup, precheck, scanForLead, type Lead, type ScanInput } from "../_shared/leadScanner.ts";
-import { classifyIncoming, myReplyIntent, referralOf, type IncomingKind, type TeamRole } from "../_shared/replyReader.ts";
+import { classifyIncoming, myReplyIntent, READER_VERSION, referralOf, type IncomingKind, type TeamRole } from "../_shared/replyReader.ts";
 import { analyzeStoredFile, bodyOf, drainQueue, gmailAttachment, processCreatorMail, processMyMail, sniff, type Fetcher, type FullMessage } from "./intel.ts";
 
 // Gmail ⇄ CRM sync, for every mailbox a user connected (an agency often runs
@@ -32,6 +32,9 @@ import { analyzeStoredFile, bodyOf, drainQueue, gmailAttachment, processCreatorM
 //   New        + they email you        → Inbound
 //   Contacted / No reply + they reply  → Replied
 //   Inbound    + you answer            → Replied
+//   Contacted / No reply / Replied / Inbound + they clearly say no → Denied
+//     (a reply that only reads like a no is flagged "Maybe not interested"
+//      in the app instead; a later normal reply from them undoes a Gmail Denied)
 // A message waiting in Gmail's "Scheduled" folder counts as your touch but is
 // stored as scheduled (not sent) and re-checked every run: once it goes out it
 // counts as sent; cancel it (it goes back to Drafts) or delete it and it is
@@ -66,11 +69,11 @@ type TokenRow = { id: string; user_id: string; access_token: string | null; refr
 type Entity = { type: "creator" | "brand"; id: string; name?: string };
 type TeamMember = { email: string; role?: string; removed?: boolean };
 type Meta = { id: string; threadId: string; labelIds?: string[]; snippet?: string; internalDate?: string; payload?: { headers?: { name: string; value: string }[] } };
-type EventRow = { user_id: string; gmail_id: string; thread_id: string; direction: "out" | "in"; entity_type: "creator" | "brand"; entity_id: string; counterpart: string; subject: string; snippet: string; at: string; mailbox: string; message_key: string; scheduled: boolean; reply_kind: IncomingKind; in_reply_to: string };
+type EventRow = { user_id: string; gmail_id: string; thread_id: string; direction: "out" | "in"; entity_type: "creator" | "brand"; entity_id: string; counterpart: string; subject: string; snippet: string; at: string; mailbox: string; message_key: string; scheduled: boolean; reply_kind: IncomingKind; in_reply_to: string; kind_v: number };
 /** Gmail thread → the CRM records already in it (per mailbox: thread ids belong to one). */
 type ThreadBook = Map<string, Entity[]>;
 // Columns added by later migrations: a database without them still gets the mail.
-const LATE_COLUMNS = ["reply_kind", "in_reply_to", "scheduled"] as const;
+const LATE_COLUMNS = ["kind_v", "reply_kind", "in_reply_to", "scheduled"] as const;
 
 class GmailError extends Error {
   constructor(message: string, public status = 0, public reconnect = false, public retryable = false) {
@@ -254,7 +257,7 @@ function eventsFor(meta: Meta, userId: string, book: Map<string, Entity[]>, own:
     if (seen.has(entity.id)) return;
     seen.add(entity.id);
     const reply_kind: IncomingKind = out ? "" : classifyIncoming({ headers: headersOf(meta), subject, text: snippet, fromOther });
-    rows.push({ user_id: userId, gmail_id: meta.id, thread_id: meta.threadId || "", direction: out ? "out" : "in", entity_type: entity.type, entity_id: entity.id, counterpart: email, subject, snippet, at, mailbox, message_key: messageKey(meta), scheduled, reply_kind, in_reply_to: replyToKey(meta) });
+    rows.push({ user_id: userId, gmail_id: meta.id, thread_id: meta.threadId || "", direction: out ? "out" : "in", entity_type: entity.type, entity_id: entity.id, counterpart: email, subject, snippet, at, mailbox, message_key: messageKey(meta), scheduled, reply_kind, in_reply_to: replyToKey(meta), kind_v: READER_VERSION });
   };
   for (const email of counterparts) for (const entity of narrow(book.get(email) || [], meta, threads)) push(entity, email, false);
   // Nobody known on it, but it belongs to a conversation you're tracking: their
@@ -467,7 +470,9 @@ const NEXT: Record<string, { out?: string; in?: string }> = {
   no_reply: { in: "replied" },
   inbound: { out: "replied" },
 };
-const LABEL: Record<string, string> = { contacted: "Contacted", inbound: "Inbound", replied: "Replied" };
+const LABEL: Record<string, string> = { contacted: "Contacted", inbound: "Inbound", replied: "Replied", denied: "Denied" };
+/** Stages a clear "no" from them closes. Negotiating / Roster / Signed are yours to decide. */
+const DENIABLE = new Set(["contacted", "no_reply", "replied", "inbound"]);
 /** A new email this long after you marked them Denied reopens the conversation. */
 const REOPEN_AFTER_MS = 14 * 86400000;
 
@@ -479,37 +484,51 @@ async function applyStatuses(admin: Admin, userId: string, entityIds: string[]) 
     const since = new Date(Date.now() - BACKFILL_DAYS * 86400000).toISOString();
     const [{ data: events }, { data: creators }, { data: brands }] = await Promise.all([
       admin.from("email_events").select("*").eq("user_id", userId).in("entity_id", ids).gte("at", since).order("at", { ascending: true }),
-      admin.from("creators").select("id, name, pipeline_status, status_updated_at, date_contacted, archived_at").eq("user_id", userId).in("id", ids),
-      admin.from("brands").select("id, name, pipeline_status, status_updated_at, date_contacted, archived_at").eq("user_id", userId).in("id", ids),
+      admin.from("creators").select("id, name, pipeline_status, status_updated_at, status_source, date_contacted, archived_at, lost_reason").eq("user_id", userId).in("id", ids),
+      admin.from("brands").select("id, name, pipeline_status, status_updated_at, status_source, date_contacted, archived_at, lost_reason").eq("user_id", userId).in("id", ids),
     ]);
     const records = [...(creators || []).map((r) => ({ ...r, table: "creators" as const, kind: "creator" as const })), ...(brands || []).map((r) => ({ ...r, table: "brands" as const, kind: "brand" as const }))];
     for (const record of records) {
       if (record.archived_at) continue;
       const changedAt = record.status_updated_at ? new Date(record.status_updated_at).getTime() : 0;
+      // A status Gmail set may be re-read against the email that set it (a reply
+      // first read as a plain answer and now known to be a "no"); one you set by
+      // hand is only ever moved by newer mail.
+      const byGmail = record.status_source === "gmail";
+      let since = changedAt;
       let status = record.pipeline_status as string;
       let at: string | null = null;
       let why = "";
       let first: string | null = null;
       for (const ev of (events || []).filter((e) => e.entity_id === record.id)) {
         first = first || ev.at;
+        const t = new Date(ev.at).getTime();
         // Only mail newer than your last status change can move it.
-        if (new Date(ev.at).getTime() <= changedAt) continue;
+        if (byGmail ? t < changedAt : t <= changedAt) continue;
         // An out-of-office, or their management turning it down for them, is not a reply.
         if (ev.direction === "in" && (ev.reply_kind === "auto" || ev.reply_kind === "managed_no")) continue;
         // Writing again to someone who passed, weeks later (not a quick "thanks
         // anyway"), reopens the conversation: the follow-ups start over.
-        const reopen = status === "denied" && ev.direction === "out" && !ev.scheduled && new Date(ev.at).getTime() - changedAt >= REOPEN_AFTER_MS ? "contacted" : "";
-        const next = reopen || NEXT[status]?.[ev.direction as "out" | "in"];
-        if (next) {
+        const reopen = status === "denied" && ev.direction === "out" && !ev.scheduled && t - since >= REOPEN_AFTER_MS ? "contacted" : "";
+        // They clearly said no → Denied. A Denied that Gmail set from their "no"
+        // goes back to Replied when they write again without saying no.
+        const saidNo = ev.direction === "in" && ev.reply_kind === "no" && DENIABLE.has(status) ? "denied" : "";
+        const unsaid = !saidNo && status === "denied" && (byGmail || at) && ev.direction === "in" && ev.reply_kind !== "no" && ev.reply_kind !== "maybe_no" ? "replied" : "";
+        const next = reopen || saidNo || unsaid || NEXT[status]?.[ev.direction as "out" | "in"];
+        if (next && next !== status) {
           status = next;
+          since = t;
           // A scheduled email carries its future send time; a status change is never dated ahead.
           at = ev.at > nowIso ? nowIso : ev.at;
           const via = ev.mailbox ? ` (${ev.mailbox})` : "";
-          why = reopen ? `you emailed again after they passed — “${ev.subject || "(no subject)"}”${via}` : ev.direction === "out" ? `you emailed “${ev.subject || "(no subject)"}”${via}` : `they emailed “${ev.subject || "(no subject)"}”${via}`;
+          const subj = `“${ev.subject || "(no subject)"}”${via}`;
+          why = reopen ? `you emailed again after they passed — ${subj}` : saidNo ? `they said no in ${subj}` : unsaid ? `they wrote again — ${subj}` : ev.direction === "out" ? `you emailed ${subj}` : `they emailed ${subj}`;
         }
       }
       if (!at || status === record.pipeline_status) continue;
       const patch: Record<string, unknown> = { pipeline_status: status, status_updated_at: at, status_source: "gmail" };
+      if (status === "denied") { patch.lost_at = at; if (!record.lost_reason) patch.lost_reason = "Said no by email"; }
+      if (record.pipeline_status === "denied" && status !== "denied" && record.lost_reason === "Said no by email") { patch.lost_reason = ""; patch.lost_at = null; }
       if (!record.date_contacted) patch.date_contacted = (first || at).slice(0, 10);
       const { error } = await admin.from(record.table).update(patch).eq("id", record.id).eq("user_id", userId).eq("pipeline_status", record.pipeline_status);
       if (error) continue;
@@ -518,6 +537,35 @@ async function applyStatuses(admin: Admin, userId: string, entityIds: string[]) 
     }
   }
   return changed;
+}
+
+// ----- replies read again with newer rules ------------------------------------------
+
+/**
+ * Replies stored before the current reply rules are read again (subject +
+ * preview, no Gmail call), so a rule fix reaches mail that already arrived —
+ * "Not at the moment." stored as a plain answer becomes a "no" and the
+ * record moves to Denied. Your own verdicts (kind_v 32767) are never touched.
+ */
+async function rereadReplies(admin: Admin, userId: string) {
+  const { data, error } = await admin.from("email_events").select("id, entity_id, subject, snippet, reply_kind").eq("user_id", userId).eq("direction", "in").lt("kind_v", READER_VERSION).limit(400);
+  if (error || !data?.length) return 0;
+  const groups = new Map<string, string[]>();
+  const touched = new Set<string>();
+  for (const r of data) {
+    let kind = String(r.reply_kind || "");
+    // Header-based 'auto', management declines and your 'ok' stay as they are.
+    if (["", "no", "maybe_no", "team"].includes(kind)) {
+      const next = classifyIncoming({ subject: r.subject || "", text: r.snippet || "", fromOther: kind === "team" });
+      if (next !== kind) { kind = next; touched.add(r.entity_id); }
+    }
+    groups.set(kind, [...(groups.get(kind) || []), r.id]);
+  }
+  for (const [kind, ids] of groups) {
+    for (const part of chunk(ids, 200)) await admin.from("email_events").update({ reply_kind: kind, kind_v: READER_VERSION }).eq("user_id", userId).in("id", part).lt("kind_v", READER_VERSION);
+  }
+  if (touched.size) await applyStatuses(admin, userId, [...touched]);
+  return touched.size;
 }
 
 // ----- creators' older mail --------------------------------------------------------
@@ -1168,6 +1216,7 @@ async function syncUser(admin: Admin, rows: TokenRow[], allRows: TokenRow[], dea
   }
   // Their reply just landed before a scheduled bump of yours went out: cancel it now.
   if (deadline - Date.now() > 5_000) await autoCancelCrossed(admin, allRows[0].user_id, allRows).catch(() => 0);
+  if (deadline - Date.now() > 5_000) await rereadReplies(admin, allRows[0].user_id).catch(() => 0);
   const readAll = async (until: number) => {
     const due = [...rows].filter((r) => opts.read === "now" || !r.read_at || Date.now() - new Date(r.read_at).getTime() >= READ_EVERY_MS).sort((a, b) => (a.read_at || "").localeCompare(b.read_at || ""));
     const out: Record<string, unknown>[] = [];

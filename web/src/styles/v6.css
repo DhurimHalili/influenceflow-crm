@@ -887,3 +887,38 @@
 .wk-extra.is-off .rule-step { opacity: .55; }
 .wk-preview { justify-self: start; border: 0; background: none; padding: 0; color: var(--accent); font: inherit; font-size: 13px; font-weight: 650; cursor: pointer; }
 .wk-preview:hover { text-decoration: underline; }
+
+/* ---- Said no / maybe not interested ---------------------------------------------------- */
+/* Their own words, shown as a speech bubble; clear no = rose, maybe = amber dashed (undecided). */
+.no-tag { display: inline-flex; align-items: center; gap: 4px; width: fit-content; max-width: 100%; margin: 3px 0 0 4px; padding: 2px 8px; border-radius: 9px; font-size: 10.5px; font-weight: 750; line-height: 1.5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; vertical-align: top; }
+.no-tag.no { color: color-mix(in srgb, var(--danger) 82%, var(--text)); background: color-mix(in srgb, var(--danger) 10%, transparent); }
+.no-tag.maybe { color: color-mix(in srgb, var(--warning) 70%, var(--text)); background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--warning) 13%, transparent) 0 6px, color-mix(in srgb, var(--warning) 6%, transparent) 6px 12px); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warning) 32%, transparent); }
+.kanban-item .no-tag, .creator-card .no-tag, .entity-mobile-card .no-tag { margin: 6px 0 0 4px; }
+.flag-inline .no-tag { margin-left: 4px; }
+
+.qchip-no svg { color: color-mix(in srgb, var(--danger) 80%, var(--text)); }
+.qchip-no.on { border-color: color-mix(in srgb, var(--danger) 70%, var(--line)); background: color-mix(in srgb, var(--danger) 9%, var(--surface-solid)); }
+.qchip-no.on b { background: color-mix(in srgb, var(--danger) 82%, var(--text)); }
+.qchip-maybe { margin-left: 2px; padding: 1px 6px; border-radius: 999px; font-size: 10.5px; font-style: normal; font-weight: 750; color: color-mix(in srgb, var(--warning) 70%, var(--text)); background: color-mix(in srgb, var(--warning) 14%, transparent); }
+
+.no-strip { --tone: var(--danger); position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px 14px; margin: 0 0 16px; padding: 14px 16px 14px 18px; border: 1px solid color-mix(in srgb, var(--tone) 28%, var(--line)); border-radius: 14px; background: linear-gradient(100deg, color-mix(in srgb, var(--tone) 8%, var(--surface-solid)), var(--surface-solid) 70%); overflow: hidden; }
+.no-strip::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 4px; background: var(--tone); }
+.no-strip.tone-maybe { --tone: var(--warning); border-style: dashed; }
+.no-strip.tone-maybe::before { background: repeating-linear-gradient(180deg, var(--tone) 0 6px, transparent 6px 10px); }
+.no-strip.tone-done { --tone: var(--text-soft); background: var(--surface-solid); }
+.no-strip-ico { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 11px; color: var(--tone); background: color-mix(in srgb, var(--tone) 13%, transparent); }
+.no-strip-body { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.no-strip-body strong { color: var(--text); font-size: 14px; }
+.no-strip-body small { color: var(--text-soft); font-size: 12px; line-height: 1.45; }
+.no-strip blockquote { position: relative; align-self: flex-start; max-width: 100%; margin: 2px 0 0 8px; padding: 7px 12px; border-radius: 4px 12px 12px 12px; background: color-mix(in srgb, var(--tone) 9%, var(--surface-solid)); color: var(--text); font-size: 13px; font-style: italic; line-height: 1.45; overflow-wrap: anywhere; }
+.no-strip blockquote::before { content: ""; position: absolute; top: 0; left: -7px; border: 7px solid transparent; border-top-color: color-mix(in srgb, var(--tone) 9%, var(--surface-solid)); border-right-color: color-mix(in srgb, var(--tone) 9%, var(--surface-solid)); }
+.no-strip blockquote cite { display: inline-block; margin-left: 8px; color: var(--text-soft); font-size: 11px; font-style: normal; font-weight: 650; }
+.no-strip-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+@media (max-width: 720px) {
+  .no-strip { grid-template-columns: auto minmax(0, 1fr); }
+  .no-strip-actions { grid-column: 1 / -1; justify-content: stretch; }
+  .no-strip-actions > * { flex: 1 1 140px; }
+}
+/* The table shows the tag under the follow-up flag on wide screens, in the name cell below 1280 px. */
+.no-tag.wide { display: none; margin-left: 0; }
+@media (min-width: 1281px) { .no-tag.wide { display: inline-flex; } }

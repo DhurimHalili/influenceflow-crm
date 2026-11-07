@@ -55,7 +55,7 @@ export function DayBriefLayer() {
   const found = useMemo(() => foundToday(data.creators), [data.creators]);
   if (!special) return null;
   const mode = today.mode as "light" | "scout";
-  const line = pickLine(mode, seed);
+  const line = pickLine(mode, seed, mode === "scout" ? today.replyResume : today.resume);
   const dayName = new Date().toLocaleDateString("en-US", { weekday: "long" });
   const parked = chase.parked.due.length;
   const replies = chase.reply.length + chase.parked.reply.length;
