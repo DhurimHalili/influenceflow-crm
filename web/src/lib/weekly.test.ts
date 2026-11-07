@@ -68,4 +68,16 @@ eq("greets by first name", mail.html.includes("Dhurim, here's your week"), true)
 const sunday = weeklyReport({ ...base, which: "this", now: new Date("2026-10-28T17:00:00Z") });
 eq("so far: later days are still to come", sunday.days.slice(3).every((d) => d.status === "future"), true);
 
+// Which mailbox did what: two mailboxes, each with its own share.
+{
+  const second = [ev("c2", "out", at(1, 10), { mailbox: "second@agency.com", thread_id: "t-x1" }), ev("c3", "out", at(1, 11), { mailbox: "second@agency.com", thread_id: "t-x2" })];
+  const two = weeklyReport({ ...base, events: [...(events as never[]), ...second], which: "last" });
+  const me = two.mailboxes.find((m) => m.email === "me@agency.com"), sec = two.mailboxes.find((m) => m.email === "second@agency.com");
+  eq("one line per mailbox", [two.mailboxes.length, !!me, !!sec], [2, true, true]);
+  eq("each mailbox counts its own emails", [sec?.emails.now, (me?.emails.now || 0) + (sec?.emails.now || 0) === two.emails.total.now], [2, true]);
+  const html = renderWeeklyEmail(two);
+  eq("the email shows which mailbox did what", [html.html.includes("Which mailbox did what"), html.html.includes("second"), html.text.includes("second@agency.com: 2 emails")], [true, true, true]);
+  eq("one mailbox: a single card, no comparison", weeklyReport({ ...base, which: "last" }).mailboxes.length, 1);
+}
+
 if (fail) { console.log(`${fail} failed`); (globalThis as { process?: { exit(n: number): void } }).process?.exit(1); } else console.log("all weekly tests pass");

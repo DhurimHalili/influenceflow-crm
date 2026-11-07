@@ -76,7 +76,7 @@ export function WeeklyReportSettings() {
   const data = useData();
   const { toast } = useToast();
   const prefs = data.profile.preferences;
-  const mode = prefs.weekly_report || "monday";
+  const mode = prefs.weekly_report || "sunday";
   const [open, setOpen] = useState(false);
   const status = useWeeklyStatus(true);
   const zone = prefs.timezone || browserZone();
@@ -86,8 +86,8 @@ export function WeeklyReportSettings() {
   };
   const last = status?.last?.find((r) => r.status === "sent");
   return <div className="weekly-settings">
-    <div className="weekly-settings-head"><strong>Weekly report by email</strong><small>Your week at a glance: effort vs your daily goal, replies, deals, every day — with an honest (and sometimes funny) verdict. Sent to {status?.to || "your email"}, in {zone}.</small></div>
-    <div className="reminder-options weekly-options">{([["monday", "Monday 8:00", "Last week, start the new one with a plan"], ["sunday", "Sunday 18:00", "This week, before it ends"], ["off", "Off", "No weekly email"]] as const).map(([value, label, hint]) => <button type="button" key={value} className={mode === value ? "selected" : ""} onClick={() => set(value)} aria-pressed={mode === value}><span>{label}</span><small>{hint}</small></button>)}</div>
+    <div className="weekly-settings-head"><strong>Weekly report by email</strong><small>Your week at a glance: effort vs your daily goal, replies, deals, every day, and which mailbox did what — with an honest (and sometimes funny) verdict. Sent to {status?.to || "your email"}, in {zone}.</small></div>
+    <div className="reminder-options weekly-options">{([["sunday", "Sunday 18:00", "This week, before it ends (default)"], ["monday", "Monday 8:00", "Last week, start the new one with a plan"], ["off", "Off", "No weekly email"]] as const).map(([value, label, hint]) => <button type="button" key={value} className={mode === value ? "selected" : ""} onClick={() => set(value)} aria-pressed={mode === value}><span>{label}</span><small>{hint}</small></button>)}</div>
     <div className="weekly-settings-foot">
       <Button size="sm" variant="secondary" onClick={() => setOpen(true)}><FileBarChart size={14} /> Preview</Button>
       <span className={`weekly-mailer ${status ? (status.configured ? "ok" : "off") : ""}`}>{!status ? "Checking the mailer…" : status.configured ? (last ? `Last sent ${new Date(last.sent_at).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}` : "Mailer ready") : "Mailer not set up yet — previews still work"}</span>
