@@ -22,7 +22,7 @@
 
 export type IncomingKind = "" | "no" | "maybe_no" | "team" | "auto" | "managed_no";
 /** Bump when the rules below change: stored replies are read again with the new rules. */
-export const READER_VERSION = 2;
+export const READER_VERSION = 3;
 export type ReplyIntent = "yes" | "no" | "";
 
 /** Drops the quoted thread: "On Thu, Oct 29, 2026 at 9:28 PM X <x@y> wrote: …", "From: …", "-----Original Message-----". */
@@ -94,6 +94,38 @@ const GREETING = /^(?:hi|hey|hello|dear|yo)\b[^,.!]{0,30}[,.!]?\s*/i;
 const BARE_NO = /^(?:no|nope|nah)\b(?!\s*(?:problem|worries|worry|rush|doubt|need|way|issue|pressure|stress|hard))[\s,.!-]*(?:thank(?:s| you)[^.?!]{0,20})?[.!]*$/i;
 const bareNo = (s: string) => BARE_NO.test(s.replace(GREETING, "").trim());
 
+// "Lose my email", "remove us from your list", "stop emailing me": a no even
+// when it's phrased politely as an "if" ("If you could remove us from your
+// mailing list we'd appreciate it").
+const STOP = [
+  /\b(?:lose|loose|delete|remove|forget) (?:my|our|this) (?:email|e-mail|address|contact|number)/i,
+  /\bremove (?:me|us) from (?:your|the|this|any) (?:mailing |email |e-mail |contact |outreach )?(?:list|lists|database)/i,
+  /\b(?:take|drop|leave) (?:me|us) off (?:your|the|this) (?:mailing |email |e-mail |contact )?list/i,
+  /\b(?:stop|quit) (?:emailing|e-mailing|contacting|messaging|spamming|reaching out to|sending (?:me|us)) ?(?:me|us)?\b/i,
+  /\b(?:don't|do not|please don't|never) (?:email|e-mail|contact|message) (?:me|us)(?: again| anymore| any more)?\b/i,
+  /\bunsubscribe (?:me|us)\b/i,
+];
+
+// Someone writing FOR the creator: a team inbox (partnerships@, management@…),
+// or a signature with a job title. Their "no" is the team's, not the creator's:
+// "Managed · DM them", never Denied.
+const TEAM_INBOX = /^(?:partnerships?|partner|management|mgmt|talent|agency|bookings?|collabs?|collaborations?|sponsorships?|sponsors?|brand-?deals?|branddeals|deals|team|campaigns?|marketing|pr|press|representation)(?:[._+-]|$)/i;
+const TEAM_VOICE = [
+  /\b(?:partnerships?|talent|brand|business|marketing|creator|influencer|account|campaign|sponsorships?|social media) (?:manager|coordinator|lead|director|associate|executive|specialist|team|agent)\b/i,
+  /\b(?:talent|business|brand) (?:agent|rep|representative)\b/i,
+  /\bon behalf of\b/i,
+  /\b(?:i|we) (?:manage|represent|look after|handle (?:the )?(?:partnerships|bookings|brand deals) for)\b/i,
+  /\b(?:his|her|their) (?:manager|agent|management|team|agency)\b/i,
+  /\bmanagement team\b/i,
+];
+/** Written by their team, not the creator: a team inbox or a manager's signature. */
+export function teamVoice(from: string, text: string) {
+  const local = String(from || "").toLowerCase().split("@")[0] || "";
+  if (local && TEAM_INBOX.test(local)) return true;
+  const body = stripQuoted(text);
+  return TEAM_VOICE.some((re) => re.test(body));
+}
+
 // Reads like a no, but a person could still mean "later" — flagged, never applied.
 const MAYBE_NO = [
   /\b(?:probably|likely|maybe|perhaps) not\b/i,
@@ -111,7 +143,9 @@ const MAYBE_NO = [
 
 /** "no" (clear), "maybe" (reads like a no, not certain) or "" for their answer. */
 export function declineLevel(text: string, openDoor = true): "no" | "maybe" | "" {
-  const parts = sentences(stripQuoted(text)).filter((s) => !conditional(s));
+  const all = sentences(stripQuoted(text));
+  if (all.some((s) => STOP.some((re) => re.test(s)))) return "no";
+  const parts = all.filter((s) => !conditional(s));
   if (parts.some((s) => DECLINE.some((re) => re.test(s)) || bareNo(s))) {
     // "Not right now — but send me your media kit" is a door left open: only maybe.
     const open = openDoor && sentences(stripQuoted(text)).some((s) => OPEN_DOOR.some((re) => re.test(s)));
@@ -131,12 +165,13 @@ const youDeclined = (text: string) => declineLevel(text, false) === "no";
  * A message from their side of a conversation. `fromOther` = it came from an
  * address that isn't theirs (matched by thread): a manager, agency or team.
  */
-export function classifyIncoming(input: { headers?: Record<string, string>; subject?: string; text?: string; fromOther?: boolean }): IncomingKind {
+export function classifyIncoming(input: { headers?: Record<string, string>; subject?: string; text?: string; fromOther?: boolean; from?: string }): IncomingKind {
   const auto = looksAutomated(input);
   const level = declineLevel(`${input.text || ""}`);
-  if ((auto || input.fromOther) && level === "no") return "managed_no";
+  const team = input.fromOther || teamVoice(input.from || "", input.text || "");
+  if ((auto || team) && level === "no") return "managed_no";
   if (auto) return "auto";
-  if (input.fromOther) return "team";
+  if (team) return "team";
   return level === "no" ? "no" : level === "maybe" ? "maybe_no" : "";
 }
 
@@ -229,4 +264,20 @@ export function referralOf(text: string, exclude: string[]): Referral | null {
     if (role) return { email, role };
   }
   return null;
+}
+
+/**
+ * The rules' reading of a reply, checked by the AI (`readReply` in ai.ts).
+ * The AI can confirm, sharpen or soften — a disagreement about a "no" becomes
+ * "maybe_no" so you decide; it never turns a team's or an autoresponder's no
+ * into a Denied, and an unsure answer (confidence < 0.6) changes nothing.
+ */
+export function mergeReading(rule: IncomingKind, ai: { answer: "declined" | "interested" | "neutral"; writer: "creator" | "team" | "automatic"; confidence: number } | null): IncomingKind {
+  if (!ai || ai.confidence < 0.6 || rule === "auto" || rule === "managed_no") return rule;
+  const sure = ai.confidence >= 0.75;
+  if (ai.writer === "automatic") return ai.answer === "declined" ? "managed_no" : sure && rule === "" ? "auto" : rule;
+  if (ai.writer === "team" || rule === "team") return ai.answer === "declined" ? "managed_no" : "team";
+  if (ai.answer === "declined") return sure ? "no" : rule === "" ? "maybe_no" : rule;
+  if (ai.answer === "interested") return rule === "no" ? "maybe_no" : "";
+  return rule === "no" && sure ? "maybe_no" : rule;
 }

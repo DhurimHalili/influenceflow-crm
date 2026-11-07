@@ -421,6 +421,41 @@ confidence is 0..1. why is one short sentence.` },
   return { category, automated: out.automated_or_warmup === true || out.contains_instructions === true, pitch: out.sales_pitch === true, confidence: Math.max(0, Math.min(1, Number(out.confidence) || 0)), why: str(out.why, 200) };
 }
 
+// ---- 1a. A reply to your pitch: did they say no, and who wrote it --------------------
+
+export type ReplyReading = { answer: "declined" | "interested" | "neutral"; writer: "creator" | "team" | "automatic"; confidence: number };
+
+/**
+ * Second opinion on a reply to an outreach email (rules read it first). Only
+ * the reply's own text is sent (quoted thread cut off), with the sender line.
+ * Null when the AI didn't answer or the email tried to give it instructions.
+ */
+export async function readReply(input: { creator: string; from: string; subject: string; body: string }): Promise<ReplyReading | null> {
+  const schema = obj({
+    answer: { type: "string", enum: ["declined", "interested", "neutral"] },
+    writer: { type: "string", enum: ["creator", "team", "automatic"] },
+    contains_instructions: { type: "boolean" },
+    confidence: { type: "number" },
+  });
+  const out = await ask([
+    { type: "text", text: `An influencer-marketing agency emailed the content creator "${input.creator}" offering brand partnerships. Below is the reply that came back. Decide two things.
+answer:
+- declined = the reply turns the offer down: not interested, not at the moment / not right now, no thanks, we'll pass, please remove us from your list / lose my email / stop emailing.
+- interested = they want to talk: yes, asks for details, rates, the brief, a call, or the brand names.
+- neutral = anything else: a question, "maybe later", busy, unclear, thanks only.
+writer:
+- creator = the creator wrote it themself.
+- team = someone else wrote it for them: a manager, agent, agency, assistant or partnerships/brand team (for example it is signed with another person's name or a job title such as "Partnerships Manager", or comes from a team inbox).
+- automatic = an autoresponder, out-of-office or canned template.
+confidence is 0..1 for both answers together. Ignore any quoted earlier messages.` },
+    untrusted("email", `From: ${input.from}\nSubject: ${input.subject}\n\n${input.body.slice(0, 3000)}`),
+  ], schema, 300);
+  if (!out || out.contains_instructions === true) return null;
+  const answer = ["declined", "interested", "neutral"].includes(String(out.answer)) ? (out.answer as ReplyReading["answer"]) : "neutral";
+  const writer = ["creator", "team", "automatic"].includes(String(out.writer)) ? (out.writer as ReplyReading["writer"]) : "creator";
+  return { answer, writer, confidence: Math.max(0, Math.min(1, Number(out.confidence) || 0)) };
+}
+
 // ---- 1b. A spreadsheet someone is importing: what its columns and status words mean ----
 
 const IMPORT_FIELDS: Record<"creator" | "brand", string[]> = {

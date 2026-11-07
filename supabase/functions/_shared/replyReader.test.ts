@@ -1,5 +1,5 @@
 // Run: node --experimental-strip-types supabase/functions/_shared/replyReader.test.ts
-import { classifyIncoming, declineLevel, myReplyIntent, quotedOwnDate, referralOf, replyTone, stripQuoted } from "./replyReader.ts";
+import { classifyIncoming, declineLevel, mergeReading, myReplyIntent, quotedOwnDate, referralOf, replyTone, stripQuoted } from "./replyReader.ts";
 
 let fail = 0;
 const check = (name: string, got: unknown, want: unknown) => {
@@ -49,6 +49,32 @@ check("interested = normal", classifyIncoming({ text: "Yes, interested! What's t
 check("team says not at the moment = managed_no", classifyIncoming({ fromOther: true, text: "Not at the moment, thanks." }), "managed_no");
 check("thanks for the kit + no = no", classifyIncoming({ text: "Thanks for the media kit. We're not interested at this time." }), "no");
 check("team says maybe later = team", classifyIncoming({ fromOther: true, text: "Maybe later in the year." }), "team");
+
+// ---- stop-emailing-me, team voice -------------------------------------------------------
+const shevon = "Hey Dhurim, Thanks for reaching out and being interested in working with us but we are not interested. If you could remove us from your mailing list we'd appreciate it. All the best, Enobong Etteh Partnerships Manager";
+check("partnerships inbox says no = managed_no (Shevon)", classifyIncoming({ from: "partnerships@s7onstudios.com", text: shevon }), "managed_no");
+check("Partnerships Manager signature says no = managed_no", classifyIncoming({ from: "shevon@gmail.com", text: shevon }), "managed_no");
+check("'remove us from your mailing list' as an if = still a no", declineLevel("If you could remove us from your mailing list we'd appreciate it."), "no");
+const rehab = "I didn't miss anything. I have already worked with Corsair and TRYX. If they want to work with me then they can email me direction. Please loose my email Thank you Sent from Yahoo Mail for iPhone";
+check("'Please loose my email' (PC Rehab) = no", classifyIncoming({ from: "krmoses@yahoo.com", text: rehab }), "no");
+check("stop emailing me = no", classifyIncoming({ text: "Stop emailing me." }), "no");
+check("don't contact me again = no", classifyIncoming({ text: "Please don't contact me again." }), "no");
+check("creator's own business inbox is the creator", classifyIncoming({ from: "owensvaultbusiness@gmail.com", text: "Not interested, thanks." }), "no");
+check("partnerships inbox says yes = team", classifyIncoming({ from: "partnerships@studio.com", text: "Sure, send the brief over." }), "team");
+check("my manager handles it (creator speaking) is not team voice", classifyIncoming({ from: "sam@gmail.com", text: "Sounds good! My manager handles deals." }), "");
+check("email me the details is not a stop", classifyIncoming({ text: "Email me the details please." }), "");
+
+// ---- AI second opinion ---------------------------------------------------------------------
+const ai = (answer: "declined" | "interested" | "neutral", writer: "creator" | "team" | "automatic", confidence = 0.9) => ({ answer, writer, confidence });
+check("AI: manager signed the no → managed_no", mergeReading("no", ai("declined", "team")), "managed_no");
+check("AI: autoresponder no → managed_no", mergeReading("", ai("declined", "automatic")), "managed_no");
+check("AI: creator no the rules missed → no", mergeReading("", ai("declined", "creator")), "no");
+check("AI: unsure no → only maybe", mergeReading("", ai("declined", "creator", 0.65)), "maybe_no");
+check("AI: rules said no, AI says interested → maybe (you decide)", mergeReading("no", ai("interested", "creator")), "maybe_no");
+check("AI: maybe confirmed interested → normal", mergeReading("maybe_no", ai("interested", "creator")), "");
+check("AI: low confidence changes nothing", mergeReading("no", ai("interested", "creator", 0.4)), "no");
+check("AI: team yes stays team", mergeReading("team", ai("interested", "creator")), "team");
+check("AI: never touches header auto", mergeReading("auto", ai("interested", "creator")), "auto");
 
 // ---- your reply to an inbound lead ----------------------------------------------------
 check("asks for media kit", myReplyIntent("Thanks for getting back to me. Could you send over your media kit and rate card? On Mon, Nov 2, 2026 at 15:52 mitchell fane <a@b.com> wrote: Yes, I would be interested."), "yes");
