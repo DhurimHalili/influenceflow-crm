@@ -1,4 +1,4 @@
-import type { DayLine, Delta, Tone, WeeklyReport } from "./weekly.ts";
+import type { DayLine, Delta, MailboxLine, Tone, WeeklyReport } from "./weekly.ts";
 
 // The weekly report as an email: tables and inline styles only (Gmail,
 // Outlook and Apple Mail all render it), 600 px wide, light colour scheme.
@@ -23,6 +23,36 @@ const DAYC: Record<DayLine["status"], { c: string; word: string }> = {
   off: { c: "#cbd5e1", word: "Day off" },
   bonus: { c: "#8b5cf6", word: "Bonus round ✨" },
   future: { c: "#e2e8f0", word: "Still to come" },
+};
+
+/** The app's mailbox colours (styles: .mbx-0 … .mbx-5), so a mailbox looks the same in the email. */
+const MBX = ["#6d5ae6", "#24a6a1", "#d59b48", "#e0794a", "#4d88e8", "#ce6475"];
+
+/** One mailbox: address + share of the week's emails, then what it sent and what came back. */
+const mailboxCard = (m: MailboxLine, total: number) => {
+  const c = MBX[m.tone % MBX.length];
+  const at = m.email.indexOf("@");
+  const share = total ? Math.round((m.emails.now / total) * 100) : 0;
+  const diff = m.emails.now - m.emails.before;
+  const trend = !m.emails.before && !m.emails.now ? "" : diff === 0 ? "same as last week" : `${diff > 0 ? "▲ +" : "▼ "}${num(diff)} vs last week`;
+  const stat = (label: string, value: string, sub = "") => `<td width="20%" align="center" valign="top" style="padding:8px 2px 2px">
+      <div style="font:800 18px/1 ${FONT};color:#17142b">${value}</div>
+      <div style="font:700 9.5px/1.3 ${FONT};letter-spacing:.04em;text-transform:uppercase;color:#7c7891;margin-top:5px">${label}</div>
+      ${sub ? `<div style="font:500 10px/1.3 ${FONT};color:#9a96ab;margin-top:2px">${sub}</div>` : ""}</td>`;
+  const rate = m.replyRate.pct === null ? "—" : `${m.replyRate.pct}%`;
+  return `<div style="background:#ffffff;border:1px solid #ece9f5;border-radius:14px;padding:12px 14px 10px;margin:0 0 10px;border-left:4px solid ${c}">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
+      <td style="font:800 14px/1.3 ${FONT};color:#17142b;word-break:break-all"><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${c};margin-right:7px"></span>${esc(at > 0 ? m.email.slice(0, at) : m.email)}<span style="font-weight:500;color:#9a96ab">${esc(at > 0 ? m.email.slice(at) : "")}</span></td>
+      <td align="right" style="font:700 11px/1.3 ${FONT};color:${c};white-space:nowrap">${share}% of emails</td></tr></table>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:8px;border-collapse:collapse;background:#f1eff8"><tr>${share > 0 ? `<td width="${Math.max(2, share)}%" style="height:6px;background:${c};font-size:0;line-height:0">&nbsp;</td>` : ""}<td style="height:6px;font-size:0;line-height:0">&nbsp;</td></tr></table>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
+      ${stat("Emails", num(m.emails.now), trend)}
+      ${stat("New", num(m.first), m.newthreads ? `+${num(m.newthreads)} new thread${m.newthreads === 1 ? "" : "s"}` : "")}
+      ${stat("Follow-ups", num(m.followups), m.answers ? `${num(m.answers)} answer${m.answers === 1 ? "" : "s"}` : "")}
+      ${stat("Replied", num(m.repliers), m.replyRate.contacted ? `${rate} reply rate` : "")}
+      ${stat("Won", num(m.wins), m.negotiations ? `${num(m.negotiations)} negotiating` : "")}
+    </tr></table>
+  </div>`;
 };
 
 const delta = (d: Delta, goodWhenUp = true) => {
@@ -148,6 +178,8 @@ export function renderWeeklyEmail(r: WeeklyReport): { subject: string; html: str
 
   ${section("What your emails were", `${mixBar}<div>${mixLegend}</div>${r.emails.otherFollowups ? `<div style="font:500 11px/1.5 ${FONT};color:#9a96ab;margin-top:6px">+ ${r.emails.otherFollowups} follow-up${r.emails.otherFollowups === 1 ? "" : "s"} on DMs, WhatsApp or calls.</div>` : ""}`, `Influencers ${num(r.segments.creator)} · Brands ${num(r.segments.brand)}${r.leads.received ? ` · ${r.leads.received} inbound lead${r.leads.received === 1 ? "" : "s"} (${r.leads.answered} answered)` : ""}`)}
 
+  ${r.mailboxes.length ? section(r.mailboxes.length > 1 ? "Which mailbox did what" : "Your mailbox", r.mailboxes.map((m) => mailboxCard(m, r.mailboxes.reduce((a, x) => a + x.emails.now, 0))).join("") + `<div style="font:500 11px/1.5 ${FONT};color:#9a96ab;margin-top:2px">Emails count for the mailbox that sent them, replies for the one they came into; negotiations and deals for the mailbox that first emailed that person or brand.</div>`, r.mailboxNote ? esc(r.mailboxNote) : "") : ""}
+
   ${section("Highlights", `<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
       ${list("🎉 Wins", r.winNames, "No wins this week — next one's yours.", "#16a34a")}
       ${list("💬 They replied", r.replyNames, "Quiet inbox this week.", "#0ea5e9")}
@@ -174,6 +206,7 @@ export function renderWeeklyEmail(r: WeeklyReport): { subject: string; html: str
     `Emails ${r.emails.total.now} · new conversations ${r.newConversations.now} · follow-ups ${r.followups.now}`,
     `Replied ${r.repliers.now} · reply rate ${replyRate} · negotiating ${r.negotiations.now} · wins ${r.wins.now}`,
     "", ...r.days.map((d) => `${d.label} ${d.date}: ${d.status === "future" ? "—" : d.sent} (${DAYC[d.status].word})`),
+    ...(r.mailboxes.length ? ["", "By mailbox:", ...r.mailboxes.map((m) => `${m.email}: ${m.emails.now} emails (${m.first} new, ${m.followups} follow-ups) · ${m.repliers} replied${m.replyRate.pct === null ? "" : ` (${m.replyRate.pct}%)`} · ${m.negotiations} negotiating · ${m.wins} won`)] : []),
     "", `Waiting: ${r.next.due} follow-ups due, ${r.next.newThreads} new threads, ${r.next.replyNeeded} replies owed`,
     app ? `Open your CRM: ${link("/app")}` : "",
   ].join("\n");

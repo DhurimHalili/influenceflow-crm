@@ -113,5 +113,29 @@ const record = (extra: Record<string, unknown> = {}) => ({ type: "creator" as co
   check("a new thread's first email is an email, not a follow-up", [log.filter((x) => x.kind === "email").length, log.filter((x) => x.kind === "followup").length], [2, 4]);
 }
 
+// 8. Daniel Owen: an old thread from June (another mailbox era), a new thread in
+//    October, no reply. The new thread's email is the first of its round — the
+//    next one is the 1st follow-up in it, due 1 business day after the wait.
+{
+  const old = ev("out", "2026-06-02T03:52:00", { thread_id: "J", subject: "Brand Partnership Opportunity" });
+  const fresh = ev("out", "2026-10-16T22:23:00", { thread_id: "O", subject: "Is it over?" });
+  const s = followupState(record(), [], [old, fresh], rules, new Date("2026-11-07T17:15:00"));
+  check("new thread after an old one: 1st follow-up next", s.kind === "due" ? [s.round, s.sent, s.thread?.active, s.thread?.fresh] : s.kind, [1, 1, "O", true]);
+  check("…the words name the new thread", flagFor(s)?.long.startsWith("No reply to the first email of your new thread “Is it over?” — send your 1st follow-up"), true);
+  const w = followupState(record(), [], [old, fresh], rules, new Date("2026-10-19T09:00:00"));
+  check("…Friday email: Monday is the wait day, Tuesday the follow-up", w.kind === "waiting" ? w.due : w.kind, "2026-10-20");
+  // A DM logged before the new thread doesn't count toward it either.
+  const dm = { id: "f1", creator_id: "c1", brand_id: null, kind: "followup", channel: "dm", note: "", at: "2026-09-01T10:00:00" } as unknown as Followup;
+  const s2 = followupState(record(), [dm], [old, fresh], rules, new Date("2026-11-07T17:15:00"));
+  check("…nor a DM sent before the new thread", s2.kind === "due" ? [s2.round, s2.sent] : s2.kind, [1, 1]);
+  // Confirmed: no more "new thread" notice.
+  const s3 = followupState(record({ primary_thread: "O", primary_thread_at: "2026-11-07T17:20:00" }), [], [old, fresh], rules, new Date("2026-11-07T17:25:00"));
+  check("…confirmed thread is no longer fresh", s3.thread?.fresh, false);
+  // Second follow-up in the new thread is numbered within it.
+  const fu = ev("out", "2026-11-09T09:00:00", { thread_id: "O" });
+  const s4 = followupState(record(), [], [old, fresh, fu], rules, new Date("2026-11-09T10:00:00"));
+  check("…follow-ups numbered inside the thread", s4.kind === "waiting" ? [s4.round, s4.sent, flagFor(s4)?.long.includes("1st follow-up in this thread")] : s4.kind, [2, 2, true]);
+}
+
 console.log(fail ? `${fail} failed` : "all passed");
 if (fail) throw new Error(`${fail} failed`);

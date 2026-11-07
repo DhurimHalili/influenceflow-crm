@@ -5,7 +5,7 @@ import { useData } from "../contexts/DataContext";
 import { useGmail } from "../contexts/GmailContext";
 import { useToast } from "../contexts/ToastContext";
 import { useChase, useDayMode, type DayInfo } from "../hooks/useChase";
-import { CHANNEL_LABELS, flagFor, nextFollowupLabel, type Flag, roundLabel, sendsAt, SNOOZE_OFF, type FollowupState, type Touch } from "../lib/followupEngine";
+import { businessDaysBetween, CHANNEL_LABELS, flagFor, lastLabel, nextFollowupLabel, type Flag, sendsAt, SNOOZE_OFF, type FollowupState, type Touch } from "../lib/followupEngine";
 import { dateLabel, daysAgoLabel, dayKey, stampLabel } from "../lib/utils";
 import type { Brand, Creator } from "../types";
 import { Button, Modal } from "./ui";
@@ -109,8 +109,10 @@ export function ConversationSection({ type, record }: { type: "creator" | "brand
   // Messages you sent since their last reply, on every channel: what the next
   // one is ("Log 3rd follow-up"). Counted over the whole conversation, so
   // switching channels or turning email reminders off never resets it.
+  // A new email thread starts the count over: other threads are history.
   const lastReplyAt = [...touches].reverse().find((t) => t.dir === "in" && t.kind !== "auto")?.at || "";
-  const sentSinceReply = touches.filter((t) => t.dir === "out" && t.at > lastReplyAt && !t.crossed).length;
+  const threadFrom = state?.thread?.activeStarted || "";
+  const sentSinceReply = state && (state.kind === "due" || state.kind === "waiting") ? state.sent ?? state.round : touches.filter((t) => t.dir === "out" && t.at > lastReplyAt && t.at >= threadFrom && !t.crossed && !t.otherThread).length;
   const nextLabel = sentSinceReply ? nextFollowupLabel(sentSinceReply) : "first message";
   const dataRef = useRef(data);
   dataRef.current = data;
@@ -172,6 +174,24 @@ export function ConversationSection({ type, record }: { type: "creator" | "brand
     toast(`Reminders now follow “${threadRows.find((t) => t.id === id)?.subject || "that thread"}”`);
   };
   const [askThread, setAskThread] = useState(false);
+  // A thread you just started: say once that reminders follow it now (one tap to confirm, or pick another).
+  const freshRow = info?.fresh ? threadRows.find((t) => t.id === info.newest) : undefined;
+  const olderRows = freshRow ? threadRows.filter((t) => t.id !== freshRow.id) : [];
+  const confirmFresh = () => {
+    if (!info || !freshRow) return;
+    const before = { primary_thread: record.primary_thread || "", primary_thread_at: record.primary_thread_at || null };
+    update({ primary_thread: info.newest, primary_thread_at: new Date().toISOString() });
+    toast(`Reminders follow “${freshRow.subject}” — the old thread stays as history`, "success", { label: "Undo", run: () => update(before) });
+  };
+  // "Your last email was Fri, Oct 16 — 15 business days ago — the first email of your new thread “…”."
+  const rules = data.profile.preferences?.followup_rules;
+  const lastWords = (s: Extract<FollowupState, { kind: "due" | "waiting" }>) => {
+    const at = new Date(s.last.at);
+    const day = at.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", ...(at.getFullYear() !== new Date().getFullYear() ? { year: "numeric" } : {}) });
+    const biz = rules ? businessDaysBetween(at, new Date(), rules) : 0;
+    const ago = biz === 0 ? "today" : biz === 1 ? "1 business day ago" : `${biz} business days ago`;
+    return `Your last message went out ${day} (${ago}) — ${lastLabel(s)}.`;
+  };
   const askKey = info?.ask ? `if.thread-asked.${record.id}.${touches[touches.length - 1]?.at || ""}` : "";
   useEffect(() => {
     if (!askKey) return;
@@ -222,7 +242,7 @@ export function ConversationSection({ type, record }: { type: "creator" | "brand
       <span className="chase-icon"><BannerIcon size={18} /></span>
       <div>
         <strong>{flag ? flag.long : paused ? state.kind === "idle" && state.until === SNOOZE_OFF ? "Follow-up reminders are off for this one" : `Reminders snoozed until ${dateLabel(state.kind === "idle" ? state.until : "")}` : closed ? record.pipeline_status === "denied" ? reachOn ? `They passed — you'll get a reminder to reach back on ${dateLabel(reachOn)}` : "Closed — denied, so no follow-ups" : `${record.pipeline_status === "signed" ? "Signed" : "On your roster"} — not chased for follow-ups` : "No conversation yet"}</strong>
-        <small>{cancel ? canCancel ? `“${cancel.detail.split(" — ")[0]}” is still scheduled in ${cancel.mailbox || "Gmail"}. Cancel it here and it never goes out.` : `Open the Scheduled folder${cancel.mailbox ? ` of ${cancel.mailbox}` : ""} and cancel “${cancel.detail.split(" — ")[0]}”. Once it's gone, this clears by itself.` : state?.kind === "managed" ? "This isn't a no from them, so they stay in your pipeline. Log the DM here and the follow-ups restart on that channel." : state?.kind === "reach-back" ? "Email them and they move back to Contacted by themselves — or log a DM and press Reached out again." : state?.kind === "waiting" && state.last.scheduled ? `Waiting in Gmail's Scheduled folder${state.last.mailbox ? ` (${state.last.mailbox})` : ""}. Once it goes out, the next follow-up is due ${dateLabel(state.due)} if they stay quiet.` : state?.kind === "due" || state?.kind === "waiting" ? `Your last message ${daysAgoLabel(state.last.at)} (${dateLabel(state.last.at)}) was ${roundLabel(state.sent ?? state.round, state.last.channel)}.` : state?.kind === "reply-needed" ? `Their message: ${state.last.detail || state.last.label}` : !touches.length ? gmail.connected ? "Email them and it shows up here by itself." : "Log a follow-up below, or connect Gmail so emails fill this in by themselves." : `Last touch ${daysAgoLabel(touches[touches.length - 1].at)}.`}</small>
+        <small>{cancel ? canCancel ? `“${cancel.detail.split(" — ")[0]}” is still scheduled in ${cancel.mailbox || "Gmail"}. Cancel it here and it never goes out.` : `Open the Scheduled folder${cancel.mailbox ? ` of ${cancel.mailbox}` : ""} and cancel “${cancel.detail.split(" — ")[0]}”. Once it's gone, this clears by itself.` : state?.kind === "managed" ? "This isn't a no from them, so they stay in your pipeline. Log the DM here and the follow-ups restart on that channel." : state?.kind === "reach-back" ? "Email them and they move back to Contacted by themselves — or log a DM and press Reached out again." : state?.kind === "waiting" && state.last.scheduled ? `Waiting in Gmail's Scheduled folder${state.last.mailbox ? ` (${state.last.mailbox})` : ""}. Once it goes out, the next follow-up is due ${dateLabel(state.due)} if they stay quiet.` : state?.kind === "due" || state?.kind === "waiting" ? lastWords(state) : state?.kind === "reply-needed" ? `Their message: ${state.last.detail || state.last.label}` : !touches.length ? gmail.connected ? "Email them and it shows up here by itself." : "Log a follow-up below, or connect Gmail so emails fill this in by themselves." : `Last touch ${daysAgoLabel(touches[touches.length - 1].at)}.`}</small>
       </div>
     </div>
 
@@ -239,6 +259,18 @@ export function ConversationSection({ type, record }: { type: "creator" | "brand
         <Button size="sm" onClick={reachAgain}><RotateCcw size={14} /> Reached out again</Button>
         <Button size="sm" variant="ghost" onClick={() => snooze(plusDays(30), "Reach-back reminder moved a month on")}><Clock3 size={14} /> Remind me next month</Button>
       </>}
+    </div>}
+
+    {freshRow && <div className="thread-fresh" role="status">
+      <span className="thread-fresh-ico" aria-hidden="true"><MailPlus size={16} /></span>
+      <div className="thread-fresh-body">
+        <strong>New thread: “{freshRow.subject}”</strong>
+        <small>Started {dateLabel(freshRow.started)}{freshRow.mailbox ? ` from ${freshRow.mailbox}` : ""}. Follow-ups count from here — the next one is your {nextLabel} in this thread.{olderRows.length ? ` ${olderRows.length === 1 ? `The older thread “${olderRows[0].subject}” (${dateLabel(olderRows[0].started)}) stays` : `${olderRows.length} older threads stay`} as history; a reply there still flags you.` : ""}</small>
+      </div>
+      <div className="thread-fresh-actions">
+        <Button size="sm" onClick={confirmFresh}>Got it</Button>
+        <Button size="sm" variant="ghost" onClick={() => setAskThread(true)}>Use another thread</Button>
+      </div>
     </div>}
 
     <div className="fu-summary">

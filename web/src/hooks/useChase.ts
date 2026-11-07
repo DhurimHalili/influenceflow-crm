@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useData } from "../contexts/DataContext";
 import { chaseList, type Chase } from "../lib/followupEngine";
 import { dayShort, dayWord, followupsPaused, followupsResume, modeOn, normalizeWeekend, sendingPaused, sendingResumes, type DayMode } from "../lib/dayMode";
+import { mailboxesByRecord } from "../lib/mailboxOf";
 import { DEFAULT_FOLLOWUP_RULES } from "../lib/prefs";
 import { latestReplies, noVerdict, notInterested, type NoLevel, type NoVerdict } from "../lib/saidNo";
 
@@ -83,7 +84,9 @@ export function useChase() {
         if (group) no.set(r.id, { verdict, group, type, denied: r.pipeline_status === "denied" });
       }
     }
-    return { list, byId, due, reply, cancel, managed, reach, rules, today, parked, no };
+    /** Which mailbox each record is emailed from (where the conversation runs now, and every one that ever wrote). */
+    const boxes = mailboxesByRecord(list);
+    return { list, byId, due, reply, cancel, managed, reach, rules, today, parked, no, boxes };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data.creators, data.brands, data.followups, data.emailEvents, rules, day, today]);
 }

@@ -133,7 +133,8 @@ Deno.serve(async (req) => {
     for (const m of members || []) {
       if (Date.now() > deadline) break;
       const prefs = (m.preferences || {}) as Prefs;
-      const mode = prefs.weekly_report === "off" ? "off" : prefs.weekly_report === "sunday" ? "sunday" : "monday";
+      // Sunday 18:00 (this week) unless you picked Monday or Off.
+      const mode = prefs.weekly_report === "off" ? "off" : prefs.weekly_report === "monday" ? "monday" : "sunday";
       if (mode === "off") continue;
       const tz = safeZone(prefs.timezone);
       const p = tzParts(now.getTime(), tz);

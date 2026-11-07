@@ -1,5 +1,5 @@
 import type { Activity, Brand, BrandContact, Campaign, Creator, EmailEvent, Followup, FollowupRules, InboundLead } from "../types";
-import { makeStats } from "./dashboardStats.ts";
+import { mailboxesOf, makeStats } from "./dashboardStats.ts";
 import { chaseList } from "./followupEngine.ts";
 import { build, type Sent } from "./outreach.ts";
 
@@ -26,6 +26,13 @@ export type WeeklyInput = {
 export type DayLine = { label: string; date: string; sent: number; emails: number; replies: number; workday: boolean; status: "hit" | "close" | "low" | "zero" | "off" | "bonus" | "future" };
 export type Tone = "great" | "good" | "mixed" | "lucky" | "bad";
 export type Delta = { now: number; before: number };
+/** One mailbox's week: what it sent (by kind) and what came back — counted like the dashboard's mailbox chips. */
+export type MailboxLine = {
+  email: string; tone: number;
+  emails: Delta; first: number; followups: number; answers: number; newthreads: number; scheduled: number;
+  repliers: number; replyRate: { contacted: number; replied: number; pct: number | null };
+  negotiations: number; wins: number;
+};
 
 export type WeeklyReport = {
   name: string; timeZone: string; appUrl: string;
@@ -39,6 +46,10 @@ export type WeeklyReport = {
   leads: { received: number; answered: number };
   segments: { creator: number; brand: number };
   winNames: string[]; replyNames: string[]; lostNames: string[];
+  /** Which mailbox did what (busiest first, colour = position, as in the app). Empty with no mailbox activity. */
+  mailboxes: MailboxLine[];
+  /** One line on the mailboxes: who sent the most, who got the best reply rate. */
+  mailboxNote: string;
   best: DayLine | null;
   next: { due: number; newThreads: number; replyNeeded: number; scheduledNext: number; reachBack: number };
   verdict: { tone: Tone; emoji: string; headline: string; line: string; effortWord: string; resultWord: string };
@@ -156,6 +167,28 @@ export function weeklyReport(input: WeeklyInput): WeeklyReport {
   else { tone = "bad"; emoji = effort < 0.3 ? "🐢" : "😬"; headline = pick(effort < 0.3 ? ["Not a productive week", "The inbox missed you", "Did your keyboard go on holiday?"] : ["Not a productive week", "A slow one", "Room to grow"], seed); line = pick(effort < 0.3 ? [`${total} sent against a ${goalTotal} goal. The influencers won't email themselves 😅`, "Even the snail is asking if you're okay. New week, clean slate — let's go.", `About ${Math.round(total / Math.max(1, workdays))} a day on a ${goal}-a-day goal. Monday is a great day to fix that.`] : [`${Math.round(effort * 100)}% of your goal and few replies — more volume is the fastest fix.`, "Not terrible, not great. Pick a time block each day for outreach and protect it."], seed); }
   const resultWord = resultsGood ? "good" : "quiet";
 
+  // Which mailbox did what: each one's share, counted like the dashboard's mailbox chips.
+  const base = { sent, received, creators: input.creators, brands: input.brands, contacts: input.contacts, campaigns: input.campaigns, activities: input.activities, leads: input.leads };
+  const order = mailboxesOf(sent, received);
+  const mailboxes: MailboxLine[] = order.map((email, tone) => {
+    const ms = makeStats({ ...base, mailbox: email });
+    const m = ms.emailMix("all", s, end, horizon);
+    const pm = ms.emailMix("all", ps, s, s);
+    return { email, tone, emails: d(m.total, pm.total), first: m.first, followups: m.followups, answers: m.answers, newthreads: m.newthreads, scheduled: m.scheduled, repliers: ms.repliers("all", s, end), replyRate: ms.replyRate("all", s, end), negotiations: ms.count("negotiations", "all", s, end), wins: ms.count("wins", "all", s, end) };
+  }).filter((m) => m.emails.now || m.emails.before || m.repliers || m.negotiations || m.wins);
+  const local = (e: string) => e.split("@")[0];
+  let mailboxNote = "";
+  if (mailboxes.length > 1) {
+    const most = [...mailboxes].sort((a, b) => b.emails.now - a.emails.now)[0];
+    const rated = mailboxes.filter((m) => m.replyRate.contacted >= 5 && m.replyRate.pct !== null).sort((a, b) => (b.replyRate.pct ?? 0) - (a.replyRate.pct ?? 0));
+    const best = rated[0];
+    const parts = most.emails.now ? [`${local(most.email)} sent the most (${most.emails.now})`] : [];
+    if (best && rated.length > 1 && (best.replyRate.pct ?? 0) > (rated[1].replyRate.pct ?? 0)) parts.push(`${local(best.email)} got the best reply rate (${best.replyRate.pct}%)`);
+    const deals = [...mailboxes].sort((a, b) => b.wins - a.wins)[0];
+    if (deals.wins > 0) parts.push(`${local(deals.email)} closed ${deals.wins === 1 ? "a deal" : `${deals.wins} deals`}`);
+    mailboxNote = parts.length ? `${parts.join(" · ")}.` : "";
+  }
+
   const fmt = (ms: number, o: Intl.DateTimeFormatOptions) => new Date(ms).toLocaleDateString("en-US", { timeZone: tz, ...o });
   return {
     name: input.name, timeZone: tz, appUrl: input.appUrl || "",
@@ -171,6 +204,7 @@ export function weeklyReport(input: WeeklyInput): WeeklyReport {
     leads: { received: leadsIn.length, answered: leadsIn.filter((l) => (l.my_replies || []).length > 0 || !!l.replied_at).length },
     segments: { creator: segCount("creator"), brand: segCount("brand") },
     winNames: names("wins"), replyNames: names("replies"), lostNames: names("lost"),
+    mailboxes, mailboxNote,
     best,
     next: {
       due: chase.filter((c) => c.state.kind === "due" && !isThread(c)).length,

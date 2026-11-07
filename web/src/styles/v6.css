@@ -945,3 +945,26 @@
 /* The table shows the tag under the follow-up flag on wide screens, in the name cell below 1280 px. */
 .no-tag.wide { display: none; margin-left: 0; }
 @media (min-width: 1281px) { .no-tag.wide { display: inline-flex; } }
+
+/* A thread you just started: reminders follow it now — said once, confirmed in one tap. */
+.thread-fresh { position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px 14px; margin: 0 0 12px; padding: 12px 14px 12px 16px; border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line)); border-radius: 13px; background: linear-gradient(100deg, var(--accent-soft), var(--surface-solid) 75%); overflow: hidden; }
+.thread-fresh::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 4px; background: var(--accent); }
+.thread-fresh-ico { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 10px; color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.thread-fresh-body { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.thread-fresh-body strong { color: var(--text); font-size: 13.5px; overflow-wrap: anywhere; }
+.thread-fresh-body small { color: var(--text-soft); font-size: 12px; line-height: 1.45; overflow-wrap: anywhere; }
+.thread-fresh-actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+@media (max-width: 720px) {
+  .thread-fresh { grid-template-columns: auto minmax(0, 1fr); }
+  .thread-fresh-actions { grid-column: 1 / -1; }
+  .thread-fresh-actions > * { flex: 1 1 130px; justify-content: center; }
+}
+
+/* Emailed-from: chips over the Influencers / Brands lists and a tag in each row. */
+.mbx-filter { flex-wrap: wrap; overflow: visible; margin: 6px 0 4px; }
+.mbx-filter button { max-width: 100%; }
+.mbx-filter button > svg { color: var(--muted); }
+.mbx-filter button.on > svg { color: var(--accent); }
+.mbx-tag { align-self: flex-start; width: fit-content; flex: none; display: inline-flex; align-items: center; gap: 6px; max-width: 150px; height: 20px; padding: 0 8px 0 7px; border-radius: 999px; border: 1px solid color-mix(in srgb, var(--mbx, var(--accent)) 30%, var(--line)); background: color-mix(in srgb, var(--mbx, var(--accent)) 8%, var(--surface-solid)); color: var(--text-soft); font-size: 11px; font-weight: 650; line-height: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; vertical-align: middle; }
+.mbx-tag .mbx-dot { width: 6px; height: 6px; box-shadow: none; }
+.mbx-tag em { font-style: normal; color: var(--muted); font-weight: 600; }

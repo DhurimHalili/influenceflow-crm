@@ -37,7 +37,9 @@ export type Touch = { id: string; at: string; dir: "out" | "in"; source: TouchSo
   /** A follow-up bumping your earlier email that went (or will go) out after they had already answered. */
   crossed?: boolean;
   /** Shown and counted, but doesn't move the follow-up clock. */
-  quiet?: boolean };
+  quiet?: boolean;
+  /** An email in another thread than the one reminders follow (history, never part of this round's count). */
+  otherThread?: boolean };
 
 /**
  * Several email threads with one person (after 4 follow-ups you start a fresh
@@ -55,6 +57,10 @@ export type ThreadInfo = {
   ask: boolean;
   /** They answered in another thread than the one you chose. */
   otherReply?: Touch;
+  /** When the thread reminders follow began (your first email in it). */
+  activeStarted: string;
+  /** You started a new thread and haven't confirmed it yet: the app says so once ("reminders follow it now"). */
+  fresh: boolean;
 };
 
 /** What happens when the clock runs out: another follow-up, or (after the cap) a fresh thread. */
@@ -136,7 +142,7 @@ function threadView(target: Target, touches: Touch[]): ThreadInfo | undefined {
   // Your choice holds — until you start a thread after making it.
   const keep = !!chosen && lastAct.has(chosen) && !(newest !== chosen && started.get(newest)! > chosenAt);
   const active = keep ? chosen : [...lastAct.entries()].sort((a, b) => a[1].localeCompare(b[1])).pop()![0];
-  for (const t of touches) if (t.source === "gmail" && t.threadId && t.threadId !== active) t.quiet = true;
+  for (const t of touches) if (t.source === "gmail" && t.threadId && t.threadId !== active) { t.quiet = true; t.otherThread = true; }
   let otherReply: Touch | undefined;
   if (keep) {
     for (const t of mail) {
@@ -148,7 +154,7 @@ function threadView(target: Target, touches: Touch[]): ThreadInfo | undefined {
   // Ask once you've answered there (the banner says "reply there, then choose" until then).
   const lastInActive = [...mail].reverse().find((t) => t.threadId === active && !(t.dir === "in" && t.kind === "auto"));
   const ask = keep ? [...lastAct.entries()].some(([tid, at]) => tid !== active && at > chosenAt) : active !== newest && lastInActive?.dir === "out";
-  return { active, count: started.size, newest, ask, otherReply };
+  return { active, count: started.size, newest, ask, otherReply, activeStarted: started.get(active) || "", fresh: !keep && !ask && active === newest };
 }
 
 export const CHANNEL_LABELS: Record<string, string> = { email: "Email", dm: "Instagram DM", tiktok: "TikTok DM", whatsapp: "WhatsApp", call: "Call", linkedin: "LinkedIn", other: "Other" };
@@ -266,13 +272,17 @@ export function followupState(target: Target, followups: Followup[], events: Ema
     return { kind: "reply-needed", since: last.at, days: businessDaysBetween(new Date(last.at), now, rules), touches, last, cancel, thread };
   }
   // Round = how many messages you've sent since their last reply (1 = first email).
+  // A new thread is a fresh start: nothing from before it counts toward its round.
+  const threadFrom = thread?.activeStarted || "";
   let round = 0;
-  for (let i = live.length - 1; i >= 0 && live[i].dir === "out"; i--) round++;
+  for (let i = live.length - 1; i >= 0 && live[i].dir === "out" && live[i].at >= threadFrom; i--) round++;
   const followupsSent = round - 1;
   // What to call it: every message since their last real reply, on any channel —
   // so turning email reminders off (or switching to WhatsApp) never renumbers your follow-ups.
+  // A new thread starts the count over: emails in your other threads (and
+  // anything before this thread began) are history, not follow-ups in it.
   const lastReal = touches.map((t) => t.dir === "in" && t.kind !== "auto" && t.kind !== "managed_no").lastIndexOf(true);
-  const sent = Math.max(round, touches.slice(lastReal + 1).filter((t) => t.dir === "out" && !t.crossed).length);
+  const sent = Math.max(round, touches.slice(lastReal + 1).filter((t) => t.dir === "out" && !t.crossed && !t.otherThread && t.at >= threadFrom).length);
   // After the cap (4 by default) of email follow-ups in one thread, the next
   // step is a fresh thread, not another follow-up — after its own wait.
   const cap = rules.thread_cap ?? 4;
@@ -299,6 +309,18 @@ export const ordinal = (n: number) => {
 
 /** "your first email" / "your 1st follow-up" / "your 2nd follow-up" … */
 export const roundLabel = (round: number, channel = "") => (round <= 1 ? (channel && channel !== "email" ? `your first ${CHANNEL_LABELS[channel] || channel} message` : "your first email") : `your ${ordinal(round - 1)} follow-up`);
+
+/** "your first email" — or, with several threads, "the first email of your new thread “Subject”". */
+export const lastLabel = (state: { round: number; sent?: number; last: Touch; thread?: ThreadInfo }) => {
+  const n = state.sent ?? state.round;
+  const t = state.thread;
+  if (t && t.count > 1 && n <= 1 && state.last.threadId === t.active && state.last.source === "gmail") {
+    const subject = (state.last.detail || "").split(" — ")[0];
+    return `the first email of your ${t.active === t.newest ? "new" : "older"} thread${subject ? ` “${subject}”` : ""}`;
+  }
+  if (t && t.count > 1 && n > 1 && state.last.channel === "email") return `${roundLabel(n, state.last.channel)} in this thread`;
+  return roundLabel(n, state.last.channel);
+};
 
 /** What sending now would be: "1st follow-up", "2nd follow-up"… */
 export const nextFollowupLabel = (round: number) => `${ordinal(round)} follow-up`;
@@ -348,7 +370,7 @@ export function flagFor(state: FollowupState): Flag | null {
       return { tone: "reach", short: "Reach back", long: `They passed ${agoWords(state.since)}${state.reason ? ` — ${state.reason.toLowerCase()}` : ""}. Their calendar may have room again: try them at the same price or better.` };
     case "due":
       if (state.next === "new-thread") return { tone: "thread", short: state.overdueDays > 0 ? `New thread · ${state.overdueDays}d late` : "Start a new thread", long: `${state.round - 1} follow-ups and no reply in this thread — start a fresh email with a new subject instead of another follow-up` };
-      return { tone: "due", short: state.overdueDays > 0 ? `Follow up · ${state.overdueDays}d late` : "Follow up today", long: `No reply to ${roundLabel(state.sent ?? state.round, state.last.channel)} — send your ${nextFollowupLabel(state.sent ?? state.round)}${state.overdueDays > 0 ? ` (due ${state.overdueDays} business day${state.overdueDays === 1 ? "" : "s"} ago)` : " today"}` };
+      return { tone: "due", short: state.overdueDays > 0 ? `Follow up · ${state.overdueDays}d late` : "Follow up today", long: `No reply to ${lastLabel(state)} — send your ${nextFollowupLabel(state.sent ?? state.round)}${state.overdueDays > 0 ? ` (due ${state.overdueDays} business day${state.overdueDays === 1 ? "" : "s"} ago)` : " today"}` };
     case "reply-needed":
       if (state.thread && (state.thread.otherReply || state.last.threadId !== state.thread.newest) && state.last.source === "gmail") return { tone: "reply", short: state.days > 0 ? `Old thread reply · ${state.days}d` : "Replied in old thread", long: `They answered in an older email thread${state.days > 0 ? ` ${state.days} business day${state.days === 1 ? "" : "s"} ago` : " today"}, not in your newest one — reply there, then choose which thread to continue in` };
       if (state.last.kind === "no") return { tone: "reply", short: state.days > 0 ? `Reply · ${state.days}d` : "Reply needed", long: `They said no ${state.days > 0 ? `${state.days} business day${state.days === 1 ? "" : "s"} ago` : "today"} while the deal was open — thank them and mark them Denied; you'll get a reminder to reach back in a month` };
@@ -360,7 +382,7 @@ export function flagFor(state: FollowupState): Flag | null {
         return { tone: "sched", short: when ? `Scheduled · ${when}` : "Scheduled", long: `${roundLabel(state.sent ?? state.round, state.last.channel).replace(/^your/, "Your")} is scheduled in Gmail${when ? ` — it sends ${when}` : ""}. It counts as done; cancel it in Gmail and the reminder comes back.` };
       }
       if (state.next === "new-thread") return { tone: "wait", short: `New thread ${weekday(state.due)}`, long: `That was your ${ordinal(state.round - 1)} follow-up in this thread — no more follow-ups here. If they stay quiet, start a new thread ${weekday(state.due)}` };
-      return { tone: "wait", short: `Follow up ${weekday(state.due)}`, long: `Waiting for a reply to ${roundLabel(state.sent ?? state.round, state.last.channel)}${state.thread && state.round === 1 && state.thread.active === state.thread.newest ? " in your new thread" : ""} — follow up ${weekday(state.due)} if they stay quiet` };
+      return { tone: "wait", short: `Follow up ${weekday(state.due)}`, long: `Waiting for a reply to ${lastLabel(state)} — follow up ${weekday(state.due)} if they stay quiet` };
     }
     case "exhausted":
       return { tone: "muted", short: "No reply", long: `No reply after ${(state.sent ?? state.round) - 1} follow-ups — consider marking them No reply` };
