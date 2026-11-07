@@ -4,7 +4,7 @@ import { isSealed, openToken, sealToken } from "../_shared/googleTokens.ts";
 import { aiChain, aiEnabled, aiKeyCount, aiModel, aiProvider, aiReadyAt, classifyLead, planImport, QuotaExhausted, readReply, testAi, useKeyStore } from "../_shared/ai.ts";
 import { decodeEntities, isWarmup, precheck, scanForLead, type Lead, type ScanInput } from "../_shared/leadScanner.ts";
 import { classifyIncoming, mergeReading, myReplyIntent, READER_VERSION, referralOf, stripQuoted, type IncomingKind, type TeamRole } from "../_shared/replyReader.ts";
-import { analyzeStoredFile, bodyOf, drainQueue, gmailAttachment, processCreatorMail, processMyMail, sniff, type Fetcher, type FullMessage } from "./intel.ts";
+import { analyzeStoredFile, bodyOf, drainQueue, gmailAttachment, processCreatorMail, processMyMail, repairKitLists, sniff, type Fetcher, type FullMessage } from "./intel.ts";
 
 // Gmail ⇄ CRM sync, for every mailbox a user connected (an agency often runs
 // two or three).
@@ -1254,6 +1254,9 @@ async function readMailbox(admin: Admin, row: TokenRow, own: Set<string>, book: 
 
   // d2. AI second opinion on replies (said no? who wrote it?), when there's quota.
   await aiReadReplies(admin, row.user_id, token, mailbox, budget, deadline - 10_000).catch(() => 0);
+
+  // d3. Deals agreed before their kit's prices were on file: give them the kit's asking price (their real %).
+  if (Date.now() < deadline - 10_000) await repairKitLists(admin, row.user_id, currency).catch(() => 0);
 
   // e. Files waiting for the AI.
   const aiRead = budget.ai > 0 && Date.now() < deadline - 10_000 ? await drainQueue({ admin, userId: row.user_id, currency, mailbox, get, max: Math.min(3, budget.ai), deadline: deadline - 8_000 }).catch(() => 0) : 0;

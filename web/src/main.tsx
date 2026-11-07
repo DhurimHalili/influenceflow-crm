@@ -11,6 +11,7 @@ import App from './App.tsx'
 import './styles/v3.css'
 import './styles/v5.css'
 import './styles/v6.css'
+import './styles/phone.css'
 import { startFaviconAnimation } from './lib/favicon'
 import { bootUpdateCheck } from './lib/appUpdate'
 

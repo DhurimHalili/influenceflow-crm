@@ -138,6 +138,54 @@ export function setListPrices(rates: Partial<Rates>, meta: RateMetaMap, prices: 
   return { rates: next, meta: nextMeta, event: { id: newId(), at, source: opts.source, summary: `New asking prices: ${changes.map((c) => `${RATE_SHORT[c.key]} ${money(c.to)}`).join(", ")}`, changes, evidence: opts.evidence?.slice(0, 300) } };
 }
 
+/**
+ * A deal was agreed with no asking price on file (it was only in their media
+ * kit, read later), so it shows "Agreed price · 0%". Given the asking price,
+ * fix it after the fact: the agreed price stays, the list price and the % are
+ * filled in ("Negotiated -25% from 4,000"), and its family follows by the same
+ * % like any negotiation (only prices still at their list). Nothing changes
+ * when the deal already has a real list price, or the price is the same.
+ */
+export function backfillList(rates: Partial<Rates>, meta: RateMetaMap, asking: Partial<Record<RateKey, number>>, opts: { at?: string; source: RateSource; evidence?: string }) {
+  const at = opts.at || new Date().toISOString();
+  const next: Partial<Rates> = { ...rates };
+  const nextMeta: RateMetaMap = { ...meta };
+  const changes: RateChange[] = [];
+  const fixed: RateKey[] = [];
+  for (const key of (Object.keys(asking) as RateKey[]).filter((k) => RATE_KEYS.includes(k))) {
+    const m = meta[key];
+    const agreed = num(rates[key]);
+    const list = Math.round(num(asking[key]));
+    if (!m || m.status !== "negotiated" || !agreed || !list || list === agreed) continue;
+    // Only a deal that never had a real asking price behind it.
+    if (num(m.list) && num(m.list) !== agreed) continue;
+    const pct = pctOf(agreed, list);
+    nextMeta[key] = { ...m, list, pct, note: `Negotiated ${pctLabel(pct)} from ${money(list)}${opts.source === "media_kit" ? " (their media kit)" : ""}` };
+    changes.push({ key, from: agreed, to: agreed, list, kind: "negotiated", note: nextMeta[key]!.note, prev: m });
+    fixed.push(key);
+  }
+  for (const family of RATE_FAMILIES) {
+    const lead = family.find((k) => fixed.includes(k));
+    if (!lead || family.filter((k) => fixed.includes(k)).length !== 1) continue;
+    const ratio = num(next[lead]) / num(nextMeta[lead]!.list);
+    for (const sibling of family) {
+      if (sibling === lead || nextMeta[sibling]?.status === "negotiated") continue;
+      const list = listPrice(next, nextMeta, sibling);
+      if (!list) continue;
+      const to = tidy(list * ratio);
+      const pct = pctOf(to, list);
+      const from = num(next[sibling]);
+      next[sibling] = to;
+      nextMeta[sibling] = { list, status: "auto", pct, at, source: opts.source, note: `Auto ${pctLabel(pct)} · followed ${RATE_SHORT[lead]}` };
+      if (to !== from) changes.push({ key: sibling, from, to, list, kind: "auto", note: nextMeta[sibling]!.note, prev: meta[sibling] || null });
+    }
+  }
+  if (!changes.length) return { rates, meta, event: null as RateEvent | null };
+  const lead = changes.filter((c) => c.kind === "negotiated");
+  const summary = `${lead.map((c) => `${RATE_SHORT[c.key]} ${money(c.list)} → ${money(c.to)} (${pctLabel(pctOf(c.to, c.list))})`).join(", ")} — asking price from ${opts.source === "media_kit" ? "their media kit" : "their email"}${changes.some((c) => c.kind === "auto") ? ` · ${changes.filter((c) => c.kind === "auto").map((c) => RATE_SHORT[c.key]).join(", ")} followed` : ""}`;
+  return { rates: next, meta: nextMeta, event: { id: newId(), at, source: opts.source, summary, changes, evidence: opts.evidence?.slice(0, 300) } as RateEvent };
+}
+
 /** Put every rate an event touched back exactly as it was. */
 export function undoEvent(rates: Partial<Rates>, meta: RateMetaMap, event: RateEvent) {
   const next: Partial<Rates> = { ...rates };

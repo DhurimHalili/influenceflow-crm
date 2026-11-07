@@ -1,5 +1,5 @@
 // Run: node --experimental-strip-types supabase/functions/_shared/negotiation.test.ts
-import { applySamePct, negotiate, setListPrices, undoEvent } from "./negotiation.ts";
+import { applySamePct, backfillList, negotiate, setListPrices, undoEvent } from "./negotiation.ts";
 
 let fail = 0;
 const eq = (name: string, got: unknown, want: unknown) => {
@@ -47,6 +47,23 @@ eq("no dedicated price", g.rates.dedicated, undefined);
 // 8. New media kit resets list prices.
 const h = setListPrices(a.rates, a.meta, { video: 6000 }, { source: "media_kit" });
 eq("media kit list", [h.rates.video, h.meta.video?.status, h.meta.video?.list], [6000, "list", 6000]);
+
+// N. Deal agreed with no asking price on file; the kit (read later) had 4,000 → -25 %, not 0 %.
+{
+  const kit = setListPrices({}, {}, { dedicated: 6000, short: 800 }, { source: "media_kit", at: "2026-10-15T00:00:00Z" });
+  const deal = negotiate(kit.rates, kit.meta, { video: 3000 }, { source: "email", at: "2026-11-03T00:00:00Z" });
+  eq("without the kit price the deal reads 0 %", deal.meta.video?.pct, 0);
+  const fix = backfillList(deal.rates, deal.meta, { video: 4000, dedicated: 6000 }, { source: "media_kit", at: "2026-11-07T00:00:00Z" });
+  eq("kit price fills the list: -25 %", [fix.rates.video, fix.meta.video?.list, fix.meta.video?.pct], [3000, 4000, -25]);
+  eq("dedicated follows -25 % from its kit price", [fix.rates.dedicated, fix.meta.dedicated?.status, fix.meta.dedicated?.pct], [4500, "auto", -25]);
+  eq("shorts untouched", fix.rates.short, 800);
+  eq("the agreed price never changes", fix.rates.video, 3000);
+  eq("running it again changes nothing", backfillList(fix.rates, fix.meta, { video: 4000 }, { source: "media_kit" }).event, null);
+  const real = negotiate({ video: 5000 }, {}, { video: 4000 }, { source: "email" });
+  eq("a deal with a real list price is left alone", backfillList(real.rates, real.meta, { video: 4500 }, { source: "media_kit" }).event, null);
+  const u = undoEvent(fix.rates, fix.meta, fix.event!);
+  eq("undo puts the 0 % deal back", [u.rates.video, u.meta.video?.pct, u.rates.dedicated], [3000, 0, 6000]);
+}
 
 console.log(fail ? `${fail} failed` : "all passed");
 if (typeof process !== "undefined") process.exit(fail ? 1 : 0);
