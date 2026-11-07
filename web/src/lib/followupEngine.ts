@@ -217,7 +217,13 @@ function markCrossed(mail: Touch[], mine: EmailEvent[], all: EmailEvent[]) {
   if (!replies.length) return;
   mine.forEach((e, i) => {
     if (e.direction !== "out") return;
+    // A bump answers your earlier email in the SAME thread. One that's alone in
+    // its thread for this person (say, a shared manager's other creator) isn't
+    // following up on anything here.
+    if (e.thread_id && !mine.some((o) => o !== e && o.thread_id === e.thread_id && o.direction === "out" && o.at < e.at)) return;
     const bumped = e.in_reply_to ? byKey.get(e.in_reply_to) : undefined;
+    // It answers a message we know isn't this person's: not a bump of yours here.
+    if (e.in_reply_to && !bumped && mine.some((o) => o.message_key && o.thread_id === e.thread_id)) return;
     let since: number | null = null;
     if (bumped) since = bumped.direction === "out" ? new Date(bumped.at).getTime() : null;
     else since = quotedOwnDate(e.snippet, own)?.getTime() ?? null;

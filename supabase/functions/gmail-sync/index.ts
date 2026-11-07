@@ -66,7 +66,8 @@ const MAX_MAILBOXES = 5;
 
 type Admin = SupabaseClient;
 type TokenRow = { id: string; user_id: string; access_token: string | null; refresh_token: string; expiry: string | null; email: string | null; scopes: string; history_id: string | null; last_sync_at: string | null; backfilled: string[] | null; sync_error?: string; connected_at?: string | null; updated_at?: string | null; send_day?: string | null; send_count?: number; leads_scanned_at?: string | null; coverage?: unknown; lead_queue?: string[] | null; read_at?: string | null; watch_expires_at?: string | null };
-type Entity = { type: "creator" | "brand"; id: string; name?: string };
+/** A CRM record an address belongs to; `via: "team"` = the address is on its team list (a manager / agency), not its own. */
+type Entity = { type: "creator" | "brand"; id: string; name?: string; via?: "team" };
 type TeamMember = { email: string; role?: string; removed?: boolean };
 type Meta = { id: string; threadId: string; labelIds?: string[]; snippet?: string; internalDate?: string; payload?: { headers?: { name: string; value: string }[] } };
 type EventRow = { user_id: string; gmail_id: string; thread_id: string; direction: "out" | "in"; entity_type: "creator" | "brand"; entity_id: string; counterpart: string; subject: string; snippet: string; at: string; mailbox: string; message_key: string; scheduled: boolean; reply_kind: IncomingKind; in_reply_to: string; kind_v: number };
@@ -221,7 +222,7 @@ async function addressBook(admin: Admin, userId: string, own: Set<string>) {
     add(c.contact_email, me);
     add(c.secondary_email, me);
     // Their manager / agent / team: mail with them counts for this creator.
-    for (const t of (Array.isArray(c.team) ? c.team : []) as TeamMember[]) if (t && typeof t.email === "string" && !t.removed) add(t.email, me);
+    for (const t of (Array.isArray(c.team) ? c.team : []) as TeamMember[]) if (t && typeof t.email === "string" && !t.removed) add(t.email, { ...me, via: "team" });
   }
   for (const b of brands.data || []) { add(b.contact_email, { type: "brand", id: b.id, name: b.name || "" }); add(b.secondary_email, { type: "brand", id: b.id, name: b.name || "" }); }
   for (const p of contacts.data || []) if (p.brand_id) add(p.email, { type: "brand", id: p.brand_id });
@@ -284,10 +285,17 @@ function counterpartsKnown(meta: Meta, book: Map<string, Entity[]>, own: Set<str
 const NAME_STOP = new Set(["the", "and", "official", "channel", "tv", "studio", "studios", "media", "with", "for"]);
 
 function narrow(list: Entity[], meta: Meta, threads?: ThreadBook): Entity[] {
-  if (list.length < 2) return list;
   const inThread = (threads?.get(meta.threadId || "") || []).map((e) => e.id);
-  const byThread = list.filter((e) => inThread.includes(e.id));
-  if (byThread.length) return byThread;
+  if (inThread.length) {
+    const byThread = list.filter((e) => inThread.includes(e.id));
+    if (byThread.length) return byThread;
+    // A manager shared by several creators, writing in ANOTHER creator's
+    // thread: the email is about that creator (the thread decides — picked up
+    // by the thread pass), not about the one whose team list she's on.
+    const own = list.filter((e) => e.via !== "team");
+    if (own.length < list.length) return own;
+  }
+  if (list.length < 2) return list;
   const text = ` ${decodeEntities(`${header(meta, "Subject")} ${meta.snippet || ""}`).toLowerCase()} `;
   const word = (w: string) => new RegExp(`[^\\p{L}\\p{N}]${w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}[^\\p{L}\\p{N}]`, "u").test(text);
   const named = list.filter((e) => {
@@ -816,6 +824,58 @@ async function cancelScheduledSend(admin: Admin, userId: string, rows: TokenRow[
 // after their reply ("crossed"). Cancelled for you unless the member turned
 // followup_rules.auto_cancel_crossed off. Auto-replies don't count as answers.
 // Same rule as markCrossed in web/src/lib/followupEngine.ts.
+/**
+ * Self-heal for managers shared by several creators. Before the thread rule in
+ * `narrow()`, an email to / from a manager on creator A's team list was filed
+ * under A even when it was in creator B's thread (B's own address started that
+ * thread). Such an email moves to B — and the manager joins B's team, so the
+ * next one matches by itself. Recent threads only; your own picks are never touched.
+ */
+async function rehomeTeamMail(admin: Admin, userId: string, book: Map<string, Entity[]>, own: Set<string>) {
+  const teamAddrs = [...book.entries()].filter(([, list]) => list.some((e) => e.via === "team")).map(([addr]) => addr);
+  if (!teamAddrs.length) return 0;
+  const since = new Date(Date.now() - 90 * 86400000).toISOString();
+  const suspects: { id: string; gmail_id: string; thread_id: string; mailbox: string; entity_id: string; entity_type: string; counterpart: string; subject: string }[] = [];
+  for (const part of chunk(teamAddrs, 100)) {
+    const { data } = await admin.from("email_events").select("id, gmail_id, thread_id, mailbox, entity_id, entity_type, counterpart, subject").eq("user_id", userId).eq("entity_type", "creator").in("counterpart", part).gte("at", since).neq("thread_id", "").limit(1000);
+    for (const r of data || []) if ((book.get(r.counterpart) || []).some((e) => e.id === r.entity_id && e.via === "team")) suspects.push(r);
+  }
+  if (!suspects.length) return 0;
+  const threadIds = Array.from(new Set(suspects.map((r) => r.thread_id)));
+  const rows: { gmail_id: string; thread_id: string; mailbox: string; entity_id: string; entity_type: string; counterpart: string }[] = [];
+  for (const part of chunk(threadIds, 150)) {
+    const { data } = await admin.from("email_events").select("gmail_id, thread_id, mailbox, entity_id, entity_type, counterpart").eq("user_id", userId).in("thread_id", part).limit(5000);
+    rows.push(...(data || []));
+  }
+  // Who a thread belongs to: the records whose OWN address is on it.
+  const ownIn = (thread: string, mailbox: string) => Array.from(new Set(rows.filter((r) => r.thread_id === thread && r.mailbox === mailbox && r.entity_type === "creator" && (book.get(r.counterpart) || []).some((e) => e.id === r.entity_id && e.via !== "team")).map((r) => r.entity_id)));
+  const moved = new Map<string, { from: string; to: string; counterpart: string; subject: string; n: number }>();
+  for (const s of suspects) {
+    const owners = ownIn(s.thread_id, s.mailbox);
+    if (!owners.length || owners.includes(s.entity_id)) continue; // their own thread (or nobody's): leave it
+    const to = owners[0];
+    const already = rows.some((r) => r.gmail_id === s.gmail_id && r.entity_id === to);
+    const { error } = already
+      ? await admin.from("email_events").delete().eq("id", s.id).eq("user_id", userId)
+      : await admin.from("email_events").update({ entity_id: to }).eq("id", s.id).eq("user_id", userId);
+    if (error) continue;
+    const key = `${s.entity_id}>${to}`;
+    const m = moved.get(key) || { from: s.entity_id, to, counterpart: s.counterpart, subject: s.subject, n: 0 };
+    m.n++;
+    moved.set(key, m);
+  }
+  if (!moved.size) return 0;
+  const ids = Array.from(new Set([...moved.values()].flatMap((m) => [m.from, m.to])));
+  const { data: names } = await admin.from("creators").select("id, name").eq("user_id", userId).in("id", ids);
+  const nameOf = (id: string) => names?.find((c) => c.id === id)?.name || "another creator";
+  for (const m of moved.values()) {
+    await linkTeam(admin, userId, m.to, m.counterpart, "team", `writes in your thread “${m.subject || "(no subject)"}”`, own).catch(() => false);
+    await admin.from("activities").insert({ user_id: userId, text: `Gmail: ${m.n === 1 ? "an email" : `${m.n} emails`} with ${m.counterpart} in “${m.subject || "(no subject)"}” belonged to ${nameOf(m.to)}, not ${nameOf(m.from)} — moved (that manager works with both).`.slice(0, 500), at: new Date().toISOString(), entity_type: "creator", entity_id: m.from });
+  }
+  await applyStatuses(admin, userId, ids).catch(() => 0);
+  return [...moved.values()].reduce((a, m) => a + m.n, 0);
+}
+
 async function autoCancelCrossed(admin: Admin, userId: string, rows: TokenRow[]) {
   const { data: pending } = await admin.from("email_events").select("gmail_id, entity_id, in_reply_to, at, created_at").eq("user_id", userId).eq("direction", "out").eq("scheduled", true).gt("at", new Date().toISOString()).neq("in_reply_to", "").limit(200);
   if (!pending?.length) return 0;
@@ -1057,7 +1117,11 @@ async function learnTeams(admin: Admin, userId: string, rows: EventRow[], own: S
     const ref = referralOf(r.snippet || "", [...own, r.counterpart]);
     if (ref && !book.get(ref.email)?.some((x) => x.id === r.entity_id) && (await linkTeam(admin, userId, r.entity_id, ref.email, ref.role, `they pointed you to them in “${r.subject || "(no subject)"}”`, own))) linked++;
     // Answered from an address that isn't theirs, inside their thread: their side.
-    if ((r.reply_kind === "team" || r.reply_kind === "managed_no") && !book.has(r.counterpart) && (await linkTeam(admin, userId, r.entity_id, r.counterpart, "team", `answered in your thread “${r.subject || "(no subject)"}”`, own))) linked++;
+    // One manager can look after several of your creators: link her to each one whose thread she answers in.
+    if ((r.reply_kind === "team" || r.reply_kind === "managed_no") && !book.get(r.counterpart)?.some((x) => x.id === r.entity_id) && (await linkTeam(admin, userId, r.entity_id, r.counterpart, "team", `answered in your thread “${r.subject || "(no subject)"}”`, own))) {
+      linked++;
+      book.set(r.counterpart, [...(book.get(r.counterpart) || []), { type: "creator", id: r.entity_id, via: "team" }]);
+    }
   }
   return linked;
 }
@@ -1318,6 +1382,8 @@ async function syncUser(admin: Admin, rows: TokenRow[], allRows: TokenRow[], dea
       await release(admin, row.id, "track_lock_until");
     }
   }
+  // A shared manager's mail filed under the wrong creator: move it first, so nothing below acts on it.
+  if (deadline - Date.now() > 5_000) await rehomeTeamMail(admin, allRows[0].user_id, book, own).catch(() => 0);
   // Their reply just landed before a scheduled bump of yours went out: cancel it now.
   if (deadline - Date.now() > 5_000) await autoCancelCrossed(admin, allRows[0].user_id, allRows).catch(() => 0);
   if (deadline - Date.now() > 5_000) await rereadReplies(admin, allRows[0].user_id).catch(() => 0);

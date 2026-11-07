@@ -137,5 +137,16 @@ const record = (extra: Record<string, unknown> = {}) => ({ type: "creator" as co
   check("…follow-ups numbered inside the thread", s4.kind === "waiting" ? [s4.round, s4.sent, flagFor(s4)?.long.includes("1st follow-up in this thread")] : s4.kind, [2, 2, true]);
 }
 
+// 9. A manager shared by two creators: a scheduled email in creator B's thread
+//    that landed on creator A is not "a follow-up after they replied" for A.
+{
+  const a1 = ev("out", "2026-11-02T20:56:00", { thread_id: "RR", message_key: "rr1@m" });
+  const aReply = ev("in", "2026-11-06T13:20:00", { thread_id: "RR", counterpart: "alena@agency.com", reply_kind: "team", message_key: "rr2@m", in_reply_to: "rr1@m" });
+  const aAnswer = ev("out", "2026-11-06T14:07:00", { thread_id: "RR", message_key: "rr3@m", in_reply_to: "rr2@m" });
+  const stray = ev("out", "2026-11-09T07:00:00", { thread_id: "CR", scheduled: true, counterpart: "alena@agency.com", in_reply_to: "cr3@m", snippet: "You might have missed our email. On Wed, Nov 4, 2026 at 6:27 AM Dhurim Halili <dhurimi@mimibridge.com> wrote:" });
+  const s = followupState(record(), [], [a1, aReply, aAnswer, stray], rules, new Date("2026-11-07T17:00:00"));
+  check("stray scheduled email in another creator's thread: no cancel flag", [!!s.cancel, s.touches.find((t) => t.at === stray.at)?.crossed ?? false], [false, false]);
+}
+
 console.log(fail ? `${fail} failed` : "all passed");
 if (fail) throw new Error(`${fail} failed`);
