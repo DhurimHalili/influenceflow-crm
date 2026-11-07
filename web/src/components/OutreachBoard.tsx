@@ -16,6 +16,16 @@ import { Tabs } from "./ui";
 // for one side (influencers / brands), over a range you pick. Every number
 // opens the list of exactly what it counted, so it can be checked by eye.
 
+type AheadItem = ReturnType<ReturnType<typeof makeStats>["scheduledAhead"]>[number];
+type AheadDay = { key: string; day: Date; n: number; kinds: Record<AheadItem["role"], number>; items: AheadItem[] };
+/** What a scheduled email is, in the words you'd use (same colours as the Emails sent mix). */
+const AHEAD_KINDS: { role: AheadItem["role"]; one: string; many: string; cls: string }[] = [
+  { role: "first", one: "new email", many: "new emails", cls: "k-first" },
+  { role: "followup", one: "follow-up", many: "follow-ups", cls: "k-followups" },
+  { role: "newthread", one: "new thread", many: "new threads", cls: "k-newthreads" },
+  { role: "answer", one: "reply", many: "replies", cls: "k-answers" },
+];
+
 const RANGES: { value: RangeKey; label: string }[] = [
   { value: "today", label: "Today" },
   { value: "yesterday", label: "Yesterday" },
@@ -86,19 +96,21 @@ export function OutreachBoard() {
   // they count on the day they go out, so they're shown apart, day by day.
   const ahead = useMemo(() => {
     if (range.horizon >= Number.MAX_SAFE_INTEGER) return [];
-    const byDay = new Map<string, { day: Date; n: number; first: number; followups: number; other: number }>();
-    for (const x of waiting) {
+    const byDay = new Map<string, AheadDay>();
+    for (const x of stats.scheduledAhead(view, range.horizon)) {
       const t = new Date(x.at);
-      if (x.channel !== "email" || t.getTime() < range.horizon) continue;
       const day = new Date(t.getFullYear(), t.getMonth(), t.getDate());
       const k = day.toDateString();
-      const row = byDay.get(k) || { day, n: 0, first: 0, followups: 0, other: 0 };
+      const row = byDay.get(k) || { key: k, day, n: 0, kinds: { first: 0, followup: 0, newthread: 0, answer: 0 }, items: [] };
       row.n++;
-      if (x.role === "first") row.first++; else if (x.role === "followup") row.followups++; else row.other++;
+      row.kinds[x.role]++;
+      row.items.push(x);
       byDay.set(k, row);
     }
     return [...byDay.values()].sort((a, b) => a.day.getTime() - b.day.getTime());
-  }, [waiting, range.horizon]);
+  }, [stats, view, range.horizon]);
+  const [aheadOpen, setAheadOpen] = useState("");
+  const openDay = ahead.find((d) => d.key === aheadOpen);
   const rate = stats.replyRate(view, range.start, range.end);
   const people = stats.repliers(view, range.start, range.end);
 
@@ -197,11 +209,17 @@ export function OutreachBoard() {
         })} prevLabel={range.prevLabel} onPick={pickBox} />}
                 {mix.otherFollowups > 0 && <p className="ob-mix-foot"><span><Send size={11} /> +{mix.otherFollowups} follow-up{mix.otherFollowups === 1 ? "" : "s"} by DM, WhatsApp or call — not emails</span></p>}
         {ahead.length > 0 && <div className="ob-ahead" aria-label="Emails scheduled for later days">
-          <span className="ob-ahead-label"><CalendarClock size={13} /><span><b>Scheduled ahead</b><small>Not in {range.key === "today" ? "today's" : "this period's"} count — each one counts on the day it sends{nextSend ? ` · next ${nextSend}` : ""}</small></span></span>
-          <div className="ob-ahead-days">{ahead.slice(0, 7).map((d, i) => <span key={d.day.toISOString()} className={`ob-ahead-day${i === 0 ? " next" : ""}`} title={`${d.day.toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" })}: ${[d.first && `${d.first} first email${d.first === 1 ? "" : "s"}`, d.followups && `${d.followups} follow-up${d.followups === 1 ? "" : "s"}`, d.other && `${d.other} other`].filter(Boolean).join(", ")}`}>
-            <em>{d.day.toLocaleDateString("en-US", { weekday: "short" })}</em><strong>{d.n}</strong><small>{d.day.toLocaleDateString("en-US", { month: "short", day: "numeric" })}</small>
-            <i aria-hidden="true">{d.first > 0 && <u className="mix-first" style={{ flexGrow: d.first }} />}{d.followups > 0 && <u className="mix-followups" style={{ flexGrow: d.followups }} />}{d.other > 0 && <u className="mix-answers" style={{ flexGrow: d.other }} />}</i>
-          </span>)}{ahead.length > 7 && <span className="ob-ahead-more">+{ahead.slice(7).reduce((n, d) => n + d.n, 0)} later</span>}</div>
+          <span className="ob-ahead-label"><CalendarClock size={13} /><span><b>Scheduled ahead</b><small>Not in {range.key === "today" ? "today's" : "this period's"} count — each one counts on the day it sends{nextSend ? ` · next ${nextSend}` : ""}. Tap a day to see who.</small></span></span>
+          <div className="ob-ahead-days">{ahead.slice(0, 7).map((d, i) => <button type="button" key={d.key} className={`ob-ahead-day${i === 0 ? " next" : ""}${aheadOpen === d.key ? " on" : ""}`} aria-expanded={aheadOpen === d.key} onClick={() => setAheadOpen(aheadOpen === d.key ? "" : d.key)} title={d.day.toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" })}>
+            <span className="ahd-head"><em>{d.day.toLocaleDateString("en-US", { weekday: "short" })}</em><small>{d.day.toLocaleDateString("en-US", { month: "short", day: "numeric" })}</small></span>
+            <strong>{d.n}<span> email{d.n === 1 ? "" : "s"}</span></strong>
+            <span className="ahd-kinds">{AHEAD_KINDS.filter((k) => d.kinds[k.role] > 0).map((k) => <span key={k.role} className={`ahd-kind ${k.cls}`}><i aria-hidden="true" /><b>{d.kinds[k.role]}</b> {d.kinds[k.role] === 1 ? k.one : k.many}</span>)}</span>
+          </button>)}{ahead.length > 7 && <span className="ob-ahead-more">+{ahead.slice(7).reduce((n, d) => n + d.n, 0)} later</span>}</div>
+          {openDay && <ul className="ob-ahead-list" aria-label={`Scheduled for ${openDay.day.toLocaleDateString("en-US", { weekday: "long" })}`}>{openDay.items.map((x) => { const k = AHEAD_KINDS.find((y) => y.role === x.role)!; return <li key={x.key}>
+            <span className={`ahd-pill ${k.cls}`}>{k.one}</span>
+            <Link to={x.to}>{x.name}</Link>
+            <small>{new Date(x.at).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}{x.mailbox ? ` · ${x.mailbox}` : ""}</small>
+          </li>; })}</ul>}
         </div>}
       </div>
       <button type="button" className={`ob-big ob-replies${open?.metric === "replies" && open.view === view ? " on" : ""}`} onClick={() => show("replies")} aria-label={`Replies received: ${c("replies")}. Show the list`}>
