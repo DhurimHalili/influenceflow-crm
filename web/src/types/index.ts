@@ -73,6 +73,8 @@ export interface WorkspacePreferences {
   timezone?: string;
   /** Record pairs you said are different people / companies ("creator:idA|idB"); never flagged as duplicates again. */
   not_duplicates?: string[];
+  /** Weekend rhythm (lib/dayMode): Saturday/Sunday as normal, no-follow-up or scout days, and the scouting goal. */
+  weekend?: import("../lib/dayMode").WeekendPrefs;
 }
 
 /** Minimums and maximums an influencer is checked against (see lib/criteria). */

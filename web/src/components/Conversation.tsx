@@ -1,11 +1,11 @@
-import { ArrowDownLeft, ArrowUpRight, BellOff, BellRing, CalendarClock, CalendarX, Clock3, ExternalLink, Hourglass, Mail, MailPlus, MessageCircle, Reply, RotateCcw, Send, Smartphone, Undo2, Users, X } from "lucide-react";
+import { ArrowDownLeft, ArrowUpRight, BellOff, BellRing, CalendarClock, CirclePause, CalendarX, Clock3, ExternalLink, Hourglass, Mail, MailPlus, MessageCircle, Reply, RotateCcw, Send, Smartphone, Undo2, Users, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useData } from "../contexts/DataContext";
 import { useGmail } from "../contexts/GmailContext";
 import { useToast } from "../contexts/ToastContext";
-import { useChase } from "../hooks/useChase";
-import { CHANNEL_LABELS, flagFor, nextFollowupLabel, roundLabel, sendsAt, SNOOZE_OFF, type FollowupState, type Touch } from "../lib/followupEngine";
+import { useChase, useDayMode, type DayInfo } from "../hooks/useChase";
+import { CHANNEL_LABELS, flagFor, nextFollowupLabel, type Flag, roundLabel, sendsAt, SNOOZE_OFF, type FollowupState, type Touch } from "../lib/followupEngine";
 import { dateLabel, daysAgoLabel, dayKey, stampLabel } from "../lib/utils";
 import type { Brand, Creator } from "../types";
 import { Button, Modal } from "./ui";
@@ -13,15 +13,34 @@ import { Button, Modal } from "./ui";
 const CHANNELS = ["email", "dm", "tiktok", "whatsapp", "call", "linkedin", "other"];
 const CHANNEL_STORE = "if.touch-channel";
 
+/**
+ * The flag as it should read TODAY. On a no-follow-up day (Saturday) a due
+ * follow-up is parked for the next working day instead of shouting "today";
+ * on a scout day (Sunday) replies wait too. Cancelling a crossed scheduled
+ * email is housekeeping, not sending, so it stays as it is.
+ */
+export function dayFlag(state: FollowupState, today: DayInfo): Flag | null {
+  const flag = flagFor(state);
+  if (!flag || state.cancel) return flag;
+  const why = today.mode === "scout" ? "Scout day — nothing goes out today" : "No follow-ups today";
+  if (today.followupsPaused && state.kind === "due") {
+    const thread = state.next === "new-thread";
+    return { tone: "parked", short: `${thread ? "New thread" : "Follow up"} ${today.resumeShort}`, long: `${why}. ${thread ? "The fresh thread" : `Your ${nextFollowupLabel(state.sent ?? state.round)}`} is first on ${today.resume}'s list — leave it, or write it now and schedule it in Gmail for ${today.resume} morning (a scheduled email counts as done).` };
+  }
+  if (today.sendingPaused && state.kind === "reply-needed") return { tone: "parked", short: `Reply ${today.replyResumeShort}`, long: `${why}. They're waiting on you — answer ${today.replyResume}, or write it now and schedule it for ${today.replyResume} morning.` };
+  return flag;
+}
+
 /** Compact flag for lists, cards and boards. */
 export function FollowFlag({ state, compact = false }: { state: FollowupState | undefined; compact?: boolean }) {
-  const flag = state ? flagFor(state) : null;
+  const today = useDayMode();
+  const flag = state ? dayFlag(state, today) : null;
   if (!flag || (compact && flag.tone === "wait")) return null;
   const Icon = flagIcon(flag.tone);
   return <span className={`follow-flag tone-${flag.tone}`} title={flag.long}><Icon size={11} />{compact && flag.tone === "sched" ? "Scheduled" : flag.short}</span>;
 }
 
-const flagIcon = (tone: string) => (tone === "due" ? BellRing : tone === "reply" ? Reply : tone === "muted" ? BellOff : tone === "sched" ? CalendarClock : tone === "managed" ? Users : tone === "reach" ? RotateCcw : tone === "thread" ? MailPlus : Hourglass);
+const flagIcon = (tone: string) => (tone === "parked" ? CirclePause : tone === "due" ? BellRing : tone === "reply" ? Reply : tone === "muted" ? BellOff : tone === "sched" ? CalendarClock : tone === "managed" ? Users : tone === "reach" ? RotateCcw : tone === "thread" ? MailPlus : Hourglass);
 
 /** Gmail's Scheduled folder in the mailbox that holds the email. */
 const scheduledUrl = (mailbox?: string) => `https://mail.google.com/mail/${mailbox ? `?authuser=${encodeURIComponent(mailbox)}` : ""}#scheduled`;
@@ -45,8 +64,10 @@ export function ConversationSection({ type, record }: { type: "creator" | "brand
   const gmail = useGmail();
   const { toast } = useToast();
   const chase = useChase().byId.get(record.id);
+  const today = useDayMode();
   const state = chase?.state;
-  const flag = state ? flagFor(state) : null;
+  const flag = state ? dayFlag(state, today) : null;
+  const parkedHere = flag?.tone === "parked";
   const touches = state?.touches || [];
   const via = record.contact_channel && record.contact_channel !== "email" ? record.contact_channel : "";
   const emailOff = record.email_followups === false;
@@ -206,7 +227,7 @@ export function ConversationSection({ type, record }: { type: "creator" | "brand
     </div>
 
     {nextStep === "new-thread" && <div className="chase-cta">
-      {state?.kind === "due" && <a className="btn btn-primary btn-sm" href={composeUrl()} target="_blank" rel="noopener noreferrer"><MailPlus size={14} /> Start a new thread in Gmail <ExternalLink size={12} /></a>}
+      {state?.kind === "due" && <a className={`btn ${parkedHere ? "btn-secondary" : "btn-primary"} btn-sm`} href={composeUrl()} target="_blank" rel="noopener noreferrer"><MailPlus size={14} /> {parkedHere ? `Write it now, schedule for ${today.resume}` : "Start a new thread in Gmail"} <ExternalLink size={12} /></a>}
       <span className="gap-pick" role="group" aria-label="Wait before the new-thread reminder">New thread after{[1, 2, 3, 5].map((d) => <button type="button" key={d} className={(record.new_thread_gap ?? data.profile.preferences?.followup_rules?.new_thread_gap ?? 1) === d ? "on" : ""} aria-pressed={(record.new_thread_gap ?? data.profile.preferences?.followup_rules?.new_thread_gap ?? 1) === d} onClick={() => { update({ new_thread_gap: d }); toast(`New-thread reminder for ${record.name}: ${d} business day${d === 1 ? "" : "s"} after the last follow-up`); }}>{d}d</button>)}</span>
     </div>}
 
@@ -223,7 +244,7 @@ export function ConversationSection({ type, record }: { type: "creator" | "brand
     <div className="fu-summary">
       <div className="fu-stat"><small>Last from you</small><strong>{lastOut ? dateLabel(lastOut.at) : "—"}</strong><em>{lastOut?.scheduled ? sendsAt(lastOut.at) ? `scheduled · sends ${sendsAt(lastOut.at)}` : "scheduled in Gmail" : lastOut ? daysAgoLabel(lastOut.at) : "nothing sent"}</em></div>
       <div className="fu-stat"><small>Last from them</small><strong>{lastIn ? dateLabel(lastIn.at) : "—"}</strong><em>{lastIn ? daysAgoLabel(lastIn.at) : "no reply yet"}</em></div>
-      <div className={`fu-stat${state?.kind === "due" ? " is-due" : ""}`}><small>{nextStep === "new-thread" ? "Next step" : state?.kind === "due" || state?.kind === "waiting" ? "Next follow-up" : "Follow-ups sent"}</small><strong>{state?.kind === "due" ? "Today" : state?.kind === "waiting" ? dateLabel(state.due) : `${touches.filter((t) => t.dir === "out").length ? Math.max(0, touches.filter((t) => t.dir === "out").length - 1) : 0}`}</strong><em>{nextStep === "new-thread" && (state?.kind === "due" || state?.kind === "waiting") ? `new thread${state.kind === "due" && state.overdueDays ? ` · ${state.overdueDays} business day${state.overdueDays === 1 ? "" : "s"} late` : ` · after ${state.round - 1} follow-ups`}` : state?.kind === "due" ? `${nextLabel}${state.overdueDays ? ` · ${state.overdueDays} business day${state.overdueDays === 1 ? "" : "s"} late` : ""}` : state?.kind === "waiting" ? nextLabel : "in total"}</em></div>
+      <div className={`fu-stat${state?.kind === "due" ? parkedHere ? " is-parked" : " is-due" : ""}`}><small>{nextStep === "new-thread" ? "Next step" : state?.kind === "due" || state?.kind === "waiting" ? "Next follow-up" : "Follow-ups sent"}</small><strong>{state?.kind === "due" ? parkedHere ? today.resume[0].toUpperCase() + today.resume.slice(1) : "Today" : state?.kind === "waiting" ? dateLabel(state.due) : `${touches.filter((t) => t.dir === "out").length ? Math.max(0, touches.filter((t) => t.dir === "out").length - 1) : 0}`}</strong><em>{nextStep === "new-thread" && (state?.kind === "due" || state?.kind === "waiting") ? `new thread${state.kind === "due" && state.overdueDays ? ` · ${state.overdueDays} business day${state.overdueDays === 1 ? "" : "s"} late` : ` · after ${state.round - 1} follow-ups`}` : state?.kind === "due" ? `${nextLabel}${state.overdueDays ? ` · ${state.overdueDays} business day${state.overdueDays === 1 ? "" : "s"} late` : ""}` : state?.kind === "waiting" ? nextLabel : "in total"}</em></div>
     </div>
 
     <div className="fu-channel">

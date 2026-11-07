@@ -328,7 +328,7 @@ export const sendsAt = (iso: string, now = new Date()) => {
   return `${date} ${time}`;
 };
 
-export type Flag = { tone: "due" | "reply" | "wait" | "sched" | "muted" | "managed" | "reach" | "thread"; short: string; long: string };
+export type Flag = { tone: "due" | "reply" | "wait" | "sched" | "muted" | "managed" | "reach" | "thread" | "parked"; short: string; long: string };
 
 const agoWords = (iso: string) => {
   const days = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 86400000));

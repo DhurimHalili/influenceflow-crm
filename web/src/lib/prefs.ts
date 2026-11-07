@@ -1,4 +1,5 @@
 import { normalizeCriteria } from "./criteria";
+import { normalizeWeekend } from "./dayMode";
 import type { Currency, FollowupRules, PayoutModel, RateCard, WorkspacePreferences } from "../types";
 
 export const CURRENCIES: { value: Currency; label: string }[] = [
@@ -108,6 +109,7 @@ export const normalizePreferences = (value: unknown): WorkspacePreferences => {
     youtube_recent: v.youtube_recent === true,
     youtube_criteria: normalizeCriteria(v.youtube_criteria),
     weekly_report: v.weekly_report === "off" || v.weekly_report === "sunday" ? v.weekly_report : "monday",
+    weekend: normalizeWeekend(v.weekend),
     not_duplicates: Array.isArray(v.not_duplicates) ? Array.from(new Set(v.not_duplicates.filter((k): k is string => typeof k === "string" && /^(creator|brand):[\w-]{1,64}\|[\w-]{1,64}$/.test(k)))).slice(-1000) : [],
     timezone: typeof v.timezone === "string" && /^[A-Za-z_]+(?:\/[A-Za-z0-9_+\-]+){0,3}$/.test(v.timezone) && v.timezone.length <= 64 ? v.timezone : undefined,
   };

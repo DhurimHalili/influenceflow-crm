@@ -1,4 +1,4 @@
-import { AlertTriangle, CalendarDays, Target, Check, LoaderCircle, Mail, Plus, RefreshCcw, ShieldCheck, Sparkles, Trophy, Unplug } from "lucide-react";
+import { AlertTriangle, CalendarDays, CirclePause, Target, Check, LoaderCircle, Mail, Plus, Radar, RefreshCcw, Send, ShieldCheck, Sparkles, Trophy, Unplug } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useData } from "../contexts/DataContext";
@@ -7,6 +7,8 @@ import { useToast } from "../contexts/ToastContext";
 import { cadencePreview } from "../lib/followupEngine";
 import { mailboxStats } from "../lib/mailboxStats";
 import { DEFAULT_FOLLOWUP_RULES } from "../lib/prefs";
+import { normalizeWeekend, type DayMode, type WeekendPrefs } from "../lib/dayMode";
+import { openDayBrief } from "./DayBrief";
 import { relativeTime } from "../lib/utils";
 import { supabase } from "../lib/supabase";
 import type { FollowupRules } from "../types";
@@ -212,4 +214,36 @@ function AiStatus() {
       <li>Done. The next sync reads every saved kit, media kits first.</li>
     </ol></details>
   </div></div>;
+}
+
+const WEEKEND_OPTIONS: { mode: DayMode; icon: typeof Send; label: string; note: string }[] = [
+  { mode: "normal", icon: Send, label: "Normal day", note: "Everything goes out, follow-ups too" },
+  { mode: "light", icon: CirclePause, label: "No follow-ups", note: "New outreach and replies only" },
+  { mode: "scout", icon: Radar, label: "Scout day", note: "No emails — find new influencers" },
+];
+
+/** Saturday and Sunday: normal, no-follow-up or scout days, the scouting goal and the briefing. */
+export function WeekendSettings() {
+  const data = useData();
+  const { toast } = useToast();
+  const prefs = data.profile.preferences;
+  const w = normalizeWeekend(prefs.weekend);
+  const save = (patch: Partial<WeekendPrefs>, message: string) => {
+    data.updateProfile({ preferences: { ...prefs, weekend: { ...w, ...patch } } });
+    toast(message);
+  };
+  const anyScout = w.saturday === "scout" || w.sunday === "scout";
+  return <section id="weekend" className="settings-section"><div className="settings-heading"><span><CalendarDays /></span><div><h2>Weekends</h2><p>What Saturday and Sunday are for. Follow-ups never shout “today” on a day they're off — they wait for the next working day.</p></div></div><div className="settings-body">
+    <div className="wk-days">{(["saturday", "sunday"] as const).map((day) => <div className="wk-day" key={day} role="radiogroup" aria-label={day === "saturday" ? "Saturday" : "Sunday"}>
+      <span className="rule-label">{day === "saturday" ? "Saturday" : "Sunday"}</span>
+      {WEEKEND_OPTIONS.map((o) => <button type="button" key={o.mode} role="radio" aria-checked={w[day] === o.mode} className={`wk-opt mode-${o.mode}${w[day] === o.mode ? " on" : ""}`} onClick={() => w[day] !== o.mode && save({ [day]: o.mode }, `${day === "saturday" ? "Saturday" : "Sunday"}: ${o.label.toLowerCase()}`)}>
+        <span className="wk-ico"><o.icon size={15} /></span><span><b>{o.label}</b><small>{o.note}</small></span>{w[day] === o.mode && <Check size={15} className="wk-check" />}
+      </button>)}
+    </div>)}</div>
+    <div className={`wk-extra${anyScout ? "" : " is-off"}`}>
+      <div className="rule-step then"><span className="rule-label">Scouting goal <small>· replaces the email goal on a scout day</small></span><span className="day-stepper" role="group" aria-label="Influencers to find on a scout day"><button type="button" onClick={() => save({ scout_goal: Math.max(1, w.scout_goal - 1) }, `Scouting goal: ${Math.max(1, w.scout_goal - 1)}`)} aria-label="Lower the scouting goal" disabled={!anyScout}>−</button><b>{w.scout_goal}</b><button type="button" onClick={() => save({ scout_goal: Math.min(200, w.scout_goal + 1) }, `Scouting goal: ${Math.min(200, w.scout_goal + 1)}`)} aria-label="Raise the scouting goal" disabled={!anyScout}>+</button></span><small>new influencers added that day</small></div>
+      <label className="switch-row rule-switch"><input type="checkbox" checked={w.reminders} onChange={(e) => save({ reminders: e.target.checked }, e.target.checked ? "Weekend briefing on" : "Weekend briefing off")} /><span className="switch" aria-hidden="true" /><span>Show the weekend briefing<small>Once a day, the first time you open the CRM on a no-follow-up or scout day — what's on, what waits, and a fresh line to start with.</small></span></label>
+      <button type="button" className="wk-preview" onClick={openDayBrief}>Preview the briefing</button>
+    </div>
+  </div></section>;
 }

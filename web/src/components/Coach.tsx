@@ -1,9 +1,10 @@
 import { motion, AnimatePresence } from "framer-motion";
-import { ArrowRight, CalendarClock, Check, Flame, Target, Trophy, X, Zap } from "lucide-react";
+import { ArrowRight, CalendarClock, Check, Flame, Radar, Target, Trophy, X, Zap } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useData } from "../contexts/DataContext";
 import { useChase } from "../hooks/useChase";
+import { foundToday, normalizeWeekend } from "../lib/dayMode";
 import { useOutreach } from "../hooks/useOutreach";
 import { coachStats, pickNudge, type CoachStats, type Nudge } from "../lib/coach";
 
@@ -29,10 +30,13 @@ export function useCoach(): { stats: CoachStats; nudge: Nudge; enabled: boolean 
   const prefs = data.profile.preferences;
   const goal = prefs.daily_email_goal || 50;
   const log = useOutreach();
+  const mode = chase.today.mode;
+  const scoutGoal = normalizeWeekend(prefs.weekend).scout_goal;
+  const found = useMemo(() => foundToday(data.creators), [data.creators]);
   const stats = useMemo(() => {
     const overdueList = chase.due.map((c) => (c.state.kind === "due" ? c.state.overdueDays : 0));
-    return coachStats({ log, goal, overdue: chase.due.length, oldestOverdueDays: overdueList.length ? Math.max(...overdueList) : 0, replyNeeded: chase.reply.length });
-  }, [log, goal, chase.due, chase.reply]);
+    return coachStats({ log, goal, overdue: chase.due.length, oldestOverdueDays: overdueList.length ? Math.max(...overdueList) : 0, replyNeeded: chase.reply.length, mode, found, scoutGoal });
+  }, [log, goal, chase.due, chase.reply, mode, found, scoutGoal]);
   const nudge = useMemo(() => pickNudge(stats), [stats]);
   return { stats, nudge, enabled: prefs.coach !== false };
 }
@@ -45,15 +49,16 @@ function Ring({ value, goal, size = 34 }: { value: number; goal: number; size?: 
 }
 
 const TONE_ICON = { push: Zap, focus: Target, cheer: Flame, win: Trophy } as const;
+const unitWord = (s: CoachStats) => (s.unit === "found" ? "found" : "emails");
 
 export function CoachCard() {
   const { stats, nudge, enabled } = useCoach();
   if (!enabled) return null;
-  const Icon = TONE_ICON[nudge.tone];
+  const Icon = stats.unit === "found" ? Radar : TONE_ICON[nudge.tone];
   const ch = nudge.challenge;
-  return <section className={`coach-card tone-${nudge.tone}`} aria-live="polite">
-    <div className="coach-goal"><Ring value={stats.sentToday} goal={stats.goal} size={64} /><div><b>{stats.sentToday}</b><small>of {stats.goal}</small></div></div>
-    <div className="coach-body"><span className="coach-kicker"><Icon size={13} /> Today's challenge</span><h2>{nudge.title}</h2><p>{nudge.body}</p>
+  return <section className={`coach-card tone-${nudge.tone}${stats.unit === "found" ? " is-scout" : ""}`} aria-live="polite">
+    <div className="coach-goal"><Ring value={stats.value} goal={stats.target} size={64} /><div><b>{stats.value}</b><small>of {stats.target}{stats.unit === "found" ? " found" : ""}</small></div></div>
+    <div className="coach-body"><span className="coach-kicker"><Icon size={13} /> {stats.unit === "found" ? "Scout day" : stats.mode === "light" ? "Today's challenge · no follow-ups" : "Today's challenge"}</span><h2>{nudge.title}</h2><p>{nudge.body}</p>
       {ch && <div className="coach-progress"><i><b style={{ width: `${Math.min(100, (ch.current / Math.max(1, ch.target)) * 100)}%` }} /></i><small>{ch.label}: {ch.current}/{ch.target}</small></div>}
     </div>
     <div className="coach-side">
@@ -69,7 +74,7 @@ export function CoachRing() {
   const navigate = useNavigate();
   if (!enabled) return null;
   return <div className="coach-top">
-    <button type="button" className={`coach-top-btn${stats.sentToday >= stats.goal ? " done" : ""}`} onClick={() => setOpen((v) => !v)} aria-expanded={open} title={`${stats.sentToday} of ${stats.goal} emails today${stats.scheduled ? ` · ${stats.scheduled} scheduled` : ""}`}><Ring value={stats.sentToday} goal={stats.goal} size={28} /><span>{stats.sentToday}<small>/{stats.goal}</small></span></button>
+    <button type="button" className={`coach-top-btn${stats.value >= stats.target ? " done" : ""}${stats.unit === "found" ? " is-scout" : ""}`} onClick={() => setOpen((v) => !v)} aria-expanded={open} title={stats.unit === "found" ? `Scout day: ${stats.value} of ${stats.target} new influencers found` : `${stats.sentToday} of ${stats.goal} emails today${stats.scheduled ? ` · ${stats.scheduled} scheduled` : ""}`}><Ring value={stats.value} goal={stats.target} size={28} /><span>{stats.unit === "found" && <Radar size={12} className="coach-top-unit" aria-hidden="true" />}{stats.value}<small>/{stats.target}</small></span></button>
     <AnimatePresence>{open && <motion.div className="coach-pop" initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }}>
       <strong>{nudge.title}</strong><p>{nudge.body}</p>
       {nudge.cta && <button type="button" className="btn btn-primary btn-sm" onClick={() => { setOpen(false); navigate(nudge.cta!.to); }}>{nudge.cta.label} <ArrowRight size={14} /></button>}
@@ -135,18 +140,20 @@ export function CoachLayer() {
   useEffect(() => {
     if (!enabled || !data.ready) return;
     const day = todayKey();
-    if (prevSent.current !== null && prevSent.current < stats.goal && stats.sentToday >= stats.goal && store.get("if.coach.goal") !== day) {
+    if (prevSent.current !== null && prevSent.current < stats.target && stats.value >= stats.target && store.get("if.coach.goal") !== day) {
       store.set("if.coach.goal", day);
-      setParty({ title: `Goal hit: ${stats.sentToday} emails today!`, body: stats.streak ? `That's ${stats.streak + 1} days in a row. Unstoppable.` : "That's how rosters get built. Take a breath — you earned it." });
+      setParty(stats.unit === "found"
+        ? { title: `Scouting done: ${stats.value} new influencers!`, body: "Monday's list is loaded. Rate them while they're fresh — then enjoy the rest of the day." }
+        : { title: `Goal hit: ${stats.sentToday} emails today!`, body: stats.streak ? `That's ${stats.streak + 1} days in a row. Unstoppable.` : "That's how rosters get built. Take a breath — you earned it." });
     }
-    prevSent.current = stats.sentToday;
+    prevSent.current = stats.value;
     if (startOverdue.current === null) startOverdue.current = stats.overdue;
     else if (startOverdue.current >= 3 && stats.overdue === 0 && store.get("if.coach.clear") !== day) {
       store.set("if.coach.clear", day);
       setParty({ title: "Every follow-up cleared!", body: `${startOverdue.current} chased today. Clean sheet — now back to new outreach.` });
       startOverdue.current = 0;
     }
-  }, [enabled, data.ready, stats.sentToday, stats.goal, stats.overdue, stats.streak]);
+  }, [enabled, data.ready, stats.value, stats.target, stats.unit, stats.sentToday, stats.overdue, stats.streak]);
   useEffect(() => {
     if (!party) return;
     const t = window.setTimeout(() => setParty(null), 5200);
@@ -158,7 +165,7 @@ export function CoachLayer() {
   return <>
     <AnimatePresence>{toast && <motion.aside className={`coach-toast tone-${toast.tone}`} role="status" initial={{ opacity: 0, y: 24, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 24 }}>
       <span className="coach-toast-icon"><Icon size={18} /></span>
-      <div><strong>{toast.title}</strong><p>{toast.body}</p><div className="coach-toast-meta"><Ring value={stats.sentToday} goal={stats.goal} size={20} /> {stats.sentToday}/{stats.goal} today</div></div>
+      <div><strong>{toast.title}</strong><p>{toast.body}</p><div className="coach-toast-meta"><Ring value={stats.value} goal={stats.target} size={20} /> {stats.value}/{stats.target} {unitWord(stats)} today</div></div>
       <div className="coach-toast-actions">{toast.cta && <button type="button" className="btn btn-primary btn-sm" onClick={() => { setToast(null); navigate(toast.cta!.to); }}>{toast.cta.label}</button>}<button type="button" className="icon-btn" onClick={() => setToast(null)} aria-label="Dismiss"><X size={15} /></button></div>
     </motion.aside>}</AnimatePresence>
     <AnimatePresence>{party && <motion.div className="coach-party" role="alertdialog" aria-label={party.title} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setParty(null)}>
