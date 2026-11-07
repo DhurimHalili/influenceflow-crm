@@ -19,6 +19,7 @@ import { Avatar, Button, Logo, LogoMark, Modal } from "./ui";
 import { useChase } from "../hooks/useChase";
 import { useLeadActions } from "../hooks/useLeadActions";
 import { CoachLayer, CoachRing } from "./Coach";
+import { DayBriefLayer } from "./DayBrief";
 import { YouTubeProgress } from "./YouTubeStats";
 import { isPastDay, isTodayDay, LOSS_REASONS } from "../lib/utils";
 import type { SearchResult, ThemeName } from "../types";
@@ -410,6 +411,7 @@ export default function AppShell() {
         <div className="modal-actions">{onboardingStep > 0 && <Button variant="ghost" onClick={() => setOnboardingStep((step) => step - 1)}>Back</Button>}<Button onClick={() => onboardingStep < 2 ? setOnboardingStep((step) => step + 1) : completeOnboarding()} disabled={onboardingStep === 1 && !displayName.trim()}>{onboardingStep === 2 ? "Open my workspace" : onboardingStep === 0 ? "Let's build it" : "Continue"}<ChevronRight size={16} /></Button></div>
       </Modal>
     <CoachLayer />
+    <DayBriefLayer />
     <YouTubeProgress />
     </div>
   );

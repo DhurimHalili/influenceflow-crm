@@ -5,6 +5,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { useData } from "../contexts/DataContext";
 import { Button, EmptyState, Metric, PageHeader } from "../components/ui";
 import { DuplicateAlert } from "../components/Duplicates";
+import { DayStrip } from "../components/DayBrief";
 import { useChase } from "../hooks/useChase";
 import { useGmail } from "../contexts/GmailContext";
 import { CoachCard } from "../components/Coach";
@@ -157,6 +158,9 @@ export default function DashboardPage() {
     actionables.filter((item) => item.next_action_date && isTodayDay(item.next_action_date)).forEach((item) => push({ id: item.id, type: `${item.kind} · Due today`, title: item.name, detail: item.next_action || "Action due today", to: item.to, urgent: false, rank: 2 }));
     // The follow-up engine: no reply after the business-day gap, or they wrote and you haven't answered.
     chase.due.sort((a, b) => (b.state.kind === "due" ? b.state.overdueDays : 0) - (a.state.kind === "due" ? a.state.overdueDays : 0)).forEach((item) => push({ id: `fu-${item.id}`, type: `${item.type === "creator" ? "Influencer" : "Brand"} · ${flagFor(item.state)?.short || "Follow up"}`, title: item.name, detail: flagFor(item.state)?.long || "", to: item.type === "creator" ? `/app/influencers/${item.id}` : `/app/brands/${item.id}`, urgent: item.state.kind === "due" && item.state.overdueDays > 0, rank: 0.5 }));
+    // Weekend: the follow-ups (and on a scout day, the replies) wait — one calm line, not a wall of "today".
+    const parkedNow = chase.parked.due.length + chase.parked.reply.length;
+    if (parkedNow) push({ id: "parked", type: `${chase.today.mode === "scout" ? "Scout day" : "No follow-ups today"} · Waiting for ${chase.today.resume}`, title: `${parkedNow} ${chase.parked.reply.length && !chase.parked.due.length ? "repl" + (parkedNow === 1 ? "y" : "ies") : "follow-up" + (parkedNow === 1 ? "" : "s")} on ${chase.today.resume}'s list`, detail: `Nothing to chase today. Leave them, or write them now and schedule them in Gmail for ${chase.today.resume} morning — a scheduled email counts as done.`, to: "/app/influencers?follow=parked", urgent: false, rank: 2.8 });
     chase.cancel.forEach((item) => push({ id: `cx-${item.id}`, type: `${item.type === "creator" ? "Influencer" : "Brand"} · Cancel scheduled email`, title: item.name, detail: flagFor(item.state)?.long || "", to: item.type === "creator" ? `/app/influencers/${item.id}` : `/app/brands/${item.id}`, urgent: true, rank: 0 }));
     chase.reply.forEach((item) => push({ id: `re-${item.id}`, type: `${item.type === "creator" ? "Influencer" : "Brand"} · Reply needed`, title: item.name, detail: flagFor(item.state)?.long || "", to: item.type === "creator" ? `/app/influencers/${item.id}` : `/app/brands/${item.id}`, urgent: item.state.kind === "reply-needed" && item.state.days >= 1, rank: 0.6 }));
     chase.managed.forEach((item) => push({ id: `mg-${item.id}`, type: `${item.type === "creator" ? "Influencer" : "Brand"} · Managed — DM them`, title: item.name, detail: flagFor(item.state)?.long || "", to: item.type === "creator" ? `/app/influencers/${item.id}` : `/app/brands/${item.id}`, urgent: false, rank: 2.5 }));
@@ -169,6 +173,7 @@ export default function DashboardPage() {
 
   return <div className="dashboard-page">
     <PageHeader eyebrow="Private workspace" title={`Good ${new Date().getHours() < 12 ? "morning" : new Date().getHours() < 18 ? "afternoon" : "evening"}, ${data.profile.display_name?.split(" ")[0] || "there"}.`} description={nudgeOfDay()} actions={<Button onClick={() => navigate("/app/campaigns?new=1")}><Plus size={16} /> New campaign</Button>} />
+    <DayStrip />
     <DuplicateAlert kind="creator" compact />
     <DuplicateAlert kind="brand" compact />
 

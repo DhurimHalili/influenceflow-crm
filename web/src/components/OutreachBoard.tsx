@@ -82,6 +82,23 @@ export function OutreachBoard() {
 
   const waiting = stats.scheduled(view);
   const nextSend = waiting.map((s) => sendsAt(s.at)).find(Boolean);
+  // Emails waiting in Gmail's Scheduled folder for a day after this period:
+  // they count on the day they go out, so they're shown apart, day by day.
+  const ahead = useMemo(() => {
+    if (range.horizon >= Number.MAX_SAFE_INTEGER) return [];
+    const byDay = new Map<string, { day: Date; n: number; first: number; followups: number; other: number }>();
+    for (const x of waiting) {
+      const t = new Date(x.at);
+      if (x.channel !== "email" || t.getTime() < range.horizon) continue;
+      const day = new Date(t.getFullYear(), t.getMonth(), t.getDate());
+      const k = day.toDateString();
+      const row = byDay.get(k) || { day, n: 0, first: 0, followups: 0, other: 0 };
+      row.n++;
+      if (x.role === "first") row.first++; else if (x.role === "followup") row.followups++; else row.other++;
+      byDay.set(k, row);
+    }
+    return [...byDay.values()].sort((a, b) => a.day.getTime() - b.day.getTime());
+  }, [waiting, range.horizon]);
   const rate = stats.replyRate(view, range.start, range.end);
   const people = stats.repliers(view, range.start, range.end);
 
@@ -178,7 +195,14 @@ export function OutreachBoard() {
           const rr = b.stats.replyRate(view, range.start, range.end);
           return { mailbox: b.mailbox, tone: mailboxTone(i), sent: m.total, first: m.first, followups: m.followups, replies: b.stats.count("replies", view, range.start, range.end), rate: rr.pct, prev: range.compare ? b.stats.emailMix(view, range.prevStart, range.prevEnd).total : null };
         })} prevLabel={range.prevLabel} onPick={pickBox} />}
-                {(mix.otherFollowups > 0 || mix.later > 0) && <p className="ob-mix-foot">{mix.otherFollowups > 0 && <span><Send size={11} /> +{mix.otherFollowups} follow-up{mix.otherFollowups === 1 ? "" : "s"} by DM, WhatsApp or call — not emails</span>}{mix.later > 0 && <span><CalendarClock size={11} /> {mix.later} more scheduled for later{nextSend ? ` · next ${nextSend}` : ""}</span>}</p>}
+                {mix.otherFollowups > 0 && <p className="ob-mix-foot"><span><Send size={11} /> +{mix.otherFollowups} follow-up{mix.otherFollowups === 1 ? "" : "s"} by DM, WhatsApp or call — not emails</span></p>}
+        {ahead.length > 0 && <div className="ob-ahead" aria-label="Emails scheduled for later days">
+          <span className="ob-ahead-label"><CalendarClock size={13} /><span><b>Scheduled ahead</b><small>Not in {range.key === "today" ? "today's" : "this period's"} count — each one counts on the day it sends{nextSend ? ` · next ${nextSend}` : ""}</small></span></span>
+          <div className="ob-ahead-days">{ahead.slice(0, 7).map((d, i) => <span key={d.day.toISOString()} className={`ob-ahead-day${i === 0 ? " next" : ""}`} title={`${d.day.toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" })}: ${[d.first && `${d.first} first email${d.first === 1 ? "" : "s"}`, d.followups && `${d.followups} follow-up${d.followups === 1 ? "" : "s"}`, d.other && `${d.other} other`].filter(Boolean).join(", ")}`}>
+            <em>{d.day.toLocaleDateString("en-US", { weekday: "short" })}</em><strong>{d.n}</strong><small>{d.day.toLocaleDateString("en-US", { month: "short", day: "numeric" })}</small>
+            <i aria-hidden="true">{d.first > 0 && <u className="mix-first" style={{ flexGrow: d.first }} />}{d.followups > 0 && <u className="mix-followups" style={{ flexGrow: d.followups }} />}{d.other > 0 && <u className="mix-answers" style={{ flexGrow: d.other }} />}</i>
+          </span>)}{ahead.length > 7 && <span className="ob-ahead-more">+{ahead.slice(7).reduce((n, d) => n + d.n, 0)} later</span>}</div>
+        </div>}
       </div>
       <button type="button" className={`ob-big ob-replies${open?.metric === "replies" && open.view === view ? " on" : ""}`} onClick={() => show("replies")} aria-label={`Replies received: ${c("replies")}. Show the list`}>
         <span className="ob-big-top"><span className="ob-ico"><Reply size={15} /></span><small>Replies received</small></span>

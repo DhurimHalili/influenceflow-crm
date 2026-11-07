@@ -19,6 +19,15 @@ export type CoachStats = {
   replyNeeded: number;
   hour: number;
   weekday: number;
+  /** Today's kind (lib/dayMode): a scout day swaps the email goal for finding influencers. */
+  mode: "normal" | "light" | "scout";
+  /** Influencers added today, and the scouting goal. */
+  found: number;
+  scoutGoal: number;
+  /** What the ring counts today: emails, or influencers found on a scout day. */
+  unit: "emails" | "found";
+  value: number;
+  target: number;
 };
 
 export type Nudge = {
@@ -45,7 +54,7 @@ export function outreachByDay(log: Sent[], days = 15, now = new Date()) {
   return counts;
 }
 
-export function coachStats(input: { log: Sent[]; goal: number; overdue: number; oldestOverdueDays: number; replyNeeded: number; now?: Date }): CoachStats {
+export function coachStats(input: { log: Sent[]; goal: number; overdue: number; oldestOverdueDays: number; replyNeeded: number; now?: Date; mode?: CoachStats["mode"]; found?: number; scoutGoal?: number }): CoachStats {
   const now = input.now || new Date();
   const counts = outreachByDay(input.log, 15, now);
   const back = (i: number) => counts.get(dayKey(new Date(now.getFullYear(), now.getMonth(), now.getDate() - i))) || 0;
@@ -57,13 +66,28 @@ export function coachStats(input: { log: Sent[]; goal: number; overdue: number; 
     else break;
   }
   const week = [1, 2, 3, 4, 5, 6, 7].map(back);
-  return { goal: input.goal, sentToday: back(0), scheduled: input.log.filter((s) => s.scheduled).length, yesterday: back(1), weekAvg: Math.round(week.reduce((a, b) => a + b, 0) / 7), streak, overdue: input.overdue, oldestOverdueDays: input.oldestOverdueDays, replyNeeded: input.replyNeeded, hour: now.getHours(), weekday: now.getDay() };
+  const mode = input.mode || "normal";
+  const found = input.found || 0;
+  const scoutGoal = input.scoutGoal || 10;
+  const sentToday = back(0);
+  const scout = mode === "scout";
+  return { goal: input.goal, sentToday, scheduled: input.log.filter((s) => s.scheduled).length, yesterday: back(1), weekAvg: Math.round(week.reduce((a, b) => a + b, 0) / 7), streak, overdue: input.overdue, oldestOverdueDays: input.oldestOverdueDays, replyNeeded: input.replyNeeded, hour: now.getHours(), weekday: now.getDay(), mode, found, scoutGoal, unit: scout ? "found" : "emails", value: scout ? found : sentToday, target: scout ? scoutGoal : input.goal };
 }
 
 const pick = <T,>(list: T[], seed: number) => list[Math.abs(seed) % list.length];
 
+/** Scout day: no emails — the goal is finding influencers for the week. */
+function scoutNudge(s: CoachStats, seed: number): Nudge {
+  const left = Math.max(0, s.scoutGoal - s.found);
+  if (s.found >= s.scoutGoal) return { id: "scout-won", tone: "win", title: pick([`Scouting done: ${s.found} found`, `${s.found} new names. Monday is loaded.`, "Shortlist: full. Nicely done."], seed), body: pick(["Rate them while they're fresh — the stars decide who gets the first email.", "Anything extra today is pure bonus for next week.", "Monday-you just got a head start."], seed), cta: { label: "See today's finds", to: "/app/influencers" } };
+  if (s.found === 0) return { id: "scout-zero", tone: "push", title: pick([`Scout day: find ${s.scoutGoal} new influencers`, `Radar on. ${s.scoutGoal} to find today.`, `Today's mission: ${s.scoutGoal} fresh names`], seed), body: "No emails today. Look for channels like your best roster creators and add them here — quick fill does the numbers.", challenge: { label: "Found", target: s.scoutGoal, current: 0 }, cta: { label: "Add an influencer", to: "/app/influencers?new=1" } };
+  return { id: "scout-go", tone: left <= 3 ? "cheer" : "focus", title: pick([`${s.found} found, ${left} to go`, left <= 3 ? `Only ${left} left — finish the list` : "Good hunting — keep the radar on", `${s.found}/${s.scoutGoal} on the shortlist`], seed), body: "Every name you add today is a first email on Monday.", challenge: { label: "Found", target: s.scoutGoal, current: s.found }, cta: { label: "Add the next one", to: "/app/influencers?new=1" } };
+}
+
 /** The one thing to do next, worded for how the day is actually going. */
 export function pickNudge(s: CoachStats, seed = new Date().getDate()): Nudge {
+  if (s.mode === "scout") return scoutNudge(s, seed);
+  if (s.mode === "light" && s.sentToday === 0 && s.sentToday < s.goal) return { id: "light-zero", tone: "push", title: pick(["New names only today", "Light day: first emails and replies", `${s.goal} new hellos — no follow-ups needed`], seed), body: `Follow-ups wait for the next working day. Write to people who've never heard from you${s.replyNeeded ? `, and answer the ${s.replyNeeded} who wrote` : ""}.`, challenge: { label: "Emails", target: Math.min(10, s.goal), current: 0 }, cta: { label: "Pick someone new", to: "/app/influencers?status=new" } };
   const left = Math.max(0, s.goal - s.sentToday);
   const pct = s.goal ? s.sentToday / s.goal : 1;
   const sprint = Math.min(left, s.hour >= 15 ? 25 : 20);

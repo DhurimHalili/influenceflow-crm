@@ -12,7 +12,7 @@ import { creatorScore, money, dateLabel, DEFAULT_RATING_WEIGHTS, today, download
 import { Stars, Textarea } from "../components/ui";
 import type { EmailTemplate, ThemeName, WorkspaceData } from "../types";
 import { columnKeys } from "../lib/exportFormats";
-import { CoachSettings, FollowupRulesSettings, GmailSettings } from "../components/SettingsGmail";
+import { CoachSettings, FollowupRulesSettings, GmailSettings, WeekendSettings } from "../components/SettingsGmail";
 import { TeamSettings } from "../components/Team";
 import { WeeklyReportSettings } from "../components/WeeklyReport";
 import { AvatarButton } from "../components/AvatarEditor";
@@ -74,6 +74,7 @@ const SECTIONS = [
   { id: "gmail", label: "Gmail", icon: Mail },
   { id: "youtube", label: "YouTube stats", icon: Youtube },
   { id: "followups", label: "Follow-up rules", icon: CalendarDays },
+  { id: "weekend", label: "Weekends", icon: CalendarDays },
   { id: "coach", label: "Daily goal & coach", icon: Target },
   { id: "team", label: "Team", icon: Users },
   { id: "reminders", label: "Notifications", icon: Bell },
@@ -348,6 +349,7 @@ export function SettingsPage() {
       <GmailSettings />
       <YouTubeSettings />
       <FollowupRulesSettings />
+      <WeekendSettings />
       <CoachSettings />
       <TeamSettings />
       <NotificationSettings />
