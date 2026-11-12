@@ -187,5 +187,15 @@ const record = (extra: Record<string, unknown> = {}) => ({ type: "creator" as co
   check("a reaction to a cold email doesn't stop the follow-up", c.kind, "due");
 }
 
+// Mail that left Gmail (Trash / deleted for good) after the CRM saw it: still sent, still on the clock.
+{
+  const mail = [ev("out", "2026-11-03T18:41:38Z", { gone: "deleted", gone_at: "2026-11-11T10:00:00Z" }), ev("out", "2026-11-05T17:16:55Z", { gone: "trash", gone_at: "2026-11-11T10:00:00Z" })];
+  const s = followupState(record(), [], mail, rules, new Date("2026-11-12T10:00:00Z"));
+  const kept = followupState(record(), [], mail.map(({ gone: _g, gone_at: _a, ...e }) => e), rules, new Date("2026-11-12T10:00:00Z"));
+  check("gone mail doesn't change the follow-up state", [s.kind, flagFor(s)?.short], [kept.kind, flagFor(kept)?.short]);
+  check("…and each touch says where it went", s.touches.map((t) => t.gone), ["deleted", "trash"]);
+  check("gone mail still counts as sent", outreachLog({ creators: [{ id: "c1", name: "techless", pipeline_status: "contacted", date_contacted: null, archived_at: null } as never], brands: [], followups: [], events: mail }).length, 2);
+}
+
 console.log(fail ? `${fail} failed` : "all passed");
 if (fail) throw new Error(`${fail} failed`);

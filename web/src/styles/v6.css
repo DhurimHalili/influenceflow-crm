@@ -968,3 +968,12 @@
 .mbx-tag { align-self: flex-start; width: fit-content; flex: none; display: inline-flex; align-items: center; gap: 6px; max-width: 150px; height: 20px; padding: 0 8px 0 7px; border-radius: 999px; border: 1px solid color-mix(in srgb, var(--mbx, var(--accent)) 30%, var(--line)); background: color-mix(in srgb, var(--mbx, var(--accent)) 8%, var(--surface-solid)); color: var(--text-soft); font-size: 11px; font-weight: 650; line-height: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; vertical-align: middle; }
 .mbx-tag .mbx-dot { width: 6px; height: 6px; box-shadow: none; }
 .mbx-tag em { font-style: normal; color: var(--muted); font-weight: 600; }
+/* Tracked mail that left Gmail: one quiet row under the tracking check. */
+.ob-gone { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px 10px; padding-top: 8px; margin-top: 2px; border-top: 1px dashed color-mix(in srgb, var(--warning) 35%, var(--line)); }
+.ob-check:not(:has(> p)) .ob-gone { border-top: 0; padding-top: 0; margin-top: 0; }
+.ob-gone > p { display: flex; gap: 8px; align-items: flex-start; margin: 0; line-height: 1.4; }
+.ob-gone > p > svg { flex: none; margin-top: 2px; color: var(--warning); }
+.ob-gone > button { min-height: 30px; padding: 0 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-solid); color: var(--text); font: 650 12px inherit; cursor: pointer; }
+.ob-gone > button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ob-gone .ob-check-list b a { display: inline; min-height: 0; padding: 0; background: none; color: var(--text); font-size: 13px; text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 2px; }
+@media (max-width: 560px) { .ob-gone { grid-template-columns: minmax(0, 1fr); } .ob-gone > button { justify-self: start; } }
