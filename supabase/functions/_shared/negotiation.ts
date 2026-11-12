@@ -209,9 +209,33 @@ export function offerEvent(rates: Partial<Rates>, meta: RateMetaMap, history: Ra
   const amount = Math.round(num(offer.amount));
   if (!amount || !RATE_KEYS.includes(offer.key)) return null;
   if (history.some((e) => e.offer && e.offer.key === offer.key && e.offer.amount === amount && e.at === at)) return null;
+  // The same number said again in a follow-up ("just checking: $1,200 still stands") is still that one offer.
+  const before = [...history].filter((e) => !e.undone && e.at < at && touches(e, offer.key)).sort((a, b) => a.at.localeCompare(b.at)).pop();
+  if (before?.offer?.key === offer.key && before.offer.amount === amount) return null;
   const list = listPrice(rates, meta, offer.key);
   const vs = list && list !== amount ? ` (${pctLabel(pctOf(amount, list))} from ${money(list)})` : "";
   return { id: newId(), at, source: "email", summary: `You offered ${money(amount)} for ${RATE_SHORT[offer.key]}${vs}`, changes: [], evidence: opts.evidence?.slice(0, 300), offer: { key: offer.key, amount } };
+}
+
+const touches = (e: RateEvent, key: RateKey) => e.offer?.key === key || e.changes.some((c) => c.key === key);
+
+/**
+ * One offer per number: an offer repeating the amount of the step right
+ * before it on the same format (your follow-up restating it) is dropped.
+ * Returns the same array when nothing repeats.
+ */
+export function dropRepeatOffers(history: RateEvent[]): RateEvent[] {
+  const drop = new Set<string>();
+  const last = new Map<RateKey, RateEvent>();
+  for (const e of [...history].filter((x) => !x.undone).sort((a, b) => a.at.localeCompare(b.at))) {
+    if (e.offer) {
+      const prev = last.get(e.offer.key);
+      if (prev?.offer?.key === e.offer.key && prev.offer.amount === e.offer.amount) { drop.add(e.id); continue; }
+      last.set(e.offer.key, e);
+    }
+    for (const c of e.changes) last.set(c.key, e);
+  }
+  return drop.size ? history.filter((e) => !drop.has(e.id)) : history;
 }
 
 /** Your offers still on the table: the latest one per format, made after that format's last agreement. */
@@ -241,7 +265,8 @@ export type TrailStep = { who: "them" | "you" | "deal"; label: string; amount: n
 export function priceTrail(history: RateEvent[], key: RateKey): TrailStep[] {
   const steps: TrailStep[] = [];
   for (const e of [...history].filter((x) => !x.undone).sort((a, b) => a.at.localeCompare(b.at))) {
-    if (e.offer?.key === key) steps.push({ who: "you", label: "You offered", amount: e.offer.amount, at: e.at });
+    const prev = steps[steps.length - 1];
+    if (e.offer?.key === key && !(prev?.who === "you" && prev.amount === e.offer.amount)) steps.push({ who: "you", label: "You offered", amount: e.offer.amount, at: e.at });
     for (const c of e.changes) {
       if (c.key !== key || !c.to) continue;
       if (c.kind === "list") { steps.length = 0; steps.push({ who: "them", label: "Asked", amount: c.to, at: e.at }); }

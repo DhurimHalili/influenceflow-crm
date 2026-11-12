@@ -1,5 +1,5 @@
 // Run: node --experimental-strip-types supabase/functions/_shared/negotiation.test.ts
-import { applySamePct, backfillList, negotiate, offerEvent, openOffers, priceTrail, reanchor, setListPrices, theirPrices, undoEvent, type RateEvent } from "./negotiation.ts";
+import { applySamePct, backfillList, dropRepeatOffers, negotiate, offerEvent, openOffers, priceTrail, reanchor, setListPrices, theirPrices, undoEvent, type RateEvent } from "./negotiation.ts";
 
 let fail = 0;
 const eq = (name: string, got: unknown, want: unknown) => {
@@ -139,6 +139,22 @@ eq("media kit list", [h.rates.video, h.meta.video?.status, h.meta.video?.list], 
   const kit = setListPrices(a.rates, a.meta, { video: 4500 }, { at: "2026-11-02T10:00:00.000Z", source: "media_kit" });
   const c3 = negotiate(kit.rates, kit.meta, { video: 3600 }, { at: "2026-11-03T10:00:00.000Z", source: "email" });
   eq("media kit price stays a list price", reanchor(c3.rates, c3.meta, [c3.event!, kit.event!, a.event!]), null);
+}
+
+// ---- the same offer said twice is one offer ----
+{
+  const ask = theirPrices({}, {}, { video: 2000 }, { at: "2026-10-01T10:00:00.000Z", source: "email" });
+  const o1 = offerEvent(ask.rates, ask.meta, [ask.event!], { key: "video", amount: 1200 }, { at: "2026-10-02T10:00:00.000Z" })!;
+  const h = [o1, ask.event!];
+  eq("a follow-up repeating your offer adds nothing", offerEvent(ask.rates, ask.meta, h, { key: "video", amount: 1200 }, { at: "2026-10-06T10:00:00.000Z" }), null);
+  eq("a new number is a new offer", offerEvent(ask.rates, ask.meta, h, { key: "video", amount: 1400 }, { at: "2026-10-06T10:00:00.000Z" })?.offer, { key: "video", amount: 1400 });
+  const down = theirPrices(ask.rates, ask.meta, { video: 1800 }, { at: "2026-10-04T10:00:00.000Z", source: "email" });
+  eq("same number again after they countered is a real step", offerEvent(down.rates, down.meta, [down.event!, ...h], { key: "video", amount: 1200 }, { at: "2026-10-06T10:00:00.000Z" })?.offer?.amount, 1200);
+  // Stored twice by an older run (the real records): one is dropped, the trail shows it once.
+  const twice: RateEvent[] = [{ ...o1, id: "dup", at: "2026-10-06T10:00:00.000Z" }, o1, ask.event!];
+  eq("repeat dropped", dropRepeatOffers(twice).map((e) => e.id), [o1.id, ask.event!.id]);
+  eq("nothing to drop → same array", dropRepeatOffers(h) === h, true);
+  eq("trail shows the offer once", priceTrail(twice, "video").map((s) => [s.who, s.amount]), [["them", 2000], ["you", 1200]]);
 }
 
 console.log(fail ? `${fail} failed` : "all passed");
