@@ -12,7 +12,13 @@
 //     'auto'       an automatic answer (out of office, autoresponder) — not a reply
 //     'managed_no' their management / an autoresponder turned it down. The person
 //                  never saw it: reach them on another channel, never mark Denied.
+//     'reaction'   an emoji reaction ("👌 Sam reacted via Gmail"): they saw it,
+//                  but there are no words — never a reply, nothing to answer.
 //   ('ok' is stored when you confirm a flagged reply was not a no; it reads as '').
+//
+//   isAck — a message that only acknowledges ("Thanks!", "Got it, talk soon"):
+//     still a reply, but once someone is signed or on your roster it doesn't
+//     need an answer.
 //
 //   myReplyIntent — your answer to someone who emailed you first (an inbound
 //     lead): 'yes' (sure, send your media kit, let's talk), 'no' (not a fit,
@@ -20,9 +26,11 @@
 //
 // Shared by gmail-sync and the app (web/src/lib/replyReader.ts re-exports it).
 
-export type IncomingKind = "" | "no" | "maybe_no" | "team" | "auto" | "managed_no";
+export type IncomingKind = "" | "no" | "maybe_no" | "team" | "auto" | "managed_no" | "reaction";
 /** Bump when the rules below change: stored replies are read again with the new rules. */
-export const READER_VERSION = 3;
+export const READER_VERSION = 4;
+/** Came from their side but isn't a reply: an autoresponder, or an emoji reaction. */
+export const notAReply = (kind: string | null | undefined) => kind === "auto" || kind === "reaction";
 export type ReplyIntent = "yes" | "no" | "";
 
 /** Drops the quoted thread: "On Thu, Oct 29, 2026 at 9:28 PM X <x@y> wrote: …", "From: …", "-----Original Message-----". */
@@ -33,6 +41,13 @@ export function stripQuoted(text: string) {
     .map((re) => s.search(re))
     .filter((i) => i >= 0);
   return (cut.length ? s.slice(0, Math.min(...cut)) : s).trim();
+}
+
+/** An emoji reaction sent as an email: "👌 Sam reacted via Gmail", "Sam reacted to your message". */
+export function isReaction(text: string) {
+  const head = stripQuoted(text).slice(0, 140);
+  // The whole message is the reaction line: an emoji, a name, "reacted via Gmail".
+  return /^[^.!?,]{0,60}\breacted (?:via gmail|to your (?:message|email))\b/i.test(head);
 }
 
 const sentences = (text: string) => text.split(/(?<=[.!?])\s+|\n+/).map((x) => x.trim()).filter(Boolean);
@@ -166,6 +181,7 @@ const youDeclined = (text: string) => declineLevel(text, false) === "no";
  * address that isn't theirs (matched by thread): a manager, agency or team.
  */
 export function classifyIncoming(input: { headers?: Record<string, string>; subject?: string; text?: string; fromOther?: boolean; from?: string }): IncomingKind {
+  if (isReaction(input.text || "")) return "reaction";
   const auto = looksAutomated(input);
   const level = declineLevel(`${input.text || ""}`);
   const team = input.fromOther || teamVoice(input.from || "", input.text || "");
@@ -195,6 +211,24 @@ const OPEN_DOOR = [
   /\bkeep (?:me|us) (?:posted|updated|in the loop)\b/i,
   /\bwhat(?:'s| is) (?:the|your) (?:budget|offer|rate)\b/i,
 ];
+
+// Words that only acknowledge. What's left after them (and small filler words)
+// must be next to nothing — a first name, a sign-off.
+const ACK_WORDS = /\b(?:thank(?:s| you)(?: so much| very much| a lot| again)?|thx|got it|noted|received|perfect|great|awesome|amazing|wonderful|excellent|cool|nice|super|lovely|sounds (?:good|great|perfect|fine)|ok(?:ay)?|will do|(?:talk|speak|chat) soon|looking forward(?: to (?:it|this|working (?:together|with you)|hearing from you))?|cheers|appreciate (?:it|that|this|you)|much appreciated|you too|have a (?:great|good|nice|lovely) (?:day|weekend|one|evening|week)|all good|no (?:worries|problem|rush)|sure(?: thing)?|(?:best|kind|warm)(?: regards| wishes)?|regards|sincerely)\b/gi;
+const ACK_FILLER = new Set("for the a an and to it that this so very much i we you your my me us all everything update updates info information details heads up letting know getting back quick fast reply response email message note confirmation confirming sharing sending again really too".split(" "));
+/**
+ * Only an acknowledgement: "Thanks!", "Got it, talk soon", "Perfect, thank you
+ * for the update". No question, nothing new said. It is still a reply — but
+ * with someone already signed or on your roster it doesn't need an answer.
+ */
+export function isAck(text: string) {
+  const body = stripQuoted(text).replace(GREETING, "");
+  if (!body || body.length > 180 || body.includes("?")) return false;
+  const rest = body.replace(ACK_WORDS, " ");
+  if (rest === body) return false;
+  const left = rest.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, " ").split(/\s+/).filter((w) => w && !ACK_FILLER.has(w));
+  return left.length <= 2;
+}
 
 /** What your answer to an inbound lead means: take them on, turn them down, or unclear. */
 export function myReplyIntent(text: string): ReplyIntent {
@@ -273,7 +307,7 @@ export function referralOf(text: string, exclude: string[]): Referral | null {
  * into a Denied, and an unsure answer (confidence < 0.6) changes nothing.
  */
 export function mergeReading(rule: IncomingKind, ai: { answer: "declined" | "interested" | "neutral"; writer: "creator" | "team" | "automatic"; confidence: number } | null): IncomingKind {
-  if (!ai || ai.confidence < 0.6 || rule === "auto" || rule === "managed_no") return rule;
+  if (!ai || ai.confidence < 0.6 || rule === "auto" || rule === "managed_no" || rule === "reaction") return rule;
   const sure = ai.confidence >= 0.75;
   if (ai.writer === "automatic") return ai.answer === "declined" ? "managed_no" : sure && rule === "" ? "auto" : rule;
   if (ai.writer === "team" || rule === "team") return ai.answer === "declined" ? "managed_no" : "team";

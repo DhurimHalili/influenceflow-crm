@@ -496,6 +496,8 @@ confidence is 0..1. Answer only for the columns and words given.` },
 export type Claims = {
   statedRates: { key: RateKey; amount: number; currency: string }[];
   agreement: { items: { key: RateKey; amount: number; currency: string }[]; quote: string } | null;
+  /** Their exact sentence naming the price(s) — shown as the evidence. */
+  statedQuote: string;
   audience: AudienceFacts;
   confidence: number;
   suspicious: boolean;
@@ -543,19 +545,22 @@ const audienceFrom = (v: unknown): AudienceFacts => {
 };
 export const hasAudience = (a: AudienceFacts) => a.topCountries.length > 0 || a.ageRanges.length > 0 || a.genderFemalePct > 0 || a.avgViews > 0 || a.followers.length > 0 || a.engagementRate > 0;
 
-export async function readCreatorEmail(input: { creator: string; subject: string; body: string; currentRates: Partial<Record<RateKey, number>> }): Promise<Claims | null> {
+export async function readCreatorEmail(input: { creator: string; subject: string; body: string; currentRates: Partial<Record<RateKey, number>>; asking?: Partial<Record<RateKey, number>>; offers?: { key: RateKey; amount: number }[] }): Promise<Claims | null> {
+  const offers = (input.offers || []).map((o) => `${o.amount} for ${o.key}`).join(", ");
   const schema = obj({
     stated_rates: { type: "array", items: RATE_ITEM },
+    stated_quote: { type: "string" },
     final_agreement: obj({ agreed: { type: "boolean" }, items: { type: "array", items: RATE_ITEM }, quote: { type: "string" } }),
     audience_claims: AUDIENCE_SCHEMA,
     contains_instructions: { type: "boolean" },
     confidence: { type: "number" },
   });
   const out = await ask([
-    { type: "text", text: `This email was written by the creator "${input.creator}" (or their manager) to an agency. Their current prices in the CRM: ${JSON.stringify(input.currentRates)}.
+    { type: "text", text: `This email was written by the creator "${input.creator}" (or their manager) to an agency. Their current prices in the CRM: ${JSON.stringify(input.currentRates)}.${input.asking && Object.keys(input.asking).length ? ` What they first asked: ${JSON.stringify(input.asking)}.` : ""}${offers ? ` The agency's latest offer to them: ${offers}.` : ""}
 Rate keys: video = integrated sponsor segment inside a video (up to ~90 s); extended = a longer integration (2 minutes or more); dedicated = whole video about the brand; bundle = several formats sold together for one price; short = Short/Reel/TikTok (a "dedicated short" is short); post; carousel; story; stream; podcast; ugc; link_in_bio; usage_rights; exclusivity.
-- stated_rates: prices the creator states as their own current asking prices in THEIR OWN WORDS in this message (not quoted earlier messages, not the agency's offers).
-- final_agreement: agreed=true ONLY if the creator clearly accepts a specific price for a specific format in this message (e.g. "ok, 2,500 for the integration works"). Counter-offers, questions and "let me think" are not agreements. quote = the exact accepting sentence.
+- stated_rates: prices the creator puts forward as THEIR price in THEIR OWN WORDS in this message — their rate, or a lower price they now propose after the agency's offer (a counter-offer). Never the agency's offer repeated back, never a deposit, a product's value, a past deal with someone else, or a number not written in this message. When they name no format and the agency's offer was for one format, use that format.
+- stated_quote: the exact sentence from the message that states the price (copied word for word, empty when stated_rates is empty).
+- final_agreement: agreed=true ONLY if the creator clearly accepts a specific price in this message (e.g. "ok, 2,500 for the integration works", or a clear yes to the exact amount the agency offered — then use the offer's format). Counter-offers, conditions ("yes, if…"), questions and "let me think" are not agreements. quote = the exact accepting sentence.
 - audience_claims: audience numbers the creator states in this message (countries %, ages %, female %, average views, followers per platform, engagement %). Leave empty when not stated.
 Use 0 / empty arrays when something is not stated. confidence is 0..1.` },
     untrusted("email", `Subject: ${input.subject}\n\n${input.body}`),
@@ -565,6 +570,7 @@ Use 0 / empty arrays when something is not stated. confidence is 0..1.` },
   const items = rateList(agreement.items);
   return {
     statedRates: rateList(out.stated_rates),
+    statedQuote: str(out.stated_quote, 300),
     agreement: agreement.agreed === true && items.length ? { items, quote: str(agreement.quote, 300) } : null,
     audience: audienceFrom(out.audience_claims),
     confidence: Math.max(0, Math.min(1, Number(out.confidence) || 0)),

@@ -21,6 +21,11 @@ import type { RateKey } from "./negotiation.ts";
 //   • an AGREED price needs a clear yes in that same sentence ("2,500 for the
 //     integration works for me") and no counter words ("but", "instead",
 //     "minimum", "can't", "would need"…).
+//   • in a negotiation the format is often left out ("$3,500 is a reasonable
+//     offer, happy to move forward"): `readAgainstOffer` matches such a
+//     sentence to the price YOU put on the table (a yes to that exact amount =
+//     agreed) or reads a number between your offer and their asking price as
+//     them coming down (a counter). Deposits, product value and stats never count.
 // What the rules find is labelled "read by rules" in the rate history and can
 // be undone with one tap, like every other change.
 
@@ -63,7 +68,7 @@ const WAS = new RegExp(String.raw`\((?:[^()]*?\b(?:usually|normally|regularly|wa
 const withoutOld = (sentence: string) => sentence.replace(WAS, " ");
 const PER_UNIT = /\b(cpm|cpv|cpc|cpa|rpm|per\s+(1,?000|thousand|view|click|sale|sign-?up|install|month|week)|\/\s?(view|click|1k|mo|month|week|wk)\b|rev(enue)?\s*share|commission|retainer|monthly|%)/i;
 const THEIR_OFFER = /\b(your|you['’]?re|you\s+(offered|proposed|mentioned|said|quoted)|budget|offer(ed)?|too\s+low|below|lowball)\b/i;
-const YES = /\b(works?\s+for\s+(me|us)|that\s+works|(sounds|looks)\s+(good|great|fair|perfect|fine)|(it['’]?s\s+a\s+|we\s+have\s+a\s+)?deal\b|agreed|i\s+agree|we\s+agree|happy\s+(to|with)|(i|we)\s+(can|could|will)\s+(do|go\s+with|accept|work\s+with)|let['’]?s\s+(do|go|lock|proceed)|confirm(ed)?|accept(ed)?|fine\s+(by|with)\s+(me|us)|i['’]?m\s+(in|good\s+with|ok(ay)?\s+with)|ok(ay)?\s+(for|with|at))\b/i;
+const YES = /\b(works?\s+for\s+(me|us)|that\s+works|(sounds|looks)\s+(good|great|fair|perfect|fine)|(it['’]?s\s+a\s+|we\s+have\s+a\s+)?deal\b|agreed|i\s+agree|we\s+agree|happy\s+(to|with)|(i|we)\s+(can|could|will)\s+(do|go\s+with|accept|work\s+with)|let['’]?s\s+(do|go|lock|proceed)|confirm(ed)?|accept(ed)?|fine\s+(by|with)\s+(me|us)|i['’]?m\s+(in|good\s+with|ok(ay)?\s+with)|ok(ay)?\s+(for|with|at)|(reasonable|fair|good|great|solid)\s+(offer|rate|price|deal|number)|open\s+to\s+(mov(e|ing)|go(ing)?|proceed(ing)?)\s+(forward|ahead)|(mov(e|ing)|go(ing)?|proceed(ing)?)\s+(forward|ahead)\s+(at|with|on))\b/i;
 const COUNTER = /\b(but|however|instead|unfortunately|minimum|at\s+least|lowest|can['’]?t|cannot|could\s+not|couldn['’]?t|won['’]?t|would\s+need|need\s+at|if\s+you|unless|counter|how\s+about|what\s+about|could\s+you|would\s+you|not\s+able|unable)\b/i;
 // Numbers that are never prices.
 const STATS = /\b(views?|subs|subscribers?|followers?|impressions?|reach|ctr|retention|watch\s*time|average|avg|engagement|likes?|comments?|plays?|downloads?|listeners?|countr(y|ies)|age[sd]?|years?\s+old|demographics?|male|female)\b|%/i;
@@ -222,6 +227,13 @@ export const statesAudience = (body: string) => /\b\d{1,3}(?:[.,]\d+)?\s?%/.test
 /** Does the email look like it talks about money or audience at all? (saves AI calls) */
 export const mentionsMoneyOrAudience = (body: string) => /[$€£]|\b(usd|eur|gbp|rate|rates|price|pricing|fee|cost|charge|budget|media\s?kit|demographic|audience|countries|age|female|male|views|subscribers|followers)\b/i.test(ownText(body));
 
+/** The amount is literally written in the sender's own words ("4,500", "4.5k", "4500") — what an AI reports must be on the page. */
+export const saysAmount = (body: string, amount: number) => {
+  const own = withoutDurations(ownText(body));
+  for (const m of own.matchAll(new RegExp(String.raw`(${NUM})\s?(k\b)?`, "gi"))) if (parseAmount(m[1], !!m[2]) === Math.round(amount)) return true;
+  return false;
+};
+
 /** A short "yes" with no price of its own ("Sounds good!", "Deal, let's do it"). */
 export const isPlainYes = (body: string) => {
   const own = ownText(body).replace(/\n(thanks|thank you|best|cheers|regards|kind regards)[\s\S]*$/i, "").trim();
@@ -246,13 +258,74 @@ export function readOffer(body: string): PriceHit | null {
   return hits.length === 1 ? hits[0] : null;
 }
 
+// An amount that isn't the fee itself: a deposit, what the product is worth, costs.
+const NOT_FEE = /\b(up-?front|deposit|advance|half|remaining|balance|bonus|expenses?|travel|shipping|product|worth|valued?|retail|invoic\w*|refund\w*|tax(es)?|vat)\b/i;
+// Words that put a price on the table without naming the format.
+const PRICE_CUE = /\b(can\s+do|could\s+do|would\s+do|i['’]?d\s+do|we['’]?d\s+do|do\s+it\s+for|for\s+you|discount(ed)?|lowest|best\s+(i|we)\s+can|meet\s+(you\s+)?(in\s+the\s+middle|half-?way)|come\s+down|go\s+down|drop\s+(it\s+)?to|final|how\s+about|what\s+about|settle\s+(at|on|for)|my\s+(rate|price|fee)|offer|pay|budget|go\s+(up\s+)?to|stretch|propose)\b/i;
+
+const oneAmount = (sentence: string) => {
+  const plain = withoutDurations(withoutOld(sentence));
+  if (RANGE.test(plain) || PER_UNIT.test(plain)) return null;
+  const money = Array.from(plain.matchAll(MONEY));
+  if (money.length !== 1) return null;
+  const g = money[0].groups || {};
+  const amount = parseAmount(g.a || g.b || "", !!(g.ka || g.kb));
+  if (amount < 25 || amount > 1_000_000) return null;
+  return { plain, amount, currency: CURRENCY(g.pre || g.post || "$") };
+};
+
 /**
- * What YOUR email says about money, read against their asking prices:
- *   accepted — you said yes to a price they asked ("The $500 looks good")
+ * Their email read against the negotiation so far — for sentences that name
+ * an amount but no format (the ones `readPrices` can't place):
+ *   agreed    — a yes to the exact amount YOU offered ("$3,500 is a reasonable
+ *               offer, I'm open to moving forward at that rate")
+ *   countered — they came down: one amount between your offer and their
+ *               asking price ("I could do $4,500"), or — before you offered
+ *               anything — a lower price for the only format they have priced,
+ *               said with price words ("for you I can do $4,500")
+ * Two different counters in one email are ambiguous: none is read.
+ */
+export function readAgainstOffer(body: string, ctx: { offers: { key: RateKey; amount: number }[]; asking: Partial<Record<RateKey, number>> }): { agreed: PriceHit[]; countered: PriceHit[] } {
+  const agreed: PriceHit[] = [];
+  const countered: PriceHit[] = [];
+  const priced = (Object.keys(ctx.asking) as RateKey[]).filter((k) => Number(ctx.asking[k]) > 0);
+  for (const sentence of sentences(ownText(body))) {
+    const one = oneAmount(sentence);
+    if (!one || formatOf(sentence)) continue;
+    const quote = sentence.slice(0, 300);
+    const same = ctx.offers.filter((o) => o.amount === one.amount);
+    if (same.length === 1) {
+      if (YES.test(one.plain) && !COUNTER.test(one.plain) && !sentence.includes("?")) agreed.push({ key: same[0].key, amount: one.amount, currency: one.currency, quote });
+      continue;
+    }
+    if (NOT_FEE.test(one.plain) || STATS.test(one.plain)) continue;
+    if (ctx.offers.length === 1) {
+      const o = ctx.offers[0];
+      const ask = Number(ctx.asking[o.key]) || 0;
+      if (ask && one.amount > o.amount && one.amount < ask) countered.push({ key: o.key, amount: one.amount, currency: one.currency, quote });
+    } else if (!ctx.offers.length && priced.length === 1 && PRICE_CUE.test(one.plain) && !THEIR_OFFER.test(one.plain.replace(/\boffer\b/gi, " "))) {
+      const ask = Number(ctx.asking[priced[0]]);
+      if (one.amount < ask && one.amount >= ask * 0.4) countered.push({ key: priced[0], amount: one.amount, currency: one.currency, quote });
+    }
+  }
+  const once = (list: PriceHit[]) => list.filter((h, i) => list.findIndex((x) => x.key === h.key) === i);
+  const clash = countered.some((c) => countered.some((x) => x.key === c.key && x.amount !== c.amount));
+  const a = once(agreed);
+  return { agreed: a, countered: clash ? [] : once(countered).filter((c) => !a.some((x) => x.key === c.key)) };
+}
+
+/**
+ * What YOUR email says about money, read against their prices:
+ *   accepted — you said yes to a price they asked, or to where they came down
+ *              ("The $500 looks good")
  *   offer    — you proposed a price of your own ("I can work with $1,400 for the integration")
  * A yes to an amount that isn't one of their prices is an offer, never an agreement.
+ * `opts.current` = the price each format stands at now (their counter);
+ * `opts.soleKey` = the format an unnamed offer is about ("we can offer $3,500
+ * for our first collaboration") — the only one they priced, or the one you
+ * offered on before.
  */
-export function readMine(body: string, theirPrices: Partial<Record<RateKey, number>>): { accepted: PriceHit | null; offer: PriceHit | null } {
+export function readMine(body: string, theirPrices: Partial<Record<RateKey, number>>, opts: { current?: Partial<Record<RateKey, number>>; soleKey?: RateKey | null } = {}): { accepted: PriceHit | null; offer: PriceHit | null } {
   let accepted: PriceHit | null = null;
   let offer: PriceHit | null = null;
   for (const sentence of sentences(ownText(body))) {
@@ -264,12 +337,14 @@ export function readMine(body: string, theirPrices: Partial<Record<RateKey, numb
     const amount = parseAmount(m.a || m.b || "", !!(m.ka || m.kb));
     if (amount < 25 || amount > 1_000_000) continue;
     const named = formatOf(sentence);
-    const theirs = (Object.keys(theirPrices) as RateKey[]).filter((k) => theirPrices[k] === amount);
-    const key = named || (theirs.length === 1 ? theirs[0] : null);
+    const current = opts.current || {};
+    const theirs = Array.from(new Set([...(Object.keys(theirPrices) as RateKey[]).filter((k) => theirPrices[k] === amount), ...(Object.keys(current) as RateKey[]).filter((k) => current[k] === amount)]));
+    const unnamed = opts.soleKey && PRICE_CUE.test(plain) && !NOT_FEE.test(plain) && !STATS.test(plain) ? opts.soleKey : null;
+    const key = named || (theirs.length === 1 ? theirs[0] : null) || unnamed;
     if (!key) continue;
     const hit = { key, amount, currency: CURRENCY(m.pre || m.post || "$"), quote: sentence.slice(0, 300) };
     const yes = YES.test(plain) && !COUNTER.test(plain) && !sentence.includes("?");
-    if (yes && theirPrices[key] === amount) accepted = accepted || hit;
+    if (yes && (theirPrices[key] === amount || current[key] === amount)) accepted = accepted || hit;
     else offer = offer || hit;
   }
   return { accepted, offer: accepted ? null : offer };

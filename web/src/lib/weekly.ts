@@ -125,7 +125,7 @@ export function weeklyReport(input: WeeklyInput): WeeklyReport {
     const workday = workdaySet.has(sp.wd) && !holidays.has(iso);
     const count = sentIn(ds, Math.min(de, end));
     const emails = sent.filter((x) => !x.scheduled && x.channel === "email" && within(x, ds, Math.min(de, end))).length;
-    const replies = new Set(received.filter((r) => { const t = new Date(r.at).getTime(); return t >= ds && t < Math.min(de, end); }).map((r) => r.entityId)).size;
+    const replies = new Set(received.filter((r) => { const t = new Date(r.at).getTime(); return r.first && t >= ds && t < Math.min(de, end); }).map((r) => r.entityId)).size;
     const future = ds >= now.getTime();
     const status: DayLine["status"] = future ? "future" : !workday ? (count > 0 ? "bonus" : "off") : count >= goal ? "hit" : count >= goal * 0.7 ? "close" : count > 0 ? "low" : "zero";
     days.push({ label: new Date(ds).toLocaleDateString("en-US", { timeZone: tz, weekday: "short" }), date: new Date(ds).toLocaleDateString("en-US", { timeZone: tz, month: "short", day: "numeric" }), sent: count, emails, replies, workday, status });

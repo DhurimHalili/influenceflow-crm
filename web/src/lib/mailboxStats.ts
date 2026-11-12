@@ -32,7 +32,7 @@ export function mailboxStats(events: EmailEvent[], leads: InboundLead[], mailbox
     const out = mine.filter((e) => e.direction === "out" && (!e.scheduled || e.at <= nowIso));
     const answers = leads.filter((l) => l.mailbox.toLowerCase() === mailbox).flatMap((l) => l.my_replies || []).filter((r) => new Date(r.at).getTime() >= since && (!r.scheduled || r.at <= nowIso));
     const sentIds = new Set([...out.map((e) => `g-${e.gmail_id}`), ...answers.map((r) => `g-${r.id}`)]);
-    const real = (e: EmailEvent) => e.direction === "in" && e.reply_kind !== "auto" && e.reply_kind !== "managed_no";
+    const real = (e: EmailEvent) => e.direction === "in" && e.reply_kind !== "auto" && e.reply_kind !== "reaction" && e.reply_kind !== "managed_no";
     const reachedAt = new Map<string, number>();
     for (const e of out) {
       const t = new Date(e.at).getTime();

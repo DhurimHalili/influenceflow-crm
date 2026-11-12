@@ -9,11 +9,18 @@ import { parseDay } from "./days.ts";
 //   • follow-ups you logged by hand (a DM, a call — or an email without Gmail)
 //   • first-contact dates stamped before anything was logged
 // What each message you sent was:
-//   first    — the first message to that person (a new conversation)
+//   first    — the first message to that person (a new conversation you opened;
+//              answering someone who wrote to you first is an answer)
 //   followup — sent right after your own last one, no reply in between
 //   newthread — the opening email of a fresh thread after the follow-up cap:
 //              a new email, not another follow-up
 //   answer   — anything else: answering them, negotiating
+// What a reply is: the FIRST real message a person sends back after you
+// reached out — one per person, however long the conversation runs after it.
+// Their second, third… message ("sorry, missed this", the back-and-forth of a
+// negotiation) is conversation: kept in the log, never counted as a reply.
+// Out-of-office mail, emoji reactions and their management's automatic no
+// are not replies at all; someone who wrote to you first didn't "reply".
 // Emails waiting in Gmail's Scheduled folder are kept apart until their send
 // time passes. Your answers to people who emailed you first (inbound leads
 // not in the CRM yet) are emails too.
@@ -42,7 +49,9 @@ export type Sent = {
 
 /** A message from their side: an email reply or one you logged ("They replied"). */
 /** A real reply. `mailbox` = the mailbox it came into (Gmail), "" for one logged by hand. */
-export type Received = { key: string; at: string; entityId: string; segment: Segment; channel: string; kind: string; source: "gmail" | "manual"; mailbox: string };
+export type Received = { key: string; at: string; entityId: string; segment: Segment; channel: string; kind: string; source: "gmail" | "manual"; mailbox: string;
+  /** The reply: this person's first real answer to your outreach. Everything after it is conversation. */
+  first: boolean };
 
 type Input = { creators: Creator[]; brands: Brand[]; contacts?: BrandContact[]; followups: Followup[]; events: EmailEvent[]; leads?: InboundLead[]; now?: Date };
 
@@ -77,16 +86,25 @@ export function build({ creators, brands, contacts = [], followups, events, lead
     const touches = timeline({ type, record: record as Creator }, logged.get(record.id) || [], mail.get(record.id) || []);
     let prev: Touch | undefined;
     let anyOut = false;
+    let replied = false;
+    // They wrote to you before you ever wrote to them: you didn't open this one.
+    let theyOpened = false;
     const threads = new Set<string>();
     for (const t of touches) {
       // The opening email of a fresh thread (after the follow-up cap) is a new email, not a follow-up.
       const freshThread = t.source === "gmail" && t.dir === "out" && !!t.threadId && !threads.has(t.threadId);
       if (t.threadId) threads.add(t.threadId);
-      // An out-of-office between two of your emails doesn't make the second one an answer.
-      if (t.dir === "in" && t.kind === "auto") continue;
+      // An out-of-office (or an emoji reaction) between two of your emails doesn't make the second one an answer.
+      if (t.dir === "in" && (t.kind === "auto" || t.kind === "reaction")) continue;
       if (t.dir === "in") {
         // Their management turning it down automatically isn't a reply from them.
-        if (t.kind !== "managed_no") received.push({ key: t.source === "gmail" ? t.id : `${record.id}:${t.id}`, at: t.at, entityId: record.id, segment: type, channel: t.channel || "email", kind: t.kind || "", source: t.source === "gmail" ? "gmail" : "manual", mailbox: t.source === "gmail" ? t.mailbox || "" : "" });
+        if (t.kind !== "managed_no") {
+          // The reply = their first real answer after you reached out; the rest is conversation.
+          if (!anyOut) theyOpened = true;
+          const first = anyOut && !replied && !theyOpened;
+          if (first) replied = true;
+          received.push({ key: t.source === "gmail" ? t.id : `${record.id}:${t.id}`, at: t.at, entityId: record.id, segment: type, channel: t.channel || "email", kind: t.kind || "", source: t.source === "gmail" ? "gmail" : "manual", mailbox: t.source === "gmail" ? t.mailbox || "" : "", first });
+        }
         prev = t;
         continue;
       }
@@ -96,7 +114,7 @@ export function build({ creators, brands, contacts = [], followups, events, lead
         const key = t.source === "gmail" ? t.id : `${record.id}:${t.id}`;
         if (!seen.has(key)) {
           seen.add(key);
-          const role: Sent["role"] = !anyOut ? "first" : prev?.dir === "out" ? (freshThread ? "newthread" : "followup") : "answer";
+          const role: Sent["role"] = !anyOut ? (theyOpened ? "answer" : "first") : prev?.dir === "out" ? (freshThread ? "newthread" : "followup") : "answer";
           sent.push({ key, at: t.at, kind: role === "followup" ? "followup" : "email", role, scheduled: waiting(t), entityId: record.id, entityType: type, segment: type, recordId: record.id, mailbox: t.mailbox || "", channel: t.source === "gmail" ? "email" : t.channel || (t.source === "legacy" ? record.contact_channel || "email" : "email"), threadId: t.threadId });
           const days = outDays.get(record.id) || new Set<string>();
           days.add(new Date(t.at).toDateString());

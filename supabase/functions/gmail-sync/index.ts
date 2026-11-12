@@ -3,8 +3,8 @@ import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { isSealed, openToken, sealToken } from "../_shared/googleTokens.ts";
 import { aiChain, aiEnabled, aiKeyCount, aiModel, aiProvider, aiReadyAt, classifyLead, planImport, QuotaExhausted, readReply, testAi, useKeyStore } from "../_shared/ai.ts";
 import { decodeEntities, isWarmup, precheck, scanForLead, type Lead, type ScanInput } from "../_shared/leadScanner.ts";
-import { classifyIncoming, mergeReading, myReplyIntent, READER_VERSION, referralOf, stripQuoted, type IncomingKind, type TeamRole } from "../_shared/replyReader.ts";
-import { analyzeStoredFile, bodyOf, drainQueue, gmailAttachment, processCreatorMail, processMyMail, repairKitLists, sniff, type Fetcher, type FullMessage } from "./intel.ts";
+import { classifyIncoming, isReaction, mergeReading, myReplyIntent, notAReply, READER_VERSION, referralOf, stripQuoted, type IncomingKind, type TeamRole } from "../_shared/replyReader.ts";
+import { analyzeStoredFile, bodyOf, drainQueue, gmailAttachment, processCreatorMail, processMyMail, repairAnchors, repairKitLists, sniff, type Fetcher, type FullMessage } from "./intel.ts";
 
 // Gmail ⇄ CRM sync, for every mailbox a user connected (an agency often runs
 // two or three).
@@ -519,8 +519,8 @@ async function applyStatuses(admin: Admin, userId: string, entityIds: string[], 
         const t = new Date(ev.at).getTime();
         // Only mail newer than your last status change can move it.
         if (byGmail ? t < changedAt : t <= changedAt) continue;
-        // An out-of-office, or their management turning it down for them, is not a reply.
-        if (ev.direction === "in" && (ev.reply_kind === "auto" || ev.reply_kind === "managed_no")) continue;
+        // An out-of-office, an emoji reaction, or their management turning it down for them, is not a reply.
+        if (ev.direction === "in" && (notAReply(ev.reply_kind) || ev.reply_kind === "managed_no")) continue;
         // Writing again to someone who passed, weeks later (not a quick "thanks
         // anyway"), reopens the conversation: the follow-ups start over.
         const reopen = status === "denied" && ev.direction === "out" && !ev.scheduled && t - sinceT >= REOPEN_AFTER_MS ? "contacted" : "";
@@ -570,8 +570,10 @@ async function rereadReplies(admin: Admin, userId: string) {
   const changes: KindChange[] = [];
   for (const r of data) {
     let kind = String(r.reply_kind || "");
+    // An emoji reaction is never a reply, whatever it was read as before.
+    if (kind !== "reaction" && isReaction(r.snippet || "")) { changes.push({ entityId: r.entity_id, at: r.at, from: kind, to: "reaction" }); kind = "reaction"; }
     // Header-based 'auto', management declines, your 'ok' and an AI verdict stay as they are.
-    if (["", "no", "maybe_no", "team"].includes(kind) && !r.reply_ai_at) {
+    else if (["", "no", "maybe_no", "team"].includes(kind) && !r.reply_ai_at) {
       const next = classifyIncoming({ subject: r.subject || "", text: r.snippet || "", fromOther: kind === "team", from: r.counterpart || "" });
       if (next !== kind) { changes.push({ entityId: r.entity_id, at: r.at, from: kind, to: next }); kind = next; }
     }
@@ -658,7 +660,7 @@ async function afterKindChange(admin: Admin, userId: string, changes: KindChange
   for (const rec of records) {
     const mine = changes.filter((c) => c.entityId === rec.id);
     const events = (mail || []).filter((e) => e.entity_id === rec.id);
-    const lastIn = events.filter((e) => e.direction === "in" && e.reply_kind !== "auto").sort((a, b) => b.at.localeCompare(a.at))[0];
+    const lastIn = events.filter((e) => e.direction === "in" && !notAReply(e.reply_kind)).sort((a, b) => b.at.localeCompare(a.at))[0];
     const newNo = mine.filter((c) => c.to === "no" && c.from !== "no").sort((a, b) => b.at.localeCompare(a.at))[0];
     const gone = mine.filter((c) => c.from === "no" && c.to !== "no").sort((a, b) => a.at.localeCompare(b.at))[0];
     if (newNo && lastIn && lastIn.at === newNo.at && DENIABLE.has(rec.pipeline_status)) {
@@ -777,7 +779,7 @@ async function undoScheduledStatus(admin: Admin, userId: string, type: "creator"
     admin.from("followups").select("kind").eq("user_id", userId).eq(type === "creator" ? "creator_id" : "brand_id", id).limit(200),
   ]);
   const outs = (mail || []).filter((m) => m.direction === "out").length + (logged || []).filter((f) => f.kind !== "reply").length;
-  const ins = (mail || []).filter((m) => m.direction === "in" && m.reply_kind !== "auto" && m.reply_kind !== "managed_no").length + (logged || []).filter((f) => f.kind === "reply").length;
+  const ins = (mail || []).filter((m) => m.direction === "in" && !notAReply(m.reply_kind) && m.reply_kind !== "managed_no").length + (logged || []).filter((f) => f.kind === "reply").length;
   if (outs > 0) return;
   const back = record.pipeline_status === "contacted" && ins === 0 ? "new" : record.pipeline_status === "replied" && ins > 0 ? "inbound" : "";
   if (!back) return;
@@ -895,7 +897,7 @@ async function autoCancelCrossed(admin: Admin, userId: string, rows: TokenRow[])
     // Only when the reply came in after the CRM already saw the scheduled email,
     // i.e. you scheduled it before they answered. One you wrote after reading
     // their reply stays: the app flags it and you decide.
-    const crossed = mine.some((m) => m.direction === "in" && m.reply_kind !== "auto" && ms(m.at) > ms(bumped.at) && ms(m.at) < ms(p.at) && ms(m.at) > ms(p.created_at));
+    const crossed = mine.some((m) => m.direction === "in" && !notAReply(m.reply_kind) && ms(m.at) > ms(bumped.at) && ms(m.at) < ms(p.at) && ms(m.at) > ms(p.created_at));
     if (!crossed) continue;
     done.add(p.gmail_id);
     const res = await cancelScheduledSend(admin, userId, rows, p.gmail_id, "replied");
@@ -1321,6 +1323,8 @@ async function readMailbox(admin: Admin, row: TokenRow, own: Set<string>, book: 
 
   // d3. Deals agreed before their kit's prices were on file: give them the kit's asking price (their real %).
   if (Date.now() < deadline - 10_000) await repairKitLists(admin, row.user_id, currency).catch(() => 0);
+  // d4. Deals measured from a counter instead of their first asking price: put the % right.
+  if (Date.now() < deadline - 10_000) await repairAnchors(admin, row.user_id).catch(() => 0);
 
   // e. Files waiting for the AI.
   const aiRead = budget.ai > 0 && Date.now() < deadline - 10_000 ? await drainQueue({ admin, userId: row.user_id, currency, mailbox, get, max: Math.min(3, budget.ai), deadline: deadline - 8_000 }).catch(() => 0) : 0;

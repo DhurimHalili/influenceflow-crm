@@ -23,7 +23,7 @@ type Rec = { id: string; pipeline_status: EntityStatus; status_updated_at?: stri
 export function latestReplies(events: EmailEvent[]) {
   const map = new Map<string, EmailEvent>();
   for (const e of events) {
-    if (e.direction !== "in" || e.reply_kind === "auto" || e.reply_kind === "managed_no") continue;
+    if (e.direction !== "in" || e.reply_kind === "auto" || e.reply_kind === "reaction" || e.reply_kind === "managed_no") continue;
     const prev = map.get(e.entity_id);
     if (!prev || e.at > prev.at) map.set(e.entity_id, e);
   }

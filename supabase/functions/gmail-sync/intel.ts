@@ -1,8 +1,8 @@
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { aiEnabled, hasAudience, QuotaExhausted, readAttachment, readCreatorEmail, type AudienceFacts, type FileReading } from "../_shared/ai.ts";
 import { decodeEntities } from "../_shared/leadScanner.ts";
-import { backfillList, negotiate, normalizeRateHistory, normalizeRateMeta, setListPrices, type RateEvent, type RateKey, type RateMetaMap, type Rates } from "../_shared/negotiation.ts";
-import { isPlainYes, mentionsMoneyOrAudience, moneyMentions, ownText, readMine, readOffer, readPrices, statesAudience, type PriceHit } from "../_shared/priceReader.ts";
+import { backfillList, negotiate, normalizeRateHistory, normalizeRateMeta, offerEvent, openOffers, reanchor, setListPrices, theirPrices, type RateEvent, type RateKey, type RateMetaMap, type Rates } from "../_shared/negotiation.ts";
+import { isPlainYes, mentionsMoneyOrAudience, moneyMentions, ownText, readAgainstOffer, readMine, readOffer, readPrices, saysAmount, statesAudience, type PriceHit } from "../_shared/priceReader.ts";
 import { listPrice } from "../_shared/negotiation.ts";
 
 // What a creator's email adds to their CRM profile:
@@ -24,6 +24,10 @@ import { listPrice } from "../_shared/negotiation.ts";
 //     agreement (→ the price is marked negotiated and they move to Roster).
 //   • Status only moves forward (Negotiating, then Roster), only from a live
 //     stage, and only for mail newer than the status you last set by hand.
+//   • The first price they name is the anchor. A lower one while it is fresh is
+//     a counter (the anchor stays), your offers are kept in the same history,
+//     and a yes to the amount you offered is an agreement even when nobody
+//     names the format. What the AI reports must be written in the email.
 // Email bodies are read in memory and never stored.
 
 type Admin = SupabaseClient;
@@ -149,11 +153,30 @@ class Profile {
   listPrices(list: { key: RateKey; amount: number; currency: string }[], at: string, source: "email" | "media_kit", evidence: string, historical: boolean, label: string) {
     const prices = this.allowed(this.money(list), at, historical);
     if (!Object.keys(prices).length) return false;
-    const done = setListPrices(this.rates, this.meta, prices, { at, source, evidence });
+    // A kit is a price list. A price in an email is read against the asking
+    // price on file: lower while it is fresh = they came down (a counter).
+    const done = source === "email" ? theirPrices(this.rates, this.meta, prices, { at, source, evidence }) : setListPrices(this.rates, this.meta, prices, { at, source, evidence });
     if (!done.event) return false;
     this.rates = done.rates; this.meta = done.meta; this.history.unshift(done.event); this.touched = true;
-    this.activities.push(`${this.c.name}: ${label}${done.event.summary.replace(/^New asking prices: /, "")}`);
+    const down = done.event.changes.some((c) => c.kind === "counter");
+    this.activities.push(down ? `${this.c.name} ${done.event.summary.replace(/^They came down/, "came down")}` : `${this.c.name}: ${label}${done.event.summary.replace(/^New asking prices: /, "")}`);
     return true;
+  }
+  /** A price you put on the table: kept in the history (nothing on the card changes). */
+  offered(offer: { key: RateKey; amount: number; currency: string; quote?: string }, at: string) {
+    if (offer.currency && offer.currency !== this.currency) return false;
+    const event = offerEvent(this.rates, this.meta, this.history, offer, { at, evidence: offer.quote ? `“${offer.quote}”` : "" });
+    if (!event) return false;
+    // Newest first — an offer read from older mail goes where it belongs in time.
+    const i = this.history.findIndex((e) => e.at <= event.at);
+    this.history.splice(i < 0 ? this.history.length : i, 0, event);
+    this.touched = true;
+    return true;
+  }
+  /** Your offers still open, and what each format's asking price is. */
+  table() {
+    const asking = Object.fromEntries((Object.keys(this.rates) as RateKey[]).filter((k) => Number(this.rates[k]) > 0).map((k) => [k, listPrice(this.rates, this.meta, k)])) as Partial<Record<RateKey, number>>;
+    return { offers: openOffers(this.history), asking };
   }
   /** Their kit's asking price for each key (latest kit sent on or before `at`, else the latest one). */
   kitAsking(at?: string) {
@@ -277,6 +300,28 @@ export async function repairKitLists(admin: Admin, userId: string, currency: str
   for (const r of needs) {
     const p = await loadProfile(admin, userId, r.id, currency);
     if (p?.fixFromKits("deal price checked against their media kit — ")) { await p.save(); fixed++; }
+  }
+  return fixed;
+}
+
+/**
+ * Deals measured from the wrong starting price: a lower price they emailed
+ * mid-negotiation used to replace their asking price, so "5,000 → 4,500 →
+ * agreed 3,500" read "−22 % from 4,500". Every read run puts such histories
+ * right (`reanchor`): the agreed price never changes, the % does.
+ */
+export async function repairAnchors(admin: Admin, userId: string, max = 40) {
+  const { data: rows } = await admin.from("creators").select("id, name, rates, rate_meta, rate_history").eq("user_id", userId).not("rate_history", "is", null).neq("rate_history", "[]").limit(1000);
+  let fixed = 0;
+  for (const r of rows || []) {
+    if (fixed >= max) break;
+    const done = reanchor((r.rates || {}) as Partial<Rates>, normalizeRateMeta(r.rate_meta), normalizeRateHistory(r.rate_history));
+    if (!done) continue;
+    const { error } = await admin.from("creators").update({ rates: done.rates, rate_meta: done.meta, rate_history: done.history }).eq("id", r.id).eq("user_id", userId);
+    if (error) continue;
+    fixed++;
+    const what = done.fixed.map((f) => `${f.key} was agreed at ${f.agreed.toLocaleString("en-US")} from their first ask of ${f.to.toLocaleString("en-US")}, not ${f.from.toLocaleString("en-US")}`).join("; ");
+    await admin.from("activities").insert({ user_id: userId, text: `${r.name}: negotiation corrected — ${what || "their lower price is a counter, not a new asking price"}`.slice(0, 500), at: new Date().toISOString(), entity_type: "creator", entity_id: r.id });
   }
   return fixed;
 }
@@ -497,7 +542,15 @@ export async function processCreatorMail(ctx: MailCtx & { message: FullMessage; 
   // Rules are exact when they fire (a price list, "$2,500 for the integration
   // works for me"); the AI fills what rules can't read. On the same format the
   // rules win, so a bundle is never turned into a dedicated video.
-  const rules = text.length > 5 ? readPrices(text) : { agreed: [] as PriceHit[], stated: [] as PriceHit[] };
+  const read = text.length > 5 ? readPrices(text) : { agreed: [] as PriceHit[], stated: [] as PriceHit[] };
+  // Sentences that name an amount but no format, read against the negotiation
+  // so far: a yes to the amount you offered, or a number between your offer
+  // and their asking price (they came down).
+  const table = p.table();
+  const versus = text.length > 5 ? readAgainstOffer(text, table) : { agreed: [] as PriceHit[], countered: [] as PriceHit[] };
+  const join = (base: PriceHit[], extra: PriceHit[]) => [...base, ...extra.filter((x) => !base.some((b) => b.key === x.key))];
+  const rules = { agreed: join(read.agreed, versus.agreed), stated: [] as PriceHit[] };
+  rules.stated = join(read.stated, versus.countered).filter((x) => !rules.agreed.some((a) => a.key === x.key));
   let stated: { key: RateKey; amount: number; currency: string }[] = [...rules.stated];
   let agreed: { key: RateKey; amount: number; currency: string }[] = [...rules.agreed];
   let evidence = rules.agreed[0]?.quote || rules.stated[0]?.quote || "";
@@ -517,11 +570,15 @@ export async function processCreatorMail(ctx: MailCtx & { message: FullMessage; 
   if (text.length > 20 && worthAi && mentionsMoneyOrAudience(text) && (await tryAi(ctx))) {
     ctx.budget.ai--;
     try {
-      const claims = await readCreatorEmail({ creator: p.c.name, subject, body: ownText(text) || text, currentRates: p.rates });
+      const claims = await readCreatorEmail({ creator: p.c.name, subject, body: ownText(text) || text, currentRates: p.rates, asking: table.asking, offers: table.offers });
       if (claims && !claims.suspicious && claims.confidence >= 0.7) {
         const add = <T extends { key: RateKey }>(base: T[], extra: T[]) => [...base, ...extra.filter((x) => !base.some((b) => b.key === x.key))];
-        if (claims.agreement) { agreed = add(agreed, claims.agreement.items); evidence = evidence || claims.agreement.quote; fromAi = fromAi || !rules.agreed.length; }
-        if (claims.statedRates.length) { stated = add(stated, claims.statedRates); evidence = evidence || subject; fromAi = fromAi || !rules.stated.length; }
+        // Nothing the AI reports is used unless that number is written in their own words.
+        const onPage = <T extends { amount: number }>(list: T[]) => list.filter((x) => saysAmount(text, x.amount));
+        const aiAgreed = claims.agreement ? onPage(claims.agreement.items) : [];
+        const aiStated = onPage(claims.statedRates).filter((x) => !aiAgreed.some((a) => a.key === x.key));
+        if (aiAgreed.length) { agreed = add(agreed, aiAgreed); evidence = evidence || claims.agreement!.quote; fromAi = fromAi || !rules.agreed.length; }
+        if (aiStated.length) { stated = add(stated, aiStated).filter((x) => !agreed.some((a) => a.key === x.key)); evidence = evidence || claims.statedQuote || subject; fromAi = fromAi || !rules.stated.length; }
         if (hasAudience(claims.audience) && p.setAudience("claimed", audienceBlock(claims.audience, { at, subject }), at)) p.activities.push(`${p.c.name} described their audience by email (not proven)`);
       }
     } catch (e) {
@@ -560,13 +617,21 @@ export async function processMyMail(ctx: MailCtx & { message: FullMessage; creat
   if (!p) return { files: 0, changes: 0, deferred: false };
   const { text } = bodyOf(ctx.message);
   const at = ctx.message.internalDate ? new Date(Number(ctx.message.internalDate)).toISOString() : new Date().toISOString();
-  // Their asking prices: what they listed (not what was already negotiated down).
-  const theirs = Object.fromEntries((Object.keys(p.rates) as RateKey[]).filter((k) => Number(p.rates[k]) > 0).map((k) => [k, listPrice(p.rates, p.meta, k)])) as Partial<Record<RateKey, number>>;
-  const mine = readMine(text, theirs);
+  // Their asking prices (what they first listed) and where each price stands now (their counter).
+  const { asking, offers } = p.table();
+  const current = Object.fromEntries((Object.keys(p.meta) as RateKey[]).filter((k) => p.meta[k]?.status === "counter" && Number(p.rates[k]) > 0).map((k) => [k, Number(p.rates[k])])) as Partial<Record<RateKey, number>>;
+  // "We can offer $3,500 for our first collaboration" names no format: it is about
+  // the only one they priced, else the one you offered on before.
+  const priced = Object.keys(asking) as RateKey[];
+  const soleKey = priced.length === 1 ? priced[0] : offers.length === 1 ? offers[0].key : null;
+  const mine = readMine(text, asking, { current, soleKey });
   if (mine.accepted) {
     p.agree([mine.accepted], at, `You agreed: “${mine.accepted.quote}”`, !!ctx.historical, "Agreed by email with");
     p.reach("roster", at, `you agreed ${mine.accepted.amount.toLocaleString("en-US")} by email`);
-  } else if (mine.offer) p.reach("negotiating", at, `you offered ${mine.offer.amount.toLocaleString("en-US")} by email`);
+  } else if (mine.offer) {
+    p.offered(mine.offer, at);
+    p.reach("negotiating", at, `you offered ${mine.offer.amount.toLocaleString("en-US")} by email`);
+  }
   await p.save();
   return { files: 0, changes: mine.accepted ? 1 : 0, deferred: false };
 }

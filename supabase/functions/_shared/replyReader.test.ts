@@ -1,5 +1,5 @@
 // Run: node --experimental-strip-types supabase/functions/_shared/replyReader.test.ts
-import { classifyIncoming, declineLevel, mergeReading, myReplyIntent, quotedOwnDate, referralOf, replyTone, stripQuoted } from "./replyReader.ts";
+import { classifyIncoming, declineLevel, isAck, isReaction, mergeReading, myReplyIntent, notAReply, quotedOwnDate, referralOf, replyTone, stripQuoted } from "./replyReader.ts";
 
 let fail = 0;
 const check = (name: string, got: unknown, want: unknown) => {
@@ -109,6 +109,23 @@ check("address only in the quote is ignored", referralOf("Sounds good!\n\nOn Thu
 check("their own address in signature is not a referral", referralOf("Love it, let's talk.\nNick\nnick@gmail.com", me), null);
 check("an address without a role word is ignored", referralOf("Please email bob@random.com", me), null);
 check("your own company address is never their team", referralOf("Contact my manager at dhurimi@mimibridge.com", me), null);
+
+// ---- reactions and acknowledgements -------------------------------------------------
+check("real: Gmail emoji reaction", classifyIncoming({ subject: "Re: A Big Letdown...", text: "👌 Deniel reacted via Gmail On Thu, Nov 12, 2026 at 2:27 PM Dhurim Halili <dhurim@mimibridge.com> wrote: Great to have you on board." }), "reaction");
+check("reaction from a team address is still a reaction", classifyIncoming({ fromOther: true, text: "👍 Jane reacted via Gmail" }), "reaction");
+check("Outlook-style reaction", isReaction("Sam reacted to your message"), true);
+check("talking about a reaction is not one", isReaction("Hi! My audience reacted really well to the last sponsor, happy to share numbers. They reacted via Gmail comments too."), false);
+check("a reaction is not a reply", [notAReply("reaction"), notAReply("auto"), notAReply(""), notAReply("no")], [true, true, false, false]);
+check("AI never overrides a reaction", mergeReading("reaction", { answer: "interested", writer: "creator", confidence: 0.95 }), "reaction");
+check("ack: thanks", isAck("Thanks!"), true);
+check("ack: got it, talk soon + name", isAck("Hi Dhurim, got it, talk soon! Deniel"), true);
+check("ack: thanks for the update", isAck("Perfect, thank you so much for the update."), true);
+check("ack with quoted history", isAck("Sounds good, thanks! On Thu, Nov 12, 2026 at 2:27 PM Dhurim <d@x.com> wrote: Could you confirm?"), true);
+check("not an ack: a question", isAck("Thanks! When do you need the draft?"), false);
+check("not an ack: news", isAck("Thanks, I'll send the draft on Friday."), false);
+check("not an ack: real: agreement with a question", isAck("Hi Dhurim, I think $3500 is a reasonable offer for our first collaboration, so I'm open to moving forward at that rate. Could you let me know which brand this campaign is for"), false);
+check("not an ack: no ack words", isAck("Deniel"), false);
+check("not an ack: empty", isAck(""), false);
 
 console.log(fail ? `${fail} failed` : "all passed");
 if (typeof process !== "undefined") process.exit(fail ? 1 : 0);

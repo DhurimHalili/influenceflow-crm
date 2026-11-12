@@ -1,5 +1,5 @@
 // Run: node --experimental-strip-types supabase/functions/_shared/priceReader.test.ts
-import { isPlainYes, readMine, readOffer, readPrices, moneyMentions, statesAudience } from "./priceReader.ts";
+import { isPlainYes, saysAmount, readAgainstOffer, readMine, readOffer, readPrices, moneyMentions, statesAudience } from "./priceReader.ts";
 
 let fail = 0;
 const eq = (name: string, got: unknown, want: unknown) => {
@@ -91,5 +91,34 @@ eq("money mentions: durations and years aren't prices", moneyMentions("A 60-90 s
 eq("money mentions: thanks email", moneyMentions("Thanks, sounds good! Talk soon."), 0);
 eq("audience stated", statesAudience("My audience is 68% US, mostly 18-24, 70% male"), true);
 eq("no audience in a plain reply", statesAudience("Sure, sending the kit now"), false);
+
+// ---- read against the negotiation so far (no format named) ----
+const vs = (body: string, offers: [string, number][], asking: Record<string, number>) => { const r = readAgainstOffer(body, { offers: offers.map(([key, amount]) => ({ key: key as "video", amount })), asking }); return { agreed: r.agreed.map((h) => [h.key, h.amount]), countered: r.countered.map((h) => [h.key, h.amount]) }; };
+eq("real: yes to your offer, no format named", vs("Hi Dhurim,\nI think $3500 is a reasonable offer for our first collaboration, so I'm open to moving forward at that rate. Could you let me know which brand this campaign is for?\n\nOn Sun, Nov 8, 2026 at 7:58 PM Agency <a@b.com> wrote:\n> we can offer $3500", [["video", 3500]], { video: 5000 }), { agreed: [["video", 3500]], countered: [] });
+eq("between your offer and their ask = they came down", vs("Thanks for the offer. I could do $4,500 for this one.", [["video", 3200]], { video: 5000 }), { agreed: [], countered: [["video", 4500]] });
+eq("a counter asked as a question still counts", vs("Could we meet at $4,000?", [["video", 3200]], { video: 5000 }), { agreed: [], countered: [["video", 4000]] });
+eq("your offer called too low is not a yes", vs("Honestly $3,200 is too low for me.", [["video", 3200]], { video: 5000 }), { agreed: [], countered: [] });
+eq("yes with a 'but' is not a yes", vs("$3,200 works but I would need usage limited to 30 days.", [["video", 3200]], { video: 5000 }), { agreed: [], countered: [] });
+eq("a deposit is not a counter", vs("I'd need $4,000 upfront before filming.", [["video", 3200]], { video: 5000 }), { agreed: [], countered: [] });
+eq("product value is not a counter", vs("The laptop is worth $4,000 so that helps.", [["video", 3200]], { video: 5000 }), { agreed: [], countered: [] });
+eq("above their ask is not a counter", vs("I could do $6,000.", [["video", 3200]], { video: 5000 }), { agreed: [], countered: [] });
+eq("two different counters = ambiguous", vs("I could do $4,500.\nOr $4,000 if you book two.", [["video", 3200]], { video: 5000 }), { agreed: [], countered: [] });
+eq("no offer yet, one priced format, price words", vs("For a first collab I can do $4,500.", [], { video: 5000 }), { agreed: [], countered: [["video", 4500]] });
+eq("no offer yet, several formats priced: can't tell which", vs("For a first collab I can do $4,500.", [], { video: 5000, dedicated: 9000 }), { agreed: [], countered: [] });
+eq("no price words, no offer: nothing", vs("Last brand paid me $4,500 fyi", [], { video: 5000 }), { agreed: [], countered: [] });
+eq("a sentence with its format is left to readPrices", vs("I can do the integration for $4,500.", [["video", 3200]], { video: 5000 }), { agreed: [], countered: [] });
+eq("views are never a counter", vs("My last video did 4,500 views in a day, $0 spent.", [["video", 3200]], { video: 5000 }), { agreed: [], countered: [] });
+
+eq("amount is on the page", [saysAmount("I can do $4,500.", 4500), saysAmount("4.5k works", 4500), saysAmount("I can do 4500 usd", 4500)], [true, true, true]);
+eq("amount only in the quoted history is not on the page", saysAmount("Sounds fine.\n\nOn Mon, Oct 6, 2026 at 10:00 Agency <a@b.com> wrote:\n> We can offer $4,500", 4500), false);
+eq("an invented amount is not on the page", saysAmount("My rate is $5,000 per integration.", 4500), false);
+
+// ---- your own emails ----
+eq("real: your offer with no format, one priced format", readMine("We understand that the US audience in your other videos is slightly higher.\nTherefore, we can offer $3500 for our first collaboration.\nLet us know if this works.", { video: 5000 }, { soleKey: "video" }).offer?.amount, 3500);
+eq("real: first offer names the format", readMine("Due to this audience we can offer $3200 for a first integration. Let me know if this works for you!", { video: 5000 }).offer?.amount, 3200);
+eq("no sole format: an unnamed offer is not guessed", readMine("Therefore, we can offer $3500 for our first collaboration.", { video: 5000, short: 900 }).offer, null);
+eq("yes to where they came down = agreed", readMine("$4,500 works for us, let's lock it in.", { video: 5000 }, { current: { video: 4500 } }).accepted?.amount, 4500);
+eq("shipping cost is not an offer", readMine("We will pay $120 for shipping the product.", { video: 5000 }, { soleKey: "video" }).offer, null);
+eq("moving forward at their price = agreed", pick(readPrices("Happy to move forward at $2,500 for the integration.")), { stated: [], agreed: [["video", 2500, "USD"]] });
 
 if (fail) { console.log(`${fail} failed`); (globalThis as { process?: { exit(n: number): void } }).process?.exit(1); } else console.log("all price-reader tests pass");

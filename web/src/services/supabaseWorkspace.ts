@@ -181,7 +181,7 @@ const normalizeEmailEvent = (row: Record<string, unknown>): EmailEvent => ({
   at: typeof row.at === "string" && row.at ? row.at : new Date().toISOString(),
   mailbox: text(row.mailbox).toLowerCase(),
   scheduled: row.scheduled === true,
-  reply_kind: (["no", "maybe_no", "team", "auto", "managed_no"] as const).find((k) => k === row.reply_kind) || "",
+  reply_kind: (["no", "maybe_no", "team", "auto", "managed_no", "reaction"] as const).find((k) => k === row.reply_kind) || "",
   message_key: text(row.message_key),
   in_reply_to: text(row.in_reply_to),
 });
