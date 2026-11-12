@@ -148,5 +148,44 @@ const record = (extra: Record<string, unknown> = {}) => ({ type: "creator" as co
   check("stray scheduled email in another creator's thread: no cancel flag", [!!s.cancel, s.touches.find((t) => t.at === stray.at)?.crossed ?? false], [false, false]);
 }
 
+// Signed / on the roster: never chased, but a message you never answered is still yours.
+{
+  // The real record: they agreed $3,500 and asked what's next; Gmail moved them to Roster with that email.
+  const mail = [
+    ev("out", "2026-09-30T16:05:02Z"), ev("out", "2026-10-28T15:33:11Z"),
+    ev("in", "2026-11-08T09:47:46Z", { snippet: "Hi Dhurim, Thanks for following up! Yes, I'm interested. My rate is $5,000 per integration." }),
+    ev("out", "2026-11-08T18:57:59Z", { snippet: "Therefore, we can offer $3500 for our first collaboration." }),
+    ev("in", "2026-11-09T10:27:42Z", { snippet: "Hi Dhurim, I think $3500 is a reasonable offer for our first collaboration, so I'm open to moving forward at that rate. Could you let me know which brand this campaign is for" }),
+  ];
+  const roster = record({ pipeline_status: "roster", status_source: "gmail", status_updated_at: "2026-11-09 10:27:42+00" });
+  const s = followupState(roster, [], mail, rules, new Date("2026-11-12T09:00:00Z"));
+  check("roster: they agreed and asked, you never answered → reply needed", [s.kind, s.kind === "reply-needed" && s.won, s.kind === "reply-needed" && s.agreed], ["reply-needed", true, true]);
+  check("…and it says what to do", [flagFor(s)?.tone, flagFor(s)?.short], ["reply", "Confirm deal · 3d"]);
+  const answered = [...mail, ev("out", "2026-11-12T12:27:45Z", { snippet: "Great to have you on board." })];
+  check("you answer → nothing owed", followupState(roster, [], answered, rules, new Date("2026-11-12T13:00:00Z")).kind, "idle");
+  const reacted = [...answered, ev("in", "2026-11-12T13:15:51Z", { reply_kind: "reaction", snippet: "👌 Deniel reacted via Gmail On Thu, Nov 12, 2026" })];
+  const r = followupState(roster, [], reacted, rules, new Date("2026-11-12T14:00:00Z"));
+  check("their emoji reaction needs no answer", [r.kind, r.touches[r.touches.length - 1].label], ["idle", "Reacted to your email"]);
+  const thanks = [...answered, ev("in", "2026-11-12T13:15:51Z", { snippet: "Perfect, thank you! Talk soon." })];
+  check("a bare thanks from someone won needs no answer", followupState(roster, [], thanks, rules, new Date("2026-11-12T14:00:00Z")).kind, "idle");
+  const asks = [...answered, ev("in", "2026-11-12T13:15:51Z", { snippet: "Thanks! When should I expect the brief?" })];
+  const a = followupState(roster, [], asks, rules, new Date("2026-11-13T09:00:00Z"));
+  check("a new question from someone won → reply needed, plainly worded", [a.kind, flagFor(a)?.short, a.kind === "reply-needed" && a.agreed], ["reply-needed", "Reply · 1d", false]);
+  check("signed counts the same", followupState(record({ pipeline_status: "signed" }), [], asks, rules, new Date("2026-11-13T09:00:00Z")).kind, "reply-needed");
+  check("moved to roster by hand: reply needed, not 'confirm the deal'", flagFor(followupState(record({ pipeline_status: "roster", status_source: "manual", status_updated_at: "2026-11-09 10:27:42+00" }), [], mail, rules, new Date("2026-11-12T09:00:00Z")))?.short, "Reply · 3d");
+  check("old unanswered mail stops being flagged", followupState(roster, [], mail, rules, new Date("2027-02-01T09:00:00Z")).kind, "idle");
+  check("snoozed stays quiet", followupState(record({ pipeline_status: "roster", followup_snooze_until: "9999-12-31" }), [], mail, rules, new Date("2026-11-12T09:00:00Z")).kind, "idle");
+  const byHand = [{ id: "f9", creator_id: "c1", brand_id: null, kind: "followup", channel: "whatsapp", note: "confirmed on WhatsApp", at: "2026-11-10T08:00:00Z" }] as unknown as Followup[];
+  check("answered on WhatsApp (logged) → nothing owed", followupState(roster, byHand, mail, rules, new Date("2026-11-12T09:00:00Z")).kind, "idle");
+  const otherThread = [...mail, ev("out", "2026-11-10T08:00:00Z", { thread_id: "t2", subject: "Another brand" })];
+  check("an email in a different thread doesn't answer this one", followupState(roster, [], otherThread, rules, new Date("2026-11-12T09:00:00Z")).kind, "reply-needed");
+  check("roster with your word last: still never chased", followupState(roster, [], answered, rules, new Date("2026-12-20T09:00:00Z")).kind, "idle");
+  check("denied is untouched by this", followupState(record({ pipeline_status: "denied", lost_at: "2026-11-09T10:27:42Z" }), [], mail, rules, new Date("2026-11-12T09:00:00Z")).kind, "idle");
+  // A reaction to cold outreach: seen, but not a reply — the follow-up clock keeps running.
+  const cold = [ev("out", "2026-11-02T10:00:00Z"), ev("in", "2026-11-02T12:00:00Z", { reply_kind: "reaction", snippet: "👍 Sam reacted via Gmail" })];
+  const c = followupState(record(), [], cold, rules, new Date("2026-11-20T10:00:00Z"));
+  check("a reaction to a cold email doesn't stop the follow-up", c.kind, "due");
+}
+
 console.log(fail ? `${fail} failed` : "all passed");
 if (fail) throw new Error(`${fail} failed`);

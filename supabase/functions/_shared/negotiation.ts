@@ -13,6 +13,13 @@
 // always shows "list 5,000 → 2,500 (−50 %)", and every change is kept in a
 // history you can undo.
 //
+// The asking price is the ANCHOR of a negotiation: the first price they named.
+// When they come down by email while it is still fresh ("ok, I can do 4,500"),
+// that is a counter — the card shows 4,500 with 5,000 struck through, and a deal
+// closed at 3,500 reads "−30 % from 5,000", never "−22 % from 4,500". Your own
+// offers are kept in the same history, so the whole path is on one line:
+// asked 5,000 → you 3,200 → they 4,500 → you 3,500 → agreed 3,500.
+//
 // Pure TypeScript: no Deno or DOM APIs.
 
 export type RateKey = "video" | "extended" | "dedicated" | "bundle" | "short" | "post" | "carousel" | "story" | "stream" | "podcast" | "ugc" | "link_in_bio" | "usage_rights" | "exclusivity";
@@ -25,12 +32,17 @@ export const RATE_SHORT: Record<RateKey, string> = {
 export const RATE_FAMILIES: RateKey[][] = [["video", "extended", "dedicated"]];
 
 export type RateSource = "email" | "manual" | "media_kit";
-export type RateStatus = "list" | "negotiated" | "auto";
+/** list = their asking price · counter = they came down, nothing agreed yet · negotiated = agreed · auto = followed a negotiated sibling. */
+export type RateStatus = "list" | "counter" | "negotiated" | "auto";
 export type RateMeta = { list: number; status: RateStatus; pct: number; at: string; source: RateSource; note: string };
 export type RateMetaMap = Partial<Record<RateKey, RateMeta>>;
 export type Rates = Record<RateKey, number>;
 export type RateChange = { key: RateKey; from: number; to: number; list: number; kind: RateStatus; note: string; prev: RateMeta | null };
-export type RateEvent = { id: string; at: string; source: RateSource; summary: string; changes: RateChange[]; evidence?: string; undone?: boolean };
+export type RateEvent = { id: string; at: string; source: RateSource; summary: string; changes: RateChange[]; evidence?: string; undone?: boolean;
+  /** A price YOU put on the table: part of the story, changes no rate. */
+  offer?: { key: RateKey; amount: number } };
+/** How long an asking price stays the anchor: a lower price from them within this many days is a counter, not a new price list. */
+export const ANCHOR_DAYS = 120;
 
 const money = (v: number) => Math.round(v).toLocaleString("en-US");
 /** Prices land on clean numbers: 4,000 not 3,987. */
@@ -90,11 +102,7 @@ export function negotiate(
   }
 
   if (!changes.length) return { rates, meta, event: null };
-  const lead = changes.filter((c) => c.kind === "negotiated");
-  const summary = lead.length
-    ? `${lead.map((c) => `${RATE_SHORT[c.key]} ${money(c.list)} → ${money(c.to)}`).join(", ")}${changes.some((c) => c.kind === "auto") ? ` · ${changes.filter((c) => c.kind === "auto").map((c) => RATE_SHORT[c.key]).join(", ")} followed` : ""}`
-    : "Rates updated";
-  return { rates: next, meta: nextMeta, event: { id: newId(), at, source: opts.source, summary, changes, evidence: opts.evidence?.slice(0, 300) } };
+  return { rates: next, meta: nextMeta, event: { id: newId(), at, source: opts.source, summary: dealSummary(changes), changes, evidence: opts.evidence?.slice(0, 300) } };
 }
 
 /** "Apply the same % to…" — the one-click follow-up the card offers. */
@@ -135,7 +143,177 @@ export function setListPrices(rates: Partial<Rates>, meta: RateMetaMap, prices: 
     changes.push({ key, from, to, list: to, kind: "list", note: nextMeta[key]!.note, prev: meta[key] || null });
   }
   if (!changes.length) return { rates, meta, event: null as RateEvent | null };
-  return { rates: next, meta: nextMeta, event: { id: newId(), at, source: opts.source, summary: `New asking prices: ${changes.map((c) => `${RATE_SHORT[c.key]} ${money(c.to)}`).join(", ")}`, changes, evidence: opts.evidence?.slice(0, 300) } };
+  return { rates: next, meta: nextMeta, event: { id: newId(), at, source: opts.source, summary: listSummary(changes), changes, evidence: opts.evidence?.slice(0, 300) } };
+}
+
+const daysApart = (a: string, b: string) => Math.abs(new Date(a).getTime() - new Date(b).getTime()) / 86400000;
+const counterNote = (pct: number, list: number) => `Their counter ${pctLabel(pct)} from ${money(list)}`;
+const counterSummary = (changes: RateChange[]) => `They came down: ${changes.map((c) => `${RATE_SHORT[c.key]} ${money(c.list)} → ${money(c.to)} (${pctLabel(pctOf(c.to, c.list))})`).join(", ")}`;
+const listSummary = (changes: RateChange[]) => `New asking prices: ${changes.map((c) => `${RATE_SHORT[c.key]} ${money(c.to)}`).join(", ")}`;
+const dealSummary = (changes: RateChange[]) => {
+  const lead = changes.filter((c) => c.kind === "negotiated");
+  const auto = changes.filter((c) => c.kind === "auto");
+  return lead.length ? `${lead.map((c) => `${RATE_SHORT[c.key]} ${money(c.list)} → ${money(c.to)}`).join(", ")}${auto.length ? ` · ${auto.map((c) => RATE_SHORT[c.key]).join(", ")} followed` : ""}` : "Rates updated";
+};
+
+/**
+ * Prices the creator names in an email. The first one is their asking price.
+ * A LOWER one while that asking price is still fresh is them coming down: a
+ * counter — the asking price stays the anchor, so the deal's % is measured
+ * from where they started. A higher price, or one long after, is a new
+ * asking price. The price they already have on the card restated changes nothing
+ * (an agreed price repeated in a later email stays agreed).
+ */
+export function theirPrices(rates: Partial<Rates>, meta: RateMetaMap, prices: Partial<Record<RateKey, number>>, opts: { at?: string; source: RateSource; evidence?: string }) {
+  const at = opts.at || new Date().toISOString();
+  const next: Partial<Rates> = { ...rates };
+  const nextMeta: RateMetaMap = { ...meta };
+  const changes: RateChange[] = [];
+  for (const key of (Object.keys(prices) as RateKey[]).filter((k) => RATE_KEYS.includes(k))) {
+    const to = Math.round(num(prices[key]));
+    const from = num(rates[key]);
+    if (!to || to === from) continue;
+    const m = meta[key];
+    const anchor = num(m?.list);
+    if (m && anchor && to === anchor && m.status === "counter") {
+      // Back up to what they first asked: the counter is off the table.
+      next[key] = to;
+      nextMeta[key] = { list: anchor, status: "list", pct: 0, at, source: opts.source, note: "Their asking price" };
+      changes.push({ key, from, to, list: anchor, kind: "list", note: nextMeta[key]!.note, prev: m });
+    } else if (m && anchor && to < anchor && m.at && daysApart(at, m.at) <= ANCHOR_DAYS) {
+      const pct = pctOf(to, anchor);
+      next[key] = to;
+      nextMeta[key] = { list: anchor, status: "counter", pct, at, source: opts.source, note: counterNote(pct, anchor) };
+      changes.push({ key, from, to, list: anchor, kind: "counter", note: nextMeta[key]!.note, prev: m });
+    } else {
+      next[key] = to;
+      nextMeta[key] = { list: to, status: "list", pct: 0, at, source: opts.source, note: opts.source === "media_kit" ? "From their media kit" : "Their asking price" };
+      changes.push({ key, from, to, list: to, kind: "list", note: nextMeta[key]!.note, prev: m || null });
+    }
+  }
+  if (!changes.length) return { rates, meta, event: null as RateEvent | null };
+  const counters = changes.filter((c) => c.kind === "counter");
+  const lists = changes.filter((c) => c.kind === "list");
+  const summary = [counters.length ? counterSummary(counters) : "", lists.length ? listSummary(lists) : ""].filter(Boolean).join(" · ");
+  return { rates: next, meta: nextMeta, event: { id: newId(), at, source: opts.source, summary, changes, evidence: opts.evidence?.slice(0, 300) } as RateEvent };
+}
+
+/**
+ * A price YOU offered by email. Nothing on the card changes — it is kept in
+ * the history so the path to the deal is complete, and so their "ok, let's
+ * do that" can be matched to the number you put on the table. Null when the
+ * same offer from the same email is already there.
+ */
+export function offerEvent(rates: Partial<Rates>, meta: RateMetaMap, history: RateEvent[], offer: { key: RateKey; amount: number }, opts: { at?: string; evidence?: string }): RateEvent | null {
+  const at = opts.at || new Date().toISOString();
+  const amount = Math.round(num(offer.amount));
+  if (!amount || !RATE_KEYS.includes(offer.key)) return null;
+  if (history.some((e) => e.offer && e.offer.key === offer.key && e.offer.amount === amount && e.at === at)) return null;
+  const list = listPrice(rates, meta, offer.key);
+  const vs = list && list !== amount ? ` (${pctLabel(pctOf(amount, list))} from ${money(list)})` : "";
+  return { id: newId(), at, source: "email", summary: `You offered ${money(amount)} for ${RATE_SHORT[offer.key]}${vs}`, changes: [], evidence: opts.evidence?.slice(0, 300), offer: { key: offer.key, amount } };
+}
+
+/** Your offers still on the table: the latest one per format, made after that format's last agreement. */
+export function openOffers(history: RateEvent[]): { key: RateKey; amount: number; at: string }[] {
+  const out = new Map<RateKey, { key: RateKey; amount: number; at: string }>();
+  const closed = new Map<RateKey, string>();
+  for (const e of history) {
+    if (e.undone) continue;
+    for (const c of e.changes) if (c.kind === "negotiated" && (closed.get(c.key) || "") < e.at) closed.set(c.key, e.at);
+  }
+  for (const e of history) {
+    if (e.undone || !e.offer) continue;
+    if (e.at <= (closed.get(e.offer.key) || "")) continue;
+    const prev = out.get(e.offer.key);
+    if (!prev || prev.at < e.at) out.set(e.offer.key, { ...e.offer, at: e.at });
+  }
+  return [...out.values()];
+}
+
+export type TrailStep = { who: "them" | "you" | "deal"; label: string; amount: number; at: string };
+/**
+ * The path of one format's price, oldest first: what they asked, what you
+ * offered, where they came down, what was agreed. Starts at the asking price
+ * the current deal is measured from. Empty when there is no story to tell
+ * (a lone asking price).
+ */
+export function priceTrail(history: RateEvent[], key: RateKey): TrailStep[] {
+  const steps: TrailStep[] = [];
+  for (const e of [...history].filter((x) => !x.undone).sort((a, b) => a.at.localeCompare(b.at))) {
+    if (e.offer?.key === key) steps.push({ who: "you", label: "You offered", amount: e.offer.amount, at: e.at });
+    for (const c of e.changes) {
+      if (c.key !== key || !c.to) continue;
+      if (c.kind === "list") { steps.length = 0; steps.push({ who: "them", label: "Asked", amount: c.to, at: e.at }); }
+      else if (c.kind === "counter") steps.push({ who: "them", label: "They came down to", amount: c.to, at: e.at });
+      else if (c.kind === "negotiated" && c.from !== c.to) {
+        if (!steps.length && c.list && c.list !== c.to) steps.push({ who: "them", label: "Asked", amount: c.list, at: e.at });
+        steps.push({ who: "deal", label: "Agreed", amount: c.to, at: e.at });
+      }
+    }
+  }
+  return steps.length > 1 ? steps : [];
+}
+
+/**
+ * Repairs histories written before counters existed: a lower price they
+ * emailed mid-negotiation was stored as a NEW asking price, so the deal that
+ * followed was measured from it ("4,500 → 3,500, −22 %") instead of from what
+ * they first asked ("5,000 → 3,500, −30 %"). The lowered "asking price"
+ * becomes a counter, the deal is measured from the first ask again, and a
+ * sibling that followed by the same % is recalculated when nobody touched it
+ * since. Agreed prices never change. Returns null when nothing was wrong.
+ */
+export function reanchor(rates: Partial<Rates>, meta: RateMetaMap, history: RateEvent[]): { rates: Partial<Rates>; meta: RateMetaMap; history: RateEvent[]; fixed: { key: RateKey; from: number; to: number; agreed: number }[] } | null {
+  const next: Partial<Rates> = { ...rates };
+  const nextMeta: RateMetaMap = { ...meta };
+  const events = history.map((e) => ({ ...e, changes: e.changes.map((c) => ({ ...c })) }));
+  const order = [...events].filter((e) => !e.undone).sort((a, b) => a.at.localeCompare(b.at));
+  const fixed: { key: RateKey; from: number; to: number; agreed: number }[] = [];
+  let touched = false;
+  for (const key of RATE_KEYS) {
+    let anchor: { price: number; at: string } | null = null;
+    let wrong = 0; // the lowered price that was stored as the list
+    for (const e of order) {
+      const c = e.changes.find((x) => x.key === key);
+      if (!c) continue;
+      if (c.kind === "list") {
+        const lowered = e.source === "email" && !!anchor && c.to > 0 && c.to < anchor.price && c.from === anchor.price && c.prev?.status === "list" && daysApart(e.at, anchor.at) <= ANCHOR_DAYS;
+        if (lowered) {
+          const pct = pctOf(c.to, anchor!.price);
+          c.kind = "counter"; c.list = anchor!.price; c.note = counterNote(pct, anchor!.price);
+          wrong = c.to;
+          e.summary = [counterSummary(e.changes.filter((x) => x.kind === "counter")), e.changes.some((x) => x.kind === "list") ? listSummary(e.changes.filter((x) => x.kind === "list")) : ""].filter(Boolean).join(" · ");
+          if (nextMeta[key]?.at === e.at && nextMeta[key]?.status === "list" && num(next[key]) === c.to) nextMeta[key] = { ...nextMeta[key]!, list: anchor!.price, status: "counter", pct, note: c.note };
+          touched = true;
+        } else { anchor = c.to > 0 ? { price: c.to, at: e.at } : null; wrong = 0; }
+      } else if (c.kind === "negotiated" && anchor && wrong && c.list === wrong) {
+        const pct = pctOf(c.to, anchor.price);
+        const oldRatio = c.to / wrong;
+        c.list = anchor.price; c.note = `Negotiated ${pctLabel(pct)} from ${money(anchor.price)}`;
+        if (c.prev && c.prev.status === "list" && c.prev.list === wrong) c.prev = { ...c.prev, list: anchor.price, status: "counter", pct: pctOf(wrong, anchor.price), note: counterNote(pctOf(wrong, anchor.price), anchor.price) };
+        if (nextMeta[key]?.at === e.at && nextMeta[key]?.status === "negotiated" && num(next[key]) === c.to) nextMeta[key] = { ...nextMeta[key]!, list: anchor.price, pct, note: c.note };
+        // Siblings that followed this deal by the old (too small) %: follow the real one.
+        const lead = e.changes.filter((x) => x.kind === "negotiated");
+        if (lead.length === 1) {
+          const ratio = c.to / anchor.price;
+          for (const s of e.changes.filter((x) => x.kind === "auto")) {
+            if (tidy(s.list * oldRatio) !== s.to) continue;
+            const to = tidy(s.list * ratio);
+            const sp = pctOf(to, s.list);
+            const current = nextMeta[s.key]?.at === e.at && nextMeta[s.key]?.status === "auto" && num(next[s.key]) === s.to;
+            s.to = to; s.note = `Auto ${pctLabel(sp)} · followed ${RATE_SHORT[key]}`;
+            if (current) { next[s.key] = to; nextMeta[s.key] = { ...nextMeta[s.key]!, pct: sp, note: s.note }; }
+          }
+        }
+        e.summary = dealSummary(e.changes);
+        fixed.push({ key, from: wrong, to: anchor.price, agreed: c.to });
+        wrong = 0;
+        touched = true;
+      } else if (c.kind === "negotiated") wrong = 0;
+    }
+  }
+  return touched ? { rates: next, meta: nextMeta, history: events, fixed } : null;
 }
 
 /**
@@ -204,7 +382,7 @@ export const normalizeRateMeta = (value: unknown): RateMetaMap => {
   for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
     if (!RATE_KEYS.includes(k as RateKey) || !v || typeof v !== "object") continue;
     const m = v as Record<string, unknown>;
-    const status = m.status === "negotiated" || m.status === "auto" ? m.status : "list";
+    const status = m.status === "negotiated" || m.status === "auto" || m.status === "counter" ? m.status : "list";
     const source = m.source === "email" || m.source === "media_kit" ? m.source : "manual";
     out[k as RateKey] = { list: num(m.list), status, pct: Number(m.pct) || 0, at: typeof m.at === "string" ? m.at : "", source, note: typeof m.note === "string" ? m.note.slice(0, 200) : "" };
   }

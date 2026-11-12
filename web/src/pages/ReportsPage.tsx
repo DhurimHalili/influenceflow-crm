@@ -78,7 +78,7 @@ export default function ReportsPage() {
       // An out-of-office or a management auto-decline isn't a reply.
       const all = timeline({ type: item.type, record: item.record as Creator }, data.followups, events);
       const managedNo = all.some((t) => t.dir === "in" && t.kind === "managed_no");
-      const touches = all.filter((t) => !(t.dir === "in" && (t.kind === "auto" || t.kind === "managed_no")));
+      const touches = all.filter((t) => !(t.dir === "in" && (t.kind === "auto" || t.kind === "reaction" || t.kind === "managed_no")));
       const first = touches[0];
       const inbound = item.record.pipeline_status === "inbound" || first?.dir === "in";
       const firstOut = touches.find((t) => t.dir === "out");

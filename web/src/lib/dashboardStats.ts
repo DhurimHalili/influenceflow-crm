@@ -4,6 +4,10 @@ import type { Received, Segment, Sent } from "./outreach.ts";
 // The numbers on the dashboard — one module, so every tile, chart and list
 // agrees, and every number can be opened to show exactly what it counted.
 //
+// "Replies" are people, not messages: each person counts once, on the day of
+// their first real answer to your outreach. The rest of a conversation is
+// reported apart ("conversation messages") and never inflates a reply number.
+//
 // Ranges are local calendar days. "Today" is compared with all of yesterday,
 // a week with the whole week before; "All time" has nothing to compare with.
 // A segment narrows everything to influencers or to the brand side (brands,
@@ -182,7 +186,7 @@ export function makeStats(all: DashInput) {
       case "answers": sentRows((x) => x.role === "answer"); break;
       case "replies":
         for (const r of input.received) {
-          if (!matches(view, r.segment) || !within(r.at, s, e)) continue;
+          if (!r.first || !matches(view, r.segment) || !within(r.at, s, e)) continue;
           const w = who({ entityId: r.entityId, segment: r.segment });
           out.push({ key: r.key, at: r.at, name: w.name, to: w.to, tag: r.kind === "team" ? "Their team replied" : r.kind === "no" ? "Said no" : r.source === "manual" ? `Replied · ${CHANNEL_WORD[r.channel] || r.channel || "logged"}` : "Replied", sub: r.source === "gmail" ? "Email" : "Logged by hand", segment: r.segment });
         }
@@ -232,17 +236,30 @@ export function makeStats(all: DashInput) {
     return { ...mix, total: mix.first + mix.followups + mix.answers + mix.newthreads + mix.scheduled, otherFollowups, later };
   }
 
-  /** People who replied at all, and the share of the people you first emailed in the range who answered (by now). */
+  /**
+   * Of the people you first contacted in the range, how many have answered by
+   * now — each person once. `declined` = how many of those answers were a no,
+   * so a rate can be read as "replied" and as "replied and still open".
+   */
   function replyRate(view: View, s: number, e: number) {
     const opened = new Map<string, string>();
     for (const x of input.sent) if (x.role === "first" && !x.scheduled && matches(view, x.segment) && within(x.at, s, e) && x.entityType !== "lead") opened.set(x.recordId, x.at);
     const answered = new Set<string>();
-    for (const r of input.received) { const since = opened.get(r.entityId); if (since && r.at > since) answered.add(r.entityId); }
-    return { contacted: opened.size, replied: answered.size, pct: opened.size ? Math.round((answered.size / opened.size) * 100) : null };
+    const declined = new Set<string>();
+    for (const r of input.received) {
+      const since = opened.get(r.entityId);
+      if (!since || r.at <= since) continue;
+      answered.add(r.entityId);
+      if (r.kind === "no") declined.add(r.entityId);
+    }
+    return { contacted: opened.size, replied: answered.size, declined: declined.size, pct: opened.size ? Math.round((answered.size / opened.size) * 100) : null };
   }
 
-  /** Who replied in the range (each person once). */
-  const repliers = (view: View, s: number, e: number) => new Set(input.received.filter((r) => matches(view, r.segment) && within(r.at, s, e)).map((r) => r.entityId)).size;
+  /** Who replied in the range: each person once, on the day of their first answer to your outreach. */
+  const repliers = (view: View, s: number, e: number) => new Set(input.received.filter((r) => r.first && matches(view, r.segment) && within(r.at, s, e)).map((r) => r.entityId)).size;
+
+  /** Messages from their side in the range that are conversation, not replies (the back-and-forth after someone's first answer). */
+  const conversation = (view: View, s: number, e: number) => input.received.filter((r) => !r.first && matches(view, r.segment) && within(r.at, s, e)).length;
 
   /** Waiting in Gmail's Scheduled folder right now. */
   const scheduled = (view: View) => input.sent.filter((x) => x.scheduled && matches(view, x.segment)).sort((a, b) => a.at.localeCompare(b.at));
@@ -264,7 +281,7 @@ export function makeStats(all: DashInput) {
       .filter((x) => x.scheduled && x.channel === "email" && matches(view, x.segment) && new Date(x.at).getTime() >= from)
       .sort((x, y) => x.at.localeCompare(y.at))
       .map((x) => ({ key: x.key, at: x.at, role: x.role, mailbox: x.mailbox, segment: x.segment, ...who(x) }));
-  return { rows, count, emailMix, replyRate, repliers, scheduled, scheduledAhead, followupChannels };
+  return { rows, count, emailMix, replyRate, repliers, conversation, scheduled, scheduledAhead, followupChannels };
 }
 
 export type Stats = ReturnType<typeof makeStats>;

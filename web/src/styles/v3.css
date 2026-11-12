@@ -768,7 +768,26 @@ body:has(.kit-page) { background: #fbfaf7; }
 .rate-tag { display: inline-flex; align-items: center; gap: 3px; font-style: normal; font-size: 11px; font-weight: 750; padding: 2px 7px; border-radius: 999px; width: fit-content; }
 .rate-tag.tag-negotiated { background: color-mix(in srgb, var(--success) 16%, transparent); color: color-mix(in srgb, var(--success) 85%, var(--text)); }
 .rate-tag.tag-auto { background: var(--accent-soft); color: var(--accent); }
+.rate-grid > div.is-counter { border-color: color-mix(in srgb, var(--warning) 38%, var(--line)); }
+.rate-tag.tag-counter { background: color-mix(in srgb, var(--warning) 15%, transparent); color: color-mix(in srgb, var(--warning) 62%, var(--text)); }
 .rate-src { display: inline-flex; align-items: center; gap: 3px; font-size: 10.5px; color: var(--muted); }
+/* How a price was reached: asked → your offers → their counter → agreed. */
+.rate-trails { display: grid; gap: 8px; margin-top: 12px; }
+.rate-trail { padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-solid); }
+.rt-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap; font-size: 12.5px; }
+.rt-head b { font-weight: 750; }
+.rt-head em { font-style: normal; font-size: 11.5px; font-weight: 700; }
+.rt-saved { color: color-mix(in srgb, var(--success) 85%, var(--text)); }
+.rt-open { color: color-mix(in srgb, var(--warning) 62%, var(--text)); }
+.rate-trail ol { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-wrap: wrap; align-items: stretch; gap: 6px 2px; }
+.rate-trail li { display: inline-flex; align-items: center; gap: 2px; min-width: 0; }
+.rate-trail li > svg { flex: none; color: var(--muted); }
+.rate-trail li > span { display: grid; gap: 1px; padding: 5px 9px; border-radius: 9px; background: var(--surface-alt); border-left: 3px solid var(--line); }
+.rate-trail li small { font-size: 10.5px; font-weight: 650; color: var(--text-soft); white-space: nowrap; }
+.rate-trail li strong { font-size: 13px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.rate-trail li.rt-you > span { border-left-color: var(--accent); }
+.rate-trail li.rt-them > span { border-left-color: color-mix(in srgb, var(--warning) 70%, var(--line)); }
+.rate-trail li.rt-deal > span { border-left-color: var(--success); background: color-mix(in srgb, var(--success) 9%, var(--surface-solid)); }
 .negotiate-panel { display: grid; gap: 12px; }
 .negotiate-lead { display: flex; gap: 8px; align-items: flex-start; margin: 0; padding: 10px 12px; border-radius: 11px; background: var(--accent-soft); color: var(--text-soft); font-size: 13px; line-height: 1.5; }
 .negotiate-lead svg { flex: none; margin-top: 2px; color: var(--accent); }

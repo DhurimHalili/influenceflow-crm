@@ -1,6 +1,6 @@
 import type { Brand, Creator, EmailEvent, EntityStatus, Followup, FollowupRules } from "../types";
 import { dayKey, parseDay } from "./days.ts";
-import { quotedOwnDate } from "./replyReader.ts";
+import { isAck, quotedOwnDate } from "./replyReader.ts";
 
 // The follow-up engine: who is waiting on whom, and when to follow up.
 //
@@ -16,9 +16,13 @@ import { quotedOwnDate } from "./replyReader.ts";
 // Records are only chased while the conversation is live: Denied, Signed and
 // Roster are never chased, nor archived or snoozed records. Someone who said
 // no gets one "reach back" reminder a month later (Settings → Follow-up rules).
+// Signed and Roster still owe an ANSWER: when their last word is a real
+// message you never replied to (they agreed a price and asked what's next),
+// it is "Reply needed" — a deal isn't done until you confirm it. An emoji
+// reaction or a bare "Thanks!" from someone already won needs nothing.
 //
 // Not everything in the timeline moves the clock:
-//   • an out-of-office / autoresponder isn't a reply
+//   • an out-of-office / autoresponder isn't a reply, nor is an emoji reaction
 //   • their management (or an autoresponder) declining isn't a no from them —
 //     the conversation becomes "managed": reach them on another channel
 //   • a scheduled follow-up that bumps your old email after they already
@@ -39,7 +43,9 @@ export type Touch = { id: string; at: string; dir: "out" | "in"; source: TouchSo
   /** Shown and counted, but doesn't move the follow-up clock. */
   quiet?: boolean;
   /** An email in another thread than the one reminders follow (history, never part of this round's count). */
-  otherThread?: boolean };
+  otherThread?: boolean;
+  /** Their message only acknowledges ("Thanks!", "Got it"): a reply, but nothing to answer once they're won. */
+  ack?: boolean };
 
 /**
  * Several email threads with one person (after 4 follow-ups you start a fresh
@@ -68,7 +74,8 @@ export type NextStep = "followup" | "new-thread";
 
 export type FollowupState = ({ thread?: ThreadInfo }) & (
   | { kind: "idle"; reason: "no-contact" | "paused" | "closed" | "snoozed"; touches: Touch[]; until?: string; cancel?: Touch }
-  | { kind: "reply-needed"; since: string; days: number; touches: Touch[]; last: Touch; cancel?: Touch }
+  /** won = they are Signed / on your roster; agreed = that message is the one that closed the price (confirm it). */
+  | { kind: "reply-needed"; since: string; days: number; touches: Touch[]; last: Touch; cancel?: Touch; won?: boolean; agreed?: boolean }
   /** round = the cadence step (what sets the clock); sent = every message you sent since their last reply, on any channel (what the words say). */
   | { kind: "waiting"; round: number; sent?: number; due: string; last: Touch; touches: Touch[]; cancel?: Touch; next?: NextStep }
   | { kind: "due"; round: number; sent?: number; due: string; overdueDays: number; last: Touch; touches: Touch[]; cancel?: Touch; next?: NextStep }
@@ -81,6 +88,10 @@ export type FollowupState = ({ thread?: ThreadInfo }) & (
 /** Statuses where nobody needs chasing. */
 export const NOT_CHASED: EntityStatus[] = ["denied", "signed", "roster"];
 export const SNOOZE_OFF = "9999-12-31";
+/** Came from their side but isn't a reply: an autoresponder or an emoji reaction. */
+const silent = (kind: Touch["kind"]) => kind === "auto" || kind === "reaction";
+/** A won relationship's unanswered message stops being flagged after this many days (it would never clear by itself). */
+export const OWED_DAYS = 45;
 /** A manual log within this window of a Gmail email in the same direction is the same touch. */
 const SAME_TOUCH_MS = 6 * 3600 * 1000;
 
@@ -125,7 +136,7 @@ export const dueDate = (sent: Date, round: number, rules: FollowupRules) => addB
 
 // ----- timeline ------------------------------------------------------------------
 
-type Target = { type: "creator" | "brand"; record: Pick<Creator, "id" | "pipeline_status" | "date_contacted" | "archived_at"> & { followup_snooze_until?: string | null; contact_channel?: string; email_followups?: boolean; lost_at?: string | null; lost_reason?: string; status_updated_at?: string; primary_thread?: string; primary_thread_at?: string | null; new_thread_gap?: number | null } };
+type Target = { type: "creator" | "brand"; record: Pick<Creator, "id" | "pipeline_status" | "date_contacted" | "archived_at"> & { status_source?: string; followup_snooze_until?: string | null; contact_channel?: string; email_followups?: boolean; lost_at?: string | null; lost_reason?: string; status_updated_at?: string; primary_thread?: string; primary_thread_at?: string | null; new_thread_gap?: number | null } };
 
 /** Which thread reminders follow (influencers only; a brand's people each have their own threads). Marks the others quiet. */
 function threadView(target: Target, touches: Touch[]): ThreadInfo | undefined {
@@ -135,7 +146,7 @@ function threadView(target: Target, touches: Touch[]): ThreadInfo | undefined {
   for (const t of mail) if (t.dir === "out" && !started.has(t.threadId!)) started.set(t.threadId!, t.at);
   if (started.size < 2) return undefined;
   const lastAct = new Map<string, string>();
-  for (const t of mail) if (!(t.dir === "in" && t.kind === "auto")) lastAct.set(t.threadId!, t.at);
+  for (const t of mail) if (!(t.dir === "in" && silent(t.kind))) lastAct.set(t.threadId!, t.at);
   const newest = [...started.entries()].sort((a, b) => a[1].localeCompare(b[1])).pop()![0];
   const chosen = target.record.primary_thread || "";
   const chosenAt = target.record.primary_thread_at || "";
@@ -146,13 +157,13 @@ function threadView(target: Target, touches: Touch[]): ThreadInfo | undefined {
   let otherReply: Touch | undefined;
   if (keep) {
     for (const t of mail) {
-      if (t.threadId === active || t.dir !== "in" || t.kind === "auto" || t.at <= chosenAt) continue;
+      if (t.threadId === active || t.dir !== "in" || silent(t.kind) || t.at <= chosenAt) continue;
       const answered = mail.some((o) => o.threadId === t.threadId && o.dir === "out" && o.at > t.at);
       if (!answered) otherReply = t;
     }
   }
   // Ask once you've answered there (the banner says "reply there, then choose" until then).
-  const lastInActive = [...mail].reverse().find((t) => t.threadId === active && !(t.dir === "in" && t.kind === "auto"));
+  const lastInActive = [...mail].reverse().find((t) => t.threadId === active && !(t.dir === "in" && silent(t.kind)));
   const ask = keep ? [...lastAct.entries()].some(([tid, at]) => tid !== active && at > chosenAt) : active !== newest && lastInActive?.dir === "out";
   return { active, count: started.size, newest, ask, otherReply, activeStarted: started.get(active) || "", fresh: !keep && !ask && active === newest };
 }
@@ -176,7 +187,8 @@ export function timeline(target: Target, followups: Followup[], events: EmailEve
     scheduled: e.direction === "out" && !!e.scheduled,
     kind: e.direction === "in" ? e.reply_kind || "" : "",
     counterpart: e.counterpart || undefined,
-    quiet: e.direction === "in" && e.reply_kind === "auto",
+    quiet: e.direction === "in" && silent(e.reply_kind),
+    ack: e.direction === "in" && !silent(e.reply_kind) && isAck(e.snippet || ""),
   }));
   markCrossed(mail, mine, events);
   // Stored newest-first; reversed so touches logged in the same second keep their order.
@@ -202,7 +214,7 @@ export function timeline(target: Target, followups: Followup[], events: EmailEve
   return touches;
 }
 
-const IN_LABEL: Record<string, string> = { "": "They emailed", no: "They said no", maybe_no: "Reads like a no", team: "Their team replied", auto: "Auto-reply", managed_no: "Declined for them" };
+const IN_LABEL: Record<string, string> = { "": "They emailed", no: "They said no", maybe_no: "Reads like a no", team: "Their team replied", auto: "Auto-reply", managed_no: "Declined for them", reaction: "Reacted to your email" };
 
 /**
  * A follow-up that bumps your own earlier email ("you might have missed my
@@ -213,7 +225,7 @@ const IN_LABEL: Record<string, string> = { "": "They emailed", no: "They said no
 function markCrossed(mail: Touch[], mine: EmailEvent[], all: EmailEvent[]) {
   const own = Array.from(new Set(all.map((e) => e.mailbox || "").filter(Boolean)));
   const byKey = new Map(mine.filter((e) => e.message_key).map((e) => [e.message_key as string, e]));
-  const replies = mail.filter((t) => t.dir === "in" && t.kind !== "auto");
+  const replies = mail.filter((t) => t.dir === "in" && !silent(t.kind));
   if (!replies.length) return;
   mine.forEach((e, i) => {
     if (e.direction !== "out") return;
@@ -235,6 +247,25 @@ function markCrossed(mail: Touch[], mine: EmailEvent[], all: EmailEvent[]) {
       mail[i].label = mail[i].scheduled ? "Scheduled follow-up — they already replied" : "Follow-up sent after they replied";
     }
   });
+}
+
+const sameMoment = (a: string, b: string) => Math.abs(new Date(a).getTime() - new Date(b).getTime()) < 1000;
+
+/**
+ * Signed / on the roster: their latest real message, when you haven't answered
+ * it — in its email thread, or anywhere by hand. Reactions, auto-replies, a
+ * bare "Thanks!", their management's automatic no, and anything older than
+ * OWED_DAYS never count.
+ */
+function owedReply(touches: Touch[], now: Date): Touch | null {
+  for (let i = touches.length - 1; i >= 0; i--) {
+    const t = touches[i];
+    if (t.dir !== "in" || silent(t.kind) || t.kind === "managed_no") continue;
+    if (t.ack || now.getTime() - new Date(t.at).getTime() > OWED_DAYS * 86400000) return null;
+    const answered = touches.slice(i + 1).some((o) => o.dir === "out" && !o.crossed && (o.source !== "gmail" || !t.threadId || !o.threadId || o.threadId === t.threadId));
+    return answered ? null : t;
+  }
+  return null;
 }
 
 export function followupState(target: Target, followups: Followup[], events: EmailEvent[], rules: FollowupRules, now = new Date()): FollowupState {
@@ -259,7 +290,12 @@ export function followupState(target: Target, followups: Followup[], events: Ema
     return { kind: "reach-back", since, due: dayKey(due), touches, reason: target.record.lost_reason || "" };
   }
   const thread = threadView(target, touches);
-  if (NOT_CHASED.includes(status)) return { kind: "idle", reason: "paused", touches, thread };
+  if (NOT_CHASED.includes(status)) {
+    // Won, so nobody is chased — but a message of theirs you never answered is still yours to answer.
+    const owed = snoozed ? null : owedReply(touches, now);
+    if (owed) return { kind: "reply-needed", since: owed.at, days: businessDaysBetween(new Date(owed.at), now, rules), touches, last: owed, cancel, thread, won: true, agreed: target.record.status_source === "gmail" && !!target.record.status_updated_at && sameMoment(target.record.status_updated_at, owed.at) };
+    return { kind: "idle", reason: "paused", touches, thread };
+  }
   if (snoozed) return { kind: "idle", reason: "snoozed", touches, until: snooze!, cancel, thread };
   // They answered in another thread than the one you chose: your turn there.
   if (thread?.otherReply) return { kind: "reply-needed", since: thread.otherReply.at, days: businessDaysBetween(new Date(thread.otherReply.at), now, rules), touches, last: thread.otherReply, cancel, thread };
@@ -287,7 +323,7 @@ export function followupState(target: Target, followups: Followup[], events: Ema
   // so turning email reminders off (or switching to WhatsApp) never renumbers your follow-ups.
   // A new thread starts the count over: emails in your other threads (and
   // anything before this thread began) are history, not follow-ups in it.
-  const lastReal = touches.map((t) => t.dir === "in" && t.kind !== "auto" && t.kind !== "managed_no").lastIndexOf(true);
+  const lastReal = touches.map((t) => t.dir === "in" && !silent(t.kind) && t.kind !== "managed_no").lastIndexOf(true);
   const sent = Math.max(round, touches.slice(lastReal + 1).filter((t) => t.dir === "out" && !t.crossed && !t.otherThread && t.at >= threadFrom).length);
   // After the cap (4 by default) of email follow-ups in one thread, the next
   // step is a fresh thread, not another follow-up — after its own wait.
@@ -366,7 +402,7 @@ const agoWords = (iso: string) => {
 export function flagFor(state: FollowupState): Flag | null {
   if (state.cancel) {
     const when = sendsAt(state.cancel.at);
-    const reply = [...state.touches].reverse().find((t) => t.dir === "in" && t.kind !== "auto");
+    const reply = [...state.touches].reverse().find((t) => t.dir === "in" && !silent(t.kind));
     return { tone: "due", short: "Cancel scheduled email", long: `They replied ${reply ? agoWords(reply.at) : "already"} — your scheduled follow-up${when ? ` (sends ${when})` : ""} would land after their answer. Cancel it in Gmail's Scheduled folder.` };
   }
   switch (state.kind) {
@@ -379,6 +415,8 @@ export function flagFor(state: FollowupState): Flag | null {
       return { tone: "due", short: state.overdueDays > 0 ? `Follow up · ${state.overdueDays}d late` : "Follow up today", long: `No reply to ${lastLabel(state)} — send your ${nextFollowupLabel(state.sent ?? state.round)}${state.overdueDays > 0 ? ` (due ${state.overdueDays} business day${state.overdueDays === 1 ? "" : "s"} ago)` : " today"}` };
     case "reply-needed":
       if (state.thread && (state.thread.otherReply || state.last.threadId !== state.thread.newest) && state.last.source === "gmail") return { tone: "reply", short: state.days > 0 ? `Old thread reply · ${state.days}d` : "Replied in old thread", long: `They answered in an older email thread${state.days > 0 ? ` ${state.days} business day${state.days === 1 ? "" : "s"} ago` : " today"}, not in your newest one — reply there, then choose which thread to continue in` };
+      if (state.won && state.agreed) return { tone: "reply", short: state.days > 0 ? `Confirm deal · ${state.days}d` : "Confirm the deal", long: `They agreed the price by email ${state.days > 0 ? `${state.days} business day${state.days === 1 ? "" : "s"} ago` : "today"} and you haven't answered — confirm it and tell them what happens next` };
+      if (state.won) return { tone: "reply", short: state.days > 0 ? `Reply · ${state.days}d` : "Reply needed", long: `${state.last.kind === "team" ? "Their team" : "They"} wrote ${state.days > 0 ? `${state.days} business day${state.days === 1 ? "" : "s"} ago` : "today"} and it's still unanswered — they're on your roster, so nothing else will remind you` };
       if (state.last.kind === "no") return { tone: "reply", short: state.days > 0 ? `Reply · ${state.days}d` : "Reply needed", long: `They said no ${state.days > 0 ? `${state.days} business day${state.days === 1 ? "" : "s"} ago` : "today"} while the deal was open — thank them and mark them Denied; you'll get a reminder to reach back in a month` };
       if (state.last.kind === "maybe_no") return { tone: "reply", short: state.days > 0 ? `Reply · ${state.days}d` : "Reply needed", long: `Their reply ${state.days > 0 ? `${state.days} business day${state.days === 1 ? "" : "s"} ago` : "today"} reads like a no, but it isn't certain — answer them, or open the profile and decide` };
       return { tone: "reply", short: state.days > 0 ? `Reply · ${state.days}d` : "Reply needed", long: `${state.last.kind === "team" ? "Their team" : "They"} wrote ${state.days > 0 ? `${state.days} business day${state.days === 1 ? "" : "s"} ago` : "today"} — your turn to answer` };

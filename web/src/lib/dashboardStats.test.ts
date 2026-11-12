@@ -55,7 +55,7 @@ eq("lists match the counts", st.rows("emails", "all", r.start, r.end).length, 4)
 eq("status words", [statusOfActivity("Gmail: X moved to Negotiating — y"), statusOfActivity("X updated to no_reply"), statusOfActivity("Gmail: X moved to No reply — z")], ["negotiating", "no_reply", "no_reply"]);
 eq("all time has no comparison", rangeOf("all", now).compare, false);
 eq("today compares with the whole of yesterday", [new Date(rangeOf("today", now).prevStart).getDate(), rangeOf("today", now).prevEnd === rangeOf("today", now).start], [4, true]);
-eq("reply rate: first contacts in range who answered", st.replyRate("all", r.start, r.end), { contacted: 1, replied: 1, pct: 100 });
+eq("reply rate: first contacts in range who answered", st.replyRate("all", r.start, r.end), { contacted: 1, replied: 1, declined: 0, pct: 100 });
 
 // One mailbox's share: two mailboxes, the parts add up to the whole.
 {
@@ -75,6 +75,36 @@ eq("reply rate: first contacts in range who answered", st.replyRate("all", r.sta
   eq("a reply counts for the mailbox it came into", [A.count("replies", "all", r.start, r.end), B.count("replies", "all", r.start, r.end)], [1, 0]);
   eq("a negotiation belongs to the mailbox that first emailed them", [A.count("negotiations", "all", r.start, r.end), B.count("negotiations", "all", r.start, r.end)], [1, 0]);
   eq("names still resolve in a mailbox view", B.rows("emails", "all", r.start, r.end, r.horizon).every((x) => x.name.startsWith("m")), true);
+}
+
+// A reply is a person answering your outreach — once. The rest is conversation.
+{
+  const who = [rec("p1"), rec("p2"), rec("p3"), rec("p4", { pipeline_status: "inbound" }), rec("p5"), rec("p6")];
+  const mail = [
+    // p1: cold email → reply → you answer → they answer → they go quiet → follow-up → "sorry, missed this".
+    ev("p1", "creator", "out", t - 9 * D), ev("p1", "creator", "in", t - 8 * D), ev("p1", "creator", "out", t - 8 * D + H), ev("p1", "creator", "in", t - 7 * D),
+    ev("p1", "creator", "out", t - 7 * D + H), ev("p1", "creator", "out", t - 3 * D), ev("p1", "creator", "in", t - 2 * D), ev("p1", "creator", "in", t - 2 * H),
+    // p2: only an emoji reaction came back — not a reply.
+    ev("p2", "creator", "out", t - 5 * D), ev("p2", "creator", "in", t - 4 * D, { reply_kind: "reaction", snippet: "👍 P2 reacted via Gmail" }),
+    // p3: said no — a reply, and a declined one.
+    ev("p3", "creator", "out", t - 5 * D), ev("p3", "creator", "in", t - 4 * D, { reply_kind: "no" }),
+    // p4: wrote to you first — nobody "replied" to outreach.
+    ev("p4", "creator", "in", t - 6 * D), ev("p4", "creator", "out", t - 5 * D), ev("p4", "creator", "in", t - 4 * D),
+    // p5: no answer at all. p6: out-of-office, then a real answer.
+    ev("p5", "creator", "out", t - 5 * D),
+    ev("p6", "creator", "out", t - 5 * D), ev("p6", "creator", "in", t - 5 * D + H, { reply_kind: "auto" }), ev("p6", "creator", "in", t - 1 * D),
+  ];
+  const logs = build({ creators: who, brands: [], contacts: [], followups: [], events: mail, leads: [], now });
+  const S = makeStats({ ...logs, creators: who, brands: [], contacts: [], campaigns: [], activities: [], leads: [] });
+  const from = t - 30 * D, to = t + H;
+  eq("a long conversation is ONE reply; reactions and auto-replies are none", S.rows("replies", "all", from, to).map((x) => x.name).sort(), ["p1", "p3", "p6"]);
+  eq("replies = people who replied", [S.count("replies", "all", from, to), S.repliers("all", from, to)], [3, 3]);
+  eq("the back-and-forth is reported apart", S.conversation("all", from, to), 5);
+  eq("a reply is dated by the first answer, not the latest message", S.count("replies", "all", t - 3 * D, to), 1);
+  eq("…so yesterday's 'sorry, missed this' adds nothing", S.rows("replies", "all", t - 3 * D, to).map((x) => x.name), ["p6"]);
+  eq("someone who wrote to you first never 'replied' to outreach", logs.received.filter((x) => x.entityId === "p4").map((x) => x.first), [false, false]);
+  eq("…and answering them is an answer, not a new conversation", logs.sent.filter((x) => x.entityId === "p4").map((x) => x.role), ["answer"]);
+  eq("reply rate: people, with the no's shown", S.replyRate("all", from, to), { contacted: 5, replied: 3, declined: 1, pct: 60 });
 }
 
 if (fail) { console.log(`${fail} failed`); (globalThis as { process?: { exit(n: number): void } }).process?.exit(1); } else console.log("all passed");

@@ -112,7 +112,8 @@ export function OutreachBoard() {
   const [aheadOpen, setAheadOpen] = useState("");
   const openDay = ahead.find((d) => d.key === aheadOpen);
   const rate = stats.replyRate(view, range.start, range.end);
-  const people = stats.repliers(view, range.start, range.end);
+  // Replies are people (first answer to your outreach); the rest of each conversation is shown apart.
+  const chatter = stats.conversation(view, range.start, range.end);
 
   // Daily chart: the last 14 days, split by what you sent; replies beside.
   const days = dailyBuckets(14);
@@ -222,16 +223,16 @@ export function OutreachBoard() {
           </li>; })}</ul>}
         </div>}
       </div>
-      <button type="button" className={`ob-big ob-replies${open?.metric === "replies" && open.view === view ? " on" : ""}`} onClick={() => show("replies")} aria-label={`Replies received: ${c("replies")}. Show the list`}>
+      <button type="button" className={`ob-big ob-replies${open?.metric === "replies" && open.view === view ? " on" : ""}`} onClick={() => show("replies")} title="People who answered your outreach — each person once, on the day of their first answer. The rest of a conversation is never counted." aria-label={`Replies received: ${c("replies")} ${c("replies") === 1 ? "person" : "people"}, each counted once. Show the list`}>
         <span className="ob-big-top"><span className="ob-ico"><Reply size={15} /></span><small>Replies received</small></span>
         <strong>{c("replies").toLocaleString("en-US")}</strong>
-        <span className="ob-note">{people ? `from ${people} ${people === 1 ? "person" : "people"}` : "Auto-replies never count"}</span>
+        <span className="ob-note">{chatter ? `One per person · ${chatter.toLocaleString("en-US")} conversation message${chatter === 1 ? "" : "s"} not counted` : "One per person · auto-replies never count"}</span>
         <Delta value={delta("replies")} />
       </button>
       <div className="ob-big ob-rate" title="Of the people you first contacted in this range, how many have answered so far">
         <span className="ob-big-top"><span className="ob-ico"><CheckCircle2 size={15} /></span><small>Reply rate</small></span>
         <strong>{rate.pct === null ? "—" : `${rate.pct}%`}</strong>
-        <span className="ob-note">{rate.contacted ? `${rate.replied} of ${rate.contacted} new conversations answered` : "No new conversations in this range"}</span>
+        <span className="ob-note">{rate.contacted ? `${rate.replied} of ${rate.contacted} new conversations answered${rate.declined ? ` · ${rate.declined} said no` : ""}` : "No new conversations in this range"}</span>
         <span className="ob-meter" aria-hidden="true"><i style={{ width: `${rate.pct || 0}%` }} /></span>
       </div>
     </div>

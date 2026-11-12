@@ -35,7 +35,7 @@ const threadOf = (events: EmailEvent[], id: string) => {
   // Scheduled sends haven't gone out: no reply timing from them yet. An
   // out-of-office or a management auto-decline isn't an answer (same rule as
   // the dashboard and Reports), so it doesn't end the wait either.
-  const real = (e: EmailEvent) => e.direction === "out" || (e.reply_kind !== "auto" && e.reply_kind !== "managed_no");
+  const real = (e: EmailEvent) => e.direction === "out" || (e.reply_kind !== "auto" && e.reply_kind !== "reaction" && e.reply_kind !== "managed_no");
   return events.filter((e) => e.entity_id === id && !e.scheduled && real(e) && !seen.has(e.gmail_id) && seen.add(e.gmail_id)).sort((a, b) => a.at.localeCompare(b.at));
 };
 

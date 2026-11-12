@@ -110,7 +110,7 @@ export function ConversationSection({ type, record }: { type: "creator" | "brand
   // one is ("Log 3rd follow-up"). Counted over the whole conversation, so
   // switching channels or turning email reminders off never resets it.
   // A new email thread starts the count over: other threads are history.
-  const lastReplyAt = [...touches].reverse().find((t) => t.dir === "in" && t.kind !== "auto")?.at || "";
+  const lastReplyAt = [...touches].reverse().find((t) => t.dir === "in" && t.kind !== "auto" && t.kind !== "reaction")?.at || "";
   const threadFrom = state?.thread?.activeStarted || "";
   const sentSinceReply = state && (state.kind === "due" || state.kind === "waiting") ? state.sent ?? state.round : touches.filter((t) => t.dir === "out" && t.at > lastReplyAt && t.at >= threadFrom && !t.crossed && !t.otherThread).length;
   const nextLabel = sentSinceReply ? nextFollowupLabel(sentSinceReply) : "first message";
@@ -215,7 +215,7 @@ export function ConversationSection({ type, record }: { type: "creator" | "brand
     toast(message);
   };
   const lastOut = [...touches].reverse().find((t) => t.dir === "out" && !(t.crossed && t.scheduled));
-  const lastIn = [...touches].reverse().find((t) => t.dir === "in" && t.kind !== "auto");
+  const lastIn = [...touches].reverse().find((t) => t.dir === "in" && t.kind !== "auto" && t.kind !== "reaction");
   const manualFollowups = touches.filter((t) => t.source === "manual" && t.dir === "out");
   const visible = [...touches].reverse().slice(0, showAll ? undefined : 6);
   const paused = state?.kind === "idle" && state.reason === "snoozed";
@@ -294,7 +294,7 @@ export function ConversationSection({ type, record }: { type: "creator" | "brand
 
     <div className="followup-actions conversation-actions" ref={menuRef}>
       <div className="menu-anchor">
-        <Button onClick={() => setMenu(menu === "log" ? "" : "log")} aria-expanded={menu === "log"}><Send size={15} /> {nextStep === "new-thread" ? "Log new email" : touches.some((t) => t.dir === "out") ? `Log ${nextLabel}` : "Log first message"}</Button>
+        <Button onClick={() => setMenu(menu === "log" ? "" : "log")} aria-expanded={menu === "log"}><Send size={15} /> {nextStep === "new-thread" ? "Log new email" : state?.kind === "reply-needed" && touches.some((t) => t.dir === "out") ? "Log your reply" : touches.some((t) => t.dir === "out") ? `Log ${nextLabel}` : "Log first message"}</Button>
         {menu === "log" && <ChannelMenu title="How did you follow up?" current={channel} onPick={log} />}
       </div>
       <div className="menu-anchor">
@@ -348,7 +348,7 @@ function TouchRow({ touch, onRemove, otherThread = false }: { touch: Touch; onRe
   return <li className={`touch dir-${touch.dir} src-${touch.source}${touch.scheduled ? " is-scheduled" : ""}`}>
     <i aria-hidden="true">{touch.scheduled ? <CalendarClock size={13} /> : touch.dir === "out" ? <ArrowUpRight size={13} /> : <ArrowDownLeft size={13} />}</i>
     <div>
-      <strong>{touch.label}{touch.source === "gmail" && <em className="src-chip">Gmail</em>}{touch.scheduled && <em className="sched-chip">Not sent yet</em>}{touch.kind === "auto" && <em className="sched-chip">Not a reply</em>}{otherThread && <em className="src-chip other-thread">Other thread</em>}</strong>
+      <strong>{touch.label}{touch.source === "gmail" && <em className="src-chip">Gmail</em>}{touch.scheduled && <em className="sched-chip">Not sent yet</em>}{(touch.kind === "auto" || touch.kind === "reaction") && <em className="sched-chip">Not a reply</em>}{otherThread && <em className="src-chip other-thread">Other thread</em>}</strong>
       {touch.detail && <small className="touch-detail">{touch.detail}</small>}
       <small className={touch.scheduled ? "touch-when" : undefined}>{touch.scheduled ? sends ? `Sends ${sends}` : "Waiting in Gmail's Scheduled folder" : `${stampLabel(touch.at)} · ${daysAgoLabel(touch.at)}`}{touch.mailbox && touch.source === "gmail" ? ` · ${touch.mailbox}` : ""}{touch.dir === "in" && (touch.kind === "team" || touch.kind === "managed_no") && touch.counterpart ? ` · from ${touch.counterpart}` : ""}</small>
     </div>
