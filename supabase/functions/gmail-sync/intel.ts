@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { aiEnabled, hasAudience, QuotaExhausted, readAttachment, readCreatorEmail, type AudienceFacts, type FileReading } from "../_shared/ai.ts";
 import { decodeEntities } from "../_shared/leadScanner.ts";
-import { backfillList, negotiate, normalizeRateHistory, normalizeRateMeta, offerEvent, openOffers, reanchor, setListPrices, theirPrices, type RateEvent, type RateKey, type RateMetaMap, type Rates } from "../_shared/negotiation.ts";
+import { backfillList, dropRepeatOffers, negotiate, normalizeRateHistory, normalizeRateMeta, offerEvent, openOffers, reanchor, setListPrices, theirPrices, type RateEvent, type RateKey, type RateMetaMap, type Rates } from "../_shared/negotiation.ts";
 import { isPlainYes, mentionsMoneyOrAudience, moneyMentions, ownText, readAgainstOffer, readMine, readOffer, readPrices, saysAmount, statesAudience, type PriceHit } from "../_shared/priceReader.ts";
 import { listPrice } from "../_shared/negotiation.ts";
 
@@ -170,6 +170,8 @@ class Profile {
     // Newest first — an offer read from older mail goes where it belongs in time.
     const i = this.history.findIndex((e) => e.at <= event.at);
     this.history.splice(i < 0 ? this.history.length : i, 0, event);
+    // Read out of order (older mail last), a later email may now repeat this one.
+    this.history = dropRepeatOffers(this.history);
     this.touched = true;
     return true;
   }
@@ -315,7 +317,11 @@ export async function repairAnchors(admin: Admin, userId: string, max = 40) {
   let fixed = 0;
   for (const r of rows || []) {
     if (fixed >= max) break;
-    const done = reanchor((r.rates || {}) as Partial<Rates>, normalizeRateMeta(r.rate_meta), normalizeRateHistory(r.rate_history));
+    const history = normalizeRateHistory(r.rate_history);
+    // The same offer stored twice (a follow-up restating it): keep one.
+    const once = dropRepeatOffers(history);
+    if (once !== history) await admin.from("creators").update({ rate_history: once }).eq("id", r.id).eq("user_id", userId);
+    const done = reanchor((r.rates || {}) as Partial<Rates>, normalizeRateMeta(r.rate_meta), once);
     if (!done) continue;
     const { error } = await admin.from("creators").update({ rates: done.rates, rate_meta: done.meta, rate_history: done.history }).eq("id", r.id).eq("user_id", userId);
     if (error) continue;
