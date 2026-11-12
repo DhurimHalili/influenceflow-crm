@@ -733,6 +733,77 @@ async function backfillCreatorMail(ctx: { admin: Admin; userId: string; mailbox:
 // folder. Sent → it counts as sent from now on (dated when it went out).
 // Cancelled (Gmail turns it back into a draft), trashed or deleted → the row
 // goes, and a status that only that email had moved is put back.
+// ----- mail that left Gmail ------------------------------------------------------
+
+// Tracked mail can vanish from the mailbox after the CRM saw it: moved to Trash
+// or deleted for good by someone — or something — with access to the mailbox
+// (a warm-up or sending tool, a Workspace retention rule). The CRM never does
+// this to sent mail: the only email it ever trashes is a scheduled one you
+// cancel, and that row is removed at the same moment. Gone mail still counts
+// (the other person got it); it is marked so the app can say where it went.
+// Two ways in: Gmail's change history (live) and a slow sweep of older mail.
+type Gone = "" | "trash" | "deleted";
+const GONE_RECHECK_DAYS = 7;
+const GONE_SWEEP_DAYS = 120;
+
+async function markGone(admin: Admin, userId: string, mailbox: string, changes: Map<string, Gone>, checked: string[] = []) {
+  const ids = Array.from(new Set([...changes.keys(), ...checked]));
+  if (!ids.length) return 0;
+  const nowIso = new Date().toISOString();
+  let moved = 0;
+  for (const part of chunk(ids, 200)) {
+    const { data, error } = await admin.from("email_events").select("id, gmail_id, entity_id, entity_type, direction, subject, gone, gone_at, scheduled").eq("user_id", userId).eq("mailbox", mailbox).in("gmail_id", part);
+    if (error) return moved; // columns not there yet: nothing to mark
+    const news: { entityId: string; type: "creator" | "brand"; text: string }[] = [];
+    for (const r of data || []) {
+      if (r.scheduled || !changes.has(r.gmail_id)) continue; // scheduled sends are rechecked on their own
+      const next = changes.get(r.gmail_id)!;
+      if ((r.gone || "") === next) continue;
+      const { error: upd } = await admin.from("email_events").update({ gone: next, gone_at: next ? r.gone_at || nowIso : null, gone_checked_at: nowIso }).eq("id", r.id).eq("user_id", userId);
+      if (upd) continue;
+      moved++;
+      const subject = `“${(r.subject || "(no subject)").slice(0, 80)}”`;
+      const mine = r.direction === "out" ? `your email ${subject}` : `their email ${subject}`;
+      const text = next === "trash" ? `Gmail: ${mine} was put in Trash in ${mailbox} — not by the CRM. It still counts; restore it from Trash within 30 days if you need it.`
+        : next === "deleted" ? `Gmail: ${mine} was deleted for good from ${mailbox} — not by the CRM. It still counts${r.direction === "out" ? " as sent: they received it" : ""}.`
+        : `Gmail: ${mine} is back in ${mailbox} (restored from Trash).`;
+      if (!news.some((x) => x.entityId === r.entity_id && x.text === text)) news.push({ entityId: r.entity_id, type: r.entity_type === "brand" ? "brand" : "creator", text });
+    }
+    if (news.length) await admin.from("activities").insert(news.slice(0, 50).map((x) => ({ user_id: userId, text: x.text.slice(0, 500), at: nowIso, entity_type: x.type, entity_id: x.entityId })));
+  }
+  if (checked.length) for (const part of chunk(checked, 200)) await admin.from("email_events").update({ gone_checked_at: nowIso }).eq("user_id", userId).eq("mailbox", mailbox).in("gmail_id", part);
+  return moved;
+}
+
+/**
+ * The slow sweep: looks again at tracked mail of the last 120 days that was
+ * never checked (or not for a week; Trash daily, since it can be restored or
+ * emptied). Newest first, a few dozen per read run — 5 quota units each.
+ */
+async function sweepGone(admin: Admin, userId: string, token: string, mailbox: string, deadline: number, max = 60) {
+  if (Date.now() > deadline) return 0;
+  const week = new Date(Date.now() - GONE_RECHECK_DAYS * 86400000).toISOString();
+  const day = new Date(Date.now() - 86400000).toISOString();
+  const { data, error } = await admin.from("email_events").select("gmail_id").eq("user_id", userId).eq("mailbox", mailbox).eq("scheduled", false)
+    .gte("at", new Date(Date.now() - GONE_SWEEP_DAYS * 86400000).toISOString())
+    .or(`gone_checked_at.is.null,gone_checked_at.lt.${week},and(gone.eq.trash,gone_checked_at.lt.${day})`)
+    .order("gone_checked_at", { ascending: true, nullsFirst: true }).order("at", { ascending: false }).limit(max * 2);
+  if (error || !data?.length) return 0;
+  const ids = Array.from(new Set(data.map((r) => r.gmail_id as string))).slice(0, max);
+  const changes = new Map<string, Gone>();
+  const checked: string[] = [];
+  for (const part of chunk(ids, 10)) {
+    if (Date.now() > deadline) break;
+    await Promise.all(part.map(async (id) => {
+      const meta = await gmail<{ labelIds?: string[] }>(token, `/messages/${id}?format=minimal`).catch((e) => (e instanceof GmailError && e.status === 404 ? null : undefined));
+      if (meta === undefined) return; // Gmail hiccup: look again next run
+      changes.set(id, meta === null ? "deleted" : (meta.labelIds || []).includes("TRASH") ? "trash" : "");
+      checked.push(id);
+    }));
+  }
+  return markGone(admin, userId, mailbox, changes, checked);
+}
+
 async function recheckScheduled(admin: Admin, userId: string, token: string, mailbox: string, deadline: number) {
   // What Gmail says is waiting right now — also catches rows stored as sent
   // before scheduled sends were told apart.
@@ -1148,6 +1219,7 @@ async function trackMailbox(admin: Admin, row: TokenRow, own: Set<string>, book:
   //    traffic, newsletters) can never get stuck re-reading the same mail.
   let historyId = row.history_id;
   const records: { id: string; ids: string[] }[] = [];
+  const goneNow = new Map<string, Gone>();
   if (historyId) {
     try {
       let pageToken = "";
@@ -1157,9 +1229,16 @@ async function trackMailbox(admin: Admin, row: TokenRow, own: Set<string>, book:
         const params = new URLSearchParams({ startHistoryId: historyId, maxResults: "500" });
         params.append("historyTypes", "messageAdded");
         params.append("historyTypes", "labelAdded");
+        // Mail leaving Gmail (Trash, deleted for good) and coming back from Trash.
+        params.append("historyTypes", "messageDeleted");
+        params.append("historyTypes", "labelRemoved");
         if (pageToken) params.set("pageToken", pageToken);
-        const res = await gmail<{ history?: { id: string; messagesAdded?: { message: { id: string } }[]; labelsAdded?: { message: { id: string }; labelIds?: string[] }[] }[]; nextPageToken?: string }>(token, `/history?${params}`);
+        const res = await gmail<{ history?: { id: string; messagesAdded?: { message: { id: string } }[]; labelsAdded?: { message: { id: string }; labelIds?: string[] }[]; labelsRemoved?: { message: { id: string }; labelIds?: string[] }[]; messagesDeleted?: { message: { id: string } }[] }[]; nextPageToken?: string }>(token, `/history?${params}`);
         for (const h of res.history || []) {
+          // In order, so the last word wins (trashed, then restored = still there).
+          for (const l of h.labelsAdded || []) if ((l.labelIds || []).includes("TRASH")) goneNow.set(l.message.id, "trash");
+          for (const l of h.labelsRemoved || []) if ((l.labelIds || []).includes("TRASH") && goneNow.get(l.message.id) !== "deleted") goneNow.set(l.message.id, "");
+          for (const d of h.messagesDeleted || []) goneNow.set(d.message.id, "deleted");
           const ids = [...(h.messagesAdded || []).map((m) => m.message.id), ...(h.labelsAdded || []).filter((l) => (l.labelIds || []).some((x) => x === "SENT" || x === "SCHEDULED" || x === "INBOX")).map((l) => l.message.id)];
           ids.forEach((id) => urgent.add(id));
           records.push({ id: String(h.id), ids });
@@ -1182,6 +1261,8 @@ async function trackMailbox(admin: Admin, row: TokenRow, own: Set<string>, book:
       }
     }
   }
+
+  if (goneNow.size) await markGone(admin, row.user_id, mailbox, goneNow).catch(() => 0);
 
   // 2. Safety net, every run: everything you sent in the last 2 days.
   const prevCoverage = readCoverage(row.coverage);
@@ -1325,6 +1406,8 @@ async function readMailbox(admin: Admin, row: TokenRow, own: Set<string>, book: 
   if (Date.now() < deadline - 10_000) await repairKitLists(admin, row.user_id, currency).catch(() => 0);
   // d4. Deals measured from a counter instead of their first asking price: put the % right.
   if (Date.now() < deadline - 10_000) await repairAnchors(admin, row.user_id).catch(() => 0);
+  // d5. Tracked mail that left Gmail since the CRM saw it (Trash / deleted for good) — older mail, a little each run.
+  if (Date.now() < deadline - 10_000) await sweepGone(admin, row.user_id, token, mailbox, deadline - 8_000).catch(() => 0);
 
   // e. Files waiting for the AI.
   const aiRead = budget.ai > 0 && Date.now() < deadline - 10_000 ? await drainQueue({ admin, userId: row.user_id, currency, mailbox, get, max: Math.min(3, budget.ai), deadline: deadline - 8_000 }).catch(() => 0) : 0;

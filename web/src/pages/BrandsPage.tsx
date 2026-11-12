@@ -58,8 +58,10 @@ const [market, setMarket] = useSessionState("brands.market", "all"); const [foll
   const wantedNiches = Array.from(new Map(data.brands.filter((item) => !item.archived_at).flatMap((item) => item.brief?.niches || []).map((n) => [n.toLowerCase(), n])).values()).sort();
   const wantedPlatforms = Array.from(new Set(data.brands.filter((item) => !item.archived_at).flatMap((item) => item.brief?.platforms || [])));
   // Markets in use, busiest first.
-  const markets = (() => { const counts = new Map<string, [string, number]>(); data.brands.filter((item) => !item.archived_at).forEach((item) => (item.brief?.markets || []).forEach((m) => { const k = m.toLowerCase(); const prev = counts.get(k); counts.set(k, [prev?.[0] || m, (prev?.[1] || 0) + 1]); })); return Array.from(counts.values()).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])); })();
-  const inboundCount = data.brands.filter((item) => !item.archived_at && item.pipeline_status === "inbound").length;
+  // With one mailbox picked, every count on the page is that mailbox's share — never the whole workspace.
+  const inBox = (id: string) => matchesMailbox(boxFilter, chase.boxes.get(id));
+  const markets = (() => { const counts = new Map<string, [string, number]>(); data.brands.filter((item) => !item.archived_at && inBox(item.id)).forEach((item) => (item.brief?.markets || []).forEach((m) => { const k = m.toLowerCase(); const prev = counts.get(k); counts.set(k, [prev?.[0] || m, (prev?.[1] || 0) + 1]); })); return Array.from(counts.values()).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])); })();
+  const inboundCount = data.brands.filter((item) => !item.archived_at && inBox(item.id) && item.pipeline_status === "inbound").length;
   const prioRank = (p: string) => (p === "urgent" ? 0 : p === "soon" ? 1 : 2);
   const cyclePriority = (brand: Brand) => {
     const next = brand.priority === "none" ? "soon" : brand.priority === "soon" ? "urgent" : ("none" as Priority);
@@ -109,16 +111,17 @@ const [market, setMarket] = useSessionState("brands.market", "all"); const [foll
       return sort === "name" ? a.name.localeCompare(b.name) : sort === "status" ? ENTITY_STATUSES.indexOf(a.pipeline_status) - ENTITY_STATUSES.indexOf(b.pipeline_status) : sort === "contacted" ? (b.date_contacted || "").localeCompare(a.date_contacted || "") : sort === "oldest" ? a.created_at.localeCompare(b.created_at) : b.created_at.localeCompare(a.created_at);
     });
   }, [data.brands, query, status, type, priorityFilter, sort, wantsPlatform, budgetFilter, nicheFilter, market, followFilter, boxFilter, chase, dups.byId]);
-  const brandDue = chase.due.filter((c) => c.type === "brand").length;
-  const brandParked = [...chase.parked.due, ...chase.parked.reply].filter((c) => c.type === "brand").length;
-  const brandReply = chase.reply.filter((c) => c.type === "brand").length;
-  const brandReach = chase.reach.filter((c) => c.type === "brand").length;
-  const brandNoList = [...chase.no.values()].filter((e) => e.type === "brand");
+  const ours = (c: { type: string; id: string }) => c.type === "brand" && inBox(c.id);
+  const brandDue = chase.due.filter(ours).length;
+  const brandParked = [...chase.parked.due, ...chase.parked.reply].filter(ours).length;
+  const brandReply = chase.reply.filter(ours).length;
+  const brandReach = chase.reach.filter(ours).length;
+  const brandNoList = [...chase.no.entries()].filter(([id, e]) => e.type === "brand" && inBox(id)).map(([, e]) => e);
   const brandNo = brandNoList.length;
   const liveBrands = useMemo(() => data.brands.filter((b) => !b.archived_at), [data.brands]);
   const boxCounts = useMemo(() => mailboxCounts(liveBrands.map((b) => b.id), chase.boxes), [liveBrands, chase.boxes]);
   const brandMaybe = brandNoList.filter((e) => e.group === "maybe").length;
-  const brandCancel = chase.cancel.filter((c) => c.type === "brand").length;
+  const brandCancel = chase.cancel.filter(ours).length;
   const formRef = useRef<HTMLFormElement>(null);
   const addAnother = useRef(false);
   const canSubmit = !brandDraftErrors(draft);

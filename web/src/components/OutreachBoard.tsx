@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { ArrowRight, Building2, CalendarClock, CheckCircle2, Handshake, Inbox, Mail, RefreshCw, Reply, Send, ShieldCheck, Sparkles, Trophy, UserPlus, Users, X, XCircle } from "lucide-react";
+import { ArrowRight, Building2, CalendarClock, CheckCircle2, Handshake, Inbox, Mail, RefreshCw, Reply, Send, ShieldCheck, Sparkles, Trash2, Trophy, UserPlus, Users, X, XCircle } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useData } from "../contexts/DataContext";
 import { useGmail } from "../contexts/GmailContext";
@@ -9,7 +9,7 @@ import { useOutreachLogs } from "../hooks/useOutreach";
 import { dailyBuckets, mailboxesOf, makeStats, rangeOf, type MetricKey, type RangeKey, type Row, type View } from "../lib/dashboardStats";
 import { MailboxName, mailboxTone } from "./MailboxBits";
 import { sendsAt } from "../lib/followupEngine";
-import { relativeTime, stampLabel, timeLabel } from "../lib/utils";
+import { dateLabel, relativeTime, stampLabel, timeLabel } from "../lib/utils";
 import { Tabs } from "./ui";
 
 // The outreach scoreboard: what you sent and what came back, for everyone or
@@ -116,14 +116,17 @@ export function OutreachBoard() {
   const chatter = stats.conversation(view, range.start, range.end);
 
   // Daily chart: the last 14 days, split by what you sent; replies beside.
+  // With one mailbox picked the scale stays the one of ALL mailboxes, so its
+  // share is visibly smaller instead of being stretched to fill the chart.
   const days = dailyBuckets(14);
-  const daily = days.map((d) => ({
-    ...d,
-    "First emails": c("first", view, d.start, d.end),
-    "Follow-ups": c("followups", view, d.start, d.end),
-    "Answers & new threads": c("answers", view, d.start, d.end) + c("newthreads", view, d.start, d.end),
-    Replies: c("replies", view, d.start, d.end),
-  }));
+  const dayOf = (st: typeof stats, d: (typeof days)[number]) => {
+    const first = st.count("first", view, d.start, d.end), followups = st.count("followups", view, d.start, d.end), answers = st.count("answers", view, d.start, d.end) + st.count("newthreads", view, d.start, d.end), replies = st.count("replies", view, d.start, d.end);
+    return { ...d, "First emails": first, "Follow-ups": followups, "Answers & new threads": answers, Replies: replies, sent: first + followups + answers };
+  };
+  const daily = days.map((d) => dayOf(stats, d));
+  const allStats = useMemo(() => (box ? makeStats(base) : null), [base, box]);
+  const peak = Math.max(1, ...(allStats ? days.map((d) => dayOf(allStats, d)) : daily).map((d) => Math.max(d.sent, d.Replies)));
+  const dailyTotals = { sent: daily.reduce((n, d) => n + d.sent, 0), replies: daily.reduce((n, d) => n + d.Replies, 0) };
 
   const syncing = gmail.syncing;
   const sync = async () => {
@@ -254,12 +257,12 @@ export function OutreachBoard() {
     </div>)}</div>
 
     <div className="daily-strip">
-      <div className="daily-strip-head"><span>Daily outreach · last 14 days{view !== "all" ? ` · ${view === "creator" ? "influencers" : "brands"}` : ""}</span><span className="daily-legend"><i className="lg-emails" /> First emails <i className="lg-followups" /> Follow-ups <i className="lg-answers" /> Answers <i className="lg-replies" /> Replies</span></div>
-      <div className="daily-chart"><ResponsiveContainer width="100%" height="100%"><BarChart data={daily} margin={{ top: 6, right: 4, left: -18, bottom: 0 }} barCategoryGap="20%" onClick={(e) => { const i = typeof e?.activeTooltipIndex === "number" ? e.activeTooltipIndex : Number(e?.activeTooltipIndex); const d = days[i]; if (d) setOpen({ metric: "emails", view, start: d.start, end: d.end, title: `Emails sent · ${new Date(d.start).toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" })}` }); }}>
+      <div className="daily-strip-head"><span>Daily outreach · last 14 days{view !== "all" ? ` · ${view === "creator" ? "influencers" : "brands"}` : ""}<b className="daily-scope">{box ? <><i className={`mbx-dot mbx-${mailboxTone(mailboxes.indexOf(box))}`} aria-hidden="true" />{box}</> : mailboxes.length > 1 ? `All ${mailboxes.length} mailboxes` : ""}{" "}<em>{dailyTotals.sent.toLocaleString("en-US")} sent · {dailyTotals.replies.toLocaleString("en-US")} {dailyTotals.replies === 1 ? "reply" : "replies"}</em></b></span><span className="daily-legend"><i className="lg-emails" /> First emails <i className="lg-followups" /> Follow-ups <i className="lg-answers" /> Answers <i className="lg-replies" /> Replies</span></div>
+      <div className="daily-chart"><ResponsiveContainer width="100%" height="100%"><BarChart data={daily} margin={{ top: 6, right: 4, left: 0, bottom: 0 }} barCategoryGap="20%" onClick={(e) => { const i = typeof e?.activeTooltipIndex === "number" ? e.activeTooltipIndex : Number(e?.activeTooltipIndex); const d = days[i]; if (d) setOpen({ metric: "emails", view, start: d.start, end: d.end, title: `Emails sent · ${new Date(d.start).toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" })}` }); }}>
         <CartesianGrid stroke="var(--line)" vertical={false} />
         <XAxis dataKey="label" axisLine={false} tickLine={false} interval="preserveStartEnd" minTickGap={8} tick={{ fill: "var(--muted)", fontSize: 10 }} />
-        <YAxis allowDecimals={false} axisLine={false} tickLine={false} width={34} tick={{ fill: "var(--muted)", fontSize: 11 }} />
-        <Tooltip cursor={{ fill: "rgba(var(--accent-rgb),.07)" }} contentStyle={{ background: "var(--surface-solid)", border: "1px solid var(--line)", borderRadius: 10, fontSize: 13, color: "var(--text)" }} />
+        <YAxis allowDecimals={false} axisLine={false} tickLine={false} width={Math.max(24, String(peak).length * 8 + 10)} domain={[0, peak]} tick={{ fill: "var(--muted)", fontSize: 11 }} />
+        <Tooltip cursor={{ fill: "rgba(var(--accent-rgb),.07)" }} content={<DayTip scope={box} />} />
         <Bar dataKey="First emails" stackId="o" fill="var(--accent)" style={{ cursor: "pointer" }} />
         <Bar dataKey="Follow-ups" stackId="o" fill="#24a6a1" style={{ cursor: "pointer" }} />
         <Bar dataKey="Answers & new threads" stackId="o" fill="#8c95a7" radius={[3, 3, 0, 0]} style={{ cursor: "pointer" }} />
@@ -268,7 +271,7 @@ export function OutreachBoard() {
       <p className="daily-hint">Tap a day to see every email you sent that day.</p>
     </div>
 
-    <TrackingCheck />
+    <TrackingCheck box={box} />
   </section>;
 }
 
@@ -315,12 +318,31 @@ function Ledger({ open, rows, onClose }: { open: NonNullable<Open>; rows: Row[];
 const sameDay = (iso: string) => new Date(iso).toDateString() === new Date().toDateString();
 
 /** What you sent in Gmail vs what the CRM tracks — the reason to trust the numbers above. */
-function TrackingCheck() {
+type DayRow = { label: string; start: number; sent: number; Replies: number; "First emails": number; "Follow-ups": number; "Answers & new threads": number };
+/** One day of the chart: what went out, what came back, for which mailbox. */
+function DayTip({ active, payload, scope }: { active?: boolean; payload?: { payload?: DayRow }[]; scope: string }) {
+  const d = active ? payload?.[0]?.payload : undefined;
+  if (!d) return null;
+  const parts: [string, number, string][] = [["First emails", d["First emails"], "lg-emails"], ["Follow-ups", d["Follow-ups"], "lg-followups"], ["Answers & new threads", d["Answers & new threads"], "lg-answers"]];
+  return <div className="day-tip" role="status">
+    <strong>{new Date(d.start).toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" })}</strong>
+    <small>{scope || "All mailboxes"}</small>
+    {d.sent || d.Replies ? <p className="day-tip-total"><b>{d.sent}</b> sent{d.Replies ? <> · <b>{d.Replies}</b> {d.Replies === 1 ? "reply" : "replies"}</> : null}</p> : <p className="day-tip-none">Nothing sent, no replies</p>}
+    {d.sent > 0 && <ul>{parts.filter(([, n]) => n > 0).map(([k, n, cls]) => <li key={k}><i className={cls} aria-hidden="true" />{k}<b>{n}</b></li>)}</ul>}
+  </div>;
+}
+
+function TrackingCheck({ box }: { box: string }) {
   const data = useData();
   const gmail = useGmail();
   const [open, setOpen] = useState(false);
-  const cover = gmail.mailboxes.map((m) => m.coverage).filter((x): x is NonNullable<typeof x> => !!x);
-  if (!cover.length) return null;
+  const [goneOpen, setGoneOpen] = useState(false);
+  // With one mailbox picked, only its own tracking check.
+  const cover = gmail.mailboxes.filter((m) => !box || m.email.toLowerCase() === box).map((m) => m.coverage).filter((x): x is NonNullable<typeof x> => !!x);
+  // Tracked mail that has since left Gmail (last 30 days), newest first — the CRM never deletes sent mail.
+  const since = Date.now() - 30 * 86400000;
+  const gone = (data.emailEvents || []).filter((e) => e.gone && (!box || (e.mailbox || "") === box) && new Date(e.gone_at || e.at).getTime() >= since).sort((a, b) => (b.gone_at || b.at).localeCompare(a.gone_at || a.at));
+  if (!cover.length && !gone.length) return null;
   const known = new Set([...data.creators.flatMap((c) => [c.contact_email, c.secondary_email || "", ...(c.team || []).filter((t) => !t.removed).map((t) => t.email)]), ...data.brands.flatMap((b) => [b.contact_email, b.secondary_email || ""]), ...data.contacts.map((p) => p.email)].map((e) => (e || "").toLowerCase()).filter(Boolean));
   const sent = cover.reduce((s, x) => s + x.sent, 0);
   const pending = cover.reduce((s, x) => s + x.pending, 0);
@@ -338,16 +360,24 @@ function TrackingCheck() {
     people.set(email, p);
   }
   const tracked = Math.max(0, sent - untracked - pending);
-  const days = cover[0].days;
+  const days = cover[0]?.days ?? 0;
+  const nameOf = new Map<string, { name: string; to: string }>([...data.creators.map((c) => [c.id, { name: c.name, to: `/app/influencers/${c.id}` }] as [string, { name: string; to: string }]), ...data.brands.map((b) => [b.id, { name: b.name, to: `/app/brands/${b.id}` }] as [string, { name: string; to: string }])]);
   const list = [...people.values()].sort((a, b) => b.last.localeCompare(a.last));
-  return <div className={`ob-check${untracked ? " has-gaps" : ""}`}>
-    <ShieldCheck size={16} />
-    <p><b>Tracking check</b> · last {days} days: {untracked ? <>{tracked} of {sent} emails you sent are in your CRM. <b>{untracked}</b> went to {list.length === 1 ? "someone" : `${list.length} people`} the CRM doesn't know.</> : <>all {sent} emails you sent are tracked{pending ? ` (${pending} still being read)` : ""}.</>}{warmup > 0 && <span className="ob-check-warm"> {warmup} warm-up email{warmup === 1 ? "" : "s"} left out.</span>}</p>
+  return <div className={`ob-check${untracked || gone.length ? " has-gaps" : ""}`}>
+    {cover.length > 0 && <ShieldCheck size={16} />}
+    {cover.length > 0 && <p><b>Tracking check</b>{box ? ` · ${box}` : ""} · last {days} days: {untracked ? <>{tracked} of {sent} emails you sent are in your CRM. <b>{untracked}</b> went to {list.length === 1 ? "someone" : `${list.length} people`} the CRM doesn't know.</> : <>all {sent} emails you sent are tracked{pending ? ` (${pending} still being read)` : ""}.</>}{warmup > 0 && <span className="ob-check-warm"> {warmup} warm-up email{warmup === 1 ? "" : "s"} left out.</span>}</p>}
     {untracked > 0 && <button type="button" onClick={() => setOpen(!open)} aria-expanded={open}>{open ? "Hide" : "Review"}</button>}
     {open && <ul className="ob-check-list">{list.slice(0, 30).map((p) => <li key={p.email}>
       <span><b>{p.email}</b><small>{p.n} email{p.n === 1 ? "" : "s"} · {relativeTime(p.last)}{p.subject ? ` · “${p.subject}”` : ""}</small></span>
       <Link to={`/app/influencers?new=1&email=${encodeURIComponent(p.email)}`}>Add influencer</Link>
       <Link to={`/app/brands?new=1&email=${encodeURIComponent(p.email)}`}>Add brand</Link>
     </li>)}<li className="ob-check-note">Added people get their whole email history on the next Gmail check. Personal mail can stay out — it's never counted.</li></ul>}
+    {gone.length > 0 && <div className="ob-gone">
+      <p><Trash2 size={14} aria-hidden="true" /><span><b>{gone.length} tracked email{gone.length === 1 ? "" : "s"}</b> left Gmail in the last 30 days ({[gone.filter((e) => e.gone === "trash").length ? `${gone.filter((e) => e.gone === "trash").length} in Trash` : "", gone.filter((e) => e.gone === "deleted").length ? `${gone.filter((e) => e.gone === "deleted").length} deleted for good` : ""].filter(Boolean).join(", ")}). The CRM didn't do it — check tools connected to {box || "your mailboxes"} and Workspace retention rules. They still count as sent.</span></p>
+      <button type="button" onClick={() => setGoneOpen(!goneOpen)} aria-expanded={goneOpen}>{goneOpen ? "Hide" : "See which"}</button>
+      {goneOpen && <ul className="ob-check-list">{gone.slice(0, 40).map((e) => { const who = nameOf.get(e.entity_id); return <li key={e.id}>
+        <span><b>{who ? <Link to={who.to}>{who.name}</Link> : e.counterpart}</b><small>{e.direction === "out" ? "You emailed" : "They emailed"} {dateLabel(e.at)} · “{e.subject || "(no subject)"}” · {e.mailbox || "Gmail"} · {e.gone === "trash" ? "in Trash" : "deleted for good"}{e.gone_at ? `, seen ${relativeTime(e.gone_at)}` : ""}</small></span>
+      </li>; })}</ul>}
+    </div>}
   </div>;
 }

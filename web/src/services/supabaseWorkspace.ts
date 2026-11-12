@@ -184,6 +184,8 @@ const normalizeEmailEvent = (row: Record<string, unknown>): EmailEvent => ({
   reply_kind: (["no", "maybe_no", "team", "auto", "managed_no", "reaction"] as const).find((k) => k === row.reply_kind) || "",
   message_key: text(row.message_key),
   in_reply_to: text(row.in_reply_to),
+  gone: row.gone === "trash" || row.gone === "deleted" ? row.gone : "",
+  gone_at: typeof row.gone_at === "string" ? row.gone_at : null,
 });
 
 const normalizeBrand = (row: Record<string, unknown>, userId: string): Brand => ({

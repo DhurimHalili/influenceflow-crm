@@ -242,6 +242,19 @@ kbd { font: 600 10px ui-monospace, SFMono-Regular, Menlo, monospace; padding: 1p
 .lg-followups { background: #24a6a1; }
 .lg-replies { background: #d59b48; }
 .daily-chart { height: 150px; }
+.daily-scope { display: inline-flex; align-items: center; gap: 6px; margin-left: 8px; padding: 2px 8px; border-radius: 999px; background: var(--surface-alt); color: var(--text-soft); font-weight: 700; text-transform: none; letter-spacing: 0; font-size: 11.5px; max-width: 100%; overflow-wrap: anywhere; }
+.daily-scope em { font-style: normal; font-weight: 600; color: var(--muted); }
+.daily-scope .mbx-dot { width: 8px; height: 8px; }
+.day-tip { min-width: 180px; padding: 9px 11px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-solid); color: var(--text); font-size: 12.5px; box-shadow: 0 8px 22px rgba(0,0,0,.12); }
+.day-tip strong { display: block; font-size: 13px; }
+.day-tip small { display: block; color: var(--muted); font-size: 11px; margin-top: 1px; overflow-wrap: anywhere; }
+.day-tip-total { margin: 6px 0 0; color: var(--text-soft); }
+.day-tip-total b { color: var(--text); font-variant-numeric: tabular-nums; }
+.day-tip ul { list-style: none; margin: 6px 0 0; padding: 6px 0 0; border-top: 1px solid var(--line); display: grid; gap: 3px; }
+.day-tip li { display: flex; align-items: center; gap: 6px; color: var(--text-soft); }
+.day-tip li i { width: 8px; height: 8px; border-radius: 2px; display: inline-block; }
+.day-tip li b { margin-left: auto; color: var(--text); font-variant-numeric: tabular-nums; }
+.day-tip-none { margin: 4px 0 0; color: var(--muted); }
 .agenda-line.line-action { background: var(--cal-action); }
 .momentum-tile em { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 

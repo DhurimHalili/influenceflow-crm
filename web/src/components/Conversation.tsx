@@ -1,4 +1,4 @@
-import { ArrowDownLeft, ArrowUpRight, BellOff, BellRing, CalendarClock, CirclePause, CalendarX, Clock3, ExternalLink, Hourglass, Mail, MailPlus, MessageCircle, Reply, RotateCcw, Send, Smartphone, Undo2, Users, X } from "lucide-react";
+import { ArrowDownLeft, ArrowUpRight, BellOff, BellRing, CalendarClock, CirclePause, CalendarX, Clock3, ExternalLink, Hourglass, Mail, MailPlus, MessageCircle, Reply, RotateCcw, Send, Smartphone, Trash2, Undo2, Users, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useData } from "../contexts/DataContext";
@@ -218,6 +218,10 @@ export function ConversationSection({ type, record }: { type: "creator" | "brand
   const lastIn = [...touches].reverse().find((t) => t.dir === "in" && t.kind !== "auto" && t.kind !== "reaction");
   const manualFollowups = touches.filter((t) => t.source === "manual" && t.dir === "out");
   const visible = [...touches].reverse().slice(0, showAll ? undefined : 6);
+  // Mail the CRM saw that has since left Gmail (Trash, or deleted for good).
+  const goneMail = touches.filter((t) => t.source === "gmail" && t.gone);
+  const goneBoxes = Array.from(new Set(goneMail.map((t) => t.mailbox || "").filter(Boolean)));
+  const goneWhere = [goneMail.some((t) => t.gone === "trash") ? "moved to Trash" : "", goneMail.some((t) => t.gone === "deleted") ? "deleted for good" : ""].filter(Boolean).join(" or ") + (goneBoxes.length ? ` in ${goneBoxes.join(" and ")}` : "");
   const paused = state?.kind === "idle" && state.reason === "snoozed";
   const closed = state?.kind === "idle" && (state.reason === "closed" || state.reason === "paused");
   const reachOn = record.pipeline_status === "denied" && state?.kind === "idle" && state.until ? state.until : "";
@@ -290,6 +294,7 @@ export function ConversationSection({ type, record }: { type: "creator" | "brand
       {mailboxes.length > 1 && <span className="fu-channel-note" title={mailboxes.join(", ")}>Emailed from {mailboxes.length} mailboxes — tracked as one conversation</span>}
     </div>
 
+    {goneMail.length > 0 && <p className="gone-note" role="note"><Trash2 size={14} aria-hidden="true" /><span><b>{goneMail.length === 1 ? "1 email here is" : `${goneMail.length} emails here are`} no longer in Gmail</b> — {goneWhere}. The CRM never deletes sent mail (it only trashes a scheduled email you cancel), so something else with access to {goneBoxes.length === 1 ? "that mailbox" : "those mailboxes"} did it. {goneMail.some((t) => t.gone === "trash") ? "Open Gmail's Trash to restore it within 30 days. " : ""}They still count as sent: the other person got them.</span></p>}
     {touches.length > 0 && <ol className="touch-list">{visible.map((touch) => <TouchRow key={touch.id} touch={touch} otherThread={!!info && !!touch.threadId && touch.threadId !== info.active} onRemove={touch.removable ? () => { if (confirm(`Remove this ${touch.dir === "in" ? "reply" : "follow-up"} from ${dateLabel(touch.at)}?`)) { data.removeTouch(target, touch.id); toast("Removed"); } } : undefined} />)}{touches.length > 6 && <li className="fu-more"><button type="button" onClick={() => setShowAll(!showAll)}>{showAll ? "Show fewer" : `Show all ${touches.length}`}</button></li>}</ol>}
 
     <div className="followup-actions conversation-actions" ref={menuRef}>
@@ -348,7 +353,7 @@ function TouchRow({ touch, onRemove, otherThread = false }: { touch: Touch; onRe
   return <li className={`touch dir-${touch.dir} src-${touch.source}${touch.scheduled ? " is-scheduled" : ""}`}>
     <i aria-hidden="true">{touch.scheduled ? <CalendarClock size={13} /> : touch.dir === "out" ? <ArrowUpRight size={13} /> : <ArrowDownLeft size={13} />}</i>
     <div>
-      <strong>{touch.label}{touch.source === "gmail" && <em className="src-chip">Gmail</em>}{touch.scheduled && <em className="sched-chip">Not sent yet</em>}{(touch.kind === "auto" || touch.kind === "reaction") && <em className="sched-chip">Not a reply</em>}{otherThread && <em className="src-chip other-thread">Other thread</em>}</strong>
+      <strong>{touch.label}{touch.source === "gmail" && <em className="src-chip">Gmail</em>}{touch.scheduled && <em className="sched-chip">Not sent yet</em>}{(touch.kind === "auto" || touch.kind === "reaction") && <em className="sched-chip">Not a reply</em>}{touch.gone && <em className="gone-chip" title={`${touch.gone === "trash" ? "Moved to Trash" : "Deleted for good"} in ${touch.mailbox || "Gmail"}${touch.goneAt ? ` — first seen ${dateLabel(touch.goneAt)}` : ""}. Not by the CRM. It still counts: they received it.`}>{touch.gone === "trash" ? "In Gmail's Trash" : "Deleted from Gmail"}</em>}{otherThread && <em className="src-chip other-thread">Other thread</em>}</strong>
       {touch.detail && <small className="touch-detail">{touch.detail}</small>}
       <small className={touch.scheduled ? "touch-when" : undefined}>{touch.scheduled ? sends ? `Sends ${sends}` : "Waiting in Gmail's Scheduled folder" : `${stampLabel(touch.at)} · ${daysAgoLabel(touch.at)}`}{touch.mailbox && touch.source === "gmail" ? ` · ${touch.mailbox}` : ""}{touch.dir === "in" && (touch.kind === "team" || touch.kind === "managed_no") && touch.counterpart ? ` · from ${touch.counterpart}` : ""}</small>
     </div>

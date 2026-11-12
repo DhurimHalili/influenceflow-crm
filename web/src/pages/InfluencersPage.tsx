@@ -1,6 +1,6 @@
 import Papa from "papaparse";
 import { Archive, ArrowDownAZ, BadgeCheck, CirclePause, MessageCircleX, CircleSlash, MailPlus, TriangleAlert, CalendarClock, CalendarX, Users, ClipboardCopy, FileText, Link2, ArrowLeft, ArrowRight, Columns3, Download, ExternalLink, Filter, Flag, Globe2, Inbox, LayoutGrid, List, Mail, Merge, Pencil, Plus, RotateCcw, Send, SlidersHorizontal, Sparkles, Star, Reply, Upload, X } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { WriteEmail } from "../components/WriteEmail";
 import { KanbanBoard } from "../components/KanbanBoard";
@@ -171,12 +171,14 @@ const linkedStatus = params.get("status");
   const stateOf = (id: string) => chase.byId.get(id)?.state;
   const niches = Array.from(new Set(data.creators.filter((item) => !item.archived_at).map((item) => item.niche).filter(Boolean))).sort();
   // Countries in use, busiest first, with how many creators are in each.
+  // With one mailbox picked, every count on the page is that mailbox's share — never the whole workspace.
+  const inBox = useCallback((id: string) => matchesMailbox(boxFilter, chase.boxes.get(id)), [boxFilter, chase.boxes]);
   const countries = useMemo(() => {
     const counts = new Map<string, number>();
-    data.creators.filter((item) => !item.archived_at).forEach((item) => { const c = (item.country || "").trim(); if (c) counts.set(c, (counts.get(c) || 0) + 1); });
+    data.creators.filter((item) => !item.archived_at && inBox(item.id)).forEach((item) => { const c = (item.country || "").trim(); if (c) counts.set(c, (counts.get(c) || 0) + 1); });
     return Array.from(counts.entries()).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
-  }, [data.creators]);
-  const unknownCountry = data.creators.filter((item) => !item.archived_at && !(item.country || "").trim()).length;
+  }, [data.creators, inBox]);
+  const unknownCountry = data.creators.filter((item) => !item.archived_at && inBox(item.id) && !(item.country || "").trim()).length;
   const dups = useDuplicates("creator");
   const filtered = useMemo(() => {
     const result = data.creators.filter((item) => !item.archived_at).filter((item) => {
@@ -236,27 +238,30 @@ const linkedStatus = params.get("status");
   const archivedHits = useMemo(() => (query.trim() ? data.creators.filter((item) => item.archived_at && matchesCreatorQuery(item, query.trim())) : []), [data.creators, query]);
   const restoreHit = (item: { id: string; name: string }) => { data.archive("creator", [item.id], true); toast(`${item.name} restored from the archive`); };
   const isNewThread = (c: { state: { kind: string } }) => (c.state as { next?: string }).next === "new-thread";
-  const dueCount = chase.due.filter((c) => c.type === "creator" && !isNewThread(c)).length;
-  const threadCount = chase.due.filter((c) => c.type === "creator" && isNewThread(c)).length;
+  const mine = (c: { type: string; id: string }) => c.type === "creator" && inBox(c.id);
+  const dueCount = chase.due.filter((c) => mine(c) && !isNewThread(c)).length;
+  const threadCount = chase.due.filter((c) => mine(c) && isNewThread(c)).length;
   const live = useMemo(() => data.creators.filter((c) => !c.archived_at), [data.creators]);
+  // The mailbox chips themselves count over everyone; everything else over the picked mailbox.
+  const liveHere = useMemo(() => live.filter((c) => inBox(c.id)), [live, inBox]);
   const critCounts = useMemo(() => {
     const out = { fits: 0, over: 0, slight: 0, hard: 0, none: 0 };
-    for (const c of live) out[verdictOf(c, criteria).level]++;
+    for (const c of liveHere) out[verdictOf(c, criteria).level]++;
     return out;
-  }, [live, criteria]);
+  }, [liveHere, criteria]);
   const outsideCount = critCounts.over + critCounts.slight + critCounts.hard;
-  const noContactCount = useMemo(() => live.filter(hasNoContact).length, [live]);
+  const noContactCount = useMemo(() => liveHere.filter(hasNoContact).length, [liveHere]);
   const boxCounts = useMemo(() => mailboxCounts(live.map((c) => c.id), chase.boxes), [live, chase.boxes]);
-  const replyCount = chase.reply.filter((c) => c.type === "creator").length;
+  const replyCount = chase.reply.filter(mine).length;
   // Weekend: follow-ups (and on a scout day, replies) wait for the next working day.
-  const parkedCount = [...chase.parked.due, ...chase.parked.reply].filter((c) => c.type === "creator").length;
-  const reachCount = chase.reach.filter((c) => c.type === "creator").length;
-  const managedCount = chase.managed.filter((c) => c.type === "creator").length;
-  const cancelCount = chase.cancel.filter((c) => c.type === "creator").length;
-  const noList = [...chase.no.values()].filter((e) => e.type === "creator");
+  const parkedCount = [...chase.parked.due, ...chase.parked.reply].filter(mine).length;
+  const reachCount = chase.reach.filter(mine).length;
+  const managedCount = chase.managed.filter(mine).length;
+  const cancelCount = chase.cancel.filter(mine).length;
+  const noList = [...chase.no.entries()].filter(([id, e]) => e.type === "creator" && inBox(id)).map(([, e]) => e);
   const noCount = noList.length;
   const maybeCount = noList.filter((e) => e.group === "maybe").length;
-  const inboundCount = useMemo(() => data.creators.filter((item) => !item.archived_at && item.pipeline_status === "inbound").length, [data.creators]);
+  const inboundCount = useMemo(() => liveHere.filter((item) => item.pipeline_status === "inbound").length, [liveHere]);
 
   const cyclePriority = (creator: Creator) => {
     const next = creator.priority === "none" ? "soon" : creator.priority === "soon" ? "urgent" : ("none" as Priority);

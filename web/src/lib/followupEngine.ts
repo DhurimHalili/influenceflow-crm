@@ -45,7 +45,10 @@ export type Touch = { id: string; at: string; dir: "out" | "in"; source: TouchSo
   /** An email in another thread than the one reminders follow (history, never part of this round's count). */
   otherThread?: boolean;
   /** Their message only acknowledges ("Thanks!", "Got it"): a reply, but nothing to answer once they're won. */
-  ack?: boolean };
+  ack?: boolean;
+  /** No longer in Gmail (Trash / deleted for good). Still counts: the other person got it. */
+  gone?: "trash" | "deleted";
+  goneAt?: string };
 
 /**
  * Several email threads with one person (after 4 follow-ups you start a fresh
@@ -189,6 +192,7 @@ export function timeline(target: Target, followups: Followup[], events: EmailEve
     counterpart: e.counterpart || undefined,
     quiet: e.direction === "in" && silent(e.reply_kind),
     ack: e.direction === "in" && !silent(e.reply_kind) && isAck(e.snippet || ""),
+    ...(e.gone ? { gone: e.gone, goneAt: e.gone_at || undefined } : {}),
   }));
   markCrossed(mail, mine, events);
   // Stored newest-first; reversed so touches logged in the same second keep their order.

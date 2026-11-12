@@ -395,6 +395,10 @@ svg.logo-mark { --logo-glow: #ff7ad9; display: block; flex: none; width: auto; h
 .touch .touch-detail { color: var(--text-soft); font-size: 12px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
 .src-chip { padding: 0 6px; border-radius: 6px; background: #fdecea; color: #c5221f; font-style: normal; font-size: 9.5px; font-weight: 800; letter-spacing: .3px; }
 [data-theme="dark"] .src-chip { background: rgba(234, 67, 53, .18); color: #ff8a80; }
+.gone-chip { margin-left: 4px; padding: 0 6px; border-radius: 6px; background: color-mix(in srgb, var(--warning) 15%, transparent); color: color-mix(in srgb, var(--warning) 60%, var(--text)); font-style: normal; font-size: 9.5px; font-weight: 800; letter-spacing: .3px; }
+.gone-note { display: flex; gap: 8px; align-items: flex-start; margin: 10px 0 0; padding: 9px 11px; border: 1px solid color-mix(in srgb, var(--warning) 35%, var(--line)); border-radius: 11px; background: color-mix(in srgb, var(--warning) 7%, var(--surface-solid)); color: var(--text-soft); font-size: 12.5px; line-height: 1.45; }
+.gone-note > svg { flex: none; margin-top: 2px; color: color-mix(in srgb, var(--warning) 70%, var(--text)); }
+.gone-note b { color: var(--text); }
 .touch .fu-remove { opacity: .55; }
 .touch:hover .fu-remove { opacity: 1; }
 .conversation-actions { position: relative; }

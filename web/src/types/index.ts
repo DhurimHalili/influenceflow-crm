@@ -493,6 +493,10 @@ export interface EmailEvent {
   /** This email's Message-ID and the one it answers (lowercase, no <>). */
   message_key?: string;
   in_reply_to?: string;
+  /** No longer in Gmail: 'trash' (in Trash) or 'deleted' (gone for good). Still counts — the other person got it. */
+  gone?: "" | "trash" | "deleted";
+  /** When the CRM first saw it gone. */
+  gone_at?: string | null;
 }
 
 /** Someone outside the CRM who wrote to one of your mailboxes and looks like a real enquiry. */
