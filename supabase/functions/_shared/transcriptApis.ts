@@ -19,7 +19,7 @@ type Outcome = TxResult | { status: "quota" | "bad_key" | "retry" | "error"; why
 type Provider = { name: string; env: string; perDay: number; get: (id: string, key: string) => Promise<Outcome> };
 
 const env = (k: string) => (typeof Deno !== "undefined" ? Deno.env.get(k) || "" : "");
-const clean = (s: unknown) => String(s ?? "").replace(/\s+/g, " ").trim().slice(0, 400);
+const clean = (s: unknown, max = 400) => String(s ?? "").replace(/\s+/g, " ").trim().slice(0, max);
 const sane = (caps: Caption[]) => caps.filter(([t, s]) => Number.isFinite(t) && t >= 0 && s).slice(0, 12_000).map(([t, s]) => [Math.round(t), s] as Caption);
 
 async function call(url: string, headers: Record<string, string>): Promise<Response | null> {
@@ -32,15 +32,24 @@ const common = (res: Response | null): Outcome | null =>
         : res.status >= 500 || res.status === 408 ? { status: "retry", why: `${res.status}` }
           : null;
 
-/** "[1:02:03] text" / "[m:ss] text" paragraphs (youtube-transcript.ai's markdown) → [ms, text]. */
+/**
+ * "[1:02:03] text" / "[m:ss] text" paragraphs (youtube-transcript.ai's markdown) → [ms, text]. A paragraph
+ * can run over several lines and a stamp can be bold ("**[0:05]**"): every line after a stamp belongs to it
+ * until the next one; the metadata header before the first stamp is skipped.
+ */
 export function parseStamped(text: string): Caption[] {
   const out: Caption[] = [];
-  for (const line of text.split(/\r?\n/)) {
-    const m = /^\s*\[(?:(\d+):)?(\d{1,2}):(\d{2})\]\s*(.+)$/.exec(line);
-    if (!m) continue;
-    out.push([((Number(m[1] || 0) * 60 + Number(m[2])) * 60 + Number(m[3])) * 1000, clean(m[4])]);
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.replace(/\*\*|__/g, "").trim();
+    if (!line) continue;
+    const m = /^\[(?:(\d+):)?(\d{1,2}):(\d{2})\]\s*(.*)$/.exec(line);
+    if (m) { out.push([((Number(m[1] || 0) * 60 + Number(m[2])) * 60 + Number(m[3])) * 1000, clean(m[4], 4000)]); continue; }
+    // A heading or list marker is not speech; anything else continues the current paragraph.
+    if (!out.length || /^#{1,6}\s|^[-*]\s*\w+:\s/.test(line)) continue;
+    const last = out[out.length - 1];
+    last[1] = clean(`${last[1]} ${line}`, 4000);
   }
-  return out;
+  return out.filter(([, t]) => t);
 }
 
 export const PROVIDERS: Provider[] = [
