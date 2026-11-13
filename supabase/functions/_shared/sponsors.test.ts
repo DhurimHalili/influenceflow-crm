@@ -132,6 +132,17 @@ eq("not sponsored by X", notSp.mentions.filter((m) => m.confidence >= 0.4).map((
 const members = readVideo(vid({ description: "Thanks to all channel members for supporting the channel!" }), ctx);
 eq("thanks to members", brands(members), []);
 
+// ---- seen on real channels ----
+const app = readVideo(vid({ description: "Mit meinem Code „MoodyCars“ erhältst du 5 % Rabatt auf AUTODOC-Produkte! Lade die AUTODOC-App herunter: https://bit.ly/AUTODOC_Mo\nAutodoc Shop: https://www.autodoc.de/?utm_source=youtube&utm_campaign=moody" }), { ...ctx, resolved: { "https://bit.ly/AUTODOC_Mo": "https://autodoc.onelink.me/abc?pid=youtube" } });
+eq("an app deep link isn't a brand of its own", app.mentions.some((m) => /onelink/.test(m.domain)), false);
+const listing = readVideo(vid({ description: "→ Zum Bentley: https://suchen.mobile.de/fahrzeuge/details.html?id=439082080&cn=DE&utm_source=yt" }), ctx);
+eq("a car listing on a marketplace isn't a deal (not even a store link)", listing.mentions.map((m) => m.name), []);
+const joined = combine([
+  { video: { id: "v1", title: "a", at: "2026-10-01" }, m: { key: "autodoc.de", name: "Autodoc", domain: "autodoc.de", domainFrom: "link", kind: "sponsored", confidence: 0.9, signals: ["description"], quote: "x" } },
+  { video: { id: "v2", title: "b", at: "2026-10-02" }, m: { key: "n:autodoc", name: "AUTODOC", domain: "", domainFrom: "", kind: "sponsored", confidence: 0.7, signals: ["description"], quote: "y" } },
+]);
+eq("a name-only find joins the same brand's domain", joined.map((l) => [l.key, l.videos]), [["autodoc.de", 2]]);
+
 // ---- across videos ----
 const v1 = { id: "a1", title: "Build 1", at: "2026-08-01" }, v2 = { id: "a2", title: "Build 2", at: "2026-09-01" };
 const links = combine([

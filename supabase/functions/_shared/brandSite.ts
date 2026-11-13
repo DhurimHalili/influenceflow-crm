@@ -179,7 +179,7 @@ export function siteName(f: Pick<SiteFacts, "title" | "siteName" | "orgName">, d
   const label = squash(domain.split(".")[0] || "");
   const want = [label, squash(hint)].filter((x) => x.length >= 3);
   const cands = [f.siteName, f.orgName, ...f.title.split(/\s[|\-–—:·]\s|\s[|–—]\s?/)]
-    .map((x) => x.replace(/\b(official|store|shop|online|website|home ?page|welcome to)\b/gi, "").replace(/\s+(?:US|USA|UK|EU|CA|AU|Global|International)$/, "").replace(/\s+/g, " ").trim())
+    .map((x) => x.replace(/\b(official|store|shop|online|website|home ?page|welcome to)\b/gi, "").replace(/\s+(?:US|USA|UK|EU|CA|AU|NZ|DE|NL|FR|ES|IT|AT|CH|BE|SE|DK|NO|PL|Global|International|Europe|Shop|Store)$/i, "").replace(/\s+/g, " ").trim())
     .filter((x) => x.length >= 2 && x.length <= 40);
   const match = cands.find((x) => { const q = squash(x); return q.length >= 2 && want.some((w) => q === w || (q.length >= 4 && (w.includes(q) || q.includes(w)))); });
   return match || (want.length ? "" : cands[0]) || hint || (domain.split(".")[0] || domain);
