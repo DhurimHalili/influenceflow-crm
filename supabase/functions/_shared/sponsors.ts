@@ -511,8 +511,14 @@ export type Link = {
 export function combine(itemsIn: { video: { id: string; title: string; at: string }; m: Mention }[]): Link[] {
   // A name-only finding joins the brand with that name's domain when this creator links it elsewhere.
   const byLabel = new Map<string, Mention>();
-  for (const it of itemsIn) if (it.m.domain && !it.m.store) { const l = norm(it.m.domain.split(".")[0]); if (l.length >= 3 && !byLabel.has(l)) byLabel.set(l, it.m); const n = norm(it.m.name); if (n.length >= 3 && !byLabel.has(n)) byLabel.set(n, it.m); }
+  const linkFirst = [...itemsIn].sort((a, b) => Number(b.m.domainFrom === "link") - Number(a.m.domainFrom === "link"));
+  for (const it of linkFirst) if (it.m.domain && !it.m.store) { const l = norm(it.m.domain.split(".")[0]); if (l.length >= 3 && !byLabel.has(l)) byLabel.set(l, it.m); const n = norm(it.m.name); if (n.length >= 3 && !byLabel.has(n)) byLabel.set(n, it.m); }
   const items = itemsIn.map((it) => {
+    if (it.m.domain && !it.m.store) {
+      // Same brand on another country domain ("autodoc.com" vs the creator's "autodoc.de"): one row.
+      const same = byLabel.get(norm(it.m.domain.split(".")[0]));
+      return same && same.key !== it.m.key ? { ...it, m: { ...it.m, key: same.key, domain: same.domain, domainFrom: same.domainFrom } } : it;
+    }
     if (it.m.domain) return it;
     const hit = byLabel.get(norm(it.m.name)) || byLabel.get(it.m.key.replace(/^n:/, ""));
     return hit ? { ...it, m: { ...it.m, key: hit.key, domain: hit.domain, domainFrom: hit.domainFrom, name: hit.name } } : it;

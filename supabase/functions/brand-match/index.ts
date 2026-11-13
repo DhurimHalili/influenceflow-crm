@@ -35,7 +35,7 @@ import { listenConfigured, listenLeft, listenTo, useListenBudget } from "../_sha
 const APP_URL = (Deno.env.get("APP_URL") || "https://dhurimhalili.github.io/influenceflow-crm").replace(/\/$/, "");
 const ALLOWED_ORIGINS = new Set([new URL(APP_URL).origin, "http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:4173", "http://localhost:5199"]);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const READER_V = 3;
+const READER_V = 4;
 const DAY = 86400_000;
 const BACK_DAYS = 400;
 const RESCAN_DAYS = 7;
@@ -168,7 +168,10 @@ async function judge(creator: string, rows: VideoRow[]) {
       const at = lines.findIndex((l) => l.includes(m.quote.slice(0, 40)) || l.toLowerCase().includes(m.name.toLowerCase()));
       const excerpt = (at >= 0 ? lines.slice(Math.max(0, at - 1), at + 2) : [m.quote]).join("\n").slice(0, 500);
       state[`item${k}`] = { video_title: row.title.slice(0, 140), youtube_paid_promotion_label: row.paid, sponsor_segment_marked: row.segments.some((s) => s.category === "sponsor"), brand: m.name, brand_website: m.domain || "unknown", text: excerpt };
-      questions[`item${k}`] = { type: "choice", instructions: `Look at item${k}. How is the creator connected to the brand "${m.name}" in that video?`, criteria: JUDGE };
+      // A plain affiliate / referral link can be confirmed or dropped, never promoted to a paid deal: the
+      // paid label is about the video, not this brand (a referral in every description isn't the sponsor).
+      const criteria = m.kind === "affiliate" && !m.unsure ? { affiliate: JUDGE.affiliate, own: JUDGE.own, mention: JUDGE.mention, not_brand: JUDGE.not_brand } : JUDGE;
+      questions[`item${k}`] = { type: "choice", instructions: `Look at item${k}. How is the creator connected to the brand "${m.name}" in that video? YouTube's paid-promotion label and a marked sponsor segment say SOMETHING in the video is paid — not that this brand is.`, criteria };
     });
     const answers = await decide(state, questions);
     if (!answers) return;
@@ -296,6 +299,14 @@ async function scanCreator(admin: SupabaseClient, c: CreatorRow, deadline: numbe
     rows.set(v.id, row);
     touched.push(row);
   }
+  // Older videos the paging didn't reach, read by older rules: read again from what is stored (no API call).
+  for (const r of rows.values()) {
+    if (r.reader_v >= READER_V || touched.includes(r)) continue;
+    const reading = readVideo({ id: r.video_id, title: r.title, description: r.description, tags: r.tags, paid: r.paid, segments: r.segments, at: r.published_at || "", secs: r.secs }, ctx);
+    r.mentions = [...reading.mentions, ...r.mentions.filter((m) => m.signals.includes("voice") && !reading.mentions.some((x) => x.key === m.key))];
+    r.reader_v = READER_V; r.judged_at = null;
+    touched.push(r);
+  }
   for (const [id, segs] of sb) {
     const r = rows.get(id);
     if (!r || touched.includes(r)) continue;
@@ -384,7 +395,9 @@ async function listenSome(admin: SupabaseClient, deadline: number): Promise<numb
       if (h.kind !== "sponsored" && h.kind !== "seeded" && h.kind !== "affiliate") continue;
       const k = idx.byName.get(h.name.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "")) || namesIn(h.name, idx)[0];
       const domain = k?.domain || h.domain;
-      const m: Mention = { key: domain || nameKey(h.name), name: k?.name || h.name, domain, domainFrom: k?.domain ? "known" : "", kind: h.kind, confidence: h.kind === "sponsored" ? 0.84 : h.kind === "seeded" ? 0.8 : 0.66, signals: ["voice", ...(r.paid ? ["paid_label" as const] : [])], quote: `“${h.quote}”`, t: r.listen.start };
+      // Heard with their own words = strong; a bare "Werbung" / empty quote = possible only.
+      const said = h.quote.replace(/[^\p{L}\p{N}]+/gu, " ").trim().split(" ").filter(Boolean).length >= 4;
+      const m: Mention = { key: domain || nameKey(h.name), name: k?.name || h.name, domain, domainFrom: k?.domain ? "known" : "", kind: h.kind, confidence: !said ? 0.55 : h.kind === "sponsored" ? 0.84 : h.kind === "seeded" ? 0.8 : 0.66, signals: ["voice", ...(r.paid ? ["paid_label" as const] : [])], quote: `“${h.quote}”`, t: r.listen.start };
       if (!r.mentions.some((x) => x.key === m.key && x.confidence >= m.confidence)) r.mentions = [...r.mentions.filter((x) => x.key !== m.key), m];
     }
     r.listened_at = new Date().toISOString();
