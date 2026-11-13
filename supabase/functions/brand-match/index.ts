@@ -35,7 +35,7 @@ import { listenConfigured, listenLeft, listenTo, useListenBudget } from "../_sha
 const APP_URL = (Deno.env.get("APP_URL") || "https://dhurimhalili.github.io/influenceflow-crm").replace(/\/$/, "");
 const ALLOWED_ORIGINS = new Set([new URL(APP_URL).origin, "http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:4173", "http://localhost:5199"]);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const READER_V = 1;
+const READER_V = 2;
 const DAY = 86400_000;
 const BACK_DAYS = 400;
 const RESCAN_DAYS = 7;
@@ -510,13 +510,20 @@ type SeenRow = { user_id: string; brand_key: string; name: string; domain: strin
 async function checkSeen(admin: SupabaseClient, s: SeenRow) {
   const now = new Date().toISOString();
   let domain = s.domain, check = "none", name = s.name, site: Record<string, unknown> | null = null;
+  let landed = "";
   const look = async (d: string) => {
     const page = await getText(`https://${d}`, { timeout: 9000, max: 1_500_000 });
     if (!page || page.status >= 400 && page.status !== 403) return null;
+    landed = normalizeDomain(page.url || "");
     return parseHtml(page.text, page.url || `https://${d}`);
   };
   if (domain) {
     const f = await look(domain);
+    // A tracking domain ("carvertical.deal", "trade.re") that lands on the brand's real site: keep the real one.
+    if (f && !f.blocked && landed && landed !== domain && hostKind(landed) === "brand" && siteIsBrand(name, landed, f)) {
+      await admin.from("creator_brands").update({ domain: landed }).eq("user_id", s.user_id).eq("brand_key", s.brand_key);
+      domain = landed;
+    }
     if (!f) check = "none";
     else if (f.blocked) check = "blocked";
     else {

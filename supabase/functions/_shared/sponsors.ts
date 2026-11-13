@@ -80,7 +80,11 @@ const SOCIAL = list(`youtube.com youtu.be instagram.com tiktok.com twitter.com x
   linkedin.com snapchat.com pinterest.com tumblr.com medium.com substack.com github.com gitlab.com docs.google.com forms.gle goo.gl google.com
   bsky.app mastodon.social t.me telegram.me wa.me whatsapp.com cash.app paypal.me paypal.com venmo.com gumroad.com ytjobs.co
   vimeo.com imgur.com dropbox.com drive.google.com onlyfans.com fansly.com mailchi.mp eepurl.com convertkit.com kit.com flowcode.com
-  wikipedia.org archive.org youtube-nocookie.com ytimg.com ggpht.com googleusercontent.com`);
+  wikipedia.org archive.org youtube-nocookie.com ytimg.com ggpht.com googleusercontent.com apps.apple.com play.google.com itunes.apple.com
+  testflight.apple.com
+  mobile.de autoscout24.de autoscout24.com autotrader.com autotrader.co.uk cars.com carsandbids.com bringatrailer.com kleinanzeigen.de craigslist.org
+  marktplaats.nl leboncoin.fr willhaben.at subito.it olx.pl`);
+// (The last line: marketplaces and classifieds — a listing link "→ Zum Bentley: mobile.de/…" is not a deal.)
 const STORES: Record<string, string> = {
   "amazon.com": "Amazon", "amzn.to": "Amazon", "amzn.eu": "Amazon", "a.co": "Amazon", "amazon.co.uk": "Amazon", "amazon.de": "Amazon", "amazon.ca": "Amazon",
   "amazon.com.au": "Amazon", "amazon.fr": "Amazon", "amazon.it": "Amazon", "amazon.es": "Amazon", "amazon.co.jp": "Amazon", "amazon.in": "Amazon", "amazon.nl": "Amazon",
@@ -95,9 +99,9 @@ const STORES: Record<string, string> = {
 const REDIRECTS = list(`bit.ly bitly.com geni.us tinyurl.com t.co ow.ly rebrand.ly short.io dub.sh dub.co lnk.to cutt.ly shorturl.at is.gd buff.ly tidd.ly prf.hn
   go.skimresources.com skimresources.com howl.me howl.link shopmy.us rstyle.me liketk.it urlgeni.us glnk.io fave.co shareasale.com awin1.com linksynergy.com
   anrdoezrs.net jdoqocy.com tkqlhce.com dpbolvw.net kqzyfj.com emjcd.com avantlink.com pntra.com pjtra.com pjatr.com redirect.viglink.com go.redirectingat.com
-  l.instagram.com lmg.gg lttstore.link trk.link bfy.tw ko.gl hyperurl.co amzlink.to joinsg.co go2.page fas.st clk.ink sovrn.co link.ltk.com`);
+  onelink.me app.link page.link sng.link adj.st smart.link go.link l.instagram.com lmg.gg lttstore.link trk.link bfy.tw ko.gl hyperurl.co amzlink.to joinsg.co go2.page fas.st clk.ink sovrn.co link.ltk.com`);
 // impact.com tracking hosts: "<brand>.sjv.io", "<brand>.pxf.io", "<brand>.8odi.net"… — the first label is the brand.
-const IMPACT = /^([a-z0-9-]+)\.(?:sjv\.io|pxf\.io|[a-z0-9]{4}\.net|evyy\.net|ojrq\.net|xhuz\.net|syuh\.net|mno8\.net|vzew\.net|uqhv\.net|ngih\.net|4cl5\.net|i387\.net|y8uw\.net|r65t\.net|fafn\.net)$/;
+const IMPACT = /^([a-z0-9-]+)\.(?:onelink\.me|app\.link|page\.link|sng\.link|go\.link|smart\.link|test-app\.link|sjv\.io|pxf\.io|[a-z0-9]{4}\.net|evyy\.net|ojrq\.net|xhuz\.net|syuh\.net|mno8\.net|vzew\.net|uqhv\.net|ngih\.net|4cl5\.net|i387\.net|y8uw\.net|r65t\.net|fafn\.net)$/;
 
 export type HostKind = "social" | "store" | "redirect" | "brand";
 export function hostKind(host: string): HostKind {
@@ -494,7 +498,15 @@ export type Link = {
  * surer (each extra sighting closes part of the gap), the kind is the one with
  * the most weight (a paid deal beats an affiliate link when both are solid).
  */
-export function combine(items: { video: { id: string; title: string; at: string }; m: Mention }[]): Link[] {
+export function combine(itemsIn: { video: { id: string; title: string; at: string }; m: Mention }[]): Link[] {
+  // A name-only finding joins the brand with that name's domain when this creator links it elsewhere.
+  const byLabel = new Map<string, Mention>();
+  for (const it of itemsIn) if (it.m.domain && !it.m.store) { const l = norm(it.m.domain.split(".")[0]); if (l.length >= 3 && !byLabel.has(l)) byLabel.set(l, it.m); const n = norm(it.m.name); if (n.length >= 3 && !byLabel.has(n)) byLabel.set(n, it.m); }
+  const items = itemsIn.map((it) => {
+    if (it.m.domain) return it;
+    const hit = byLabel.get(norm(it.m.name)) || byLabel.get(it.m.key.replace(/^n:/, ""));
+    return hit ? { ...it, m: { ...it.m, key: hit.key, domain: hit.domain, domainFrom: hit.domainFrom, name: hit.name } } : it;
+  });
   const by = new Map<string, { video: { id: string; title: string; at: string }; m: Mention }[]>();
   for (const it of items) (by.get(it.m.key) || by.set(it.m.key, []).get(it.m.key)!).push(it);
   const out: Link[] = [];
