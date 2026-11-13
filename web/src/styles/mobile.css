@@ -47,10 +47,6 @@ img, svg, video { max-width: 100%; }
   .panel-heading { flex-wrap: wrap; gap: 10px; }
   .panel-heading .tabs { margin-bottom: 0; }
 
-  /* Bulk bar stays reachable and scrolls on narrow phones. */
-  .bulk-bar { gap: 10px; }
-  .bulk-bar > * { flex: 0 0 auto; }
-
   /* Modals: full-width sheets with room to scroll and safe-area padding. */
   .modal { padding-bottom: calc(18px + env(safe-area-inset-bottom)); }
   .modal-actions { flex-wrap: wrap; }

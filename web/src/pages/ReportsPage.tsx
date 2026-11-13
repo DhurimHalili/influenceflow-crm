@@ -96,7 +96,9 @@ export default function ReportsPage() {
       if (item.type === "brand" && wonByCampaign.has(item.record.id)) rank = 4;
       const wonAct = history.filter((a) => rankFromText(a.text) === 4).map((a) => a.at).sort()[0];
       const wonAt = rank === 4 ? wonAct || item.record.status_updated_at : null;
-      const startAt = first?.at || null;
+      // Someone you moved along by hand with nothing logged (put straight on the roster after a call)
+      // still counts — from the day you contacted or added them — so Reports never drops a record the board shows.
+      const startAt = first?.at || (rank > 0 ? (item.record as Creator).date_contacted || item.record.created_at || null : null);
       // The mailbox that opened the conversation (or, for someone who wrote first, the one they wrote to).
       // A hand-logged first touch (a DM, a call) has no mailbox: the first real email decides.
       const mailbox = ((inbound ? first?.mailbox || touches.find((t) => t.mailbox)?.mailbox : touches.find((t) => t.dir === "out" && t.mailbox)?.mailbox) || "").toLowerCase();
@@ -127,7 +129,7 @@ export default function ReportsPage() {
       { key: "reached", label: "Reached out", value: cohort.length, icon: Send, now: "" },
       { key: "replied", label: "Replied", value: stage(2), icon: Reply, now: "" },
       { key: "negotiating", label: "Got to negotiating", value: stage(3), icon: HandCoins, now: `${cohort.filter((p) => p.record.pipeline_status === "negotiating").length} negotiating now` },
-      { key: "won", label: who === "creator" ? "Roster" : "Signed", value: stage(4), icon: Trophy, now: "" },
+      { key: "won", label: who === "creator" ? "Reached roster" : "Signed", value: stage(4), icon: Trophy, now: (() => { const still = cohort.filter((p) => p.rank >= 4 && ["roster", "signed", "active", "completed"].includes(p.record.pipeline_status)).length; const left = stage(4) - still; return left > 0 ? `${still} ${who === "creator" ? "on roster" : "signed"} now · ${left} left later` : ""; })() },
     ];
     const inboundSide = side(inbound);
     const closeDays = side(people).filter((p) => p.wonAt && p.startAt).map((p) => Math.max(0, (new Date(p.wonAt!).getTime() - new Date(p.startAt!).getTime()) / 86400000));
@@ -245,12 +247,12 @@ export default function ReportsPage() {
 
     <section className="dash-panel funnel-hero">
       <div className="funnel-hero-head">
-        <div className="funnel-headline"><span className="funnel-big">{report.contacted ? `${conversion}%` : "—"}</span><div><strong>of the {who === "creator" ? "influencers" : "brands"} you reached out to {who === "creator" ? "joined your roster" : "signed"}</strong><small>{report.contacted ? `${report.wonCount} of ${report.contacted} · first contact in this range` : "Reach out to someone and this fills in"}</small></div></div>
+        <div className="funnel-headline"><span className="funnel-big">{report.contacted ? `${conversion}%` : "—"}</span><div><strong>of the {who === "creator" ? "influencers" : "brands"} you reached out to {who === "creator" ? "made it to your roster" : "signed"}</strong><small>{report.contacted ? `${report.wonCount} of ${report.contacted} · first contact in this range` : "Reach out to someone and this fills in"}</small></div></div>
         <Tabs active={who} onChange={(v) => setWho(v as Who)} tabs={[{ value: "creator", label: "Influencers" }, { value: "brand", label: "Brands" }]} />
       </div>
       <ol className="funnel-steps">{report.funnel.map((step, i) => { const prev = i ? report.funnel[i - 1].value : 0; return <li key={step.key} className={`fs-${step.key}`}>
-        {i > 0 && <span className="fs-conv" title={`From ${report.funnel[i - 1].label.toLowerCase()}`}>{pct(step.value, prev)}%</span>}
-        <div className="fs-card"><span className="fs-icon"><step.icon size={15} /></span><b>{step.value}</b><small>{step.label}</small>{step.now && step.value !== Number.parseInt(step.now, 10) && <em className="fs-now" title="Counts everyone who reached this stage, including those who went on to sign or ended later">{step.now}</em>}<i className="fs-bar"><em style={{ width: `${top ? Math.max(step.value ? 4 : 0, (step.value / top) * 100) : 0}%` }} /></i></div>
+        {i > 0 && <span className="fs-conv" aria-hidden="true">→</span>}
+        <div className="fs-card"><span className="fs-icon"><step.icon size={15} /></span><b>{step.value}</b><small>{step.label}</small>{i === 0 && <span className="fs-step">first contact in this range</span>}{i > 0 && <span className="fs-step" title={`${step.value} of the ${prev} who ${report.funnel[i - 1].label.toLowerCase()}`}>{pct(step.value, prev)}% of {i === 1 ? "those reached" : i === 2 ? "those who replied" : "those negotiating"}</span>}{step.now && step.value !== Number.parseInt(step.now, 10) && <em className="fs-now" title="Counts everyone who reached this stage, including those who went on or ended later">{step.now}</em>}<i className="fs-bar"><em style={{ width: `${top ? Math.max(step.value ? 4 : 0, (step.value / top) * 100) : 0}%` }} /></i></div>
       </li>; })}</ol>
       <p className="funnel-note">{report.contacted ? <>Out of every <b>10</b> {who === "creator" ? "influencers" : "brands"} you contact, about <b>{Math.round((report.repliedCount / report.contacted) * 10)}</b> reply and <b>{Math.round((report.wonCount / report.contacted) * 100) / 10}</b> {who === "creator" ? "join your roster" : "sign"}.{report.closedCount ? <> It takes about <b>{report.closeDays} day{report.closeDays === 1 ? "" : "s"}</b> from first contact to {wonWord}.</> : null}</> : "Your funnel appears as soon as your first outreach is logged or synced from Gmail."}</p>
     </section>

@@ -48,3 +48,15 @@ export async function officialSite(name: string, get: Fetcher = defaultFetch): P
   const domains = new Set(found.map((f) => f.domain));
   return domains.size === 1 ? found[0] : null;
 }
+
+
+/** DuckDuckGo's free Instant Answer API: the "Official site" it lists for an entity with exactly this name. */
+export async function duckSite(name: string, get: Fetcher = defaultFetch): Promise<string> {
+  const q = encodeURIComponent(name.slice(0, 60));
+  const d = await get(`https://api.duckduckgo.com/?q=${q}&format=json&no_html=1&skip_disambig=1&t=influenceflow`) as { Heading?: string; Results?: { FirstURL?: string; Text?: string }[]; Type?: string } | null;
+  if (!d || d.Type === "D") return "";
+  // The answer must be about this very name (not a near miss), and the site must carry it.
+  if (squash(d.Heading || "").replace(/(?:vpn|inc|ltd|company|app)$/, "") !== squash(name).replace(/(?:vpn|inc|ltd|company|app)$/, "") && !squash(d.Heading || "").startsWith(squash(name))) return "";
+  const site = normalizeDomain(String(d.Results?.[0]?.FirstURL || ""));
+  return site && domainFits(name, site) ? site : "";
+}

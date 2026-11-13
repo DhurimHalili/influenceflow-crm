@@ -477,7 +477,7 @@ export function foundBrands(w: MatchWorld): Found[] {
 /** "Sure" when the domain is the creator's own link AND the site says it's that brand. */
 export const domainTrust = (s: Pick<SeenBrand, "domain" | "domain_check" | "checked_at" | "site">): { label: string; tone: "good" | "info" | "warn" } =>
   !s.domain ? { label: "No website yet", tone: "warn" }
-    : s.domain_check === "site" ? ((s.site as { via?: string } | null)?.via === "wikidata" ? { label: "Official site · Wikidata", tone: "good" } : (s.site as { via?: string } | null)?.via === "guess" ? { label: "Their site, found by name", tone: "info" } : { label: "Website checked", tone: "good" })
+    : s.domain_check === "site" ? (({ wikidata: { label: "Official site · Wikidata", tone: "good" }, search: { label: "Official site · DuckDuckGo", tone: "good" }, google: { label: "Official site · Google search", tone: "good" }, guess: { label: "Their site, found by name", tone: "info" } } as Record<string, { label: string; tone: "good" | "info" }>)[String((s.site as { via?: string } | null)?.via || "")] || { label: "Website checked", tone: "good" })
       : s.domain_check === "guess" ? { label: "Website found by name — check it", tone: "info" }
         : s.domain_check === "mismatch" ? { label: "Site name differs — check it", tone: "warn" }
           : s.domain_check === "blocked" ? { label: "Site blocks checks", tone: "info" }
