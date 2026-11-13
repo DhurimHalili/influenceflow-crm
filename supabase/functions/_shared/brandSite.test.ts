@@ -29,6 +29,11 @@ eq("site name prefers the domain over an odd og:site_name", siteName({ title: "V
 eq("region suffix dropped", siteName({ title: "Secretlab US", siteName: "", orgName: "" }, "secretlab.co"), "Secretlab");
 eq("a different company's site", siteIsBrand("Corsair", "corsairfly.example", { title: "Air travel deals", siteName: "Fly Away", orgName: "" }), false);
 
+eq("site name from a long og:site_name", siteName({ title: "", siteName: "Polestar – Elektroautos | Polestar", orgName: "" }, "polestar.com"), "Polestar");
+eq("site name drops a tagline", siteName({ title: "OBSBOT - Die beste Auto-Tracking-Webcam", siteName: "", orgName: "" }, "obsbot.com"), "OBSBOT");
+eq("a domain-spelled name needs the page to agree", siteIsBrand("Jasonsentme", "jasonsentme.com", { title: "Mattresses for every sleeper", siteName: "Dreamy", orgName: "" }), false);
+eq("…unless the page says nothing about itself", siteIsBrand("Tryx", "tryx.com", { title: "", siteName: "", orgName: "" }), true);
+
 const shop = parseShopify({ products: [{ title: "Luca L70 Case", product_type: "Case", tags: "white, atx", variants: [{ price: "129.99" }] }, { title: "Gift card", product_type: "", tags: [], variants: [{ price: "999999" }] }] });
 eq("shopify products", shop.map((p) => [p.title, p.type, p.price]), [["Luca L70 Case", "Case", 129.99], ["Gift card", "", 999999]]);
 eq("price stats ignore placeholders", priceStats([...shop, { title: "Fan", price: 19 }]), { min: 19, median: 129.99, max: 129.99, currency: "" });

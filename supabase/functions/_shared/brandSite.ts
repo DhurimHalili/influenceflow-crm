@@ -166,8 +166,11 @@ export function siteIsBrand(name: string, domain: string, f: Pick<SiteFacts, "ti
   const hay = [f.siteName, f.orgName, f.title.split(/[|\-–—:·]/)[0], f.title].map(squash).filter(Boolean);
   // The exact domain is enough ("tryx.com" for TRYX); a domain that only contains the name
   // ("corsairfly…") must also call itself that name on the page.
-  if (label && label === n) return true;
-  return hay.some((x) => x === n || (n.length >= 4 && x.includes(n)) || (x.length >= 4 && n.includes(x)));
+  const said = hay.some((x) => x === n || (n.length >= 4 && x.includes(n)) || (x.length >= 4 && n.includes(x)));
+  // The domain alone only counts when the page says nothing about itself (a script-only shell);
+  // otherwise the page must call itself that name ("jasonsentme.com" titled something else is not a brand check).
+  if (label && label === n) return said || !hay.some((x) => x.length >= 3);
+  return said;
 }
 
 /**
@@ -178,10 +181,11 @@ export function siteIsBrand(name: string, domain: string, f: Pick<SiteFacts, "ti
 export function siteName(f: Pick<SiteFacts, "title" | "siteName" | "orgName">, domain: string, hint = ""): string {
   const label = squash(domain.split(".")[0] || "");
   const want = [label, squash(hint)].filter((x) => x.length >= 3);
-  const cands = [f.siteName, f.orgName, ...f.title.split(/\s[|\-–—:·]\s|\s[|–—]\s?/)]
+  // Every part of every name the site gives ("Polestar – Elektroautos | Polestar" → "Polestar", "Elektroautos"…), shortest match wins.
+  const cands = [f.siteName, f.orgName, f.title].flatMap((x) => [...x.split(/\s[|\-–—:·]\s|\s[|–—]\s?/), x])
     .map((x) => x.replace(/\b(official|store|shop|online|website|home ?page|welcome to)\b/gi, "").replace(/\s+(?:US|USA|UK|EU|CA|AU|NZ|DE|NL|FR|ES|IT|AT|CH|BE|SE|DK|NO|PL|Global|International|Europe|Shop|Store)$/i, "").replace(/\s+/g, " ").trim())
     .filter((x) => x.length >= 2 && x.length <= 40);
-  const match = cands.find((x) => { const q = squash(x); return q.length >= 2 && want.some((w) => q === w || (q.length >= 4 && (w.includes(q) || q.includes(w)))); });
+  const match = cands.filter((x) => { const q = squash(x); return q.length >= 2 && want.some((w) => q === w || (q.length >= 4 && (w.includes(q) || q.includes(w)))); }).sort((a, b) => a.length - b.length)[0];
   return match || (want.length ? "" : cands[0]) || hint || (domain.split(".")[0] || domain);
 }
 
