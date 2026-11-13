@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { hasSupabase, supabase } from "../lib/supabase";
-import { byCreator, type BrandLink, type ContentRow, type IntelRow, type MatchWorld, type Pitch, type SeenBrand } from "../lib/match";
+import { byCreator, trustedLinks, type BrandLink, type ContentRow, type IntelRow, type MatchWorld, type Pitch, type SeenBrand } from "../lib/match";
 import { normalizeCriteria } from "../lib/criteria";
 import type { DealKind } from "../lib/sponsors";
 import { useData } from "./DataContext";
@@ -19,7 +19,7 @@ import { useToast } from "./ToastContext";
 // A creator you add with a YouTube channel is read right away (not at the
 // next 3-minute cron), and a toast says what was found.
 
-export type MatchStatus = { stamp?: string; creators: number; read: number; noYoutube?: number; lastRead?: string | null; everyMin?: number; perRun?: number; rescanDays?: number; brandDays?: number; brands: number; researched: number; youtube: boolean; clef: { configured: boolean; left: number; cap: number; pausedUntil: string | null }; listen: { configured: boolean; secondsLeft: number } };
+export type MatchStatus = { stamp?: string; creators: number; read: number; failed?: number; backfilling?: number; videos?: number; paidVideos?: number; transcripts?: number; noCaptions?: number; transcriptWaiting?: number; listened?: number; listenQueue?: number; noYoutube?: number; lastRead?: string | null; everyMin?: number; perRun?: number; rescanDays?: number; brandDays?: number; brands: number; researched: number; youtube: boolean; clef: { configured: boolean; left: number; cap: number; pausedUntil: string | null }; listen: { configured: boolean; secondsLeft: number } };
 type Result = { ok: boolean; message: string };
 type Value = {
   ready: boolean;
@@ -49,7 +49,7 @@ type Value = {
 
 const MatchContext = createContext<Value | null>(null);
 
-async function call<T>(body: Record<string, unknown>): Promise<{ data?: T; error?: string }> {
+export async function matchCall<T>(body: Record<string, unknown>): Promise<{ data?: T; error?: string }> {
   const { data, error } = await supabase.functions.invoke("brand-match", { body });
   if (!error) return { data: data as T };
   const res = (error as { context?: Response }).context;
@@ -95,7 +95,7 @@ export function MatchProvider({ children }: { children: ReactNode }) {
     setLoading(true);
     try {
       const [l, i, c, s, p] = await Promise.all([
-        pageAll<BrandLink>("creator_brands", "id, creator_id, brand_key, brand_name, domain, brand_id, kind, confidence, store, videos, first_at, last_at, evidence, by_ai, manual, verdict, verdict_kind, verdict_at, updated_at", userId),
+        pageAll<BrandLink>("creator_brands", "id, creator_id, brand_key, brand_name, domain, brand_id, kind, confidence, store, videos, first_at, last_at, evidence, by_ai, manual, verdict, verdict_kind, verdict_at, updated_at, video_ids", userId),
         pageAll<IntelRow>("brand_intel", "brand_id, intel, status, researched_at", userId),
         pageAll<ContentRow>("creator_content", "creator_id, content, status, note, scanned_at", userId),
         pageAll<SeenBrand>("seen_brands", "brand_key, name, domain, domain_check, site, checked_at, hidden, added_brand_id", userId),
@@ -108,7 +108,7 @@ export function MatchProvider({ children }: { children: ReactNode }) {
       setPitches(p);
       setReady(true);
       setError("");
-      const st = await call<MatchStatus & { ok: boolean }>({ action: "status" });
+      const st = await matchCall<MatchStatus & { ok: boolean }>({ action: "status" });
       if (st.data) { setStatus(st.data); stamp.current = st.data.stamp || ""; }
     } catch (e) {
       // Before the migration runs the tables don't exist: say so plainly, keep the app working.
@@ -128,7 +128,7 @@ export function MatchProvider({ children }: { children: ReactNode }) {
     if (!wanted || !pending) return;
     const t = window.setInterval(async () => {
       if (document.visibilityState !== "visible" || busy.current) return;
-      const st = await call<MatchStatus & { ok: boolean }>({ action: "status" });
+      const st = await matchCall<MatchStatus & { ok: boolean }>({ action: "status" });
       if (!st.data) return;
       if (st.data.stamp && st.data.stamp === stamp.current) { setStatus(st.data); return; }
       stamp.current = st.data.stamp || "";
@@ -140,7 +140,7 @@ export function MatchProvider({ children }: { children: ReactNode }) {
   const scan = useCallback(async (creatorId: string, opts: { quiet?: boolean } = {}): Promise<Result> => {
     setScanning((s) => new Set(s).add(creatorId));
     try {
-      const r = await call<{ ok: boolean; videos: number; newVideos: number; links: number; status: string }>({ action: "scan_creator", id: creatorId });
+      const r = await matchCall<{ ok: boolean; videos: number; newVideos: number; links: number; status: string }>({ action: "scan_creator", id: creatorId });
       if (r.error || !r.data) { if (!opts.quiet) toast(r.error || "Couldn't read their videos.", "error"); return { ok: false, message: r.error || "" }; }
       await refresh();
       const d = r.data;
@@ -155,7 +155,7 @@ export function MatchProvider({ children }: { children: ReactNode }) {
   const research = useCallback(async (brandId: string): Promise<Result> => {
     setResearching((s) => new Set(s).add(brandId));
     try {
-      const r = await call<{ ok: boolean }>({ action: "research_brand", id: brandId });
+      const r = await matchCall<{ ok: boolean }>({ action: "research_brand", id: brandId });
       if (r.error) { toast(r.error, "error"); return { ok: false, message: r.error }; }
       await refresh();
       toast("Brand research updated.");
@@ -225,15 +225,18 @@ export function MatchProvider({ children }: { children: ReactNode }) {
     }
   }, [cloud, data.creators, scan, toast]);
 
-  const linksBy = useMemo(() => byCreator(links), [links]);
+  const activeBrands = useMemo(() => data.brands.filter((b) => !b.archived_at), [data.brands]);
+  // Only trusted deals reach the screens (Sure / Likely, about a verified brand) — see trustedLinks.
+  const shown = useMemo(() => trustedLinks(links, seen, data.brands), [links, seen, data.brands]);
+  const linksBy = useMemo(() => byCreator(shown), [shown]);
   const criteria = useMemo(() => normalizeCriteria(data.profile.preferences.youtube_criteria), [data.profile.preferences.youtube_criteria]);
   const world = useMemo<MatchWorld>(() => ({
-    links, linksBy, pitches, campaigns: data.campaigns, creators: data.creators.filter((c) => !c.archived_at), brands: data.brands.filter((b) => !b.archived_at), archivedBrands: data.brands.filter((b) => b.archived_at),
+    links: shown, linksBy, pitches, campaigns: data.campaigns, creators: data.creators.filter((c) => !c.archived_at), brands: activeBrands, archivedBrands: data.brands.filter((b) => b.archived_at),
     intel, content, seen, criteria,
-  }), [links, linksBy, pitches, data.campaigns, data.creators, data.brands, intel, content, seen, criteria]);
+  }), [shown, linksBy, pitches, data.campaigns, data.creators, data.brands, activeBrands, intel, content, seen, criteria]);
 
-  const value = useMemo<Value>(() => ({ ready, loading, error, links, linksBy, intel, content, seen, pitches, status, scanning, researching, world, load, refresh, scan, research, verdict, addLink, hide, pitch, unpitch }),
-    [ready, loading, error, links, linksBy, intel, content, seen, pitches, status, scanning, researching, world, load, refresh, scan, research, verdict, addLink, hide, pitch, unpitch]);
+  const value = useMemo<Value>(() => ({ ready, loading, error, links: shown, linksBy, intel, content, seen, pitches, status, scanning, researching, world, load, refresh, scan, research, verdict, addLink, hide, pitch, unpitch }),
+    [ready, loading, error, shown, linksBy, intel, content, seen, pitches, status, scanning, researching, world, load, refresh, scan, research, verdict, addLink, hide, pitch, unpitch]);
   return <MatchContext.Provider value={value}>{children}</MatchContext.Provider>;
 }
 

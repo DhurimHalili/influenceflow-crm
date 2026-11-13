@@ -1,12 +1,13 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { channelIdOf, uploadsPage, videoDetails, youtubeConfigured, YouTubeQuota, type FullVideo } from "../_shared/youtube.ts";
-import { cleanName, combine, dealProof, DIRECTORY, hostKind, hostOf, knownIndex, linksToFollow, nameKey, namesIn, normalizeDomain, prettyName, readVideo, type DealKind, type Known, type Mention, type Segment } from "../_shared/sponsors.ts";
+import { brandish, cleanName, combine, dealProof, DIRECTORY, domainFits, nameAsDomain, shortLinkDomain, hostKind, hostOf, knownIndex, linksToFollow, nameKey, namesIn, normalizeDomain, prettyName, readTranscript, readVideo, type Caption, type DealKind, type Known, type Mention, type Segment } from "../_shared/sponsors.ts";
 import { brandTopics, contentProfile, TOPIC, TOPICS, topicLabel, videoTopics, type ContentVideo } from "../_shared/taxonomy.ts";
 import { marketsOf, parseHtml, parseShopify, parseShopifyCollections, parseWoo, priceStats, readProgram, siteIsBrand, siteName, type Product, type SiteFacts } from "../_shared/brandSite.ts";
 import { clefStatus, decide, useClefBudget, type ClefQuestion } from "../_shared/clef.ts";
 import { listenConfigured, listenLeft, listenTo, useListenBudget } from "../_shared/listen.ts";
 import { askBrand, useBrandAskBudget } from "../_shared/brandAsk.ts";
+import { officialSite } from "../_shared/officialSite.ts";
 
 // Brand ⇄ creator matching and "who works with whom" (see the migration
 // 20261122000000_brand_match.sql for the tables).
@@ -36,11 +37,15 @@ import { askBrand, useBrandAskBudget } from "../_shared/brandAsk.ts";
 const APP_URL = (Deno.env.get("APP_URL") || "https://dhurimhalili.github.io/influenceflow-crm").replace(/\/$/, "");
 const ALLOWED_ORIGINS = new Set([new URL(APP_URL).origin, "http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:4173", "http://localhost:5199"]);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const READER_V = 5;
+const READER_V = 6;
 // Brand research version: 2 = Gemini reads sites that block robots or say too little.
 const INTEL_V = 2;
 const DAY = 86400_000;
 const BACK_DAYS = 400;
+// Full-year read: pages of 50 uploads per run (1 YouTube unit each), and a ceiling per creator.
+const BACKFILL_PAGES = 4;
+const MAX_VIDEOS = 1500;
+type Backfill = { token?: string; done?: boolean; at?: string };
 const RESCAN_DAYS = 7;
 const BRAND_DAYS = 14;
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36";
@@ -52,6 +57,7 @@ type VideoRow = {
   user_id: string; creator_id: string; video_id: string; title: string; published_at: string | null; secs: number; views: number; paid: boolean; tags: string[];
   description: string; topics: { key: string; share: number }[]; topics_by: string; mentions: Mention[]; segments: Segment[]; listen: { start: number; end: number; why: string } | null;
   listened_at: string | null; sb_at: string | null; reader_v: number; judged_at: string | null; updated_at?: string;
+  transcript_status?: string; transcript_lang?: string; transcript_kind?: string; transcript_at?: string | null; transcript_hits?: { t: number; text: string }[]; transcript_tries?: number;
 };
 
 const sleep = (ms: number) => new Promise((ok) => setTimeout(ok, ms));
@@ -225,7 +231,7 @@ async function refineTopics(creator: string, rows: VideoRow[], extra: string[]) 
 
 // ---- reading one creator ------------------------------------------------------------------
 
-type ScanResult = { videos: number; newVideos: number; links: number; status: string };
+type ScanResult = { videos: number; newVideos: number; links: number; status: string; backfilling?: boolean };
 
 async function scanCreator(admin: SupabaseClient, c: CreatorRow, deadline: number, opts: { force?: boolean } = {}): Promise<ScanResult> {
   const now = new Date();
@@ -237,27 +243,51 @@ async function scanCreator(admin: SupabaseClient, c: CreatorRow, deadline: numbe
   }
   if (!channel) { await saveStatus("no_channel"); return { videos: 0, newVideos: 0, links: 0, status: "no_channel" }; }
 
-  const { data: oldRows } = await admin.from("creator_videos").select("*").eq("user_id", c.user_id).eq("creator_id", c.id).order("published_at", { ascending: false }).limit(400);
-  const rows = new Map<string, VideoRow>(((oldRows || []) as VideoRow[]).map((r) => [r.video_id, r]));
+  const oldRows: VideoRow[] = [];
+  for (let from = 0; from < MAX_VIDEOS; from += 1000) {
+    const { data } = await admin.from("creator_videos").select("*").eq("user_id", c.user_id).eq("creator_id", c.id).order("published_at", { ascending: false }).range(from, from + 999);
+    oldRows.push(...((data || []) as VideoRow[]));
+    if (!data || data.length < 1000) break;
+  }
+  const rows = new Map<string, VideoRow>(oldRows.map((r) => [r.video_id, r]));
   const first = rows.size === 0;
   const since = now.getTime() - BACK_DAYS * DAY;
+  const { data: cc } = await admin.from("creator_content").select("backfill").eq("creator_id", c.id).maybeSingle();
+  // Where the full-year read stands. Creators read before it existed (capped at 150) start again from the top,
+  // skipping what is stored — 1 YouTube unit per 50 videos.
+  let backfill = (cc?.backfill || {}) as Backfill;
+  if (backfill.done === undefined) backfill = { token: "", done: first ? false : oldRows.length < 140, at: now.toISOString() };
 
-  // 1. Which uploads are new (or were read by older rules).
+  // 1. Which uploads are new (or were read by older rules): newest first until 12 known in a row.
   const want: string[] = [];
   let token = "", pages = 0, knownRun = 0;
-  pageLoop: while (pages < (first ? 3 : 2)) {
-    const page = await uploadsPage(channel, token);
-    pages++;
-    for (const it of page.items) {
-      if (it.at && new Date(it.at).getTime() < since) break pageLoop;
+  const take = (items: { id: string; at: string }[]) => {
+    for (const it of items) {
+      if (it.at && new Date(it.at).getTime() < since) return "old";
       const old = rows.get(it.id);
       if (!old || old.reader_v < READER_V || opts.force && !old.description && (old.paid || old.mentions.length)) { want.push(it.id); knownRun = 0; }
-      else if (++knownRun >= 12 && !first) break pageLoop;
+      else if (++knownRun >= 12 && !first) return "known";
     }
-    if (!page.next || Date.now() > deadline - 25_000) break;
+    return "";
+  };
+  headLoop: while (pages < (first ? 3 : 2)) {
+    const page = await uploadsPage(channel, token);
+    pages++;
+    const stop = take(page.items);
+    if (stop === "old" || !page.next) { if (first) backfill = { token: "", done: true, at: now.toISOString() }; break headLoop; }
+    if (stop === "known") break headLoop;
     token = page.next;
+    if (first) backfill = { token, done: false, at: now.toISOString() };
+    if (Date.now() > deadline - 25_000) break;
   }
-  const fresh: FullVideo[] = want.length ? (await videoDetails(want.slice(0, 150))).filter((v) => v.live === "none" || v.live === "") : [];
+  // 1b. The rest of the year, a few pages a run, until a year back (no 150-video cap).
+  knownRun = -1e9;
+  for (let p = 0; !backfill.done && p < BACKFILL_PAGES && want.length < 250 && Date.now() < deadline - 40_000; p++) {
+    const page = await uploadsPage(channel, backfill.token || "");
+    const stop = take(page.items);
+    backfill = stop === "old" || !page.next || rows.size + want.length >= MAX_VIDEOS ? { token: "", done: true, at: now.toISOString() } : { token: page.next, done: false, at: now.toISOString() };
+  }
+  const fresh: FullVideo[] = want.length ? (await videoDetails(want.slice(0, 250))).filter((v) => v.live === "none" || v.live === "") : [];
 
   // 2. SponsorBlock: new long videos from the last 18 months, and recent ones again (segments come in after release).
   const sbWanted = [
@@ -298,7 +328,7 @@ async function scanCreator(admin: SupabaseClient, c: CreatorRow, deadline: numbe
       sb_at: sb.has(v.id) ? now.toISOString() : old?.sb_at || null, reader_v: READER_V, judged_at: null,
     };
     // What was heard in an earlier listen stays.
-    if (old?.listened_at) row.mentions = [...row.mentions, ...old.mentions.filter((m) => m.signals.includes("voice") && !row.mentions.some((x) => x.key === m.key))];
+    if (old?.listened_at || old?.transcript_status === "ok") row.mentions = [...row.mentions, ...old.mentions.filter((m) => (m.signals.includes("voice") || m.signals.includes("transcript")) && !row.mentions.some((x) => x.key === m.key))];
     rows.set(v.id, row);
     touched.push(row);
   }
@@ -306,7 +336,7 @@ async function scanCreator(admin: SupabaseClient, c: CreatorRow, deadline: numbe
   for (const r of rows.values()) {
     if (r.reader_v >= READER_V || touched.includes(r)) continue;
     const reading = readVideo({ id: r.video_id, title: r.title, description: r.description, tags: r.tags, paid: r.paid, segments: r.segments, at: r.published_at || "", secs: r.secs }, ctx);
-    r.mentions = [...reading.mentions, ...r.mentions.filter((m) => m.signals.includes("voice") && !reading.mentions.some((x) => x.key === m.key))];
+    r.mentions = [...reading.mentions, ...r.mentions.filter((m) => (m.signals.includes("voice") || m.signals.includes("transcript")) && !reading.mentions.some((x) => x.key === m.key))];
     r.reader_v = READER_V; r.judged_at = null;
     touched.push(r);
   }
@@ -317,7 +347,7 @@ async function scanCreator(admin: SupabaseClient, c: CreatorRow, deadline: numbe
     if (JSON.stringify(segs) === JSON.stringify(r.segments)) { touched.push(r); continue; }
     r.segments = segs;
     const reading = readVideo({ id, title: r.title, description: r.description, tags: r.tags, paid: r.paid, segments: segs, at: r.published_at || "", secs: r.secs }, ctx);
-    r.mentions = [...reading.mentions, ...r.mentions.filter((m) => m.signals.includes("voice") && !reading.mentions.some((x) => x.key === m.key))];
+    r.mentions = [...reading.mentions, ...r.mentions.filter((m) => (m.signals.includes("voice") || m.signals.includes("transcript")) && !reading.mentions.some((x) => x.key === m.key))];
     if (!r.listened_at) r.listen = reading.listen || null;
     r.judged_at = null;
     touched.push(r);
@@ -343,8 +373,8 @@ async function scanCreator(admin: SupabaseClient, c: CreatorRow, deadline: numbe
   const links = await rebuildLinks(admin, c, [...rows.values()]);
   const recent = [...rows.values()].filter((r) => r.published_at).sort((a, b) => String(b.published_at).localeCompare(String(a.published_at))).slice(0, 60);
   const profile = contentProfile(recent.map((r): ContentVideo => ({ id: r.video_id, title: r.title, at: r.published_at || "", secs: r.secs, topics: r.topics })), now, recent.some((r) => r.topics_by === "ai") ? "rules+ai" : "rules");
-  await admin.from("creator_content").upsert({ creator_id: c.id, user_id: c.user_id, content: profile, status: recent.length ? "ok" : "empty", note: "", scanned_at: now.toISOString(), updated_at: now.toISOString() });
-  return { videos: rows.size, newVideos: fresh.length, links, status: recent.length ? "ok" : "empty" };
+  await admin.from("creator_content").upsert({ creator_id: c.id, user_id: c.user_id, content: profile, status: recent.length ? "ok" : "empty", note: "", backfill, scanned_at: now.toISOString(), updated_at: now.toISOString() });
+  return { videos: rows.size, newVideos: fresh.length, links, status: recent.length ? "ok" : "empty", backfilling: !backfill.done };
 }
 
 /** creator_brands for one creator from all their videos. Your verdicts and hand-added links stay. */
@@ -367,7 +397,7 @@ async function rebuildLinks(admin: SupabaseClient, c: CreatorRow, rows: VideoRow
     user_id: c.user_id, creator_id: c.id, brand_key: l.key, brand_name: l.name.slice(0, 80), domain: l.domain,
     brand_id: (l.domain && byDomain.get(l.domain)) || byName.get(l.name.toLowerCase().replace(/[^a-z0-9]+/g, "")) || null,
     kind: l.kind, confidence: l.confidence, store: l.store, videos: l.videos, first_at: l.first || null, last_at: l.last || null, evidence: l.evidence,
-    by_ai: l.evidence.some((e) => e.signals.includes("ai") || e.signals.includes("voice")), updated_at: now,
+    by_ai: l.evidence.some((e) => e.signals.includes("ai") || e.signals.includes("voice")), video_ids: l.videoIds, updated_at: now,
   }));
   for (let i = 0; i < payload.length; i += 100) {
     const { error } = await admin.from("creator_brands").upsert(payload.slice(i, i + 100), { onConflict: "user_id,creator_id,brand_key" });
@@ -386,7 +416,7 @@ async function rebuildLinks(admin: SupabaseClient, c: CreatorRow, rows: VideoRow
 
 async function listenSome(admin: SupabaseClient, deadline: number): Promise<number> {
   if (!listenConfigured() || (await listenLeft()) <= 0) return 0;
-  const { data } = await admin.from("creator_videos").select("*").not("listen", "is", null).is("listened_at", null).order("published_at", { ascending: false }).limit(4);
+  const { data } = await admin.from("creator_videos").select("*").not("listen", "is", null).is("listened_at", null).order("paid", { ascending: false }).order("published_at", { ascending: false }).limit(6);
   let done = 0;
   const changed = new Map<string, CreatorRow>();
   for (const r of (data || []) as VideoRow[]) {
@@ -531,51 +561,84 @@ async function researchBrand(admin: SupabaseClient, b: BrandRow): Promise<Intel 
 
 type SeenRow = { user_id: string; brand_key: string; name: string; domain: string; domain_check: string; checked_at: string | null };
 
+// Is this found brand real, and what is its own website? In order:
+//   1. the creator's own link — only when that domain IS the brand's (its name, not a short link,
+//      tracker or agency: sbck.me, plug.dev, dotomi.com) and the page calls itself that name;
+//   2. Wikidata's official website for an item that is exactly this company / brand / product;
+//   3. name.com — only for a distinctive name, when the page calls itself that and sells something.
+// A phrase, a handle or an everyday word ("either", "in advance", "Tom Fox") never gets this far.
+// domain_check: site (verified) · guess (a name.com that looks right, not verified) · mismatch · blocked · none.
 async function checkSeen(admin: SupabaseClient, s: SeenRow) {
   const now = new Date().toISOString();
-  let domain = s.domain, check = "none", name = s.name, site: Record<string, unknown> | null = null;
+  let name = cleanName(s.name) || s.name;
+  let domain = s.domain || nameAsDomain(name);
+  let check = "none", via = "", site: Record<string, unknown> | null = null;
   let landed = "";
   const look = async (d: string) => {
+    landed = "";
     const page = await getText(`https://${d}`, { timeout: 9000, max: 1_500_000 });
     if (!page || page.status >= 400 && page.status !== 403) return null;
     landed = normalizeDomain(page.url || "");
     return parseHtml(page.text, page.url || `https://${d}`);
   };
-  if (domain) {
-    const f = await look(domain);
-    // A tracking domain ("carvertical.deal", "trade.re") that lands on the brand's real site: keep the real one.
-    if (f && !f.blocked && landed && landed !== domain && hostKind(landed) === "brand" && siteIsBrand(name, landed, f)) {
-      await admin.from("creator_brands").update({ domain: landed }).eq("user_id", s.user_id).eq("brand_key", s.brand_key);
-      domain = landed;
+  const describe = (f: SiteFacts) => ({ title: f.title.slice(0, 160), description: f.description.slice(0, 300), topics: brandTopics({ products: f.products, site: [f.title, f.description, ...f.nav] }), logo: f.logo });
+  const fromLabel = name === prettyName(domain) || norm(name) === norm(domain.split(".")[0] || "");
+  if (brandish(name) || nameAsDomain(name)) {
+    // 1. The creator's link.
+    if (domain && hostKind(domain) === "brand") {
+      const f = await look(domain);
+      if (f && !f.blocked && landed && landed !== domain && hostKind(landed) === "brand" && domainFits(name, landed)) domain = landed;
+      if (f && !f.blocked && domainFits(name, domain) && siteIsBrand(name, domain, f)) {
+        check = "site"; via = "link"; site = describe(f);
+        // A name that was only the domain spelled out ("Wtm", "Rayconglobal"): what the site calls itself.
+        if (fromLabel) name = siteName(f, domain, name) || name;
+      } else if (f?.blocked && domainFits(name, domain)) check = "blocked";
+      // The link opens another company's site (chartindustries.com for "Howden"): the creator promoted THAT —
+      // don't look the name up elsewhere. A short personal / campaign link (x.la, sbck.me) proves nothing either way.
+      else if (f) check = shortLinkDomain(domain) ? "none" : "mismatch";
     }
-    if (!f) check = "none";
-    else if (f.blocked) check = "blocked";
-    else {
-      check = siteIsBrand(name, domain, f) ? "site" : "mismatch";
-      // The name was only the domain spelled out ("Rayconglobal"): use what the site calls itself.
-      if (check === "site" && name === prettyName(domain)) name = siteName(f, domain, name) || name;
-      site = { title: f.title.slice(0, 160), description: f.description.slice(0, 300), topics: brandTopics({ products: f.products, site: [f.title, f.description, ...f.nav] }), logo: f.logo };
+    if (check === "mismatch") {
+      await admin.from("seen_brands").update({ name: cleanName(name) || s.name, domain_check: "mismatch", site: null, checked_at: now, updated_at: now }).eq("user_id", s.user_id).eq("brand_key", s.brand_key);
+      return { domain, check, name: cleanName(name) || s.name, via: "" };
     }
-  } else {
-    // Only a name was written: try name.com and keep it only if the site says it is that brand.
-    const slug = name.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "");
-    if (slug.length >= 3) {
-      const f = await look(`${slug}.com`);
-      if (f && !f.blocked && siteIsBrand(name, `${slug}.com`, f)) {
-        domain = `${slug}.com`; check = "guess";
-        site = { title: f.title.slice(0, 160), description: f.description.slice(0, 300), topics: brandTopics({ products: f.products, site: [f.title, f.description, ...f.nav] }), logo: f.logo };
-        await admin.from("creator_brands").update({ domain }).eq("user_id", s.user_id).eq("brand_key", s.brand_key).eq("domain", "");
+    // 2. Wikidata, when the link didn't prove it (a short link, a tracker, a wall, nothing).
+    if (check !== "site" && !(fromLabel && !brandish(name))) {
+      const wd = await officialSite(name).catch(() => null);
+      if (wd) {
+        domain = wd.domain; check = "site"; via = "wikidata";
+        site = { ...(site || {}), title: wd.label, description: wd.description };
+        if (!site.topics) { const f = await look(domain).catch(() => null); if (f && !f.blocked) site = { ...describe(f), title: wd.label, description: wd.description }; }
       }
     }
-  }
+    // 3. name.com for a distinctive name with no usable link.
+    if (check !== "site" && check !== "blocked") {
+      const slug = norm(name);
+      if (slug.length >= 6 && !PLAIN.has(slug)) {
+        const g = `${slug}.com`;
+        const f = await look(g);
+        if (f && !f.blocked && siteIsBrand(name, g, f) && (landed === g || domainFits(name, landed))) {
+          const facts = describe(f);
+          domain = landed && domainFits(name, landed) ? landed : g;
+          check = facts.topics.length && new RegExp(norm(name).slice(0, 6), "i").test(norm(f.title + f.description)) ? "site" : "guess";
+          via = "guess"; site = facts;
+        }
+      }
+    }
+  } else domain = s.domain;
+  if (site) site.via = via;
   await admin.from("seen_brands").update({ name: cleanName(name) || s.name, domain, domain_check: check, site, checked_at: now, updated_at: now }).eq("user_id", s.user_id).eq("brand_key", s.brand_key);
-  if (name !== s.name && cleanName(name)) await admin.from("creator_brands").update({ brand_name: cleanName(name) }).eq("user_id", s.user_id).eq("brand_key", s.brand_key);
-  return { domain, check, name };
+  // Keep the deal rows in step: the verified website, and the cleaned name.
+  if (check === "site" || check === "guess") await admin.from("creator_brands").update({ domain }).eq("user_id", s.user_id).eq("brand_key", s.brand_key);
+  if (cleanName(name) && cleanName(name) !== s.name) await admin.from("creator_brands").update({ brand_name: cleanName(name) }).eq("user_id", s.user_id).eq("brand_key", s.brand_key);
+  return { domain, check, name: cleanName(name) || s.name, via };
 }
+const PLAIN = new Set(["either", "segment", "teams", "spot", "advance", "store", "brand", "today", "video", "gaming", "music"]);
+const norm = (x: string) => String(x || "").toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/&/g, "and").replace(/[^a-z0-9]+/g, "");
 
 /** Add brands found in a NEW creator's videos when they're sure: a paid or seeded deal, the creator's own link, the site confirmed. */
-async function autoAdd(admin: SupabaseClient, s: SeenRow, checked: { domain: string; check: string; name: string }) {
-  if (checked.check !== "site" || !checked.domain) return;
+async function autoAdd(admin: SupabaseClient, s: SeenRow, checked: { domain: string; check: string; name: string; via?: string }) {
+  // Only a verified website (the creator's link that IS the brand's, or Wikidata) — never a guess — and a real name.
+  if (checked.check !== "site" || !checked.domain || checked.via === "guess" || !brandish(checked.name)) return;
   const { data: me } = await admin.from("profiles").select("preferences").eq("id", s.user_id).maybeSingle();
   if ((me?.preferences as { match_auto_add?: boolean } | null)?.match_auto_add === false) return;
   // Only a PROVEN brand deal (their own words + something else backs it up) — never an affiliate link,
@@ -671,14 +734,24 @@ async function cron(admin: SupabaseClient) {
   }
   // 3. Brands found in videos: check the domain is theirs (then maybe add them).
   {
-    const { data: list } = await admin.from("seen_brands").select("user_id, brand_key, name, domain, domain_check, checked_at").in("user_id", ids).eq("hidden", false).or(`checked_at.is.null,and(domain_check.eq.none,domain.neq.,checked_at.lt.${new Date(Date.now() - 2 * DAY).toISOString()})`).limit(14);
-    await pool((list || []) as SeenRow[], 4, async (s) => {
+    const { data: list } = await admin.from("seen_brands").select("user_id, brand_key, name, domain, domain_check, checked_at").in("user_id", ids).eq("hidden", false).or(`checked_at.is.null,and(domain_check.eq.none,domain.neq.,checked_at.lt.${new Date(Date.now() - 2 * DAY).toISOString()})`).limit(24);
+    await pool((list || []) as SeenRow[], 6, async (s) => {
       if (Date.now() > deadline - 25_000) return;
       const checked = await checkSeen(admin, s).catch(() => null);
       if (checked) { log.seen = Number(log.seen) + 1; await autoAdd(admin, s, checked).catch(() => null); }
     });
   }
   for (const u of ids) await relink(admin, u).catch(() => null);
+  // 3b. Creators whose full year isn't read yet (the first read stops at 150; the rest follows here).
+  if (youtubeConfigured() && !log.quota && Date.now() < deadline - 50_000) {
+    const { data: open } = await admin.from("creator_content").select("creator_id, backfill, status").in("user_id", ids).in("status", ["ok", "empty"]).limit(5000);
+    const cids = ((open || []) as { creator_id: string; backfill: Backfill | null }[]).filter((r) => r.backfill?.done !== true).map((r) => r.creator_id).slice(0, 3);
+    const { data: list } = cids.length ? await admin.from("creators").select("id, user_id, name, socials, youtube, created_at, archived_at").in("id", cids).is("archived_at", null) : { data: [] };
+    for (const c of (list || []) as CreatorRow[]) {
+      if (Date.now() > deadline - 50_000) break;
+      try { await scanCreator(admin, c, deadline - 30_000); log.backfill = Number(log.backfill || 0) + 1; } catch (e) { if (e instanceof YouTubeQuota) { log.quota = "youtube"; break; } }
+    }
+  }
   // 4. Creators not read for a week.
   if (youtubeConfigured() && !log.quota && Date.now() < deadline - 50_000) {
     const { data: stale } = await admin.from("creator_content").select("creator_id, scanned_at").in("user_id", ids).lt("scanned_at", new Date(Date.now() - RESCAN_DAYS * DAY).toISOString()).order("scanned_at", { ascending: true }).limit(6);
@@ -734,7 +807,7 @@ Deno.serve(async (req) => {
     const newest = (table: string, col: string) => admin.from(table).select(col).eq("user_id", userId).order(col, { ascending: false, nullsFirst: false }).limit(1).maybeSingle();
     const [{ data: people }, { data: done }, { count: brands }, { count: researched }, clef, l1, l2, l3, { count: links }] = await Promise.all([
       admin.from("creators").select("id, socials").eq("user_id", userId).is("archived_at", null).limit(5000),
-      admin.from("creator_content").select("creator_id, scanned_at").eq("user_id", userId).limit(5000),
+      admin.from("creator_content").select("creator_id, scanned_at, status, backfill").eq("user_id", userId).limit(5000),
       admin.from("brands").select("id", { count: "exact", head: true }).eq("user_id", userId).is("archived_at", null),
       admin.from("brand_intel").select("brand_id", { count: "exact", head: true }).eq("user_id", userId),
       clefStatus(),
@@ -747,9 +820,104 @@ Deno.serve(async (req) => {
     // Only creators with a YouTube channel can be read; the rest never count as "waiting".
     const withYoutube = ((people || []) as { id: string; socials: CreatorRow["socials"] }[]).filter((c) => youtubeOf(c.socials)).map((c) => c.id);
     const readAt = new Map(((done || []) as { creator_id: string; scanned_at: string | null }[]).map((d) => [d.creator_id, d.scanned_at || ""]));
-    const creators = withYoutube.length, read = withYoutube.filter((id) => readAt.has(id)).length;
+    // "Read" = their videos really were read; a channel that couldn't be read is counted apart.
+    const rowsOf = new Map(((done || []) as { creator_id: string; status: string; backfill: Backfill | null }[]).map((d) => [d.creator_id, d]));
+    const creators = withYoutube.length;
+    const read = withYoutube.filter((id) => ["ok", "empty"].includes(rowsOf.get(id)?.status || "")).length;
+    const failed = withYoutube.filter((id) => ["error", "no_channel", "quota"].includes(rowsOf.get(id)?.status || "")).length;
+    const backfilling = withYoutube.filter((id) => rowsOf.get(id) && rowsOf.get(id)!.backfill?.done !== true && ["ok", "empty"].includes(rowsOf.get(id)!.status)).length;
     const lastRead = [...readAt.values()].sort().pop() || null;
-    return json({ ok: true, stamp, creators, read, noYoutube: (people || []).length - creators, lastRead, everyMin: 3, perRun: 4, rescanDays: RESCAN_DAYS, brandDays: BRAND_DAYS, brands: brands || 0, researched: researched || 0, youtube: youtubeConfigured(), clef, listen: { configured: listenConfigured(), secondsLeft: await listenLeft() } });
+    const year = new Date(Date.now() - 365 * DAY).toISOString();
+    const vc = (f: (q: ReturnType<typeof videoCount>) => ReturnType<typeof videoCount>) => f(videoCount()).then((r) => r.count || 0);
+    const videoCount = () => admin.from("creator_videos").select("video_id", { count: "exact", head: true }).eq("user_id", userId).gte("published_at", year);
+    const [videos, paidVideos, transcripts, noCaptions, waiting, listened, listenQueue] = await Promise.all([
+      vc((q) => q), vc((q) => q.eq("paid", true)), vc((q) => q.eq("transcript_status", "ok")), vc((q) => q.eq("transcript_status", "none")),
+      vc((q) => q.eq("transcript_status", "").gt("secs", 60)), vc((q) => q.not("listened_at", "is", null)), vc((q) => q.not("listen", "is", null).is("listened_at", null)),
+    ]);
+    return json({ ok: true, stamp, creators, read, failed, backfilling, videos, paidVideos, transcripts, noCaptions, transcriptWaiting: waiting, listened, listenQueue, noYoutube: (people || []).length - creators, lastRead, everyMin: 3, perRun: 4, rescanDays: RESCAN_DAYS, brandDays: BRAND_DAYS, brands: brands || 0, researched: researched || 0, youtube: youtubeConfigured(), clef, listen: { configured: listenConfigured(), secondsLeft: await listenLeft() } });
+  }
+
+  // ---- transcripts from the browser helper (the member's own connection; YouTube blocks servers) ----
+  if (input.action === "transcript_queue") {
+    // Videos of the last year with no captions read yet: YouTube-labelled paid ones first, then the newest.
+    const n = Math.min(20, Math.max(1, Math.floor(Number(input.n) || 10)));
+    const skip = new Set((Array.isArray(input.skip) ? input.skip : []).filter((x): x is string => typeof x === "string" && /^[\w-]{11}$/.test(x)).slice(0, 300));
+    const cutoff = new Date(Date.now() - BACK_DAYS * DAY).toISOString();
+    const pick = (paid: boolean) => admin.from("creator_videos").select("video_id, creator_id, title, published_at, paid").eq("user_id", userId).eq("transcript_status", "").eq("paid", paid).gt("secs", 60).gte("published_at", cutoff).order("published_at", { ascending: false }).limit(n + skip.size);
+    const [{ data: a }, { data: b }, { count: left }] = await Promise.all([pick(true), pick(false), admin.from("creator_videos").select("video_id", { count: "exact", head: true }).eq("user_id", userId).eq("transcript_status", "").gt("secs", 60).gte("published_at", cutoff)]);
+    const items = [...(a || []), ...(b || [])].filter((v) => !skip.has(v.video_id)).slice(0, n).map((v) => ({ id: v.video_id, title: String(v.title || "").slice(0, 120) }));
+    return json({ ok: true, items, left: left || 0 });
+  }
+
+  if (input.action === "transcript_save") {
+    const raw = Array.isArray(input.items) ? input.items.slice(0, 8) : [];
+    type In = { id: string; status: "ok" | "none" | "error"; lang: string; kind: string; caps: Caption[] };
+    const items: In[] = [];
+    let chars = 0;
+    for (const x of raw as Record<string, unknown>[]) {
+      const id = typeof x?.id === "string" && /^[\w-]{11}$/.test(x.id) ? x.id : "";
+      const status = x?.status === "ok" || x?.status === "none" || x?.status === "error" ? x.status : "";
+      if (!id || !status) continue;
+      const caps: Caption[] = [];
+      if (status === "ok" && Array.isArray(x.caps)) for (const c of (x.caps as unknown[]).slice(0, 12_000)) {
+        if (!Array.isArray(c) || typeof c[0] !== "number" || typeof c[1] !== "string") continue;
+        const t = c[1].slice(0, 400);
+        chars += t.length;
+        if (chars > 900_000) break;
+        caps.push([Math.max(0, Math.min(36_000_000, Math.round(c[0]))), t]);
+      }
+      items.push({ id, status: status === "ok" && !caps.length ? "none" : status, lang: String(x.lang || "").replace(/[^\w-]/g, "").slice(0, 12), kind: x.kind === "asr" ? "asr" : x.kind === "manual" ? "manual" : "", caps });
+    }
+    if (!items.length) return json({ ok: true, saved: 0, found: 0 });
+    // Only this member's own videos.
+    const { data: own } = await admin.from("creator_videos").select("*").eq("user_id", userId).in("video_id", items.map((i) => i.id));
+    const rowsById = new Map<string, VideoRow[]>();
+    for (const r of (own || []) as VideoRow[]) rowsById.set(r.video_id, [...(rowsById.get(r.video_id) || []), r]);
+    const { known } = await knownFor(admin, userId);
+    const creatorIds = Array.from(new Set(((own || []) as VideoRow[]).map((r) => r.creator_id)));
+    const { data: people } = creatorIds.length ? await admin.from("creators").select("id, user_id, name, socials, youtube, created_at, archived_at").eq("user_id", userId).in("id", creatorIds) : { data: [] };
+    const byCreator = new Map(((people || []) as CreatorRow[]).map((c) => [c.id, c]));
+    const now = new Date().toISOString();
+    const changed: VideoRow[] = [];
+    let found = 0;
+    for (const it of items) for (const r of rowsById.get(it.id) || []) {
+      if (it.status === "error") { const tries = (r.transcript_tries || 0) + 1; changed.push({ ...r, transcript_tries: tries, transcript_status: tries >= 3 ? "error" : "", transcript_at: now }); continue; }
+      if (it.status === "none") { changed.push({ ...r, transcript_status: "none", transcript_at: now, transcript_hits: [] }); continue; }
+      const c = byCreator.get(r.creator_id);
+      const ownDomains = (c?.socials || []).filter((x) => x && !["YouTube", "Instagram", "TikTok", "X", "Twitch", "Kick", "Facebook", "LinkedIn", "Snapchat", "Pinterest", "Threads", "WhatsApp"].includes(x.platform)).map((x) => normalizeDomain(x.url)).filter(Boolean);
+      const base = r.mentions.filter((m) => !m.signals.includes("transcript"));
+      const heard = readTranscript(it.caps, { creator: c?.name || "", handle: typeof c?.youtube?.handle === "string" ? c.youtube.handle : "", ownDomains, known, resolved: {}, local: base, paid: r.paid });
+      // The same brand from the description and from their words: one finding with both signals.
+      const merged = [...base];
+      for (const m of heard.mentions) {
+        const i = merged.findIndex((x) => x.key === m.key);
+        if (i < 0) { merged.push(m); continue; }
+        const x = merged[i];
+        const spokenWins = m.confidence >= x.confidence || (x.kind === "affiliate" && m.kind !== "affiliate");
+        merged[i] = { ...(spokenWins ? m : x), domain: x.domain || m.domain, domainFrom: x.domain ? x.domainFrom : m.domainFrom, signals: Array.from(new Set([...x.signals, ...m.signals])), confidence: Math.min(0.97, Math.max(x.confidence, m.confidence) + (x.kind === m.kind ? 0.04 : 0)), t: m.t ?? x.t };
+      }
+      if (heard.notSponsored) for (const m of merged) if (m.kind === "sponsored" && !/sponsor/i.test(m.quote)) m.confidence = Math.min(m.confidence, 0.35);
+      const deal = heard.mentions.some((m) => m.kind !== "affiliate" && m.confidence >= 0.8);
+      found += heard.mentions.filter((m) => m.kind !== "affiliate").length;
+      changed.push({ ...r, mentions: merged, listen: deal ? null : r.listen, transcript_status: "ok", transcript_lang: it.lang, transcript_kind: it.kind, transcript_at: now, transcript_hits: heard.hits, judged_at: null });
+    }
+    if (changed.length) {
+      const { error } = await admin.from("creator_videos").upsert(changed.map((r) => ({ ...r, updated_at: now })));
+      if (error) return json({ error: "Couldn't save the transcripts." }, 500);
+    }
+    // Who works with whom, again for the creators whose videos changed.
+    for (const cid of Array.from(new Set(changed.filter((r) => r.transcript_status === "ok").map((r) => r.creator_id)))) {
+      const c = byCreator.get(cid);
+      if (!c) continue;
+      const all: VideoRow[] = [];
+      for (let from = 0; from < MAX_VIDEOS; from += 1000) {
+        const { data } = await admin.from("creator_videos").select("*").eq("user_id", userId).eq("creator_id", cid).range(from, from + 999);
+        all.push(...((data || []) as VideoRow[]));
+        if (!data || data.length < 1000) break;
+      }
+      await rebuildLinks(admin, c, all).catch(() => 0);
+    }
+    return json({ ok: true, saved: changed.length, found });
   }
 
   if (input.action === "scan_creator") {

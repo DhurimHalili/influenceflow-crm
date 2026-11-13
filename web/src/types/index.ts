@@ -353,7 +353,7 @@ export interface Brand {
   /** What they sell, set by you (topic keys from lib/taxonomy.ts) — wins over their site for matching. */
   match_topics?: string[];
   /** Set when the brand came from a creator's video (Match → found in videos). */
-  discovered?: { creator_id: string; creator: string; kind: string; at: string; auto?: boolean } | null;
+  discovered?: { creator_id: string; creator: string; kind: string; at: string; auto?: boolean; cleanup?: boolean; why?: string } | null;
   pipeline_status: EntityStatus;
   date_contacted: string | null;
   status_updated_at: string;

@@ -1,5 +1,6 @@
-import { BadgeCheck, BadgeDollarSign, Bot, Check, ChevronRight, CircleAlert, CircleHelp, Ear, ExternalLink, FileText, Gift, Link2, ListVideo, Loader2, Pencil, Play, ScanSearch, Store, Tags, X } from "lucide-react";
-import { useMemo, useState, type ReactNode } from "react";
+import { BadgeCheck, BadgeDollarSign, Bot, Captions, Check, ChevronRight, CircleAlert, CircleHelp, Ear, ExternalLink, FileText, Gift, Link2, ListVideo, Loader2, Pencil, Play, ScanSearch, Store, Tags, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { loadProof, quickProof, type ProofVideo } from "../lib/videoProof";
 import { Link } from "react-router-dom";
 import { useMatch } from "../contexts/MatchContext";
 import { counts, isDeal, kindOf, linkIsBrand, PROOF_LABEL, proofOf, type BrandLink, type Match } from "../lib/match";
@@ -87,11 +88,12 @@ const SIGNAL: Record<Signal, { icon: typeof Gift; text: string }> = {
   chapters: { icon: ListVideo, text: "The video's chapters" },
   sponsorblock: { icon: ScanSearch, text: "SponsorBlock — viewers marked the segment" },
   voice: { icon: Ear, text: "Heard in the video" },
+  transcript: { icon: Captions, text: "Said in the video (captions)" },
   ai: { icon: Bot, text: "AI double-checked the wording" },
   you: { icon: Check, text: "You confirmed it" },
 };
 export const signalText = (s: Signal) => SIGNAL[s]?.text || s;
-const watch = (e: Evidence) => `https://www.youtube.com/watch?v=${encodeURIComponent(e.video)}${e.t ? `&t=${Math.max(0, Math.floor(e.t))}s` : ""}`;
+const watch = (e: Pick<Evidence, "video" | "t">) => `https://www.youtube.com/watch?v=${encodeURIComponent(e.video)}${e.t ? `&t=${Math.max(0, Math.floor(e.t))}s` : ""}`;
 const stamp = (t?: number) => (t === undefined ? "" : `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, "0")}`);
 
 /** Why we think they work with a brand: every video, the exact words, the signals — and your call. */
@@ -109,11 +111,7 @@ export function EvidenceModal({ link, creator, onClose }: { link: BrandLink | nu
       {live.verdict === "no" ? <p className="mx-note warn"><CircleAlert size={14} /> You marked this as wrong — it doesn't count anywhere.</p>
         : <div className={`mx-proof-box ${proofOf(live).level}`}><ProofTag link={live} /><p>{proofOf(live).why}{proofOf(live).level === "stated" || proofOf(live).level === "hint" ? " Not added to your CRM by itself — open the video and decide below." : proofOf(live).level === "affiliate" ? " Fine to pitch them a real brand deal." : ""}</p></div>}
       {live.domain && <p className="mx-ev-site"><Link2 size={13} /> <a href={`https://${live.domain}`} target="_blank" rel="noopener noreferrer">{live.domain}</a><span>{live.brand_id ? "· their website in your CRM" : check === "guess" ? "· found by their name — check it's theirs" : check === "site" ? "· from the creator's own link, site checked" : check === "mismatch" ? "· the site's name differs — check it" : "· from the creator's link"}</span></p>}
-      {live.evidence.length ? <ol className="mx-ev-list">{live.evidence.map((e) => <li key={e.video}>
-        <a className="mx-ev-video" href={watch(e)} target="_blank" rel="noopener noreferrer"><Play size={13} /><span><strong>{e.title || "Video"}</strong><small>{e.at ? dateLabel(e.at) : ""}{e.t !== undefined ? ` · at ${stamp(e.t)}` : ""} · {KIND_LABEL[e.kind]}</small></span><ExternalLink size={13} /></a>
-        {e.quote && <blockquote>{e.quote}</blockquote>}
-        <div className="mx-signals">{e.signals.map((s) => { const S = SIGNAL[s]; return S ? <span key={s} title={S.text}><S.icon size={12} /> {S.text}</span> : null; })}</div>
-      </li>)}</ol> : <p className="muted-copy">{live.manual ? "You added this by hand." : "No video evidence kept."}</p>}
+      {live.manual && !live.evidence.length ? <p className="muted-copy">You added this by hand.</p> : <ProofList links={[live]} />}
       {!live.manual && <div className="mx-verdict">
         <span>Is this right?</span>
         <div className="mx-verdict-btns">
@@ -125,6 +123,32 @@ export function EvidenceModal({ link, creator, onClose }: { link: BrandLink | nu
       <p className="mx-fine">{live.manual ? "" : `Read from their videos ${ago(live.updated_at)} · checked again with their new videos every week. `}Sponsored = paid placement. Seeded = the brand sent the product. Affiliate = a link or code that pays commission. Your answer is kept for good — a new scan never changes it.</p>
     </div>
   </Modal>;
+}
+
+/** Every video behind one or more deals: date, title, the exact words, the signals — newest first. */
+export function ProofList({ links, creatorsById }: { links: BrandLink[]; creatorsById?: Map<string, Creator> }) {
+  const sig = links.map((l) => `${l.id}:${l.video_ids?.length || 0}:${l.updated_at}`).join(",");
+  const [rows, setRows] = useState<ProofVideo[]>(() => quickProof(links));
+  const [state, setState] = useState<"loading" | "done" | "error">("loading");
+  const [limit, setLimit] = useState(25);
+  const linksRef = useRef(links);
+  linksRef.current = links;
+  useEffect(() => {
+    let off = false;
+    setRows(quickProof(linksRef.current)); setState("loading"); setLimit(25);
+    loadProof(linksRef.current).then((r) => { if (!off) { setRows(r); setState("done"); } }, () => { if (!off) setState("error"); });
+    return () => { off = true; };
+  }, [sig]);
+  const many = new Set(rows.map((r) => r.creator)).size > 1;
+  if (!rows.length) return <p className="muted-copy">{state === "loading" ? "Loading the videos…" : "No video evidence kept."}</p>;
+  return <div className="mx-proof-list">
+    <ol className="mx-ev-list">{rows.slice(0, limit).map((e) => { const who = many ? creatorsById?.get(e.creator)?.name : ""; return <li key={`${e.creator}|${e.video}`}>
+      <a className="mx-ev-video" href={watch(e)} target="_blank" rel="noopener noreferrer"><Play size={13} /><span><strong>{e.title || "Video"}</strong><small>{[who, e.at ? dateLabel(e.at) : "", e.t !== undefined ? `at ${stamp(e.t)}` : "", KIND_LABEL[e.kind]].filter(Boolean).join(" · ")}</small></span><ExternalLink size={13} /></a>
+      {e.quote && <blockquote>{e.quote}</blockquote>}
+      <div className="mx-signals">{e.signals.map((s) => { const S = SIGNAL[s]; return S ? <span key={s} title={S.text}><S.icon size={12} /> {S.text}</span> : null; })}</div>
+    </li>; })}</ol>
+    <p className="mx-proof-foot">{state === "loading" ? <><Loader2 size={12} className="spin" /> Loading every video…</> : state === "error" ? "Couldn't load the older videos — these are the strongest ones." : `${rows.length} video${rows.length === 1 ? "" : "s"}${rows.length > 1 ? `, ${dateLabel(rows[rows.length - 1].at)} – ${dateLabel(rows[0].at)}` : ""}`}{rows.length > limit && <> · <button type="button" className="link-btn" onClick={() => setLimit(limit + 50)}>Show {Math.min(50, rows.length - limit)} more</button></>}</p>
+  </div>;
 }
 
 /** Pick what a brand sells (overrides their site). */
