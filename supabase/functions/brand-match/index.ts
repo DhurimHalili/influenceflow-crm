@@ -597,7 +597,7 @@ type Intel = {
   programs: { kind: string; url: string; text: string; commission?: string; network?: string }[]; socials: { platform: string; url: string }[];
   markets: string[]; currency: string; wiki: string; works_with_creators: boolean | number | null; pages: string[]; verified: boolean;
   /** Where the shop is: its store's own country (Shopify meta.json) and the company's home (Wikidata). */
-  geo?: { shop?: string; hq?: string; at: string };
+  geo?: { shop?: string; cur?: string; hq?: string; at: string };
 };
 
 /**
@@ -608,7 +608,11 @@ type Intel = {
 async function brandGeo(name: string, domain: string, origin: string): Promise<NonNullable<Intel["geo"]>> {
   const geo: NonNullable<Intel["geo"]> = { at: new Date().toISOString() };
   const meta = origin ? await getJson(`${origin.replace(/\/$/, "")}/meta.json`).catch(() => null) as { country?: unknown; currency?: unknown; myshopify_domain?: unknown } | null : null;
-  if (meta && typeof meta.country === "string" && /^[A-Z]{2}$/.test(meta.country) && (typeof meta.myshopify_domain === "string" || typeof meta.currency === "string")) geo.shop = meta.country;
+  if (meta && typeof meta.country === "string" && /^[A-Z]{2}$/.test(meta.country) && (typeof meta.myshopify_domain === "string" || typeof meta.currency === "string")) {
+    geo.shop = meta.country;
+    // The store's base currency — never localized to whoever asks (a page's currency can be).
+    if (typeof meta.currency === "string" && /^[A-Z]{3}$/.test(meta.currency)) geo.cur = meta.currency;
+  }
   const hq = await companyCountry(name, domain).catch(() => "");
   if (hq) geo.hq = hq;
   return geo;

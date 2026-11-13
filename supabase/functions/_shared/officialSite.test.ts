@@ -51,13 +51,10 @@ eq("ddg: near miss heading → nothing", await duckSite("Away", async () => ({ H
 eq("ddg: disambiguation → nothing", await duckSite("Gamma", async () => ({ Heading: "Gamma", Type: "D", Results: [] })), "");
 eq("ddg: business qualifier is fine", await duckSite("Nothing", async () => ({ Heading: "Nothing (company)", Type: "A", Results: [{ FirstURL: "https://nothing.tech" }] })), "nothing.tech");
 
-// Where the company is based: Wikidata P17 of the item whose official site is the brand's.
-const dellHq = async (url: string) => {
-  if (url.includes("wbsearchentities")) return { search: [{ id: "Q28206816", label: "Dell", description: "brand of computers owned by Dell, Inc." }] };
-  if (url.includes("Q28206816")) return { entities: { Q28206816: { descriptions: { en: { value: "brand of computers" } }, claims: { P31: [], P856: [{ mainsnak: { datavalue: { value: "https://www.dell.com" } }, rank: "normal" }], P17: [{ mainsnak: { datavalue: { value: { id: "Q30" } } }, rank: "normal" }] } } } };
-  return null;
-};
-eq("company country: Dell → US", await companyCountry("Dell", "dell.com", dellHq), "US");
-eq("company country: a different site → nothing", await companyCountry("Dell", "dell-parts.de", dellHq), "");
+// Where the company is based: one SPARQL query, the item's official site must be the brand's.
+const sparql = (rows: [string, string][]) => async (url: string) => (url.includes("query.wikidata.org") ? { results: { bindings: rows.map(([site, iso]) => ({ site: { value: site }, iso: { value: iso } })) } } : null);
+eq("company country: Valvoline → US", await companyCountry("Valvoline", "valvoline.com", sparql([["https://www.valvoline.com/", "US"]])), "US");
+eq("company country: same name, another site → nothing", await companyCountry("Monarch", "monarch.com", sparql([["http://www.monarchfilm.com/", "US"], ["https://www.fox.com/monarch/", "US"]])), "");
+eq("company country: two countries for one site → not sure", await companyCountry("Acme", "acme.com", sparql([["https://acme.com", "US"], ["https://acme.com/de", "DE"]])), "");
 
 if (fail) { console.log(`\n${fail} failing`); Deno.exit(1); } else console.log("\nall officialSite tests pass");

@@ -69,26 +69,23 @@ export async function duckSite(name: string, get: Fetcher = defaultFetch): Promi
   return site && domainFits(name, site) ? site : "";
 }
 
-// Wikidata ids of the countries brands usually come from → ISO code (anything else: one more lookup).
-const COUNTRY_Q: Record<string, string> = {
-  Q30: "US", Q145: "GB", Q183: "DE", Q142: "FR", Q16: "CA", Q408: "AU", Q148: "CN", Q17: "JP", Q884: "KR", Q865: "TW", Q55: "NL", Q34: "SE", Q39: "CH",
-  Q38: "IT", Q29: "ES", Q31: "BE", Q40: "AT", Q20: "NO", Q35: "DK", Q33: "FI", Q36: "PL", Q155: "BR", Q96: "MX", Q668: "IN", Q664: "NZ", Q27: "IE",
-  Q334: "SG", Q8646: "HK", Q45: "PT", Q213: "CZ", Q801: "IL", Q43: "TR", Q159: "RU", Q212: "UA", Q28: "HU", Q218: "RO", Q41: "GR", Q878: "AE",
-};
 
 /**
- * The country a company is based in (Wikidata P17 "country" of the item whose official site is this
- * domain). "" when Wikidata doesn't know it for sure. One signal among several — never the market alone.
+ * The country a company is based in: Wikidata items whose English name is the brand's AND whose
+ * official website (P856) is the brand's own domain, then their country (P17 → ISO code, P297) —
+ * one SPARQL query (the search API rate-limits shared server addresses). "" unless exactly one
+ * country comes back. One signal among several — never the market alone.
  */
 export async function companyCountry(name: string, domain: string, get: Fetcher = defaultFetch): Promise<string> {
-  const site = await officialSite(name, get).catch(() => null);
-  if (!site || normalizeDomain(site.domain).split(".")[0] !== normalizeDomain(domain).split(".")[0]) return "";
-  const data = await get(`https://www.wikidata.org/wiki/Special:EntityData/${site.id}.json`) as { entities?: Record<string, { claims?: Record<string, { mainsnak?: { datavalue?: { value?: { id?: string } } }; rank?: string }[]> }> } | null;
-  const claims = data?.entities?.[site.id]?.claims || {};
-  const q = (claims.P17 || []).filter((c) => c.rank !== "deprecated").map((c) => c.mainsnak?.datavalue?.value?.id || "")[0] || "";
-  if (!q) return "";
-  if (COUNTRY_Q[q]) return COUNTRY_Q[q];
-  const c = await get(`https://www.wikidata.org/wiki/Special:EntityData/${q}.json`) as { entities?: Record<string, { claims?: Record<string, { mainsnak?: { datavalue?: { value?: string } } }[]> }> } | null;
-  const iso = String(c?.entities?.[q]?.claims?.P297?.[0]?.mainsnak?.datavalue?.value || "");
-  return /^[A-Z]{2}$/.test(iso) ? iso : "";
+  const label = normalizeDomain(domain).split(".")[0];
+  const clean = String(name || "").replace(/["\\\n]/g, "").trim().slice(0, 60);
+  if (!label || clean.length < 2) return "";
+  const names = Array.from(new Set([clean, clean.toUpperCase() === clean ? clean : "", label.charAt(0).toUpperCase() + label.slice(1)].filter(Boolean)));
+  const values = names.map((n) => `"${n}"@en`).join(" ");
+  const query = `SELECT ?site ?iso WHERE { VALUES ?n { ${values} } ?i rdfs:label ?n ; wdt:P856 ?site ; wdt:P17 ?c . ?c wdt:P297 ?iso } LIMIT 20`;
+  const d = await get(`https://query.wikidata.org/sparql?format=json&query=${encodeURIComponent(query)}`) as { results?: { bindings?: { site?: { value?: string }; iso?: { value?: string } }[] } } | null;
+  const isos = new Set((d?.results?.bindings || [])
+    .filter((b) => normalizeDomain(String(b.site?.value || "")).split(".")[0] === label)
+    .map((b) => String(b.iso?.value || "")).filter((x) => /^[A-Z]{2}$/.test(x)));
+  return isos.size === 1 ? [...isos][0] : "";
 }
