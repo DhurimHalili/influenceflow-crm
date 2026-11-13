@@ -944,7 +944,13 @@ async function cron(admin: SupabaseClient) {
     const { data: rows } = await admin.from("brand_intel").select("brand_id, user_id, intel").in("user_id", ids).eq("status", "ok").is("intel->geo", null).limit(6);
     for (const r of (rows || []) as { brand_id: string; user_id: string; intel: Intel | null }[]) {
       if (Date.now() > deadline - 35_000 || !r.intel?.domain) continue;
-      const { data: b } = await admin.from("brands").select("name, domain").eq("id", r.brand_id).maybeSingle();
+      const { data: b } = await admin.from("brands").select("id, user_id, name, domain, archived_at").eq("id", r.brand_id).maybeSingle();
+      // The brand's website was changed since its site was read (opr.as → opera.com): read it again in full.
+      if (b && normalizeDomain(b.domain || "") && normalizeDomain(b.domain || "") !== r.intel.domain) {
+        await researchBrand(admin, b as BrandRow).catch(() => null);
+        log.brands = Number(log.brands) + 1;
+        continue;
+      }
       const origin = (() => { try { return new URL(r.intel!.url).origin; } catch { return `https://${r.intel!.domain}`; } })();
       const geo = await brandGeo(b?.name || r.intel.name, r.intel.domain, origin).catch(() => ({ at: new Date().toISOString() }));
       await admin.from("brand_intel").update({ intel: { ...r.intel, geo } }).eq("brand_id", r.brand_id).eq("user_id", r.user_id);
