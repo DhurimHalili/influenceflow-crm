@@ -215,5 +215,12 @@ eq("proof: spoken + known = proven", P([ev({ signals: ["transcript"], quote: "�
 eq("proof: spoken unknown name = not proven", P([ev({ signals: ["transcript"], quote: "“this video is sponsored by zentrovia the app”", confidence: 0.5 })]), "stated");
 eq("combine keeps every video id", combine([{ video: v1, m: { key: "x.com", name: "X", domain: "x.com", domainFrom: "link", kind: "sponsored", confidence: 0.9, signals: ["description"], quote: "Sponsored by X" } }, { video: v2, m: { key: "x.com", name: "X", domain: "x.com", domainFrom: "link", kind: "sponsored", confidence: 0.9, signals: ["description"], quote: "Sponsored by X" } }])[0].videoIds, ["a2", "a1"]);
 
+// ---- credits and phrases are never brands (live finds, Nov 2026) ----
+eq("'thank you in advance for supporting' is no brand", brands(readVideo(vid({ paid: true, description: "I may earn commission from some of the links above (thank you in advance for supporting the channel)" }), ctx)), []);
+eq("a music-licence credit is cut, the sponsor on the same line kept", brands(readVideo(vid({ paid: true, description: "Presented by LEGENDZ 🎵 Copyrighted music licensed from Lickd. https://lickd.co/abc" }), ctx)).map((x) => x.split("|")[0]), ["LEGENDZ"]);
+eq("music provided by NCS is no deal", brands(readVideo(vid({ description: "Music provided by NCS https://ncs.io/x\nThanks to NordVPN for sponsoring https://nordvpn.com/x" }), ctx)).map((x) => x.split("|")[0]), ["NordVPN"]);
+eq("a sponsor named like a credit is still the sponsor", brands(readVideo(vid({ description: "Thanks to Beats by Dre for sponsoring this video! https://beatsbydre.com" }), ctx)).map((x) => x.split("|")[0]), ["Beats by Dre"]);
+eq("stock footage credit is no deal", brands(readVideo(vid({ description: "Stock footage from Storyblocks https://storyblocks.com/x" }), ctx)), []);
+
 if (fail) { console.log(`\n${fail} failing`); (globalThis as { process?: { exit: (n: number) => void } }).process?.exit(1); }
 else console.log("\nall sponsor tests pass");

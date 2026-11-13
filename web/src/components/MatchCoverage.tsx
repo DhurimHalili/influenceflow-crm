@@ -25,7 +25,8 @@ function useHelperLine() {
   const h = useHelper();
   if (h.version === null) return { tone: "info", text: "Checking for the helper…", action: "" } as const;
   if (!h.version) return { tone: "off", text: "Spoken words aren't read yet", action: "install" } as const;
-  if (h.blockedUntil > Date.now()) return { tone: "warn", text: `YouTube asked to slow down · back at ${clock(h.blockedUntil)}`, action: "" } as const;
+  if (h.outdated) return { tone: "warn", text: `Update the helper · ${h.version} → ${h.latest}`, action: "update" } as const;
+  if (h.blockedUntil > Date.now()) return { tone: "warn", text: /403/.test(h.blockedWhy) ? `YouTube refused this browser · trying again at ${clock(h.blockedUntil)}` : `YouTube asked this connection to slow down · back at ${clock(h.blockedUntil)}`, action: "" } as const;
   if (h.paused) return { tone: "off", text: "Helper paused", action: "resume" } as const;
   if (h.today >= h.dailyCap) return { tone: "ok", text: `Done for today · ${n(h.dailyCap)} videos`, action: "" } as const;
   if (h.elsewhere) return { tone: "ok", text: "Reading in another CRM tab", action: "" } as const;
@@ -53,7 +54,7 @@ export function CoverageStrip() {
     <button type="button" className={`mx-helper-pill ${line.tone}`} onClick={() => setSheet(true)} aria-haspopup="dialog">
       {line.tone === "live" ? <i className="mx-live-dot" aria-hidden="true" /> : line.tone === "off" ? <PlugZap size={14} aria-hidden="true" /> : line.tone === "warn" ? <TimerReset size={14} aria-hidden="true" /> : <CheckCircle2 size={14} aria-hidden="true" />}
       <span>{line.text}</span>
-      <em>{line.action === "install" ? "Turn on — free" : "Details"}</em>
+      <em>{line.action === "install" ? "Turn on — free" : line.action === "update" ? "Update" : "Details"}</em>
     </button>
     {sheet && <HelperSheet onClose={() => setSheet(false)} />}
   </section>;
@@ -72,7 +73,13 @@ function HelperSheet({ onClose }: { onClose: () => void }) {
   return <Modal open onClose={onClose} title="Read what creators say" description="Captions show sponsors said out loud that no description mentions. Free, from your own browser.">
     <div className="mx-helper">
       <p className={`mx-helper-state ${line.tone}`}>{line.tone === "live" ? <i className="mx-live-dot" aria-hidden="true" /> : null}{line.text}{h.current && h.running ? <small> — {h.current}</small> : null}</p>
-      {h.version ? <>
+      {h.outdated ? <>
+        <ol className="mx-helper-steps">
+          <li><b>Download the new helper</b><Button size="sm" onClick={downloadHelper}><Download size={13} /> influenceflow-helper.zip</Button><span>Unzip it over your old <code>influenceflow-helper</code> folder (replace the files).</span></li>
+          <li><b>Reload it</b><span>On <code>chrome://extensions</code>, click the round reload arrow on the InfluenceFlow helper card.</span></li>
+          <li><b>Reload this page</b><span>It reads again by itself. Nothing you read before is lost.</span></li>
+        </ol>
+      </> : h.version ? <>
         <div className="mx-helper-facts">
           <div><small>This tab</small><b>{n(h.session.read)}</b><span>videos read · {n(h.session.found)} deals heard</span></div>
           <div><small>Today, this computer</small><b>{n(h.today)}</b><span>of {n(h.dailyCap)} a day</span></div>
@@ -95,7 +102,7 @@ function HelperSheet({ onClose }: { onClose: () => void }) {
         <h4>Why a helper?</h4>
         <p>YouTube lets people read captions but blocks servers, so the CRM can't fetch them itself. The helper reads them from your browser, anonymously, like opening the video would — paid-labelled videos first, then the newest. A busy year of 16,000 videos takes a few days of the CRM being open; after that it keeps up with new uploads.</p>
         <h4>What it touches</h4>
-        <p>Only youtube.com, only captions, without your YouTube login. The caption lines go to your CRM, which keeps just the lines that matter (the sponsor read, “they sent me this”, codes) — never whole transcripts. If YouTube ever asks to slow down it stops for six hours by itself. Remove it any time from the extensions page.</p>
+        <p>Only youtube.com, only captions, without your YouTube login. The caption lines go to your CRM, which keeps just the lines that matter (the sponsor read, “they sent me this”, codes) — never whole transcripts. If YouTube ever asks to slow down it stops by itself — an hour for a plain refusal, six for a bot check. Remove it any time from the extensions page.</p>
       </section>
     </div>
   </Modal>;

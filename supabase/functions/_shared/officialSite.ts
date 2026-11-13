@@ -9,7 +9,10 @@ const squash = (s: string) => String(s || "").toLowerCase().normalize("NFKD").re
 const BUSINESS = /\b(?:compan(?:y|ies)|brand|manufacturer|maker|business|corporation|enterprise|retailer|store|shop|startup|service|software|app(?:lication)?|platform|website|web ?site|online|developer|publisher|video game|game|vpn|provider|producer|subsidiary|firm|e-?commerce|marketplace|bank|fintech|product|line of|range of|device|hardware|technology|tech|network|conglomerate|multinational|chain)\b/i;
 const NOT_A_BRAND = /\b(?:born|human|person|singer|actor|actress|footballer|politician|youtuber|musician|rapper|player|writer|author|journalist|family name|surname|given name|disambiguation|village|city|town|river|mountain|film|album|song|episode|novel|painting|species|genus|asteroid|scholarly|society|association|research|university|college|school|institute|union|party|government|agency|ministry|church|hospital|journal|television series|tv series|band)\b/i;
 
-type Fetcher = (url: string) => Promise<unknown>;
+// Things that share a brand's name but are never what a creator promotes: places, names, list pages.
+const NEVER_A_SPONSOR = /^(?:Wikimedia (?:disambiguation|list|category)|(?:unisex |male |female )?(?:given name|family name|surname|name)$)|\b(?:town|city|village|township|census-designated place|unincorporated community|human settlement|hamlet|lieu-dit|commune|municipality|county|parish|neighbou?rhood|district|river|lake|mountain|island|footballer|politician|singer|actor|actress)\b/i;
+
+type Fetcher =(url: string) => Promise<unknown>;
 const defaultFetch: Fetcher = async (url) => {
   const res = await fetch(url, { headers: { "User-Agent": "InfluenceFlowCRM/1.0 (brand website check)", Accept: "application/json" }, signal: AbortSignal.timeout(9000) }).catch(() => null);
   return res?.ok ? res.json().catch(() => null) : null;
@@ -23,10 +26,11 @@ export async function officialSite(name: string, get: Fetcher = defaultFetch): P
   if (want.length < 2) return null;
   const search = await get(`https://www.wikidata.org/w/api.php?action=wbsearchentities&search=${encodeURIComponent(name.slice(0, 60))}&language=en&uselang=en&type=item&limit=7&format=json`) as { search?: { id: string; label?: string; description?: string; match?: { text?: string } }[] } | null;
   // The label must BE the name; an alias only counts when the website also fits the name (ESR ≠ "European Society of Radiology").
-  const hits = (search?.search || []).filter((h) => squash(h.label || "") === want || squash(h.match?.text || "") === want).slice(0, 4);
-  // A name shared by two or more things (Gamma the app, Gamma the Dutch DIY chain): too ambiguous to pick.
-  // Any other thing with exactly this name (a genus, a surname, a store chain) makes it ambiguous.
-  if ((search?.search || []).filter((h) => squash(h.label || "") === want).length > 1) return null;
+  const hits = (search?.search || []).filter((h) => (squash(h.label || "") === want || squash(h.match?.text || "") === want) && !NEVER_A_SPONSOR.test(h.description || "")).slice(0, 4);
+  // A name shared by two or more things that could be what a creator promotes (Gamma the app, Gamma the
+  // Dutch DIY chain, the Greek letter): too ambiguous to pick. Towns, surnames and disambiguation pages
+  // are never a sponsor, so "Dell" (a brand + 12 places and names) is still Dell.
+  if ((search?.search || []).filter((h) => squash(h.label || "") === want && !NEVER_A_SPONSOR.test(h.description || "")).length > 1) return null;
   const found: OfficialSite[] = [];
   for (const h of hits) {
     if (!/^Q\d+$/.test(h.id)) continue;
@@ -55,6 +59,10 @@ export async function duckSite(name: string, get: Fetcher = defaultFetch): Promi
   const q = encodeURIComponent(name.slice(0, 60));
   const d = await get(`https://api.duckduckgo.com/?q=${q}&format=json&no_html=1&skip_disambig=1&t=influenceflow`) as { Heading?: string; Results?: { FirstURL?: string; Text?: string }[]; Type?: string } | null;
   if (!d || d.Type === "D") return "";
+  // "Away (band)": a qualified heading is another thing with this name unless the qualifier says business.
+  const qualifier = /\(([^)]*)\)/.exec(d.Heading || "")?.[1];
+  if (qualifier !== undefined && !BUSINESS.test(qualifier)) return "";
+  d.Heading = (d.Heading || "").replace(/\s*\([^)]*\)\s*/g, " ").trim();
   // The answer must be about this very name (not a near miss), and the site must carry it.
   if (squash(d.Heading || "").replace(/(?:vpn|inc|ltd|company|app)$/, "") !== squash(name).replace(/(?:vpn|inc|ltd|company|app)$/, "") && !squash(d.Heading || "").startsWith(squash(name))) return "";
   const site = normalizeDomain(String(d.Results?.[0]?.FirstURL || ""));

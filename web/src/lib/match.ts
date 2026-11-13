@@ -428,8 +428,23 @@ export type Found = { seen: SeenBrand; links: BrandLink[]; best: BrandLink; crea
 /** The words that name one brand: its domain's main label ("autodoc" for autodoc.de and autodoc.com) and its name. */
 const tokensOf = (domain: string, name: string) => {
   const label = squash(normalizeDomain(domain || "").split(".")[0] || "");
-  return [label.length >= 3 ? `d:${label}` : "", squash(name).length >= 3 ? `d:${squash(name)}` : ""].filter(Boolean);
+  // A name written as a website ("Meter.com") is the same brand as "Meter".
+  const asSite = /^[\w-]+\.[a-z]{2,6}$/i.test(String(name || "").trim()) ? squash(String(name).split(".")[0]) : "";
+  return Array.from(new Set([label.length >= 3 ? `d:${label}` : "", squash(name).length >= 3 ? `d:${squash(name)}` : "", asSite.length >= 3 ? `d:${asSite}` : ""].filter(Boolean)));
 };
+
+/**
+ * The brand you already have for a find — by the same rule the found list uses, so the list
+ * and its Add button always agree. `active`: nothing to add. `cleanup`: a copy the Match
+ * clean-up archived (a handle, no website…) — Add restores it with the verified name and site.
+ */
+export function brandTwin<B extends Pick<Brand, "id" | "name" | "domain" | "archived_at" | "discovered">>(brands: B[], name: string, domain: string): { active?: B; cleanup?: B } {
+  const want = new Set(tokensOf(domain, name));
+  const hit = (b: B) => tokensOf(b.domain || "", b.name).some((t) => want.has(t));
+  const active = brands.find((b) => !b.archived_at && hit(b));
+  if (active) return { active };
+  return { cleanup: brands.find((b) => !!b.archived_at && !!(b.discovered as { cleanup?: boolean } | null | undefined)?.cleanup && hit(b)) };
+}
 /**
  * Brand DEALS found in videos for brands you don't have. One row per brand
  * even when creators link it differently (autodoc.de / autodoc.com / "AUTODOC"),

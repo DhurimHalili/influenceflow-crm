@@ -37,7 +37,7 @@ import { duckSite, officialSite } from "../_shared/officialSite.ts";
 const APP_URL = (Deno.env.get("APP_URL") || "https://dhurimhalili.github.io/influenceflow-crm").replace(/\/$/, "");
 const ALLOWED_ORIGINS = new Set([new URL(APP_URL).origin, "http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:4173", "http://localhost:5199"]);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const READER_V = 6;
+const READER_V = 7;
 // Brand research version: 2 = Gemini reads sites that block robots or say too little.
 const INTEL_V = 2;
 const DAY = 86400_000;
@@ -69,6 +69,51 @@ const videoRow = (r: VideoRow) => ({
   transcript_status: "", transcript_lang: "", transcript_kind: "", transcript_at: null, transcript_hits: [], transcript_tries: 0,
   ...r,
 });
+
+// creator_videos without the two big text columns (description, tags): what every read needs.
+const VIDEO_LIGHT = "user_id,creator_id,video_id,title,published_at,secs,views,paid,topics,topics_by,mentions,segments,listen,listened_at,sb_at,reader_v,judged_at,updated_at,transcript_status,transcript_lang,transcript_kind,transcript_at,transcript_hits,transcript_tries";
+// What rebuilding who-works-with-whom reads.
+const LINK_COLS = "user_id,creator_id,video_id,title,published_at,paid,mentions";
+
+/** Description + tags for the rows that don't have them loaded yet (only those). */
+async function fillText(admin: SupabaseClient, c: { id: string; user_id: string }, rows: VideoRow[]) {
+  const want = rows.filter((r) => r.description === undefined);
+  for (let i = 0; i < want.length; i += 150) {
+    const part = want.slice(i, i + 150);
+    const { data } = await admin.from("creator_videos").select("video_id,description,tags").eq("user_id", c.user_id).eq("creator_id", c.id).in("video_id", part.map((r) => r.video_id));
+    const got = new Map(((data || []) as { video_id: string; description: string; tags: string[] }[]).map((d) => [d.video_id, d]));
+    for (const r of part) { const d = got.get(r.video_id); r.description = d?.description || ""; r.tags = d?.tags || []; }
+  }
+}
+
+/** Every video of a creator, just what the deal rebuild reads. */
+async function linkRows(admin: SupabaseClient, userId: string, creatorId: string): Promise<VideoRow[]> {
+  const all: VideoRow[] = [];
+  for (let from = 0; from < MAX_VIDEOS; from += 1000) {
+    const { data } = await admin.from("creator_videos").select(LINK_COLS).eq("user_id", userId).eq("creator_id", creatorId).range(from, from + 999);
+    all.push(...((data || []) as unknown as VideoRow[]));
+    if (!data || data.length < 1000) break;
+  }
+  return all;
+}
+
+/**
+ * Upsert videos in batches whose rows carry the SAME columns (PostgREST refuses mixed batches, PGRST102).
+ * A row loaded without its text has no description/tags keys, so the stored text is left as it is.
+ */
+async function saveVideos(admin: SupabaseClient, rows: VideoRow[], at: string) {
+  const groups = new Map<string, Record<string, unknown>[]>();
+  for (const r of rows) {
+    const row = wellFormed({ ...videoRow(r), updated_at: at }) as Record<string, unknown>;
+    for (const k of Object.keys(row)) if (row[k] === undefined) delete row[k];
+    const sig = Object.keys(row).sort().join(",");
+    (groups.get(sig) || groups.set(sig, []).get(sig)!).push(row);
+  }
+  for (const batch of groups.values()) for (let i = 0; i < batch.length; i += 80) {
+    const { error } = await admin.from("creator_videos").upsert(batch.slice(i, i + 80));
+    if (error) throw new Error(`save videos: ${error.message}`);
+  }
+}
 function wellFormed<T>(v: T): T {
   if (typeof v === "string") return (((v as string).toWellFormed?.() ?? (v as string).replace(/[\uD800-\uDFFF]/g, "")).replace(/\u0000/g, "")) as T;
   if (Array.isArray(v)) return v.map(wellFormed) as T;
@@ -187,7 +232,7 @@ async function judge(creator: string, rows: VideoRow[]) {
     const state: Record<string, unknown> = { creator };
     const questions: Record<string, ClefQuestion> = {};
     batch.forEach(({ row, m }, k) => {
-      const lines = row.description.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+      const lines = (row.description || "").split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
       const at = lines.findIndex((l) => l.includes(m.quote.slice(0, 40)) || l.toLowerCase().includes(m.name.toLowerCase()));
       const excerpt = (at >= 0 ? lines.slice(Math.max(0, at - 1), at + 2) : [m.quote]).join("\n").slice(0, 500);
       state[`item${k}`] = { video_title: row.title.slice(0, 140), youtube_paid_promotion_label: row.paid, sponsor_segment_marked: row.segments.some((s) => s.category === "sponsor"), brand: m.name, brand_website: m.domain || "unknown", text: excerpt };
@@ -257,10 +302,13 @@ async function scanCreator(admin: SupabaseClient, c: CreatorRow, deadline: numbe
   }
   if (!channel) { await saveStatus("no_channel"); return { videos: 0, newVideos: 0, links: 0, status: "no_channel" }; }
 
+  // Every stored video WITHOUT its description and tags (half the table's size): the text is fetched
+  // below only for the videos read again or shown to the AI. Loading all of it on every read was most
+  // of the project's data transfer.
   const oldRows: VideoRow[] = [];
   for (let from = 0; from < MAX_VIDEOS; from += 1000) {
-    const { data } = await admin.from("creator_videos").select("*").eq("user_id", c.user_id).eq("creator_id", c.id).order("published_at", { ascending: false }).range(from, from + 999);
-    oldRows.push(...((data || []) as VideoRow[]));
+    const { data } = await admin.from("creator_videos").select(opts.force ? "*" : VIDEO_LIGHT).eq("user_id", c.user_id).eq("creator_id", c.id).order("published_at", { ascending: false }).range(from, from + 999);
+    oldRows.push(...((data || []) as unknown as VideoRow[]));
     if (!data || data.length < 1000) break;
   }
   const rows = new Map<string, VideoRow>(oldRows.map((r) => [r.video_id, r]));
@@ -327,6 +375,15 @@ async function scanCreator(admin: SupabaseClient, c: CreatorRow, deadline: numbe
   }
   const ctx = { creator: c.name, handle, ownDomains, known, resolved };
 
+  // The text of the stored videos that will be read again (older rules, new SponsorBlock segments)
+  // or shown to the AI (the newest 60) — and nothing else.
+  {
+    const freshIds = new Set(fresh.map((v) => v.id));
+    const newest = [...rows.values()].sort((a, b) => String(b.published_at).localeCompare(String(a.published_at))).slice(0, 60);
+    const need = [...rows.values()].filter((r) => !freshIds.has(r.video_id) && (r.reader_v < READER_V || sb.has(r.video_id) || newest.includes(r)));
+    await fillText(admin, c, need);
+  }
+
   // 4. Read every new video; re-read old ones whose SponsorBlock segments changed.
   const touched: VideoRow[] = [];
   for (const v of fresh) {
@@ -377,11 +434,7 @@ async function scanCreator(admin: SupabaseClient, c: CreatorRow, deadline: numbe
   }
 
   // 6. Save the videos.
-  for (let i = 0; i < touched.length; i += 80) {
-    const batch = touched.slice(i, i + 80).map((r) => wellFormed({ ...videoRow(r), updated_at: now.toISOString() }));
-    const { error } = await admin.from("creator_videos").upsert(batch);
-    if (error) throw new Error(`save videos: ${error.message}`);
-  }
+  await saveVideos(admin, touched, now.toISOString());
 
   // 7. One row per brand, and the content mix.
   const links = await rebuildLinks(admin, c, [...rows.values()]);
@@ -455,8 +508,8 @@ async function listenSome(admin: SupabaseClient, deadline: number): Promise<numb
     done++;
   }
   for (const c of changed.values()) {
-    const { data: rows } = await admin.from("creator_videos").select("*").eq("user_id", c.user_id).eq("creator_id", c.id).limit(400);
-    await rebuildLinks(admin, c, (rows || []) as VideoRow[]);
+    // Every video of the creator (it used to be the first 400: deals from older videos were dropped).
+    await rebuildLinks(admin, c, await linkRows(admin, c.user_id, c.id));
   }
   return done;
 }
@@ -592,6 +645,8 @@ async function checkSeen(admin: SupabaseClient, s: SeenRow) {
     landed = "";
     const page = await getText(`https://${d}`, { timeout: 9000, max: 1_500_000 });
     if (!page || page.status >= 400 && page.status !== 403) return null;
+    // A short-link service's own error page ("dell.to/error?url=") names the brand but isn't its site.
+    if (/\/(?:error|404|not-?found|invalid|expired)(?:[/?#.]|$)/i.test(new URL(page.url || `https://${d}`).pathname)) return null;
     landed = normalizeDomain(page.url || "");
     return parseHtml(page.text, page.url || `https://${d}`);
   };
@@ -615,10 +670,12 @@ async function checkSeen(admin: SupabaseClient, s: SeenRow) {
       await admin.from("seen_brands").update({ name: cleanName(name) || s.name, domain_check: "mismatch", site: null, checked_at: now, updated_at: now }).eq("user_id", s.user_id).eq("brand_key", s.brand_key);
       return { domain, check, name: cleanName(name) || s.name, via: "" };
     }
-    // 2. Wikidata, when the link didn't prove it (a short link, a tracker, a wall, nothing).
-    if (check !== "site" && !(fromLabel && !brandish(name))) {
+    // 2. Wikidata, when the link didn't prove it (a short link, a tracker, a wall, nothing) — and also when
+    //    the "site" is a short-style host (dell.to, del.ly): the company's official website wins over it.
+    const shortHost = check === "site" && shortLinkDomain(domain);
+    if ((check !== "site" || shortHost) && !(fromLabel && !brandish(name))) {
       const wd = await officialSite(name).catch(() => null);
-      if (wd) {
+      if (wd && (!shortHost || (wd.domain !== domain && domainFits(name, wd.domain)))) {
         domain = wd.domain; check = "site"; via = "wikidata";
         site = { ...(site || {}), title: wd.label, description: wd.description };
         if (!site.topics) { const f = await look(domain).catch(() => null); if (f && !f.blocked) site = { ...describe(f), title: wd.label, description: wd.description }; }
@@ -922,20 +979,14 @@ Deno.serve(async (req) => {
       changed.push({ ...r, mentions: merged, listen: deal ? null : r.listen, transcript_status: "ok", transcript_lang: it.lang, transcript_kind: it.kind, transcript_at: now, transcript_hits: heard.hits, judged_at: null });
     }
     if (changed.length) {
-      const { error } = await admin.from("creator_videos").upsert(changed.map((r) => wellFormed({ ...videoRow(r), updated_at: now })));
-      if (error) return json({ error: "Couldn't save the transcripts." }, 500);
+      const saved = await saveVideos(admin, changed, now).then(() => true, () => false);
+      if (!saved) return json({ error: "Couldn't save the transcripts." }, 500);
     }
     // Who works with whom, again for the creators whose videos changed.
     for (const cid of Array.from(new Set(changed.filter((r) => r.transcript_status === "ok").map((r) => r.creator_id)))) {
       const c = byCreator.get(cid);
       if (!c) continue;
-      const all: VideoRow[] = [];
-      for (let from = 0; from < MAX_VIDEOS; from += 1000) {
-        const { data } = await admin.from("creator_videos").select("*").eq("user_id", userId).eq("creator_id", cid).range(from, from + 999);
-        all.push(...((data || []) as VideoRow[]));
-        if (!data || data.length < 1000) break;
-      }
-      await rebuildLinks(admin, c, all).catch(() => 0);
+      await rebuildLinks(admin, c, await linkRows(admin, userId, cid)).catch(() => 0);
     }
     return json({ ok: true, saved: changed.length, found });
   }

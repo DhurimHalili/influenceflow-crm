@@ -1,9 +1,11 @@
 import { ArrowRight, BadgeCheck, CircleAlert, Handshake, Loader2, Plus, RefreshCw, Send, Sparkles } from "lucide-react";
 import { useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useData } from "../contexts/DataContext";
 import { useMatch } from "../contexts/MatchContext";
 import { useToast } from "../contexts/ToastContext";
+import { blankBrand, brandValue } from "./BrandForm";
+import { BrandPicker } from "./BrandPicker";
 import { brandDomain, budgetOf, isDeal, matchOf, sellsOf, sellsSource, type BrandLink } from "../lib/match";
 import { KIND_LABEL, type DealKind } from "../lib/sponsors";
 import { compact, money } from "../lib/utils";
@@ -59,6 +61,9 @@ export function BrandMatchPanel({ brand }: { brand: Brand }) {
   </section>;
 }
 
+// What each kind means, in a few words, under the choice.
+const KIND_HINT: Record<DealKind, string> = { sponsored: "They were paid", seeded: "Product sent", affiliate: "Link or code only" };
+
 export function CreatorMatchPanel({ creator }: { creator: Creator }) {
   const data = useData();
   const m = useMatch();
@@ -67,8 +72,16 @@ export function CreatorMatchPanel({ creator }: { creator: Creator }) {
   const deals = useCreatorDeals(creator.id);
   const [proof, setProof] = useState<BrandLink | null>(null);
   const [adding, setAdding] = useState(false);
-  const [pick, setPick] = useState({ brand: "", kind: "sponsored" as DealKind });
+  const [pick, setPick] = useState({ brand: "", kind: "sponsored" as DealKind, fresh: false });
+  const [saving, setSaving] = useState(false);
+  const toast = useToast().toast;
+  const navigate = useNavigate();
   const brands = m.world.brands;
+  const activeBrands = useMemo(() => data.brands.filter((b) => !b.archived_at), [data.brands]);
+  // Already a deal here: shown with a tick, never linked twice.
+  const linked = useMemo(() => new Set(deals.filter(isDeal).map((l) => l.brand_id).filter((x): x is string => !!x)), [deals]);
+  // In their videos with a link or code only (no deal on file): the likeliest next deal you'd log.
+  const seenHere = useMemo(() => Array.from(new Set(deals.filter((l) => !isDeal(l) && !l.store && l.brand_id && !linked.has(l.brand_id)).map((l) => l.brand_id as string))), [deals, linked]);
   const fits = useMemo(() => brands.map((b) => ({ b, x: matchOf(b, creator, m.world) })).filter((r) => !r.x.missing && !r.x.flags.works && r.x.score >= 55).sort((a, b) => b.x.score - a.x.score).slice(0, 4), [brands, creator, m.world]);
   const hasYouTube = (creator.socials || []).some((s) => s.platform === "YouTube" && (s.url || s.handle));
   // Brand deals (paid / product sent) first; affiliate links are listed apart — they are not deals.
@@ -83,10 +96,13 @@ export function CreatorMatchPanel({ creator }: { creator: Creator }) {
       : row?.status === "ok" ? <p className="muted-copy">No paid deals or seeded products found in their last {content?.videos || ""} videos.</p> : !hasYouTube ? <p className="muted-copy">Add their YouTube channel — the CRM reads their videos for brand deals.</p> : null}
     {affiliates.length > 0 && <div className="mx-side-aff"><small>Affiliate links only — not a deal</small><div className="mx-side-deals">{affiliates.map((l) => <DealChip key={l.id} link={l} onOpen={() => setProof(l)} />)}</div></div>}
     {stores.length > 0 && <p className="mx-side-stores">Store affiliate: {stores.map((l) => l.brand_name).join(", ")}</p>}
-    {adding ? <form className="mx-add-deal" onSubmit={async (e) => { e.preventDefault(); if (!pick.brand) return; await m.addLink(creator.id, pick.brand, pick.kind); setAdding(false); setPick({ brand: "", kind: "sponsored" }); }}>
-      <select value={pick.brand} onChange={(e) => setPick({ ...pick, brand: e.target.value })} aria-label="Brand" required><option value="">Pick a brand…</option>{data.brands.filter((b) => !b.archived_at).sort((a, b) => a.name.localeCompare(b.name)).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select>
-      <select value={pick.kind} onChange={(e) => setPick({ ...pick, kind: e.target.value as DealKind })} aria-label="Kind of deal">{(Object.keys(KIND_LABEL) as DealKind[]).map((k) => <option key={k} value={k}>{KIND_LABEL[k]}</option>)}</select>
-      <div><Button size="sm" type="submit" disabled={!pick.brand}>Save</Button><Button size="sm" variant="ghost" type="button" onClick={() => setAdding(false)}>Cancel</Button></div>
+    {adding ? <form className="mx-add-deal" onSubmit={async (e) => { e.preventDefault(); if (!pick.brand || saving) return; setSaving(true); const ok = await m.addLink(creator.id, pick.brand, pick.kind, { retries: pick.fresh ? 6 : 0 }); setSaving(false); if (ok) { setAdding(false); setPick({ brand: "", kind: "sponsored", fresh: false }); } }}>
+      <p className="mx-add-title">Add a deal you know about</p>
+      <BrandPicker brands={activeBrands} value={pick.brand} onChange={(id) => setPick({ ...pick, brand: id, fresh: false })} taken={linked} autoFocus
+        suggested={seenHere.length ? { ids: seenHere, label: "Linked in their videos — no deal on file" } : undefined}
+        onCreate={(name) => { const b = data.addBrand({ ...brandValue({ ...blankBrand, name }) }); setPick({ ...pick, brand: b.id, fresh: true }); toast(`${b.name} added to your brands.`, "success", { label: "Open", run: () => navigate(`/app/brands/${b.id}`) }); }} />
+      <div className="mx-kind-seg" role="radiogroup" aria-label="Kind of deal">{(Object.keys(KIND_LABEL) as DealKind[]).map((k) => <button key={k} type="button" role="radio" aria-checked={pick.kind === k} className={`k-${k}${pick.kind === k ? " on" : ""}`} onClick={() => setPick({ ...pick, kind: k })}><strong>{KIND_LABEL[k]}</strong><small>{KIND_HINT[k]}</small></button>)}</div>
+      <div className="mx-add-actions"><Button size="sm" type="submit" disabled={!pick.brand} loading={saving}>Save deal</Button><Button size="sm" variant="ghost" type="button" onClick={() => { setAdding(false); setPick({ brand: "", kind: "sponsored", fresh: false }); }}>Cancel</Button><small>Saved as yours — it's never changed by what the videos say.</small></div>
     </form> : <button type="button" className="mx-add-link" onClick={() => setAdding(true)}><Plus size={13} /> Add a deal you know about</button>}
     {content?.topics.length ? <div className="mx-side-mix"><small>Their content · last {content.videos} videos</small><ContentBar topics={content.topics} height={8} /><TopicChips items={content.topics} max={4} /></div> : null}
     {fits.length > 0 && <div className="mx-side-fits"><small><Sparkles size={12} /> Brands that fit</small>{fits.map(({ b, x }) => <Link key={b.id} to={`/app/match?id=${b.id}`} className={`mx-side-fit tone-${x.tone}`}><ScoreRing match={x} size="sm" /><span><strong>{b.name}</strong><small>{x.flags.pitched ? `Pitched` : x.reasons[0]?.text || ""}</small></span>{x.flags.rival && <CircleAlert size={13} className="mx-rival-ico" aria-label={`Recent deal with ${x.flags.rival.name}`} />}</Link>)}<Link to={`/app/match?by=creator&id=${creator.id}`} className="mx-more">All brands for {creator.name.split(" ")[0]} <ArrowRight size={13} /></Link></div>}
