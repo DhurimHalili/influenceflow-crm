@@ -1,14 +1,15 @@
-import { ArrowLeft, BadgeCheck, Building2, Check, ChevronDown, CircleAlert, CircleHelp, Download, EyeOff, FileText, Globe2, Handshake, Loader2, Plus, RefreshCw, Search, Send, ShieldCheck, Sparkles, Store, Users, X } from "lucide-react";
+import { ArrowLeft, BadgeCheck, Building2, Crown, Check, ChevronDown, CircleAlert, CircleHelp, Download, EyeOff, FileText, Globe2, Handshake, Loader2, Plus, RefreshCw, Search, Send, ShieldCheck, Sparkles, Store, Users, X } from "lucide-react";
 import { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { blankBrand, brandValue } from "../components/BrandForm";
 import { BrandHistory, CoverageStrip, exportDeals } from "../components/MatchCoverage";
+import { GeoPill, isRoster, MarketStrip, RosterBoard, RosterLane } from "../components/MatchRoster";
 import { ago, ContentBar, CreatorChip, DealChip, EditTopicsButton, EvidenceModal, nextIn, ProofTag, ReadState, ScoreRing, TopicChips, TopicPicker, topicColor } from "../components/MatchBits";
 import { Avatar, Button, EmptyState, Modal, PageHeader } from "../components/ui";
 import { useData } from "../contexts/DataContext";
 import { useMatch } from "../contexts/MatchContext";
 import { useToast } from "../contexts/ToastContext";
-import { brandDomain, brandDoubts, brandTwin, budgetOf, counts, domainTrust, foundBrands, isDeal, kindOf, linkIsBrand, marketsOf, matchOf, PROOF_LABEL, proofOf, sellsOf, sellsSource, type BrandLink, type Match } from "../lib/match";
+import { brandDomain, brandDoubts, brandMarketsOf, brandTwin, budgetOf, counts, domainTrust, foundBrands, isDeal, kindOf, linkIsBrand, matchOf, PROOF_LABEL, proofOf, sellsOf, sellsSource, type BrandLink, type Match } from "../lib/match";
 import { KIND_LABEL, sureness, type DealKind } from "../lib/sponsors";
 import { topicLabel } from "../lib/taxonomy";
 import { compact, dateLabel, money } from "../lib/utils";
@@ -32,7 +33,7 @@ export default function MatchPage() {
   const m = useMatch();
   const [params, setParams] = useSearchParams();
   const view = params.get("view") === "deals" ? "deals" : "match";
-  const by = params.get("by") === "creator" ? "creator" : "brand";
+  const by = params.get("by") === "creator" ? "creator" : params.get("by") === "roster" ? "roster" : "brand";
   const id = params.get("id") || "";
   const set = useCallback((next: Record<string, string>) => setParams((p) => { for (const [k, v] of Object.entries(next)) { if (v) p.set(k, v); else p.delete(k); } return p; }, { replace: false }), [setParams]);
   const creators = m.world.creators;
@@ -55,7 +56,7 @@ export default function MatchPage() {
     {m.error && <p className="mx-banner warn"><CircleAlert size={15} /> {m.error}</p>}
     {!m.ready && !m.error ? <div className="mx-loading" aria-busy="true"><Loader2 size={18} className="spin" /> Loading matches…</div>
       : view === "deals" ? <DealsView found={found} />
-      : <MatchView by={by} id={id} set={set} creators={creators} brands={brands} />}
+      : <MatchView by={by} id={id} openId={params.get("open") || ""} set={set} creators={creators} brands={brands} />}
     {how && <HowItWorks onClose={() => setHow(false)} />}
   </div>;
 }
@@ -92,15 +93,25 @@ function HowItWorks({ onClose }: { onClose: () => void }) {
         </ul>
         <p>Your “Yes” or “No, wrong” on a deal is kept for good — a new read never changes it.</p>
       </section>
-      <section><h4>The match score</h4><p>Mostly content (60%): how much of their recent videos sit on or close to what the brand sells. Size, price, market and your criteria count only where known, and can't lift an off-topic creator. 80+ is a great fit, 62+ good, 45+ fair.</p></section>
+      <section><h4>The match score</h4><p>Content (45%) and audience (30%) decide it. Content: how much of their recent videos is about what the brand sells — a channel only about it ranks highest; a broader channel in the same world (a tech reviewer for a PC brand) that regularly covers it is still a good fit. Audience: where their viewers are — the media kit's audience countries when there are any (40% of the audience in the brand's markets is a full match), else their country — against where the brand sells, its main market counting most (the markets you set, else what the CRM finds: their store's country, country website, shop currency, where the company is based, the countries the site serves, and where the creators they already pay are). Outside the brand's markets a creator tops out at 55, a neighbouring market at 72; no country on file is never a penalty. Size, price and your criteria refine it and can't lift an off-topic creator. 80+ great, 62+ good, 45+ fair.</p></section>
     </div>
   </Modal>;
 }
 
 // ---- Matches ----------------------------------------------------------------------------------
 
-function MatchView({ by, id, set, creators, brands }: { by: "brand" | "creator"; id: string; set: (n: Record<string, string>) => void; creators: Creator[]; brands: Brand[] }) {
+/** By brand · By creator · Roster. */
+function ModeSeg({ by, set, roster }: { by: "brand" | "creator" | "roster"; set: (n: Record<string, string>) => void; roster: number }) {
+  return <div className="mx-seg" role="tablist" aria-label="Match from">
+    <button type="button" role="tab" aria-selected={by === "brand"} className={by === "brand" ? "on" : ""} onClick={() => set({ by: "", id: "", open: "" })}><Building2 size={13} /> By brand</button>
+    <button type="button" role="tab" aria-selected={by === "creator"} className={by === "creator" ? "on" : ""} onClick={() => set({ by: "creator", id: "", open: "" })}><Users size={13} /> By creator</button>
+    {roster > 0 && <button type="button" role="tab" aria-selected={by === "roster"} className={by === "roster" ? "on" : ""} onClick={() => set({ by: "roster", id: "", open: "" })}><Crown size={13} /> Roster</button>}
+  </div>;
+}
+
+function MatchView({ by, id, openId, set, creators, brands }: { by: "brand" | "creator" | "roster"; id: string; openId: string; set: (n: Record<string, string>) => void; creators: Creator[]; brands: Brand[] }) {
   const m = useMatch();
+  const rosterCount = creators.filter(isRoster).length;
   const [q, setQ] = useState("");
   const query = useDeferredValue(q.trim().toLowerCase());
   const brandRows = useMemo<BrandRow[]>(() => brands.map((b) => {
@@ -124,6 +135,7 @@ function MatchView({ by, id, set, creators, brands }: { by: "brand" | "creator";
     return { creator: c, content: row?.content || null, status: row?.status || "", great, deals: (m.linksBy.get(c.id) || []).filter((l) => counts(l) && !l.store).length };
   }).sort((a, b) => b.great - a.great || Number(!!b.content) - Number(!!a.content) || a.creator.name.localeCompare(b.creator.name)), [creators, brands, m.content, m.world, m.linksBy, by]);
 
+  if (by === "roster") return <div className="mx-roster-view"><div className="mx-roster-top"><ModeSeg by={by} set={set} roster={rosterCount} /></div><RosterBoard creators={creators} brands={brands} /></div>;
   const firstBrand = brandRows.find((r) => r.state === "ok")?.brand.id || brandRows[0]?.brand.id || "";
   const firstCreator = creatorRows[0]?.creator.id || "";
   const selected = id || (typeof window !== "undefined" && window.matchMedia?.("(min-width: 761px)").matches ? (by === "brand" ? firstBrand : firstCreator) : "");
@@ -136,14 +148,11 @@ function MatchView({ by, id, set, creators, brands }: { by: "brand" | "creator";
   return <div className={`mx-split${selected ? " has-pick" : ""}`}>
     <aside className="mx-rail" aria-label={by === "brand" ? "Brands" : "Creators"}>
       <div className="mx-rail-top">
-        <div className="mx-seg" role="tablist" aria-label="Match from">
-          <button type="button" role="tab" aria-selected={by === "brand"} className={by === "brand" ? "on" : ""} onClick={() => set({ by: "", id: "" })}><Building2 size={13} /> By brand</button>
-          <button type="button" role="tab" aria-selected={by === "creator"} className={by === "creator" ? "on" : ""} onClick={() => set({ by: "creator", id: "" })}><Users size={13} /> By creator</button>
-        </div>
+        <ModeSeg by={by} set={set} roster={rosterCount} />
         <label className="mx-search"><Search size={14} /><input value={q} onChange={(e) => setQ(e.target.value.slice(0, 60))} placeholder={by === "brand" ? "Brand or what they sell" : "Creator or topic"} aria-label="Search" />{q && <button type="button" onClick={() => setQ("")} aria-label="Clear search"><X size={13} /></button>}</label>
       </div>
       <div className="mx-rail-list" role="listbox" aria-label={by === "brand" ? "Pick a brand" : "Pick a creator"}>
-        {by === "brand" ? shownBrands.map((r) => <button type="button" role="option" aria-selected={selected === r.brand.id} key={r.brand.id} className={`mx-rail-item${selected === r.brand.id ? " on" : ""}`} onClick={() => set({ id: r.brand.id })}>
+        {by === "brand" ? shownBrands.map((r) => <button type="button" role="option" aria-selected={selected === r.brand.id} key={r.brand.id} className={`mx-rail-item${selected === r.brand.id ? " on" : ""}`} onClick={() => set({ id: r.brand.id, open: "" })}>
           <Avatar name={r.brand.name} path={r.brand.avatar_path} size="sm" />
           <span className="mx-ri-main"><strong>{r.brand.name}</strong>
             {r.state === "ok" ? <span className="mx-ri-sells">{r.sells.slice(0, 2).map((s) => <span key={s.key}><i style={{ background: topicColor(s.key) }} />{topicLabel(s.key)}</span>)}</span>
@@ -151,7 +160,7 @@ function MatchView({ by, id, set, creators, brands }: { by: "brand" | "creator";
           </span>
           <span className="mx-ri-count">{r.great > 0 ? <b className="great">{r.great}</b> : r.good > 0 ? <b>{r.good}</b> : null}{r.works > 0 && <em title={`${r.works} of your creators already work with them`}><Handshake size={11} />{r.works}</em>}</span>
         </button>)
-        : shownCreators.map((r) => <button type="button" role="option" aria-selected={selected === r.creator.id} key={r.creator.id} className={`mx-rail-item${selected === r.creator.id ? " on" : ""}`} onClick={() => set({ id: r.creator.id })}>
+        : shownCreators.map((r) => <button type="button" role="option" aria-selected={selected === r.creator.id} key={r.creator.id} className={`mx-rail-item${selected === r.creator.id ? " on" : ""}`} onClick={() => set({ id: r.creator.id, open: "" })}>
           <Avatar name={r.creator.name} path={r.creator.avatar_path} size="sm" />
           <span className="mx-ri-main"><strong>{r.creator.name}</strong>
             {r.content?.topics.length ? <ContentBar topics={r.content.topics} height={5} /> : <small className="mx-ri-state">{m.scanning.has(r.creator.id) ? "Reading videos…" : r.status === "no_channel" ? "No YouTube channel" : r.status === "error" ? "Couldn't read videos" : "Videos not read yet"}</small>}
@@ -164,7 +173,7 @@ function MatchView({ by, id, set, creators, brands }: { by: "brand" | "creator";
     </aside>
     <section className="mx-pane">
       {selected ? <button type="button" className="mx-back" onClick={() => set({ id: "" })}><ArrowLeft size={15} /> {by === "brand" ? "All brands" : "All creators"}</button> : null}
-      {selected && by === "brand" && brands.find((b) => b.id === selected) ? <BrandPane brand={brands.find((b) => b.id === selected)!} creators={creators} />
+      {selected && by === "brand" && brands.find((b) => b.id === selected) ? <BrandPane brand={brands.find((b) => b.id === selected)!} creators={creators} openFirst={openId} />
         : selected && by === "creator" && creators.find((c) => c.id === selected) ? <CreatorPane creator={creators.find((c) => c.id === selected)!} brands={brands} />
         : <div className="mx-pane-empty"><Sparkles size={22} /><p>Pick a {by} to see {by === "brand" ? "the creators that fit them" : "the brands that fit them"}.</p></div>}
     </section>
@@ -172,7 +181,7 @@ function MatchView({ by, id, set, creators, brands }: { by: "brand" | "creator";
 }
 
 /** A brand: what we know about it, then every creator ranked for it. */
-function BrandPane({ brand, creators }: { brand: Brand; creators: Creator[] }) {
+function BrandPane({ brand, creators, openFirst = "" }: { brand: Brand; creators: Creator[]; openFirst?: string }) {
   const data = useData();
   const m = useMatch();
   const navigate = useNavigate();
@@ -182,13 +191,21 @@ function BrandPane({ brand, creators }: { brand: Brand; creators: Creator[] }) {
   const sells = sellsOf(brand, intel);
   const source = sellsSource(brand, intel);
   const [picker, setPicker] = useState(false);
-  const [scope, setScope] = useState<"best" | "all">("best");
+  const [scope, setScope] = useState<"best" | "all" | "roster">("best");
   const [hidePitched, setHidePitched] = useState(true);
   const [picked, setPicked] = useState<string[]>([]);
   const [open, setOpen] = useState("");
   const [proof, setProof] = useState<{ link: BrandLink; creator: Creator } | null>(null);
   const [history, setHistory] = useState(false);
   useEffect(() => { setPicked([]); setOpen(""); setHistory(false); }, [brand.id]);
+  // Open one creator's row (from the roster lane or the roster board): show it wherever it sits in the list.
+  const reveal = useCallback((cid: string) => {
+    setOpen(cid);
+    setHidePitched(false);
+    setScope((s) => (s === "best" ? "all" : s));
+    window.setTimeout(() => document.getElementById(`mx-row-${cid}`)?.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "center" }), 60);
+  }, []);
+  useEffect(() => { if (openFirst) reveal(openFirst); }, [openFirst, brand.id, reveal]);
 
   const rows = useMemo<Row[]>(() => creators.map((creator) => ({ creator, match: matchOf(brand, creator, m.world) })).sort((a, b) => b.match.score - a.match.score), [brand, creators, m.world]);
   const works = rows.filter((r) => r.match.flags.works);
@@ -196,10 +213,11 @@ function BrandPane({ brand, creators }: { brand: Brand; creators: Creator[] }) {
   const scored = rows.filter((r) => !r.match.flags.works && !r.match.missing);
   const pitched = scored.filter((r) => r.match.flags.pitched);
   const fresh = scored.filter((r) => !r.match.flags.pitched);
-  const list = (scope === "best" ? fresh.filter((r) => r.match.score >= 45) : fresh).concat(hidePitched ? [] : pitched).sort((a, b) => b.match.score - a.match.score);
+  const list = scope === "roster" ? scored.filter((r) => isRoster(r.creator)).sort((a, b) => b.match.score - a.match.score)
+    : (scope === "best" ? fresh.filter((r) => r.match.score >= 45) : fresh).concat(hidePitched ? [] : pitched).sort((a, b) => b.match.score - a.match.score);
+  const markets = brandMarketsOf(brand, m.world);
   const unread = rows.filter((r) => r.match.missing === "creator").length;
   const budget = budgetOf(brand, m.world);
-  const markets = marketsOf(brand, intel);
   const program = intel?.programs.find((p) => p.kind === "affiliate") || intel?.programs.find((p) => p.kind === "creator" || p.kind === "ambassador");
   const domain = brandDomain(brand);
   const researching = m.researching.has(brand.id);
@@ -219,11 +237,12 @@ function BrandPane({ brand, creators }: { brand: Brand; creators: Creator[] }) {
       <small>Sells {source === "you" ? <em>· set by you</em> : source === "site" ? <em>· from their site{intel?.by === "rules+ai" ? " + AI" : intel?.by === "gemini" ? " · read by Gemini" : ""}</em> : sells.length ? <em>· from their type</em> : null}</small>
       <div className="mx-fact-row">{sells.length ? <TopicChips items={sells} max={6} /> : <span className="muted-copy">{row?.status === "blocked" ? "Their site blocks robots." : !domain ? "No website yet." : !row ? "Reading their site…" : "Couldn't tell from their site."}</span>}<EditTopicsButton onClick={() => setPicker(true)} /></div>
     </div>
+    <MarketStrip brand={brand} markets={markets} />
     <div className="mx-facts">
       {intel?.price && <div className="mx-fact"><small>Price range</small><b>{money(intel.price.min)}–{money(intel.price.max)}</b><span>typical {money(intel.price.median)}{intel.products ? ` · ${intel.products} products` : ""}</span></div>}
       <div className="mx-fact"><small>Budget</small>{budget ? <><b>{budget.low === budget.high ? money(budget.high) : `${money(budget.low)}–${money(budget.high)}`}<i> /{budget.per === "video" ? "video" : "creator"}</i></b><span>{budget.kind === "estimate" ? "Estimate from " : "From "}{budget.from}</span></> : <><b className="dim">Unknown</b><span>Add it to the brief, or it shows once they sponsor a creator you track</span></>}</div>
       <div className="mx-fact"><small>Creator program</small>{program ? <><b><a href={program.url} target="_blank" rel="noopener noreferrer">{program.kind === "affiliate" ? "Affiliate" : program.kind === "ambassador" ? "Ambassadors" : "Creators"}{program.commission ? ` · ${program.commission}` : ""}</a></b><span>{program.network || "on their site"}</span></> : <><b className="dim">None listed</b><span>{intel ? "Not on their site" : "—"}</span></>}</div>
-      <div className="mx-fact"><small>Works with</small><b>{works.length} of yours</b><span>{markets.length ? `Sells in ${markets.slice(0, 3).join(", ")}${markets.length > 3 ? ` +${markets.length - 3}` : ""}` : "Markets unknown"}</span></div>
+      <div className="mx-fact"><small>Works with</small><b>{works.length} of yours</b><span>{works.length ? "Already sponsored or seeded" : "None of your creators yet"}</span></div>
     </div>
 
     {works.length > 0 && <div className="mx-works">
@@ -235,16 +254,18 @@ function BrandPane({ brand, creators }: { brand: Brand; creators: Creator[] }) {
       <div className="mx-works-list">{affiliates.map((r) => <CreatorChip key={r.creator.id} creator={r.creator} onClick={() => setProof({ link: r.match.flags.affiliate!, creator: r.creator })}><DealChip link={r.match.flags.affiliate!} showName={false} compact /></CreatorChip>)}</div>
     </div>}
 
+    {sells.length > 0 && <RosterLane rows={rows} onOpen={reveal} />}
+
     <div className="mx-list-head">
-      <h3>{scope === "best" ? "Best fits" : "Every creator"} <span>{list.length}</span></h3>
+      <h3>{scope === "best" ? "Best fits" : scope === "roster" ? "Roster" : "Every creator"} <span>{list.length}</span></h3>
       <div className="mx-list-tools">
-        <div className="mx-seg sm" role="tablist" aria-label="Which creators"><button type="button" role="tab" aria-selected={scope === "best"} className={scope === "best" ? "on" : ""} onClick={() => setScope("best")}>Best fits</button><button type="button" role="tab" aria-selected={scope === "all"} className={scope === "all" ? "on" : ""} onClick={() => setScope("all")}>All</button></div>
+        <div className="mx-seg sm" role="tablist" aria-label="Which creators"><button type="button" role="tab" aria-selected={scope === "best"} className={scope === "best" ? "on" : ""} onClick={() => setScope("best")}>Best fits</button><button type="button" role="tab" aria-selected={scope === "all"} className={scope === "all" ? "on" : ""} onClick={() => setScope("all")}>All</button>{creators.some(isRoster) && <button type="button" role="tab" aria-selected={scope === "roster"} className={scope === "roster" ? "on" : ""} onClick={() => setScope("roster")}><Crown size={12} /> Roster</button>}</div>
         {pitched.length > 0 && <label className="mx-check"><input type="checkbox" checked={!hidePitched} onChange={(e) => setHidePitched(!e.target.checked)} /> Show pitched ({pitched.length})</label>}
       </div>
     </div>
     {!sells.length ? <div className="mx-empty-card"><Sparkles size={18} /><div><strong>Tell the CRM what {brand.name} sells</strong><p>{domain ? "Their site didn't say clearly enough. Pick it once — every creator is ranked right away." : "Add their website, or pick what they sell — every creator is ranked right away."}</p></div><Button size="sm" onClick={() => setPicker(true)}>Pick what they sell</Button></div>
       : !list.length ? <p className="mx-none">{unread === creators.length ? "Your creators' videos are still being read — matches appear here as they finish." : scope === "best" ? <>No strong fits yet. <button type="button" className="link-btn" onClick={() => setScope("all")}>See every creator</button>.</> : "No creators to show."}</p>
-      : <ol className="mx-rows">{list.slice(0, scope === "best" ? 40 : 200).map((r) => <MatchRow key={r.creator.id} r={r} brand={brand} open={open === r.creator.id} onToggle={() => setOpen(open === r.creator.id ? "" : r.creator.id)} picked={picked.includes(r.creator.id)} onPick={() => togglePick(r.creator.id)} sells={sells} onProof={(link) => setProof({ link, creator: r.creator })} />)}</ol>}
+      : <ol className="mx-rows">{list.slice(0, scope === "best" ? 40 : 300).map((r) => <MatchRow key={r.creator.id} r={r} brand={brand} open={open === r.creator.id} onToggle={() => setOpen(open === r.creator.id ? "" : r.creator.id)} picked={picked.includes(r.creator.id)} onPick={() => togglePick(r.creator.id)} sells={sells} onProof={(link) => setProof({ link, creator: r.creator })} />)}</ol>}
     {unread > 0 && sells.length > 0 && <p className="mx-foot-note"><Loader2 size={12} className="spin" /> {unread} creator{unread === 1 ? "" : "s"} not scored yet — their videos are being read.</p>}
 
     {picked.length > 0 && <div className="mx-tray" role="region" aria-label="Picked creators">
@@ -268,11 +289,11 @@ function MatchRow({ r, brand, open, onToggle, picked, onPick, sells, onProof }: 
   const lit = new Set(match.carriers.map((x) => x.key));
   const pitched = match.flags.pitched;
   const views = c.avg_views || c.youtube?.avg_views || 0;
-  return <li className={`mx-row tone-${match.tone}${open ? " open" : ""}${pitched ? " pitched" : ""}`}>
+  return <li id={`mx-row-${c.id}`} className={`mx-row tone-${match.tone}${open ? " open" : ""}${pitched ? " pitched" : ""}${isRoster(c) ? " roster" : ""}`}>
     <label className="mx-pick" title={`Pick ${c.name}`}><input type="checkbox" checked={picked} onChange={onPick} aria-label={`Pick ${c.name} for a pitch`} /></label>
     <ScoreRing match={match} />
     <button type="button" className="mx-row-main" onClick={onToggle} aria-expanded={open}>
-      <span className="mx-row-who"><Avatar name={c.name} path={c.avatar_path} size="sm" /><span><strong>{c.name}</strong><small>{[STATUS_LABELS[c.pipeline_status], views ? `${compact(views)} avg views` : "", c.country].filter(Boolean).join(" · ")}</small></span></span>
+      <span className="mx-row-who"><Avatar name={c.name} path={c.avatar_path} size="sm" /><span><strong>{c.name}{isRoster(c) && <Crown size={12} className="mx-crown" aria-label="On your roster" />}</strong><small><GeoPill geo={match.geo} creator={c} />{[STATUS_LABELS[c.pipeline_status], views ? `${compact(views)} avg views` : ""].filter(Boolean).join(" · ")}</small></span></span>
       <span className="mx-reasons">{match.reasons.slice(0, 3).map((x) => <span key={x.text} className={`reason ${x.tone === "good" ? "ok" : x.tone === "warn" || x.tone === "bad" ? "near" : "no"}`}>{x.text}</span>)}{pitched && <span className="reason linked"><Send size={10} /> {pitched.how === "campaign" ? "In a campaign" : `Pitched ${ago(pitched.at)}`}</span>}</span>
       <ChevronDown size={15} className="mx-caret" aria-hidden="true" />
     </button>
@@ -286,7 +307,7 @@ function MatchRow({ r, brand, open, onToggle, picked, onPick, sells, onProof }: 
         <Link className="btn btn-secondary btn-sm" to={`/app/campaigns?new=1&brand=${brand.id}&creator=${c.id}`}><Plus size={13} /> Campaign</Link>
         <Link className="btn btn-ghost btn-sm" to={`/app/influencers/${c.id}`}>Open profile</Link>
       </div>
-      {sells.length > 0 && <p className="mx-fine">Content counts most ({pct(0.6)}); size, price, market and your bar count only where they're known.</p>}
+      {sells.length > 0 && <p className="mx-fine">Content ({pct(0.45)}) and audience ({pct(0.3)}) decide it: what they make vs what {brand.name} sells, and where their audience is vs where {brand.name} sells. Size, price and your bar refine it.</p>}
     </div>}
   </li>;
 }

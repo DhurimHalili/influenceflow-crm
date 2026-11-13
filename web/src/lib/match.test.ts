@@ -98,4 +98,28 @@ eq("twin: a brand you archived is neither (the list never offers it)", brandTwin
 const w9 = { ...w3, brands: [], archivedBrands: tw.filter((b) => b.archived_at), links: w3.links.map((l) => ({ ...l })) } as MatchWorld;
 eq("found: a clean-up copy doesn't hide a verified find", foundBrands(w9).length, foundBrands({ ...w3, brands: [], archivedBrands: [] } as MatchWorld).length);
 
+// ---- market: where they sell vs where the audience is ----
+const usBrief = { ...tryx.brief, markets: ["United States", "United Kingdom"] };
+const usBrand = brand({ id: "b1", brief: usBrief } as never);
+const geoWorld = world({ creators: [creator("us", { country: "United States" }), creator("uk", { country: "United Kingdom" }), creator("de", { country: "Germany" }), creator("nowhere", { country: "" }), creator("kit", { country: "Germany", audience: { verified: { top_countries: [{ country: "United States", pct: 70 }, { country: "Germany", pct: 10 }] } } } as never)],
+  content: new Map(["us", "uk", "de", "nowhere", "kit"].map((id) => [id, content([["pc_builds", 0.7], ["gpus", 0.2]])])) });
+const g = Object.fromEntries(geoWorld.creators.map((c) => [c.id, matchOf(usBrand, c, geoWorld)]));
+yes("same content: US (main market) > UK (also sells) > Germany (doesn't)", g.us.score > g.uk.score && g.uk.score > g.de.score, [g.us.score, g.uk.score, g.de.score]);
+yes("a creator outside the brand's markets is never a top pick", g.de.score <= 55, g.de.score);
+yes("no country: scored on everything else, not marked down", g.nowhere.score >= g.uk.score && g.nowhere.geo === null, [g.nowhere.score, g.uk.score]);
+eq("market reason reads plainly", [g.us.reasons[1].text, g.uk.reasons[1].text, g.de.reasons[1].text], ["US · their main market", "UK · they sell there too", "Germany · they don't sell there"]);
+yes("media-kit audience beats the creator's own country", g.kit.geo?.source === "kit" && g.kit.score > g.de.score && g.kit.reasons[1].text.startsWith("Audience 70% US"), [g.kit.geo, g.kit.reasons[1]]);
+// Edits show at once: change the country, the match follows (no stale cache across worlds).
+const moved = world({ ...geoWorld, creators: geoWorld.creators.map((c) => (c.id === "de" ? { ...c, country: "United States" } : c)), content: geoWorld.content });
+yes("changing a creator's country re-scores them", matchOf(usBrand, moved.creators.find((c) => c.id === "de")!, moved).score === g.us.score, matchOf(usBrand, moved.creators.find((c) => c.id === "de")!, moved).score);
+
+// ---- content: the narrower the fit, the better (a PC brand: a PC-only channel beats a broad tech reviewer) ----
+const pcBrand = brand({ id: "b1", brief: usBrief } as never);
+const techWorld = world({ creators: [creator("pconly"), creator("broad"), creator("phones")],
+  content: new Map([["pconly", content([["pc_builds", 0.75], ["pc_cases", 0.15], ["gpus", 0.1]])], ["broad", content([["phones", 0.3], ["pc_builds", 0.25], ["laptops", 0.2], ["audio", 0.15]])], ["phones", content([["phones", 0.85]])]]) });
+const [tp, tb, tph] = ["pconly", "broad", "phones"].map((id) => matchOf(pcBrand, techWorld.creators.find((c) => c.id === id)!, techWorld));
+yes("PC-only channel is the best match for a PC hardware brand", tp.score > tb.score && tp.tone === "great", [tp.score, tb.score]);
+yes("a broad tech reviewer (phones, PCs, laptops) is a good match", tb.score >= 62 && tb.score > tph.score, [tb.score, tph.score]);
+yes("a phones-only channel ranks lowest", tph.score < tb.score, tph.score);
+
 if (fail) { console.log(`\n${fail} failing`); process.exit(1); } else console.log("\nall match tests pass");

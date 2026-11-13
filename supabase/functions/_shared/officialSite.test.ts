@@ -1,6 +1,6 @@
 // Run: deno run --allow-read supabase/functions/_shared/officialSite.test.ts
 // Recorded Wikidata / DuckDuckGo answers — no network.
-import { duckSite, officialSite } from "./officialSite.ts";
+import { companyCountry, duckSite, officialSite } from "./officialSite.ts";
 
 let fail = 0;
 const eq = (name: string, got: unknown, want: unknown) => {
@@ -50,5 +50,14 @@ eq("ddg: exact heading + fitting site", await duckSite("NZXT", async () => ({ He
 eq("ddg: near miss heading → nothing", await duckSite("Away", async () => ({ Heading: "Away (band)", Type: "A", Results: [{ FirstURL: "https://away.band" }] })), "");
 eq("ddg: disambiguation → nothing", await duckSite("Gamma", async () => ({ Heading: "Gamma", Type: "D", Results: [] })), "");
 eq("ddg: business qualifier is fine", await duckSite("Nothing", async () => ({ Heading: "Nothing (company)", Type: "A", Results: [{ FirstURL: "https://nothing.tech" }] })), "nothing.tech");
+
+// Where the company is based: Wikidata P17 of the item whose official site is the brand's.
+const dellHq = async (url: string) => {
+  if (url.includes("wbsearchentities")) return { search: [{ id: "Q28206816", label: "Dell", description: "brand of computers owned by Dell, Inc." }] };
+  if (url.includes("Q28206816")) return { entities: { Q28206816: { descriptions: { en: { value: "brand of computers" } }, claims: { P31: [], P856: [{ mainsnak: { datavalue: { value: "https://www.dell.com" } }, rank: "normal" }], P17: [{ mainsnak: { datavalue: { value: { id: "Q30" } } }, rank: "normal" }] } } } };
+  return null;
+};
+eq("company country: Dell → US", await companyCountry("Dell", "dell.com", dellHq), "US");
+eq("company country: a different site → nothing", await companyCountry("Dell", "dell-parts.de", dellHq), "");
 
 if (fail) { console.log(`\n${fail} failing`); Deno.exit(1); } else console.log("\nall officialSite tests pass");

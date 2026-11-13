@@ -433,6 +433,17 @@ export function topicFit(brand: { key: string; weight: number }[], creator: { ke
   // Videos with no clear topic are unknown, not off-topic: they count at half the creator's own fit.
   const known = Math.min(1, creator.reduce((n, c) => n + c.share, 0));
   if (known < 1) fit += (1 - known) * fit * 0.5;
+  // The same audience: a broad channel in the brand's world (a tech reviewer — phones, PCs, laptops,
+  // accessories — for a PC hardware brand) that regularly covers exactly what the brand sells is a good
+  // fit, even though most videos are about neighbouring things. A channel that is ONLY about what the
+  // brand sells still ranks higher (its own fit is near 1).
+  const brandFamilies = new Set(brand.map((b) => familyOf(b.key)).filter((f): f is FamilyKey => !!f));
+  const world = new Set<FamilyKey>(brandFamilies);
+  for (const f of brandFamilies) for (const r of FAMILIES[f].related) world.add(r);
+  const core = Math.min(1, creator.filter((c) => brand.some((b) => affinity(c.key, b.key) >= 0.8)).reduce((n, c) => n + c.share, 0));
+  // Of the videos whose topic is clear (unclear ones aren't off-topic).
+  const inWorld = known > 0 ? Math.min(1, creator.filter((c) => { const f = familyOf(c.key); return !!f && world.has(f); }).reduce((n, c) => n + c.share, 0) / known) : 0;
+  if (core >= 0.15 && inWorld >= 0.5) fit = Math.max(fit, Math.min(0.85, 0.25 + 0.8 * core + 0.2 * inWorld));
   const carriers = Array.from(carry.entries()).map(([key, share]) => ({ key, share })).sort((a, b) => b.share - a.share);
   // "On topic": the share of their content that is close to anything the brand sells.
   const onTopic = Math.min(1, carriers.reduce((n, c) => n + c.share, 0));

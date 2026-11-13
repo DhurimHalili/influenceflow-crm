@@ -17,7 +17,8 @@
 
 import type { Brand, Campaign, Creator } from "../types";
 import { judge, youtubeSubs } from "./criteria";
-import { findCountry } from "./countries";
+import { COUNTRIES } from "./countries";
+import { audienceOf, brandMarkets, mainAudience, marketFit, type Audience, type BrandMarkets, type GeoSignals } from "./geo";
 import { brandish, dealProof, domainFits, nameAsDomain, normalizeDomain, type DealKind, type Evidence, type Proof } from "./sponsors";
 import { overlap, scoreText, topicFit, topicLabel, TOPIC, type ContentProfile } from "./taxonomy";
 
@@ -28,6 +29,8 @@ export type BrandIntel = {
   products: number; examples: string[]; price: { min: number; median: number; max: number; currency: string } | null; platform: string;
   programs: { kind: string; url: string; text: string; commission?: string; network?: string }[]; socials: { platform: string; url: string }[];
   markets: string[]; currency: string; wiki: string; pages: string[]; verified: boolean;
+  /** Where the shop is: its store country (Shopify), country domain, the company's home (Wikidata). */
+  geo?: GeoSignals | null;
 };
 export type IntelRow = { brand_id: string; intel: BrandIntel | null; status: string; researched_at: string | null };
 export type ContentRow = { creator_id: string; content: ContentProfile | null; status: string; note?: string; scanned_at: string | null };
@@ -131,18 +134,23 @@ export const sellsSource = (b: { match_topics?: string[] }, intel?: BrandIntel |
 
 const reach = (c: Creator) => c.avg_views || c.youtube?.avg_views || 0;
 const median = (xs: number[]) => { const v = xs.filter((x) => x > 0).sort((a, b) => a - b); return v.length ? v[Math.floor(v.length / 2)] : 0; };
-const CURRENCY_HOME: Record<string, string[]> = { USD: ["US"], GBP: ["GB"], CAD: ["CA"], AUD: ["AU"], NZD: ["NZ"], EUR: ["DE", "FR", "NL", "IT", "ES", "BE", "AT", "IE", "FI", "PT"], JPY: ["JP"], SEK: ["SE"], NOK: ["NO"], DKK: ["DK"], CHF: ["CH"], PLN: ["PL"], INR: ["IN"], SGD: ["SG"] };
-const ENGLISH = new Set(["US", "GB", "CA", "AU", "NZ", "IE"]);
-const EU = new Set(["DE", "FR", "NL", "IT", "ES", "BE", "AT", "IE", "FI", "PT", "SE", "DK", "PL", "CZ", "GR", "HU", "RO", "SK", "SI", "HR", "LU", "LT", "LV", "EE", "BG", "CY", "MT"]);
-const codeOf = (v: string) => (/^[A-Z]{2}$/.test(v) ? v : findCountry(v)?.code || "");
 
-/** Where a brand sells (country codes), from your brief, then its site. */
-export function marketsOf(b: Pick<Brand, "brief">, intel?: BrandIntel | null): string[] {
-  const fromBrief = (b.brief?.markets || []).map(codeOf).filter(Boolean);
-  if (fromBrief.length) return Array.from(new Set(fromBrief));
-  const site = [...(intel?.markets || []), ...(CURRENCY_HOME[intel?.currency || ""] || [])];
-  return Array.from(new Set(site));
+/** Where a brand sells (country codes, main market first). */
+export function marketsOf(b: Pick<Brand, "brief" | "domain">, intel?: BrandIntel | null): string[] {
+  return brandMarkets(b, intel).list.map((m) => m.code);
 }
+const NAME_BY_CODE = new Map(COUNTRIES.map((c) => [c.code, c.name]));
+/** Short, the way people say it: US, UK, Germany. */
+export const countryName = (code: string) => (code === "US" ? "US" : code === "GB" ? "UK" : code === "AE" ? "UAE" : NAME_BY_CODE.get(code) || code);
+
+/** Where a brand sells, with the creators it already pays counted in (their main audience country). */
+function brandMarketsIn(b: Brand, intel: BrandIntel | null | undefined, idx: Index): BrandMarkets {
+  const paid = idx.linksFor(b).filter((l) => isDeal(l) && counts(l, 0.65)).map((l) => idx.creatorById.get(l.creator_id)).filter((c): c is Creator => !!c);
+  const sponsored = Array.from(new Map(paid.map((c) => [c.id, mainAudience(c)])).values()).filter(Boolean);
+  return brandMarkets(b, intel, sponsored);
+}
+/** The same, for screens (cached per world). */
+export const brandMarketsOf = (b: Brand, w: MatchWorld): BrandMarkets => memo(w, `markets:${b.id}`, () => brandMarketsIn(b, w.intel.get(b.id)?.intel, indexOf(w)));
 
 // ---- budget ---------------------------------------------------------------------------------
 
@@ -189,6 +197,8 @@ export type Match = {
   onTopic: number;
   carriers: { key: string; share: number }[];
   parts: { content: number; size: number | null; price: number | null; market: number | null; quality: number | null };
+  /** The market side in one line: their (audience) country vs where the brand sells. null = not known. */
+  geo: { code: string; share: number; source: Audience["source"]; fit: number; place: "main" | "also" | "near" | "outside" } | null;
   reasons: Reason[];
   flags: Flags;
   /** Why there's no real score yet: we haven't read the creator's videos, or don't know what the brand sells. */
@@ -213,7 +223,9 @@ export type MatchWorld = {
 };
 
 export const toneOf = (score: number): Match["tone"] => (score >= 80 ? "great" : score >= 62 ? "good" : score >= 45 ? "fair" : "weak");
-const WEIGHTS = { content: 0.6, size: 0.14, price: 0.1, market: 0.08, quality: 0.08 };
+// Content and audience decide a match: what they make vs what the brand sells, and where their audience
+// is vs where the brand sells. Size, price and your bar refine it.
+const WEIGHTS = { content: 0.45, market: 0.3, size: 0.1, price: 0.08, quality: 0.07 };
 const pct = (x: number) => `${Math.round(x * 100)}%`;
 const k = (n: number) => (n >= 1e6 ? `${Math.round(n / 1e5) / 10}M` : n >= 1e3 ? `${Math.round(n / 100) / 10}K` : String(Math.round(n)));
 
@@ -322,7 +334,7 @@ export function matchOf(b: Brand & { match_topics?: string[] }, c: Creator, w: M
   }
 
   if (!content?.topics?.length || !sells.length) {
-    return { score: 0, tone: "weak", fit: 0, onTopic: 0, carriers: [], parts: { content: 0, size: null, price: null, market: null, quality: null }, reasons, flags, missing: !sells.length ? "brand" : "creator" };
+    return { score: 0, tone: "weak", fit: 0, onTopic: 0, carriers: [], parts: { content: 0, size: null, price: null, market: null, quality: null }, geo: null, reasons, flags, missing: !sells.length ? "brand" : "creator" };
   }
   const tf = topicFit(sells, content.topics);
   const parts: Match["parts"] = { content: tf.fit, size: null, price: null, market: null, quality: null };
@@ -360,16 +372,22 @@ export function matchOf(b: Brand & { match_topics?: string[] }, c: Creator, w: M
     reasons.push({ text: rate <= budget.high ? "Their rate fits the budget" : rate <= budget.high * 1.25 ? "Rate a little over budget" : "Rate over budget", tone: rate <= budget.high ? "good" : rate <= budget.high * 1.25 ? "info" : "warn" });
   }
 
-  // Market: where the brand sells vs. the creator and their audience.
-  const markets = marketsOf(b, intel);
-  const home = codeOf(c.country || "") || (c.youtube?.country || "").toUpperCase();
-  const top = (c.audience?.verified?.top_countries || []).map((x) => codeOf(x.country)).filter(Boolean);
-  if (markets.length && (home || top.length)) {
-    const where = [...top.slice(0, 2), home].filter(Boolean);
-    const hit = where.some((x) => markets.includes(x));
-    const near = !hit && where.some((x) => (EU.has(x) && markets.some((m) => EU.has(m))) || (ENGLISH.has(x) && markets.some((m) => ENGLISH.has(m))));
-    parts.market = hit ? 1 : near ? 0.65 : 0.3;
-    if (!hit) reasons.push({ text: near ? "A nearby market" : "Outside where they sell", tone: near ? "info" : "warn" });
+  // Market: where their audience is (media kit, else their country) vs where the brand sells (main market first).
+  const markets = memo(w, `markets:${b.id}`, () => brandMarketsIn(b, intel, idx));
+  const aud = audienceOf(c);
+  const mf = marketFit(markets, aud);
+  let geo: Match["geo"] = null;
+  if (mf) {
+    parts.market = mf.fit;
+    const top = aud.list[0];
+    const main = markets.list[0]?.code || "";
+    const place: NonNullable<Match["geo"]>["place"] = mf.fit >= 0.9 ? "main" : mf.fit >= 0.6 ? "also" : mf.fit >= 0.3 ? "near" : "outside";
+    geo = { code: top.code, share: top.share, source: aud.source, fit: mf.fit, place };
+    const who = aud.source === "kit" ? `Audience ${Math.round(top.share * 100)}% ${top.code}` : countryName(top.code);
+    reasons.push(place === "main" ? { text: `${who} · ${markets.list.length > 1 ? "their main market" : "where they sell"}`, tone: "good" }
+      : place === "also" ? { text: `${who} · they sell there too`, tone: "good" }
+        : place === "near" ? { text: `${who} · next to their ${countryName(main)} market`, tone: "info" }
+          : { text: `${who} · they don't sell there`, tone: "bad" });
   }
 
   // Your bar.
@@ -384,9 +402,14 @@ export function matchOf(b: Brand & { match_topics?: string[] }, c: Creator, w: M
   let score = Math.round((sum / weight) * 100);
   // Content is the gate: good numbers can't lift an off-topic creator.
   score = Math.max(0, Math.min(score, Math.round(tf.fit * 100) + 12, 99));
+  // …and a creator outside the brand's markets can't be a top pick, however on-topic.
+  if (parts.market !== null) score = Math.min(score, parts.market < 0.25 ? 55 : parts.market < 0.5 ? 72 : parts.market < 0.75 ? 88 : 99);
   if (flags.affiliate) reasons.push({ text: `Has an affiliate link to ${b.name} — no deal yet`, tone: "info" });
   if (flags.rival) reasons.push({ text: `${kindOf(flags.rival.link) === "seeded" ? "Seeded" : "Sponsored"} by ${flags.rival.name} ${flags.rival.days < 14 ? "this month" : `${Math.round(flags.rival.days / 7)} wk ago`}`, tone: "warn" });
-  return { score, tone: toneOf(score), fit: tf.fit, onTopic: tf.onTopic, carriers: tf.carriers, parts, reasons, flags, missing: "" };
+  // Market first among the reasons after content: it's what the brand asks about next.
+  const geoReason = reasons.findIndex((r) => r.text.includes(" · ") && /main market|sell there|market$|where they sell/.test(r.text));
+  if (geoReason > 1) reasons.splice(1, 0, ...reasons.splice(geoReason, 1));
+  return { score, tone: toneOf(score), fit: tf.fit, onTopic: tf.onTopic, carriers: tf.carriers, parts, geo, reasons, flags, missing: "" };
 }
 
 /**
