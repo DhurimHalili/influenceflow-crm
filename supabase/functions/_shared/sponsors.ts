@@ -81,12 +81,12 @@ const SOCIAL = list(`youtube.com youtu.be instagram.com tiktok.com twitter.com x
   bsky.app mastodon.social t.me telegram.me wa.me whatsapp.com cash.app paypal.me paypal.com venmo.com gumroad.com ytjobs.co
   vimeo.com imgur.com dropbox.com drive.google.com onlyfans.com fansly.com mailchi.mp eepurl.com convertkit.com kit.com flowcode.com
   wikipedia.org archive.org youtube-nocookie.com ytimg.com ggpht.com googleusercontent.com apps.apple.com play.google.com itunes.apple.com
-  testflight.apple.com
+  testflight.apple.com kickstarter.com indiegogo.com tr.ee lnk.bio campsite.bio solo.to bio.link hoo.be
   mobile.de autoscout24.de autoscout24.com autotrader.com autotrader.co.uk cars.com carsandbids.com bringatrailer.com kleinanzeigen.de craigslist.org
   marktplaats.nl leboncoin.fr willhaben.at subito.it olx.pl`);
 // (The last line: marketplaces and classifieds — a listing link "→ Zum Bentley: mobile.de/…" is not a deal.)
 const STORES: Record<string, string> = {
-  "amazon.com": "Amazon", "amzn.to": "Amazon", "amzn.eu": "Amazon", "a.co": "Amazon", "amazon.co.uk": "Amazon", "amazon.de": "Amazon", "amazon.ca": "Amazon",
+  "amazon.com": "Amazon", "amzn.to": "Amazon", "link.amazon": "Amazon", "amazon.com.mx": "Amazon", "amzn.eu": "Amazon", "a.co": "Amazon", "amazon.co.uk": "Amazon", "amazon.de": "Amazon", "amazon.ca": "Amazon",
   "amazon.com.au": "Amazon", "amazon.fr": "Amazon", "amazon.it": "Amazon", "amazon.es": "Amazon", "amazon.co.jp": "Amazon", "amazon.in": "Amazon", "amazon.nl": "Amazon",
   "bestbuy.com": "Best Buy", "bestbuy.ca": "Best Buy", "bestbuy.7tiv.net": "Best Buy", "newegg.com": "Newegg", "newegg.ca": "Newegg", "bhphotovideo.com": "B&H", "bhpho.to": "B&H",
   "walmart.com": "Walmart", "target.com": "Target", "adorama.com": "Adorama", "ebay.com": "eBay", "aliexpress.com": "AliExpress", "temu.com": "Temu",
@@ -99,7 +99,7 @@ const STORES: Record<string, string> = {
 const REDIRECTS = list(`bit.ly bitly.com geni.us tinyurl.com t.co ow.ly rebrand.ly short.io dub.sh dub.co lnk.to cutt.ly shorturl.at is.gd buff.ly tidd.ly prf.hn
   go.skimresources.com skimresources.com howl.me howl.link shopmy.us rstyle.me liketk.it urlgeni.us glnk.io fave.co shareasale.com awin1.com linksynergy.com
   anrdoezrs.net jdoqocy.com tkqlhce.com dpbolvw.net kqzyfj.com emjcd.com avantlink.com pntra.com pjtra.com pjatr.com redirect.viglink.com go.redirectingat.com
-  onelink.me app.link page.link sng.link adj.st smart.link go.link l.instagram.com lmg.gg lttstore.link trk.link bfy.tw ko.gl hyperurl.co amzlink.to joinsg.co go2.page fas.st clk.ink sovrn.co link.ltk.com`);
+  ts.la opr.as dada.link geni.us amzlink.to onelink.me app.link page.link sng.link adj.st smart.link go.link l.instagram.com lmg.gg lttstore.link trk.link bfy.tw ko.gl hyperurl.co amzlink.to joinsg.co go2.page fas.st clk.ink sovrn.co link.ltk.com`);
 // impact.com tracking hosts: "<brand>.sjv.io", "<brand>.pxf.io", "<brand>.8odi.net"… — the first label is the brand.
 const IMPACT = /^([a-z0-9-]+)\.(?:onelink\.me|app\.link|page\.link|sng\.link|go\.link|smart\.link|test-app\.link|sjv\.io|pxf\.io|[a-z0-9]{4}\.net|evyy\.net|ojrq\.net|xhuz\.net|syuh\.net|mno8\.net|vzew\.net|uqhv\.net|ngih\.net|4cl5\.net|i387\.net|y8uw\.net|r65t\.net|fafn\.net)$/;
 
@@ -109,7 +109,7 @@ export function hostKind(host: string): HostKind {
   const reg = normalizeDomain(h);
   if (SOCIAL.has(h) || SOCIAL.has(reg)) return "social";
   if (STORES[h] || STORES[reg] || /^amazon\.[a-z.]+$/.test(h)) return "store";
-  if (REDIRECTS.has(h) || REDIRECTS.has(reg) || IMPACT.test(h)) return "redirect";
+  if (REDIRECTS.has(h) || REDIRECTS.has(reg) || IMPACT.test(h) || /^[a-z0-9]{4}\.net$/.test(reg) && /\d|^(?:ojrq|evyy|xhuz|syuh|vzew|uqhv|ngih|fafn|gtgu|zvxo)\.net$/.test(reg)) return "redirect";
   return "brand";
 }
 const STORE_HOME = new Map<string, string>();
@@ -307,6 +307,8 @@ export function readVideo(v: VideoIn, ctx: ReadContext): Reading {
   const notSponsored = NOT_SPONSORED.test(desc) || NOT_SPONSORED.test(v.title);
   const paid = v.paid === true;
   const found = new Map<string, Mention>();
+  // Links made "the sponsor" only because they sat up top in a paid video.
+  const promoted = new Set<string>();
 
   const resolveKnown = (name: string, domain: string): { key: string; name: string; domain: string; domainFrom: Mention["domainFrom"] } | null => {
     if (domain) {
@@ -337,6 +339,7 @@ export function readVideo(v: VideoIn, ctx: ReadContext): Reading {
     const final = ctx.resolved?.[url] || url;
     const host = hostOf(final);
     const kind = hostKind(host);
+    // Followed, but it stopped on another tracker: treat it as not followed.
     const impact = IMPACT.exec(hostOf(url));
     return { url: final, host, kind, domain: kind === "brand" ? normalizeDomain(host) : "", hint: impact ? impact[1] : "" };
   };
@@ -388,7 +391,8 @@ export function readVideo(v: VideoIn, ctx: ReadContext): Reading {
     // "#ad", "sponsored by", "paid partnership" on the line: paid, even if they also sent the product.
     if (/#ad\b|#sponsored|sponsored by|paid (?:promotion|partnership)|today'?s sponsor/i.test(cueText)) for (const n of named) n.kind = "sponsored";
     // Known brands written anywhere on a cue line ("#ad Corsair 6500X").
-    if (cueKind && cueKind !== "affiliate") for (const k of namesIn(naked, idx)) named.push({ name: k.name, kind: cueKind });
+    // ("Remaking the Crystal XBOX — thank you Fanttik for sponsoring" names Fanttik, not Xbox.)
+    if (cueKind && cueKind !== "affiliate" && !named.length) for (const k of namesIn(naked, idx)) named.push({ name: k.name, kind: cueKind });
     const negated = NOT_SPONSORED.test(cueText);
 
     let usedName = false;
@@ -425,7 +429,8 @@ export function readVideo(v: VideoIn, ctx: ReadContext): Reading {
       if (!kind) continue;
       // An unnamed promo link up top in a paid video is most likely the sponsor read.
       let unsure = false;
-      if (kind === "affiliate" && line.lead && !named.length && (paid || sponsorSegs.length)) { kind = "sponsored"; conf = paid ? 0.74 : 0.66; unsure = true; }
+      const referral = /referral|[?&](?:ref|aff|affiliate|via)=|\/(?:ref|aff)\//i.test(t.url) || /\b(?:comes? from|i use|i used|my gear|i recommend)\b/i.test(cueText);
+      if (kind === "affiliate" && line.lead && !named.length && !referral && (paid || sponsorSegs.length)) { kind = "sponsored"; conf = paid ? 0.74 : 0.66; unsure = true; promoted.add(base.key); }
       else if (kind === "affiliate" && line.lead && (/(?:\d{1,2} ?% off|free trial|use code)/i.test(cueText) || CTA.test(cueText))) unsure = true;
       add({ ...base, kind, confidence: conf + (paid && kind === "sponsored" ? 0.06 : 0), signals: ["description"], quote: line.text, unsure });
     }
@@ -454,13 +459,18 @@ export function readVideo(v: VideoIn, ctx: ReadContext): Reading {
   if ((sponsorSegs.length || paid) && !sponsoredNow().length && !notSponsored) {
     for (const line of lines.filter((l) => l.lead)) {
       if (sectionKind(line.section) === "social" || OWN.test(line.text)) continue;
-      const target = line.urls.map(linkTarget).find((t) => t.kind === "brand" && t.domain && !isOwn(t.domain));
+      if (/\b(?:comes? from|i use|i used|my gear|i recommend)\b/i.test(line.text)) continue;
+      const target = line.urls.map(linkTarget).find((t) => t.kind === "brand" && t.domain && !isOwn(t.domain) && !/referral|[?&](?:ref|aff|affiliate|via)=|\/(?:ref|aff)\//i.test(t.url));
       if (!target) continue;
       const r = resolveKnown("", target.domain)!;
       add({ ...r, kind: "sponsored", confidence: paid && sponsorSegs.length ? 0.72 : 0.6, signals: ["description", ...(sponsorSegs.length ? ["sponsorblock" as Signal] : []), ...(paid ? ["paid_label" as Signal] : [])], quote: line.text, t: sponsorSegs[0]?.start, unsure: true });
       break;
     }
   }
+
+  // A sponsor named in plain words wins: links that were only promoted for sitting up top go back to affiliate.
+  const named = [...found.values()].some((m) => m.kind === "sponsored" && !promoted.has(m.key) && m.confidence >= 0.8);
+  if (named) for (const k of promoted) { const m = found.get(k); if (m && m.kind === "sponsored") { m.kind = "affiliate"; m.confidence = 0.6; } }
 
   // 4. Signals that back up what the text says.
   for (const m of found.values()) {
@@ -475,9 +485,9 @@ export function readVideo(v: VideoIn, ctx: ReadContext): Reading {
   }
   const mentions = [...found.values()].filter((m) => m.confidence >= 0.3).sort((a, b) => b.confidence - a.confidence);
   // Something is being promoted but nothing in the text says what: worth a listen.
-  const named = mentions.some((m) => (m.kind === "sponsored" || m.kind === "seeded") && m.confidence >= 0.6);
+  const anyNamed = mentions.some((m) => (m.kind === "sponsored" || m.kind === "seeded") && m.confidence >= 0.6);
   let listen: Reading["listen"];
-  if (!named && !notSponsored) {
+  if (!anyNamed && !notSponsored) {
     const seg = sponsorSegs[0] || segments.find((s) => s.category === "exclusive_access" && s.action !== "full");
     if (seg) listen = { start: Math.max(0, Math.floor(seg.start) - 3), end: Math.ceil(seg.end) + 3, why: seg.category === "sponsor" ? "sponsor segment" : "exclusive access" };
     else if (paid) listen = { start: 0, end: Math.min(150, v.secs || 150), why: "paid promotion label" };

@@ -143,6 +143,15 @@ const joined = combine([
 ]);
 eq("a name-only find joins the same brand's domain", joined.map((l) => [l.key, l.videos]), [["autodoc.de", 2]]);
 
+const fanttik = readVideo(vid({ paid: true, description: "Remaking a modern version of the Crystal XBOX - Thank you Fanttik for sponsoring this video! Fanttik is running a big Father's Day promotion now: https://fanttik.com/zac" }), ctx);
+eq("a console in the sponsor line isn't the sponsor", fanttik.mentions.map((m) => [m.name, m.kind]), [["Fanttik", "sponsored"]]);
+const epiPaid = readVideo(vid({ paid: true, segments: [{ category: "sponsor", action: "skip", start: 40, end: 90 }], description: "All of the Music and SFX I use comes from: https://www.epidemicsound.com/referral/pw5gp9/\nThank you Opera for sponsoring this video! Try Opera for free: https://opr.as/Opera-browser-zac" }), { ...ctx, resolved: { "https://opr.as/Opera-browser-zac": "https://www.opera.com/gx?utm_campaign=zac" } });
+eq("a referral up top stays an affiliate; the named sponsor wins", epiPaid.mentions.map((m) => [m.name, m.kind]), [["Opera GX", "sponsored"], ["Epidemic Sound", "affiliate"]]);
+const kick = readVideo(vid({ paid: true, description: "UGREEN HomeAgent on Kickstarter: https://bit.ly/4xaVqla" }), { ...ctx, resolved: { "https://bit.ly/4xaVqla": "https://www.kickstarter.com/projects/ugreen/homeagent" } });
+eq("a crowdfunding page isn't the brand", kick.mentions.some((m) => /kickstarter/i.test(m.name)), false);
+const imp = readVideo(vid({ description: "Product link: https://makerainc.sjv.io/zacbuild" }), { ...ctx, resolved: { "https://makerainc.sjv.io/zacbuild": "https://ojrq.net/c/123/456" } });
+eq("a tracker that lands on another tracker isn't a brand", imp.mentions.some((m) => /ojrq/i.test(m.domain)), false);
+
 // ---- across videos ----
 const v1 = { id: "a1", title: "Build 1", at: "2026-08-01" }, v2 = { id: "a2", title: "Build 2", at: "2026-09-01" };
 const links = combine([
