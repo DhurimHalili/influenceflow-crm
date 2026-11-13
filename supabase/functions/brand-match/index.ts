@@ -35,7 +35,7 @@ import { listenConfigured, listenLeft, listenTo, useListenBudget } from "../_sha
 const APP_URL = (Deno.env.get("APP_URL") || "https://dhurimhalili.github.io/influenceflow-crm").replace(/\/$/, "");
 const ALLOWED_ORIGINS = new Set([new URL(APP_URL).origin, "http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:4173", "http://localhost:5199"]);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const READER_V = 2;
+const READER_V = 3;
 const DAY = 86400_000;
 const BACK_DAYS = 400;
 const RESCAN_DAYS = 7;

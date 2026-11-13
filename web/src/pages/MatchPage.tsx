@@ -293,6 +293,10 @@ function DealsView({ found }: { found: ReturnType<typeof foundBrands> }) {
   const [proof, setProof] = useState<{ link: BrandLink; creator?: Creator } | null>(null);
   const [showHidden, setShowHidden] = useState(false);
   const autoAdd = data.profile.preferences.match_auto_add !== false;
+  // "Possible" finds (a name with no clear words, maybe a person) wait behind a toggle.
+  const [showUnsure, setShowUnsure] = useState(false);
+  const unsureFound = found.filter((f) => f.best.verdict !== "yes" && f.best.confidence < 0.65);
+  const shownFound = showUnsure ? found : found.filter((f) => !unsureFound.includes(f));
   const creatorsById = useMemo(() => new Map(m.world.creators.map((c) => [c.id, c])), [m.world.creators]);
   const hiddenCount = useMemo(() => [...m.seen.values()].filter((s) => s.hidden).length, [m.seen]);
 
@@ -331,7 +335,7 @@ function DealsView({ found }: { found: ReturnType<typeof foundBrands> }) {
         {sure.length > 1 && <Button size="sm" onClick={() => { const added = sure.map(add); toast(`Added ${added.length} brands — their sites are read next.`, "success"); }}><Plus size={13} /> Add the {sure.length} sure ones</Button>}
       </div>
       <label className="mx-auto-add"><input type="checkbox" checked={autoAdd} onChange={(e) => { data.updateProfile({ preferences: { ...data.profile.preferences, match_auto_add: e.target.checked } }); toast(e.target.checked ? "Sure brands from creators you add are added by themselves." : "Found brands wait here for you."); }} /> Add sure ones by themselves when I add a creator <small>(paid or seeded, the creator's own link, site checked)</small></label>
-      {found.length ? <ul className="mx-found-list">{found.slice(0, 60).map((f) => {
+      {shownFound.length ? <ul className="mx-found-list">{shownFound.slice(0, 60).map((f) => {
         const trust = domainTrust(f.seen);
         const kindsHere = Array.from(new Set(f.links.map(kindOf)));
         const who = Array.from(new Set(f.links.map((l) => l.creator_id))).map((id) => creatorsById.get(id)).filter((c): c is Creator => !!c);
@@ -351,7 +355,8 @@ function DealsView({ found }: { found: ReturnType<typeof foundBrands> }) {
             <button type="button" className="mx-icon-btn" onClick={() => void m.hide(f.seen.brand_key, true)} aria-label={`Hide ${f.seen.name}`} title="Hide — not a brand you'd pitch"><EyeOff size={14} /></button>
           </div>
         </li>;
-      })}</ul> : <p className="mx-none">Nothing new — every brand found in videos is in your CRM or hidden.</p>}
+      })}</ul> : <p className="mx-none">{found.length ? "Only unsure finds so far — show them below." : "Nothing new — every brand found in videos is in your CRM or hidden."}</p>}
+      {unsureFound.length > 0 && <button type="button" className="link-btn mx-hidden-toggle" onClick={() => setShowUnsure(!showUnsure)}>{showUnsure ? "Hide" : "Show"} {unsureFound.length} unsure find{unsureFound.length === 1 ? "" : "s"}</button>}
       {hiddenCount > 0 && <button type="button" className="link-btn mx-hidden-toggle" onClick={() => setShowHidden(!showHidden)}>{showHidden ? "Hide" : "Show"} {hiddenCount} hidden</button>}
       {showHidden && <ul className="mx-hidden-list">{[...m.seen.values()].filter((s) => s.hidden).map((s) => <li key={s.brand_key}><span>{s.name}{s.domain ? ` · ${s.domain}` : ""}</span><button type="button" className="link-btn" onClick={() => void m.hide(s.brand_key, false)}>Show again</button></li>)}</ul>}
     </section>}
