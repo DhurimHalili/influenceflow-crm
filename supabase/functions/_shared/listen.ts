@@ -5,8 +5,9 @@
 // link — nothing is downloaded) and says which brand is promoted and how, in
 // the creator's own words.
 //
-// Budget: Gemini's free tier allows 8 hours of YouTube video a day; we use at
-// most LISTEN_DAILY_SECONDS (default 2 hours) and only short clips (≤ 3 min).
+// Budget: Gemini's free daily requests are shared with media-kit and price
+// reading, so at most LISTEN_DAILY_CLIPS (default 6) clips / LISTEN_DAILY_SECONDS
+// (default 15 min) a day, short clips only (≤ 3 min); a 429 stops it for the day.
 // The video is untrusted content: structured output only, names and quotes
 // re-checked here, nothing applied unless the model heard it said.
 
@@ -15,21 +16,29 @@ import { cleanName, normalizeDomain, type DealKind } from "./sponsors.ts";
 const env = (name: string) => (Deno.env.get(name) || "").trim();
 const keys = () => Array.from(new Set(`${env("GEMINI_API_KEYS")} ${env("GEMINI_API_KEY")}`.split(/[\s,;]+/).map((k) => k.trim().replace(/^["']+|["']+$/g, "")).filter((k) => /^[\w.-]{20,300}$/.test(k))));
 const model = () => (env("GEMINI_LISTEN_MODEL") || env("GEMINI_MODEL") || "gemini-3.5-flash").replace(/[^\w.:@/-]/g, "");
-const dailySeconds = () => Math.max(0, Number(env("LISTEN_DAILY_SECONDS")) || 7200);
+const dailySeconds = () => Math.max(0, Number(env("LISTEN_DAILY_SECONDS")) || 900);
+// Few clips a day: Gemini's free daily requests are shared with media-kit and price reading.
+const dailyClips = () => Math.max(0, Number(env("LISTEN_DAILY_CLIPS")) || 6);
+const nextPacificMidnight = () => {
+  const now = new Date();
+  const la = new Date(now.toLocaleString("en-US", { timeZone: "America/Los_Angeles" }));
+  const next = new Date(la); next.setHours(24, 5, 0, 0);
+  return now.getTime() + (next.getTime() - la.getTime());
+};
 
 // deno-lint-ignore no-explicit-any
 type Admin = { from: (t: string) => any; rpc: (fn: string, args: Record<string, unknown>) => any };
 let admin: Admin | null = null;
-let state: { day: string; used: number; paused: number } | null = null;
+let state: { day: string; used: number; paused: number; clips: number } | null = null;
 export function useListenBudget(a: Admin) { admin = a; state = null; }
 const utcDay = () => new Date().toISOString().slice(0, 10);
 async function load() {
   const day = utcDay();
   if (state && state.day === day) return state;
-  state = { day, used: 0, paused: 0 };
+  state = { day, used: 0, paused: 0, clips: 0 };
   if (admin) {
-    const { data } = await admin.from("ai_budget").select("units, paused_until").eq("route", "listen").eq("day", day).maybeSingle();
-    if (data) state = { day, used: Number(data.units) || 0, paused: data.paused_until ? new Date(data.paused_until).getTime() : 0 };
+    const { data } = await admin.from("ai_budget").select("units, calls, paused_until").eq("route", "listen").eq("day", day).maybeSingle();
+    if (data) state = { day, used: Number(data.units) || 0, paused: data.paused_until ? new Date(data.paused_until).getTime() : 0, clips: Number(data.calls) || 0 };
   }
   return state;
 }
@@ -39,7 +48,7 @@ const pause = async (until: number, note: string) => {
 };
 
 export const listenConfigured = () => keys().length > 0;
-export async function listenLeft() { const s = await load(); return s.paused > Date.now() ? 0 : Math.max(0, dailySeconds() - s.used); }
+export async function listenLeft() { const s = await load(); return s.paused > Date.now() || s.clips >= dailyClips() ? 0 : Math.max(0, dailySeconds() - s.used); }
 
 export type Heard = { name: string; domain: string; kind: DealKind | "own" | "mention"; quote: string };
 
@@ -52,7 +61,7 @@ export async function listenTo(videoId: string, start: number, end: number): Pro
   if (!/^[\w-]{11}$/.test(videoId) || !listenConfigured()) return null;
   const from = Math.max(0, Math.floor(start)), to = Math.max(from + 10, Math.min(Math.ceil(end), from + 180));
   const s = await load();
-  if (s.paused > Date.now() || s.used + (to - from) > dailySeconds()) return null;
+  if (s.paused > Date.now() || s.clips >= dailyClips() || s.used + (to - from) > dailySeconds()) return null;
   const schema = {
     type: "object",
     properties: {
@@ -91,8 +100,9 @@ Only brands actually said or shown in this clip. If nothing is promoted, return 
       });
     } catch { continue; }
     if (res.status === 429) {
+      // Out of quota: stop listening for the day rather than spend what the other AI work needs.
       const t = await res.text().catch(() => "");
-      if (/PerDay|per day|daily/i.test(t)) continue; // this key is done for today; try the next
+      await pause(/PerDay|per day|daily/i.test(t) ? nextPacificMidnight() : Date.now() + 3600_000, `429 ${t.slice(0, 140)}`);
       return null;
     }
     if (res.status === 401 || res.status === 403) continue;
@@ -103,7 +113,7 @@ Only brands actually said or shown in this clip. If nothing is promoted, return 
       if (res.status === 400 && /videoMetadata|mediaResolution|fileData|Invalid JSON payload/i.test(t)) { await pause(Date.now() + 24 * 3600_000, `${res.status} ${t.slice(0, 160)}`); return null; }
       return null;
     }
-    s.used += to - from;
+    s.used += to - from; s.clips += 1;
     if (admin) await Promise.resolve(admin.rpc("ai_budget_use", { p_route: "listen", p_units: to - from })).catch(() => null);
     const body = await res.json().catch(() => null) as { candidates?: { content?: { parts?: { text?: string; thought?: boolean }[] } }[] } | null;
     const raw = (body?.candidates?.[0]?.content?.parts || []).filter((p) => !p.thought && p.text).map((p) => p.text).join("");
@@ -120,6 +130,6 @@ Only brands actually said or shown in this clip. If nothing is promoted, return 
     }
     return heard;
   }
-  await pause(Date.now() + 3600_000, "every Gemini key is out of quota for listening");
+  await pause(nextPacificMidnight(), "no Gemini key could listen");
   return null;
 }

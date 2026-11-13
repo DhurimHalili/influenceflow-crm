@@ -152,6 +152,12 @@ eq("a crowdfunding page isn't the brand", kick.mentions.some((m) => /kickstarter
 const imp = readVideo(vid({ description: "Product link: https://makerainc.sjv.io/zacbuild" }), { ...ctx, resolved: { "https://makerainc.sjv.io/zacbuild": "https://ojrq.net/c/123/456" } });
 eq("a tracker that lands on another tracker isn't a brand", imp.mentions.some((m) => /ojrq/i.test(m.domain)), false);
 
+const tld = combine([
+  { video: { id: "v1", title: "a", at: "2026-10-01" }, m: { key: "autodoc.de", name: "Autodoc", domain: "autodoc.de", domainFrom: "link", kind: "sponsored", confidence: 0.9, signals: ["description"], quote: "x" } },
+  { video: { id: "v2", title: "b", at: "2026-10-02" }, m: { key: "autodoc.com", name: "AUTODOC", domain: "autodoc.com", domainFrom: "known", kind: "sponsored", confidence: 0.84, signals: ["voice"], quote: "y" } },
+]);
+eq("one brand on two country domains is one row (the creator's link wins)", tld.map((l) => [l.key, l.videos]), [["autodoc.de", 2]]);
+
 // ---- across videos ----
 const v1 = { id: "a1", title: "Build 1", at: "2026-08-01" }, v2 = { id: "a2", title: "Build 2", at: "2026-09-01" };
 const links = combine([
