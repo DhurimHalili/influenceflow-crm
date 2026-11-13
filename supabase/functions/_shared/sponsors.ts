@@ -20,7 +20,7 @@
 // unsure ones on the server. Pure — tested in sponsors.test.ts.
 
 export type DealKind = "sponsored" | "seeded" | "affiliate";
-export type Signal = "paid_label" | "description" | "title" | "chapters" | "sponsorblock" | "voice" | "ai" | "you";
+export type Signal = "paid_label" | "description" | "title" | "chapters" | "sponsorblock" | "voice" | "transcript" | "ai" | "you";
 export type Segment = { category: string; action: string; start: number; end: number; description?: string; votes?: number };
 export type VideoIn = { id: string; title: string; description: string; tags?: string[]; paid?: boolean; segments?: Segment[]; at: string; secs?: number };
 export type Known = { key: string; name: string; domain: string; aliases?: string[] };
@@ -227,15 +227,69 @@ const secondsOf = (stamp: string) => stamp.split(":").reduce((s, p) => s * 60 + 
 
 /** Tidy a brand name cut out of a sentence; "" when it isn't a usable name. */
 export function cleanName(raw: string): string {
-  let s = String(raw || "").replace(/[\u{1F000}-\u{1FFFF}\u{2600}-\u{27BF}\u{FE0F}]/gu, " ").replace(/\s+/g, " ").trim();
+  let s = String(raw || "").replace(/[\u{1F000}-\u{1FFFF}\u{2600}-\u{27BF}\u{FE0F}]/gu, " ").replace(/[®™©]/g, "").replace(/\s+/g, " ").trim();
+  // "- Keysfan.com", "• NordVPN", "> Ridge"
+  s = s.replace(/^[\s\-–—•*·>»:~]+/, "");
+  // A social handle: "@NZXTglobal" → "NZXT", "@HerschelSupply#ad" → "Herschel Supply".
+  if (s.startsWith("@")) {
+    s = s.slice(1).split(/[\s#]/)[0].replace(/(?:global|official|hq|uk|usa|us|eu|de|fr|videos?|tv|gaming|channel|team|store|shop|brand)$/i, "");
+    if (/[a-z][A-Z]/.test(s)) s = s.replace(/([a-z])([A-Z])/g, "$1 $2");
+  }
+  s = s.replace(/#\w+/g, " ").replace(/\s+/g, " ").trim();
   s = s.replace(/^(?:the (?:folks|team|people|guys|crew) (?:at|over at|from)|(?:our|my) (?:good )?(?:friends?|partners?|sponsors?) (?:at|over at|from)|(?:our|my) (?:friends?|partners?|sponsors?)|friends (?:at|over at)|everyone (?:at|over at)|the amazing|for|our|my|the|this|today'?s sponsor,?)\s+/i, "");
-  s = s.split(/\s+(?:for|to|with|at|and get|and use|who|which|that|because|on|in|so|via|-|–|—|\||:)\s+|\s*[|:;,!?(["“”]\s*|\s+[-–—]\s*|\.\s/)[0].trim();
+  s = s.split(/\s+(?:for|to|with|at|and|and get|and use|their|who|which|that|because|on|in|so|via|plus|shoutout|-|–|—|\||:)\s+|\s*[|:;,!?(["“”]\s*|\s+[-–—]\s*|\.\s/)[0].trim();
   s = s.replace(/\s+(?:today|again|this video|this episode|for this|here|below|everyone)$/i, "").replace(/[.'’"]+$/, "").trim();
+  // "Gamma sponsorship", "Tonal segment", "Ridge promo"
+  for (let i = 0; i < 3; i++) s = s.replace(/\s+(?:sponsorships?|sponsors?|sponsored|segments?|promos?|promotions?|giveaways?|deals?|discounts?|codes?|links?|ads?|videos?|reviews?|units?|samples?|partnerships?)$/i, "").trim();
   if (s.length < 2 || s.length > 40 || !/[a-z]/i.test(s) || s.split(" ").length > 4) return "";
+  if (/[%()[\]{}<>=+]/.test(s) || /^\d/.test(s) && /\b(?:off|percent|free|days?|months?|years?|weeks?|hours?)\b/i.test(s)) return "";
   if (STOP_NAMES.has(s.toLowerCase())) return "";
   if (/^(?:a|an|some|every|all|any|lots?|loads|many|our|my|your|their|his|her|its)\b/i.test(s)) return "";
   if (/^(?:i|we|they|he|she|it|you|me|us|him|them|this|that|these|those|there|here|what|when|how|just|also|so|and|but)\b/i.test(s)) return "";
   return s;
+}
+
+// Everyday words that a sentence cut can leave behind ("sponsored by either…", "in advance", "teams").
+const PLAIN_WORDS = new Set("about above after again against ago ahead all along already also always among another any anyone anything around away back because been before being below best better between big both bring brought but buy came can cannot check come coming could day days did different does doing done down during each early either else enough even ever every everything far few find first following free friend from full get gets getting give given go going good got great guys had has have having help her here high him his home hope how however huge important in inside instead into just keep kind know last later least less let life like little live long look looking lot made make making many may maybe me more most much must my myself need never new next nice night no none not nothing now of off often old on once one only open or other others our out over own part people place please plus point possible pretty probably put quick quite rather real really right same say see segment segments set several she should show side since small so some someone something sometimes soon special spot start still stuff such sure take team teams than thank thanks that the their them then there these they thing things think this those though through time times to today together too top total toward try two under until up upon us use used using very via want was way we week well were what when where which while who whole why will with within without work world would year years yes yet you your advance".split(" "));
+
+/** Could this be a brand's name (not a phrase, a handle or an everyday word)? */
+export function brandish(name: string): boolean {
+  const clean = cleanName(name);
+  if (!clean) return false;
+  if (nameAsDomain(clean)) return true;
+  const words = clean.toLowerCase().split(" ");
+  if (words.every((w) => PLAIN_WORDS.has(w))) return false;
+  // Brands are written as names: a capital or a digit somewhere ("eBay", "NZXT", "3M"), never all lowercase.
+  return /[A-Z0-9]/.test(clean);
+}
+
+/** "Keysfan.com", "Monday.com", "Boot.dev" → the domain it names; "" otherwise. */
+export function nameAsDomain(name: string): string {
+  const m = /^([a-z0-9][a-z0-9-]{1,40})\.(com|net|org|io|co|ai|app|dev|gg|tv|de|uk|co\.uk|me|so|xyz|shop|store|tech)$/i.exec(String(name || "").trim());
+  return m ? normalizeDomain(`${m[1]}.${m[2]}`) : "";
+}
+
+/** A short personal / campaign link domain ("x.la", "sbck.me", "plug.dev", "andauth.co"): says nothing about the brand. */
+export const shortLinkDomain = (domain: string) => {
+  const d = normalizeDomain(domain);
+  const [label, ...rest] = d.split(".");
+  return !!label && label.length <= 6 && /^(?:me|la|ly|co|link|dev|gg|so|to|io|sh|cc|li|is|at|be|fyi|page|app)$/.test(rest.join("."));
+};
+
+/** Is this domain plausibly that brand's own (its main label is the name, or contains it, or the other way round)? */
+export function domainFits(name: string, domain: string): boolean {
+  const n = norm(cleanName(name) || name).replace(/(?:official|global|inc|llc|ltd|gmbh|corp|store|shop|hq)$/, "");
+  const raw = norm(normalizeDomain(domain).split(".")[0] || "");
+  if (n.length < 2 || raw.length < 2) return false;
+  // "weareholy.com", "getsurfshark", "trynordvpn", "ridgewallet", "helixsleep" → the name inside.
+  const l = raw.length > n.length + 1 ? raw.replace(/^(?:weare|we|get|try|shop|use|go|my|the|join|hello|meet|buy|wear|drink|eat|play)(?=.{3,})/, "") : raw;
+  if (l === n || raw === n) return true;
+  if (n.length >= 4 && l.replace(/(?:hq|app|official|store|shop|global|inc|labs?|tech|co|us|uk|world|online|wallet|travel|audio|sleep|home|gear|wear|club|direct)$/, "") === n) return true;
+  if (n.length >= 3 && l.startsWith(n)) return true;
+  if (l.length >= 4 && n.startsWith(l)) return true;
+  if (n.length >= 5 && l.includes(n)) return true;
+  if (l.length >= 5 && n.includes(l)) return true;
+  return false;
 }
 
 // Name cut out of a cue sentence. Each pattern says which kind it points to.
@@ -504,6 +558,8 @@ export type Evidence = { video: string; title: string; at: string; kind: DealKin
 export type Link = {
   key: string; name: string; domain: string; domainFrom: string; kind: DealKind; confidence: number; store: boolean;
   videos: number; first: string; last: string; evidence: Evidence[];
+  /** Every video it was seen in, newest first (evidence keeps the best few quotes). */
+  videoIds: string[];
 };
 
 /**
@@ -545,13 +601,14 @@ export function combine(itemsIn: { video: { id: string; title: string; at: strin
     const seen = new Set<string>();
     const evidence: Evidence[] = [];
     for (const r of rows) {
-      if (seen.has(r.video.id) || evidence.length >= 6) continue;
+      if (seen.has(r.video.id) || evidence.length >= 8) continue;
       seen.add(r.video.id);
       evidence.push({ video: r.video.id, title: r.video.title.slice(0, 140), at: r.video.at, kind: r.m.kind, confidence: r.m.confidence, signals: r.m.signals, quote: r.m.quote, ...(r.m.t !== undefined ? { t: Math.round(r.m.t) } : {}) });
     }
+    const videoIds = Array.from(new Set([...rows].sort((a, b) => b.video.at.localeCompare(a.video.at)).map((r) => r.video.id))).slice(0, 400);
     out.push({
       key, name: (rows.find((r) => r.m.domainFrom === "known") || best).m.name, domain: best.m.domain, domainFrom: best.m.domainFrom,
-      kind, confidence: clamp(conf), store: rows.some((r) => r.m.store), videos: perVideo.size, first: dates[0] || "", last: dates[dates.length - 1] || "", evidence,
+      kind, confidence: clamp(conf), store: rows.some((r) => r.m.store), videos: perVideo.size, first: dates[0] || "", last: dates[dates.length - 1] || "", evidence, videoIds,
     });
   }
   return out.sort((a, b) => b.confidence - a.confidence);
@@ -578,11 +635,11 @@ export type Proof = "proven" | "stated" | "hint" | "affiliate";
 const SAYS_DEAL = new RegExp(`${SPONSOR.source}|${SEEDED.source}`, "i");
 // Quotes the reader wrote itself ("<title> — YouTube shows …") are not their words.
 const madeUp = (q: string) => /— (?:YouTube shows|marked ")/.test(q);
-const BACKING: Signal[] = ["paid_label", "sponsorblock", "title", "chapters", "voice"];
+const BACKING: Signal[] = ["paid_label", "sponsorblock", "title", "chapters", "voice", "transcript"];
 
 /** Did they say it in words in this video? */
 export const saysDeal = (e: Pick<Evidence, "kind" | "signals" | "quote">) =>
-  e.kind !== "affiliate" && (e.signals.includes("voice") || e.signals.includes("chapters") || (!madeUp(e.quote) && SAYS_DEAL.test(e.quote)));
+  e.kind !== "affiliate" && (e.signals.includes("voice") || e.signals.includes("chapters") || (!madeUp(e.quote) && SAYS_DEAL.test(e.quote)) || (e.signals.includes("transcript") && SAID_ALOUD.test(e.quote)));
 
 export function dealProof(l: { kind: DealKind; store?: boolean; evidence: Evidence[]; verdict?: string; verdict_kind?: DealKind | null; manual?: boolean }): { level: Proof; why: string } {
   const kind = l.verdict_kind || l.kind;
@@ -592,6 +649,9 @@ export function dealProof(l: { kind: DealKind; store?: boolean; evidence: Eviden
   const said = deal.filter(saysDeal);
   const heard = said.find((e) => e.signals.includes("voice") && e.quote.split(/\s+/).length >= 4);
   if (heard) return { level: "proven", why: "Heard them say it in the video." };
+  // Their spoken words in the captions, naming a brand we can place (a known brand, or the one their description links).
+  const spoken = said.find((e) => e.signals.includes("transcript") && e.confidence >= 0.8);
+  if (spoken) return { level: "proven", why: `They say it in the video${spoken.t !== undefined ? ` (at ${Math.floor(spoken.t / 60)}:${String(Math.floor(spoken.t % 60)).padStart(2, "0")})` : ""}.` };
   const backed = said.find((e) => new Set(e.signals.filter((s) => BACKING.includes(s) || s === "description")).size >= 2);
   if (backed) {
     const also = backed.signals.filter((s) => BACKING.includes(s) && s !== "chapters");
@@ -602,4 +662,111 @@ export function dealProof(l: { kind: DealKind; store?: boolean; evidence: Eviden
   if (said.length) return { level: "stated", why: "Said once in the description — nothing in the video itself backs it up yet." };
   if (deal.some((e) => e.signals.includes("paid_label") || e.signals.includes("sponsorblock"))) return { level: "hint", why: "The video is marked as paid, but no words name this brand — it may be a different sponsor." };
   return { level: "hint", why: "Only a link or a name — nothing says it was paid for or sent." };
+}
+
+// ---- reading what they SAY (captions) ----------------------------------------------------
+//
+// Captions come from YouTube (manual or automatic, translated to English when
+// the video isn't). Automatic captions have no capitals and little punctuation,
+// so names are matched against brands we can place: the ones this video's own
+// description links or names, your CRM, found brands and the directory. A name
+// nobody can place ("sponsored by fluxio") stays an unsure find.
+
+export type Caption = [ms: number, text: string];
+export type TranscriptRead = { mentions: Mention[]; hits: { t: number; text: string }[]; notSponsored: boolean };
+
+const SPOKEN_SPONSOR = /\b(?:(?:this|today'?s) (?:video|episode|stream) is (?:sponsored|brought to you|made possible|presented|powered) by|(?:is|was) sponsored by|sponsored by|today'?s sponsor(?: is)?|our sponsor (?:today|for today'?s video)|sponsor of (?:this|today'?s) video|thanks? (?:you )?(?:so much |a lot |again )?to ([a-z0-9][\w .&'-]{1,40}?) for (?:sponsoring|partnering|supporting this video|making this video possible)|in (?:paid )?partnership with|partnered (?:up )?with|teamed up with|brought to you by|a word from (?:our|today'?s) sponsor|(?:paid|sponsored) (?:promotion|segment|partnership))\b/g;
+const SPOKEN_SEEDED = /\b(?:sent (?:me|us|over|this|these|it) (?:over|out)?|(?:was|were) sent (?:to (?:me|us) )?by|(?:were|was) (?:kindly )?provided by|provided (?:to (?:me|us) )?by|(?:kindly )?(?:gifted|loaned|lent) (?:to )?(?:me|us)|for sending (?:this|these|me|us|it|over)|review (?:unit|sample) (?:from|provided)|courtesy of)\b/g;
+const SPOKEN_CODE = /\b(?:use (?:my |the |our )?(?:code|link)|with (?:my |the )?code|code [a-z0-9]{3,16} (?:at|for|to get)|(?:the )?(?:first )?link (?:is )?(?:in|down in|below in) the description|link below)\b/g;
+const SPOKEN_NO = /\b(?:(?:is|was|it'?s|this is)(?: not|n'?t) (?:a )?sponsored|not (?:a )?sponsored|no ?one (?:paid|sponsored)|nobody (?:paid|sponsored)|not an ad\b|bought (?:it|this|these|them) (?:myself|with my own money)|no sponsor)/;
+// Their spoken words say it's a deal (used by the proof check on transcript quotes).
+const SAID_ALOUD = new RegExp(`${SPOKEN_SPONSOR.source}|${SPOKEN_SEEDED.source}`, "i");
+const SPOKEN_DOMAIN = /\b([a-z0-9][a-z0-9-]{2,30})\s?(?:dot|\.)\s?(com|co|io|net|gg|org|de|tv|app|ai|co\.uk)\b/g;
+
+/** What the creator says about brands, from timed captions. Pure. */
+export function readTranscript(caps: Caption[], ctx: ReadContext & { local?: Mention[]; paid?: boolean }): TranscriptRead {
+  // Words with the time each was said.
+  const words: string[] = [], times: number[] = [];
+  for (const [ms, text] of caps) {
+    for (const w of String(text || "").replace(/\[[^\]]{0,30}\]/g, " ").toLowerCase().normalize("NFKD").replace(/[̀-ͯ]/g, "").replace(/[“”"]/g, " ").split(/\s+/)) {
+      if (!w) continue;
+      words.push(w); times.push(Math.max(0, Math.round(Number(ms) / 1000)));
+    }
+    if (words.length > 40_000) break;
+  }
+  const text = words.join(" ");
+  const starts: number[] = [];
+  { let at = 0; for (const w of words) { starts.push(at); at += w.length + 1; } }
+  const wordAt = (char: number) => { let lo = 0, hi = starts.length - 1; while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (starts[mid] <= char) lo = mid; else hi = mid - 1; } return lo; };
+  const windowOf = (char: number, before = 22, after = 30) => { const w = wordAt(char); const a = Math.max(0, w - before), b = Math.min(words.length, w + after); return { from: a, to: b, text: words.slice(a, b).join(" "), t: times[w] ?? 0 }; };
+  // The opening says "this isn't sponsored": the whole video is treated that way.
+  const notSponsored = SPOKEN_NO.test(words.slice(0, 400).join(" "));
+
+  const idx = indexFor(ctx.known || []);
+  const own = new Set((ctx.ownDomains || []).map(normalizeDomain));
+  // Brands this video's description names or links: matched by name even when it's an everyday word ("Ridge").
+  const local = (ctx.local || []).filter((m) => !m.store && m.name).map((m) => ({ m, keys: Array.from(new Set([norm(m.name), m.domain ? norm(m.domain.split(".")[0]) : ""].filter((k) => k.length >= 3))) }));
+  const found = new Map<string, Mention>();
+  const hits: { t: number; text: string }[] = [];
+  const add = (m: Mention) => {
+    if (m.domain && own.has(m.domain)) return;
+    const prev = found.get(m.key);
+    if (!prev || m.confidence > prev.confidence) found.set(m.key, prev ? { ...m, signals: Array.from(new Set([...prev.signals, ...m.signals])) } : m);
+  };
+  const place = (win: { text: string }, cueAt: number, capture?: string): { key: string; name: string; domain: string; domainFrom: Mention["domainFrom"]; how: "local" | "known" | "domain" | "guess" } | null => {
+    const flat = ` ${win.text.replace(/[^a-z0-9]+/g, " ")} `;
+    const squashedWin = flat.replace(/ /g, "");
+    // Closest to the cue wins when several are named.
+    const dist = (needle: string) => { const i = win.text.indexOf(needle); return i < 0 ? 1e9 : Math.abs(i - cueAt); };
+    let best: ReturnType<typeof place> = null, bestD = 1e9;
+    for (const l of local) for (const k of l.keys) {
+      if (!(flat.includes(` ${k} `) || (k.length >= 6 && squashedWin.includes(k)))) continue;
+      const d = dist(k.slice(0, 4));
+      if (d < bestD) { bestD = d; best = { key: l.m.key, name: l.m.name, domain: l.m.domain, domainFrom: l.m.domainFrom, how: "local" }; }
+    }
+    if (best) return best;
+    for (const k of namesIn(win.text, idx)) {
+      const d = dist(norm(k.name).slice(0, 4));
+      if (d < bestD) { bestD = d; best = { key: k.domain || nameKey(k.name), name: k.name, domain: k.domain, domainFrom: k.domain ? "known" : "", how: "known" }; }
+    }
+    if (best) return best;
+    for (const m of win.text.matchAll(SPOKEN_DOMAIN)) {
+      const domain = normalizeDomain(`${m[1]}.${m[2]}`);
+      if (!domain || hostKind(domain) !== "brand") continue;
+      const k = idx.byDomain.get(domain);
+      return { key: domain, name: k?.name || prettyName(domain), domain, domainFrom: "link", how: "domain" };
+    }
+    const guess = cleanName(capture || "");
+    if (guess && guess.split(" ").length <= 3) {
+      const k = idx.byName.get(norm(guess));
+      if (k) return { key: k.domain || nameKey(k.name), name: k.name, domain: k.domain, domainFrom: k.domain ? "known" : "", how: "known" };
+      return { key: nameKey(guess), name: guess.replace(/\b\w/g, (c) => c.toUpperCase()), domain: "", domainFrom: "", how: "guess" };
+    }
+    return null;
+  };
+
+  const cues: { at: number; kind: DealKind; capture: string; len: number }[] = [];
+  for (const m of text.matchAll(SPOKEN_SPONSOR)) cues.push({ at: m.index!, kind: "sponsored", capture: m[1] || "", len: m[0].length });
+  for (const m of text.matchAll(SPOKEN_SEEDED)) cues.push({ at: m.index!, kind: "seeded", capture: "", len: m[0].length });
+  for (const m of text.matchAll(SPOKEN_CODE)) cues.push({ at: m.index!, kind: "affiliate", capture: "", len: m[0].length });
+  cues.sort((a, b) => a.at - b.at);
+  for (const c of cues.slice(0, 60)) {
+    const win = windowOf(c.at);
+    if (SPOKEN_NO.test(win.text)) continue;
+    const cueAt = c.at - starts[win.from];
+    // The words right after "sponsored by" are the likeliest name.
+    const after = c.kind === "sponsored" && !c.capture ? text.slice(c.at + c.len, c.at + c.len + 40).trim().split(/\s+/).slice(0, 2).join(" ") : c.capture;
+    const p = place(win, cueAt, after);
+    if (!p) continue;
+    // A code read inside a sponsor read is the sponsor read.
+    let kind = c.kind;
+    if (kind === "affiliate" && cues.some((o) => o.kind === "sponsored" && Math.abs(o.at - c.at) < 400)) kind = "sponsored";
+    if (notSponsored && kind === "sponsored") continue;
+    const base = p.how === "local" ? 0.9 : p.how === "known" ? 0.86 : p.how === "domain" ? 0.82 : 0.5;
+    const conf = kind === "affiliate" ? Math.min(base, 0.6) : kind === "seeded" ? base - 0.04 : base + (ctx.paid ? 0.03 : 0);
+    const quote = words.slice(Math.max(win.from, wordAt(c.at) - 8), Math.min(win.to, wordAt(c.at) + 22)).join(" ");
+    add({ key: p.key, name: p.name, domain: p.domain, domainFrom: p.domainFrom, kind, confidence: clamp(conf), signals: ["transcript"], quote: `“${quoteOf(quote)}”`, t: win.t, unsure: p.how === "guess" });
+    if (hits.length < 8 && !hits.some((h) => Math.abs(h.t - win.t) < 20)) hits.push({ t: win.t, text: win.text.slice(0, 320) });
+  }
+  return { mentions: [...found.values()].filter((m) => m.confidence >= 0.3).sort((a, b) => b.confidence - a.confidence), hits, notSponsored };
 }

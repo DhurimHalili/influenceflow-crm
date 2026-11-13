@@ -1,5 +1,5 @@
 // Run: node --experimental-strip-types --import ./scripts/ts-hooks.mjs src/lib/match.test.ts
-import { budgetOf, byCreator, foundBrands, matchOf, sellsOf, type BrandLink, type MatchWorld } from "./match.ts";
+import { brandDoubts, budgetOf, byCreator, foundBrands, matchOf, sellsOf, trustedLinks, type BrandLink, type MatchWorld } from "./match.ts";
 import type { Brand, Campaign, Creator } from "../types/index.ts";
 
 let fail = 0;
@@ -67,5 +67,21 @@ const w3 = world({ links: [
   link({ creator_id: "cars", brand_key: "oldbrand.com", brand_name: "Old Brand", domain: "oldbrand.com", evidence: said("Sponsored by Old Brand") }),
 ], archivedBrands: [{ name: "Old Brand", domain: "oldbrand.com" }] });
 eq("found: one row per brand across domains and names; no hint, affiliate, CRM or archived brand", foundBrands(w3).map((f) => [f.seen.name, f.creators]), [["AUTODOC", 3]]);
+
+// ---- only trusted deals reach the screen ----
+const sureEv = (q: string, sig: string[]) => [{ video: "t" + q.length, title: "t", at: "2026-10-01", kind: "sponsored", confidence: 0.9, signals: sig, quote: q }] as never;
+const seenOk = (key: string, name: string, domain: string, check = "site") => [key, { brand_key: key, name, domain, domain_check: check, site: { via: "link" }, checked_at: "x", hidden: false, added_brand_id: null }] as [string, never];
+const raw = [
+  link({ id: "a", creator_id: "builder", brand_key: "raycon.com", brand_name: "Raycon", domain: "raycon.com", evidence: sureEv("Sponsored by Raycon", ["description", "paid_label"]) }),
+  link({ id: "b", creator_id: "builder", brand_key: "n:either", brand_name: "either", domain: "", evidence: sureEv("Sponsored by either", ["description", "paid_label"]) }),
+  link({ id: "c", creator_id: "builder", brand_key: "sbck.me", brand_name: "RevenueCat", domain: "sbck.me", evidence: sureEv("Sponsored by RevenueCat", ["description", "paid_label"]) }),
+  link({ id: "d", creator_id: "builder", brand_key: "aztech.com", brand_name: "Aztech", domain: "aztech.com", evidence: sureEv("Aztech https://aztech.com", ["description"]) }),
+  link({ id: "e", creator_id: "builder", brand_key: "tryx.com", brand_name: "TRYX", domain: "tryx.com", confidence: 0.5, evidence: sureEv("TRYX sent me this", ["description"]) }),
+  link({ id: "f", creator_id: "builder", brand_key: "keychron.com", brand_name: "Keychron", domain: "keychron.com", verdict: "yes" }),
+];
+const seenMap = new Map([seenOk("raycon.com", "Raycon", "raycon.com"), seenOk("n:either", "either", ""), seenOk("sbck.me", "RevenueCat", "sbck.me", "mismatch"), seenOk("aztech.com", "Aztech", "aztech.com")]);
+eq("trusted: verified sure deal yes; phrase, short link, no-words link, weak and unchecked no; your yes always", trustedLinks(raw, seenMap, [tryx]).map((l) => l.id), ["a", "f"]);
+const mk = (id: string, name: string, domain: string, extra: Record<string, unknown> = {}) => brand({ id, name, domain, created_at: `2026-11-1${id.length}`, discovered: { creator_id: "x", creator: "x", kind: "sponsored", at: "" }, ...extra } as never);
+eq("doubts: phrases, handles, trackers, copies, no site; real brands kept", [...brandDoubts([brand({ id: "own", name: "NZXT", domain: "nzxt.com", created_at: "2026-01-01" }), mk("1", "Asus and their Expertbook Ultra", "bestlaptop.deals"), mk("22", "@NZXTglobal", ""), mk("333", "RevenueCat", "sbck.me"), mk("4444", "Sony", ""), mk("55555", "febi", "febi.com"), mk("666666", "HOLY", "weareholy.com"), mk("7777777", "Nothing", "nothing.tech")]).keys()], ["1", "22", "333", "4444"]);
 
 if (fail) { console.log(`\n${fail} failing`); process.exit(1); } else console.log("\nall match tests pass");

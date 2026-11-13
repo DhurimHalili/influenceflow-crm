@@ -8,6 +8,7 @@ import { UpdateWatcher } from "./components/UpdateWatcher";
 import { GmailProvider } from "./contexts/GmailContext";
 import { YouTubeProvider } from "./contexts/YouTubeContext";
 import { MatchProvider } from "./contexts/MatchContext";
+import { HelperProvider } from "./contexts/HelperContext";
 import { AccessProvider, AccessWaiting, useAccess } from "./contexts/AccessContext";
 
 const AppShell = lazy(() => import("./components/AppShell"));
@@ -73,6 +74,7 @@ export default function App() {
             <GmailProvider>
             <YouTubeProvider>
             <MatchProvider>
+            <HelperProvider>
             <UpdateWatcher />
             <Suspense fallback={<LoadingScreen />}>
               <Routes>
@@ -109,6 +111,7 @@ export default function App() {
                 <Route path="*" element={<NotFound />} />
               </Routes>
             </Suspense>
+            </HelperProvider>
             </MatchProvider>
             </YouTubeProvider>
             </GmailProvider>

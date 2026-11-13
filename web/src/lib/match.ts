@@ -18,7 +18,7 @@
 import type { Brand, Campaign, Creator } from "../types";
 import { judge, youtubeSubs } from "./criteria";
 import { findCountry } from "./countries";
-import { dealProof, normalizeDomain, type DealKind, type Evidence, type Proof } from "./sponsors";
+import { brandish, dealProof, domainFits, nameAsDomain, normalizeDomain, type DealKind, type Evidence, type Proof } from "./sponsors";
 import { overlap, scoreText, topicFit, topicLabel, TOPIC, type ContentProfile } from "./taxonomy";
 
 // ---- what the server writes ---------------------------------------------------------------
@@ -35,6 +35,8 @@ export type BrandLink = {
   id: string; creator_id: string; brand_key: string; brand_name: string; domain: string; brand_id: string | null; kind: DealKind; confidence: number;
   store: boolean; videos: number; first_at: string | null; last_at: string | null; evidence: Evidence[]; by_ai: boolean; manual: boolean;
   verdict: "" | "yes" | "no"; verdict_kind: DealKind | null; verdict_at: string | null; updated_at: string;
+  /** Every video it was seen in, newest first (evidence keeps the best few quotes). */
+  video_ids?: string[];
 };
 export type SeenBrand = {
   brand_key: string; name: string; domain: string; domain_check: "" | "site" | "link" | "mismatch" | "guess" | "none" | "blocked";
@@ -67,7 +69,36 @@ export const proofOf = (l: BrandLink): { level: Proof; why: string } => {
   if (!p) { p = dealProof(l); proofCache.set(l, p); }
   return p;
 };
-export const PROOF_LABEL: Record<Proof, string> = { proven: "Proven", stated: "Said once", hint: "Not confirmed", affiliate: "Affiliate" };
+// Brand deals read "Sure" (proven) or "Likely" (said once); anything weaker is never shown.
+export const PROOF_LABEL: Record<Proof, string> = { proven: "Sure", stated: "Likely", hint: "Unconfirmed", affiliate: "Affiliate" };
+
+/**
+ * Only what can be trusted reaches any screen. A deal (paid / product sent) must be Sure or Likely
+ * (at least 65 %) AND be about a real brand: one in your CRM, or a found brand whose own website was
+ * verified (its link really is theirs, or Wikidata's official site). An affiliate link must be at least
+ * Likely. Your "Yes" always counts, your "No" never does. Everything else (a phrase, a person, a short
+ * link, a guess) waits silently until it's verified — never shown as a brand.
+ */
+export function trustedLinks(links: BrandLink[], seen: Map<string, SeenBrand>, allBrands: Brand[]): BrandLink[] {
+  // A brand Match added that turns out doubtful (a phrase, a short link, a copy) doesn't vouch for anything.
+  const doubts = brandDoubts(allBrands);
+  const brands = allBrands.filter((b) => !b.archived_at && !doubts.has(b.id));
+  const ids = new Set(brands.map((b) => b.id));
+  const byDomain = new Set(brands.map(brandDomain).filter(Boolean));
+  const byName = new Set(brands.map((b) => squash(b.name)).filter((n) => n.length >= 3));
+  return links.filter((l) => {
+    if (l.verdict === "no") return false;
+    if (l.verdict === "yes" || l.manual) return true;
+    if (l.confidence < 0.65) return false;
+    const inCrm = (!!l.brand_id && ids.has(l.brand_id)) || (!!l.domain && byDomain.has(l.domain)) || byName.has(squash(l.brand_name));
+    if (!isDeal(l)) return inCrm || l.store || (!!l.domain && brandish(l.brand_name));
+    const level = proofOf(l).level;
+    if (level !== "proven" && level !== "stated") return false;
+    if (inCrm) return true;
+    const s = seen.get(l.brand_key);
+    return !!s && !s.hidden && s.domain_check === "site" && !!s.domain && brandish(s.name);
+  });
+}
 export const brandDomain = (b: Pick<Brand, "domain">) => {
   const key = b.domain || "";
   let v = domains.get(key);
@@ -177,7 +208,7 @@ export type MatchWorld = {
   seen: Map<string, SeenBrand>;
   criteria?: Parameters<typeof judge>[1];
   /** Brands you archived: never suggested again as "found". */
-  archivedBrands?: Pick<Brand, "domain" | "name">[];
+  archivedBrands?: Pick<Brand, "domain" | "name" | "discovered">[];
   now?: Date;
 };
 
@@ -358,6 +389,33 @@ export function matchOf(b: Brand & { match_topics?: string[] }, c: Creator, w: M
   return { score, tone: toneOf(score), fit: tf.fit, onTopic: tf.onTopic, carriers: tf.carriers, parts, reasons, flags, missing: "" };
 }
 
+/**
+ * Brands that Match added (found in videos) and that don't hold up: not a brand name ("either",
+ * "Asus and their Expertbook Ultra", "@NZXTglobal"), a website that isn't theirs (a short link,
+ * tracker or agency: sbck.me, plug.dev), no website at all, or a copy of a brand already there.
+ * Only brands still at New — anything you've worked on is yours. Id → why.
+ */
+export function brandDoubts(brands: Brand[]): Map<string, string> {
+  const out = new Map<string, string>();
+  const active = brands.filter((b) => !b.archived_at).sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
+  const owner = new Map<string, Brand>();
+  const tokens = (b: Brand) => { const d = brandDomain(b); const l = squash(d.split(".")[0] || ""); const n = squash(b.name.replace(/^@/, "")); return [l.length >= 3 ? `d:${l}` : "", n.length >= 3 ? `d:${n}` : ""].filter(Boolean); };
+  for (const b of active) {
+    const mine = tokens(b);
+    const first = mine.map((t) => owner.get(t)).find((x) => x && x.id !== b.id);
+    for (const t of mine) if (!owner.has(t)) owner.set(t, b);
+    if (!b.discovered || b.pipeline_status !== "new") continue;
+    const d = brandDomain(b);
+    const fits = !!d && (domainFits(b.name, d) || nameAsDomain(b.name) === d);
+    // A lowercase or everyday-word name is fine when its own website carries it (febi.com, nothing.tech, bestbuy.com).
+    if (!brandish(b.name) && !fits || /^@|#/.test(b.name.trim()) && !fits) out.set(b.id, "Not a brand name — words cut from a video description.");
+    else if (first) out.set(b.id, `A copy of ${first.name}, already in your CRM.`);
+    else if (!d) out.set(b.id, "No website could be verified for it.");
+    else if (!fits) out.set(b.id, `${d} isn't their own website (a short link, tracker or another site).`);
+  }
+  return out;
+}
+
 /** Group a list of links per creator once (they're read many times per render). */
 export const byCreator = (links: BrandLink[]) => {
   const m = new Map<string, BrandLink[]>();
@@ -380,7 +438,8 @@ const tokensOf = (domain: string, name: string) => {
  */
 export function foundBrands(w: MatchWorld): Found[] {
   const have = new Set<string>();
-  for (const b of [...w.brands, ...(w.archivedBrands || [])]) for (const t of tokensOf(b.domain || "", b.name)) have.add(t);
+  // Archived by you: never suggested again. Archived by the Match clean-up (it didn't hold up): may come back once verified.
+  for (const b of [...w.brands, ...(w.archivedBrands || []).filter((x) => !(x.discovered as { cleanup?: boolean } | null | undefined)?.cleanup)]) for (const t of tokensOf(b.domain || "", b.name)) have.add(t);
   // Group links that share a domain label or a name (union-find over tokens).
   const parent = new Map<string, string>();
   const find = (x: string): string => { let r = x; while (parent.get(r) !== r) r = parent.get(r)!; parent.set(x, r); return r; };
@@ -416,9 +475,9 @@ export function foundBrands(w: MatchWorld): Found[] {
 }
 
 /** "Sure" when the domain is the creator's own link AND the site says it's that brand. */
-export const domainTrust = (s: Pick<SeenBrand, "domain" | "domain_check" | "checked_at">): { label: string; tone: "good" | "info" | "warn" } =>
+export const domainTrust = (s: Pick<SeenBrand, "domain" | "domain_check" | "checked_at" | "site">): { label: string; tone: "good" | "info" | "warn" } =>
   !s.domain ? { label: "No website yet", tone: "warn" }
-    : s.domain_check === "site" ? { label: "Website checked", tone: "good" }
+    : s.domain_check === "site" ? ((s.site as { via?: string } | null)?.via === "wikidata" ? { label: "Official site · Wikidata", tone: "good" } : (s.site as { via?: string } | null)?.via === "guess" ? { label: "Their site, found by name", tone: "info" } : { label: "Website checked", tone: "good" })
       : s.domain_check === "guess" ? { label: "Website found by name — check it", tone: "info" }
         : s.domain_check === "mismatch" ? { label: "Site name differs — check it", tone: "warn" }
           : s.domain_check === "blocked" ? { label: "Site blocks checks", tone: "info" }
