@@ -63,6 +63,12 @@ type VideoRow = {
 const sleep = (ms: number) => new Promise((ok) => setTimeout(ok, ms));
 // Video text can hold broken characters (a lone half of an emoji, a NUL byte) that Postgres refuses as
 // JSON — one such title used to make a creator's whole save fail. Every string is made well-formed first.
+// One save may mix rows read back from the table (every column) with new ones built here: the database
+// refuses a batch whose rows don't all have the same fields, so every video row gets every field.
+const videoRow = (r: VideoRow) => ({
+  transcript_status: "", transcript_lang: "", transcript_kind: "", transcript_at: null, transcript_hits: [], transcript_tries: 0,
+  ...r,
+});
 function wellFormed<T>(v: T): T {
   if (typeof v === "string") return (((v as string).toWellFormed?.() ?? (v as string).replace(/[\uD800-\uDFFF]/g, "")).replace(/\u0000/g, "")) as T;
   if (Array.isArray(v)) return v.map(wellFormed) as T;
@@ -372,7 +378,7 @@ async function scanCreator(admin: SupabaseClient, c: CreatorRow, deadline: numbe
 
   // 6. Save the videos.
   for (let i = 0; i < touched.length; i += 80) {
-    const batch = touched.slice(i, i + 80).map((r) => wellFormed({ ...r, updated_at: now.toISOString() }));
+    const batch = touched.slice(i, i + 80).map((r) => wellFormed({ ...videoRow(r), updated_at: now.toISOString() }));
     const { error } = await admin.from("creator_videos").upsert(batch);
     if (error) throw new Error(`save videos: ${error.message}`);
   }
@@ -916,7 +922,7 @@ Deno.serve(async (req) => {
       changed.push({ ...r, mentions: merged, listen: deal ? null : r.listen, transcript_status: "ok", transcript_lang: it.lang, transcript_kind: it.kind, transcript_at: now, transcript_hits: heard.hits, judged_at: null });
     }
     if (changed.length) {
-      const { error } = await admin.from("creator_videos").upsert(changed.map((r) => wellFormed({ ...r, updated_at: now })));
+      const { error } = await admin.from("creator_videos").upsert(changed.map((r) => wellFormed({ ...videoRow(r), updated_at: now })));
       if (error) return json({ error: "Couldn't save the transcripts." }, 500);
     }
     // Who works with whom, again for the creators whose videos changed.
