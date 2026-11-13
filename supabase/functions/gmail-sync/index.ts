@@ -2,6 +2,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { isSealed, openToken, sealToken } from "../_shared/googleTokens.ts";
 import { aiChain, aiEnabled, aiKeyCount, aiModel, aiProvider, aiReadyAt, classifyLead, planImport, QuotaExhausted, readReply, testAi, useKeyStore } from "../_shared/ai.ts";
+import { clefStatus, useClefBudget } from "../_shared/clef.ts";
 import { decodeEntities, isWarmup, precheck, scanForLead, type Lead, type ScanInput } from "../_shared/leadScanner.ts";
 import { classifyIncoming, isReaction, mergeReading, myReplyIntent, notAReply, READER_VERSION, referralOf, stripQuoted, type IncomingKind, type TeamRole } from "../_shared/replyReader.ts";
 import { analyzeStoredFile, bodyOf, drainQueue, gmailAttachment, processCreatorMail, processMyMail, repairAnchors, repairKitLists, sniff, type Fetcher, type FullMessage } from "./intel.ts";
@@ -597,7 +598,8 @@ const SAID_NO = "Said no by email";
  */
 async function aiReadReplies(admin: Admin, userId: string, token: string, mailbox: string, budget: { ai: number }, deadline: number) {
   if (!aiEnabled() || budget.ai <= 0 || Date.now() > deadline - 8_000) return 0;
-  if ((await aiReadyAt("text").catch(() => 0)) > Date.now()) return 0;
+  // Clef answers this first; only when it's out too AND the chat models are cooling down is there nothing to do.
+  if ((await aiReadyAt("text").catch(() => 0)) > Date.now() && !((await clefStatus().catch(() => null))?.left)) return 0;
   const { data } = await admin.from("email_events").select("id, gmail_id, entity_id, counterpart, subject, reply_kind, at").eq("user_id", userId).eq("mailbox", mailbox).eq("direction", "in").is("reply_ai_at", null).in("reply_kind", ["", "no", "maybe_no", "team"]).lt("kind_v", 32767).gte("at", new Date(Date.now() - 60 * 86400000).toISOString()).order("at", { ascending: false }).limit(40);
   if (!data?.length) return 0;
   const ids = Array.from(new Set(data.map((r) => r.entity_id)));
@@ -1638,6 +1640,7 @@ Deno.serve(async (req) => {
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const admin = createClient(supabaseUrl, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
   useKeyStore(admin);
+  useClefBudget(admin);
   const configured = !!(Deno.env.get("GOOGLE_CLIENT_ID") && Deno.env.get("GOOGLE_CLIENT_SECRET") && Deno.env.get("GMAIL_OAUTH_REDIRECT_URI"));
   let input: Record<string, unknown> = {};
   try {

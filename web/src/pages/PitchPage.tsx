@@ -5,6 +5,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { SocialBadge } from "../components/SocialIcon";
 import { LogoMark } from "../components/ui";
 import { useData } from "../contexts/DataContext";
+import { useMatch } from "../contexts/MatchContext";
 import { RATE_FIELDS } from "../lib/prefs";
 import { compact, initials, malePct, money, pctText } from "../lib/utils";
 import type { Creator, RateCard } from "../types";
@@ -23,6 +24,10 @@ export default function PitchPage() {
   const [params] = useSearchParams();
   const ids = useMemo(() => (params.get("ids") || "").split(",").filter((x) => /^[\w-]{6,64}$/.test(x)).slice(0, 12), [params]);
   const creators = ids.map((id) => data.creators.find((c) => c.id === id)).filter((c): c is Creator => !!c);
+  // From Match: saving the PDF remembers who was pitched to this brand, so they're never pitched twice.
+  const brandId = params.get("brandId") || "";
+  const forBrand = data.brands.find((b) => b.id === brandId && !b.archived_at);
+  const match = useMatch();
   const agency = data.profile.preferences.agency_name || data.profile.display_name;
   const [brand, setBrand] = useState(params.get("brand") || "");
   const [markup, setMarkup] = useState(25);
@@ -48,8 +53,9 @@ export default function PitchPage() {
       <label>Your markup<span className="pitch-markup"><input type="number" min={0} max={300} value={markup} onChange={(e) => setMarkup(Math.max(0, Math.min(300, Number(e.target.value) || 0)))} />%</span></label>
       <div className="pitch-formats" role="group" aria-label="Prices to show">{offered.map((f) => <label key={f.key} className={keys.includes(f.key) ? "on" : ""}><input type="checkbox" checked={keys.includes(f.key)} onChange={(e) => setKeys((k) => (e.target.checked ? [...k, f.key] : k.filter((x) => x !== f.key)))} />{f.short}</label>)}</div>
       <label className="pitch-note-in">Note<input value={note} onChange={(e) => setNote(e.target.value.slice(0, 240))} placeholder="Why these creators (optional)" /></label>
-      <button type="button" className="btn btn-primary btn-sm" onClick={() => window.print()}><Printer size={14} /> Save PDF</button>
+      <button type="button" className="btn btn-primary btn-sm" onClick={() => { if (forBrand && creators.length) void match.pitch(forBrand.id, creators.map((c) => c.id), "pitch"); window.print(); }}><Printer size={14} /> Save PDF</button>
     </div>
+    {forBrand && <p className="pitch-private">Saving the PDF marks these creators as pitched to {forBrand.name} — Match won't suggest them to {forBrand.name} again.</p>}
     <p className="pitch-private">Brands see your prices with the markup included — what each creator charges you never appears. Only audience numbers verified from a media kit or stats screenshot are shown.</p>
 
     <article className="pitch-doc">

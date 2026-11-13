@@ -200,6 +200,8 @@ const normalizeBrand = (row: Record<string, unknown>, userId: string): Brand => 
   secondary_email_label: text(row.secondary_email_label),
   brief: normalizeBrief(row.brief),
   socials: normalizeSocials(row.socials),
+  match_topics: Array.isArray(row.match_topics) ? row.match_topics.filter((x): x is string => typeof x === "string" && /^[a-z_]{2,30}$/.test(x)).slice(0, 8) : [],
+  discovered: row.discovered && typeof row.discovered === "object" && !Array.isArray(row.discovered) ? (row.discovered as Brand["discovered"]) : null,
   pipeline_status: (mapStatus(row.pipeline_status) as Brand["pipeline_status"]) || "new",
   date_contacted: dateOrNull(row.date_contacted),
   status_updated_at:
@@ -430,7 +432,7 @@ export async function loadCloudWorkspace(userId: string): Promise<WorkspaceData 
 // PostgREST rejects the upsert with an unknown-column error: strip exactly
 // the column it names and retry, so one missing column never blocks the
 // whole save (and never drops the columns that do exist).
-const OPTIONAL_COLUMNS = ["engagement_rate", "next_action", "deliverables_items", "entity_type", "entity_id", "updated_at", "followup_count", "last_followup_at", "lost_reason", "lost_at", "stars", "stars_consistency", "stars_demographics", "stars_niche", "stars_engagement", "priority", "next_action_date", "kind", "done", "draft_subject", "draft_body", "status_updated_at", "email_templates", "rating_weights", "preferences", "rates", "payment_status", "invoice_due", "paid_at", "payout_status", "socials", "brief", "country", "secondary_email", "secondary_email_label", "payout_model", "creator_fees", "followup_snooze_until", "status_source", "brand_id", "kind", "channel", "brand_terms", "rate_meta", "rate_history", "audience", "contract", "avatar_path", "contact_channel", "email_followups", "primary_thread", "primary_thread_at", "new_thread_gap", "youtube", "youtube_synced_at", "team"];
+const OPTIONAL_COLUMNS = ["engagement_rate", "next_action", "deliverables_items", "entity_type", "entity_id", "updated_at", "followup_count", "last_followup_at", "lost_reason", "lost_at", "stars", "stars_consistency", "stars_demographics", "stars_niche", "stars_engagement", "priority", "next_action_date", "kind", "done", "draft_subject", "draft_body", "status_updated_at", "email_templates", "rating_weights", "preferences", "rates", "payment_status", "invoice_due", "paid_at", "payout_status", "socials", "brief", "country", "secondary_email", "secondary_email_label", "payout_model", "creator_fees", "followup_snooze_until", "status_source", "brand_id", "kind", "channel", "brand_terms", "rate_meta", "rate_history", "audience", "contract", "avatar_path", "contact_channel", "email_followups", "primary_thread", "primary_thread_at", "new_thread_gap", "youtube", "youtube_synced_at", "team", "match_topics", "discovered"];
 
 const missingColumn = (error: { message?: string; details?: string; hint?: string; code?: string }) => {
   const msg = `${error.message || ""} ${error.details || ""} ${error.hint || ""}`;

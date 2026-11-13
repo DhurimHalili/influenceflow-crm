@@ -4,7 +4,7 @@ import {
   Archive, BarChart3, Building2, CalendarDays, Check, ChevronRight, CircleDollarSign, Clock3, Cloud, CloudOff, Command, HelpCircle, Inbox, LoaderCircle,
   Keyboard, LayoutDashboard, Compass, LogOut, UserCheck, Menu, MessageCircle, MonitorX, Moon, Palette, Plus, Search, SearchX, Settings, ShieldCheck, Sun,
   Sparkles, TrendingUp, UserX, Users, Wallet, X,
-  Receipt,
+  Receipt, Handshake,
 } from "lucide-react";
 import { useInvoicesToChase } from "./Money";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -38,6 +38,7 @@ const navSections = [
   { label: "Manage", items: [
     { to: "/app/influencers", label: "Influencers", icon: Users },
     { to: "/app/brands", label: "Brands", icon: Building2 },
+    { to: "/app/match", label: "Match", icon: Handshake },
     { to: "/app/leads", label: "Inbound leads", icon: Inbox },
     { to: "/app/campaigns", label: "Campaigns", icon: BarChart3 },
     { to: "/app/invoices", label: "Invoices", icon: Receipt },
