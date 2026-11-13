@@ -14,7 +14,7 @@ import { businessDaysBetween, timeline } from "../lib/followupEngine";
 import { mailboxStats } from "../lib/mailboxStats";
 import { declined, replyTone } from "../lib/replyReader";
 import { DEFAULT_FOLLOWUP_RULES } from "../lib/prefs";
-import { lossReasonLabel, money } from "../lib/utils";
+import { dateLabel, lossReasonLabel, money } from "../lib/utils";
 import type { Activity, Brand, Creator, EntityStatus } from "../types";
 
 // What's working: how many people you reach turn into replies, deals and
@@ -125,14 +125,23 @@ export default function ReportsPage() {
     const side = (list: typeof people) => list.filter((p) => p.type === who);
     const cohort = side(outreach);
     const stage = (n: number) => cohort.filter((p) => p.rank >= n).length;
+    // Joined the roster (or signed) IN this range — counted by the day they joined (the deal was agreed),
+    // whenever they were first emailed. That's the "Joined roster" tile; the steps before it follow
+    // the people first contacted in the range.
+    const joined = side(box ? everyone.filter((p) => p.mailbox === box) : everyone)
+      .filter((p) => p.wonAt && new Date(p.wonAt).getTime() >= from)
+      .map((p) => ({ id: p.record.id, name: p.record.name, at: p.wonAt!, startAt: p.startAt, inbound: p.inbound, still: ["roster", "signed", "active", "completed"].includes(p.record.pipeline_status), earlier: p.inbound || !p.startAt || new Date(p.startAt).getTime() < from }))
+      .sort((a, b) => b.at.localeCompare(a.at));
+    const leftLater = joined.filter((j) => !j.still).length;
     const funnel = [
       { key: "reached", label: "Reached out", value: cohort.length, icon: Send, now: "" },
       { key: "replied", label: "Replied", value: stage(2), icon: Reply, now: "" },
       { key: "negotiating", label: "Got to negotiating", value: stage(3), icon: HandCoins, now: `${cohort.filter((p) => p.record.pipeline_status === "negotiating").length} negotiating now` },
-      { key: "won", label: who === "creator" ? "Reached roster" : "Signed", value: stage(4), icon: Trophy, now: (() => { const still = cohort.filter((p) => p.rank >= 4 && ["roster", "signed", "active", "completed"].includes(p.record.pipeline_status)).length; const left = stage(4) - still; return left > 0 ? `${still} ${who === "creator" ? "on roster" : "signed"} now · ${left} left later` : ""; })() },
+      { key: "won", label: who === "creator" ? "Joined roster" : "Signed", value: joined.length, icon: Trophy, now: leftLater > 0 ? `${joined.length - leftLater} ${who === "creator" ? "on roster" : "signed"} now · ${leftLater} left later` : "" },
     ];
     const inboundSide = side(inbound);
-    const closeDays = side(people).filter((p) => p.wonAt && p.startAt).map((p) => Math.max(0, (new Date(p.wonAt!).getTime() - new Date(p.startAt!).getTime()) / 86400000));
+    // How long the deals closed in this range took, from first contact.
+    const closeDays = joined.filter((j) => j.startAt && !j.inbound).map((j) => Math.max(0, (new Date(j.at).getTime() - new Date(j.startAt!).getTime()) / 86400000));
     const replied = cohort.filter((p) => p.firstIn && p.firstOut);
     const replyDays = replied.map((p) => businessDaysBetween(new Date(p.firstOut!.at), new Date(p.firstIn!.at), rules));
     // Which message they answered, and how: a new thread is its own bucket.
@@ -201,8 +210,10 @@ export default function ReportsPage() {
     const boxes = mailboxStats(events, gmail.leads, gmail.mailboxes.map((m) => m.email), range === "all" ? null : Number(range)).map((s) => ({ ...s, won: side(all.filter((p) => !p.inbound)).filter((p) => p.mailbox === s.mailbox && p.rank >= 4).length }));
     const leadsIn = gmail.leads.filter((l) => new Date(l.first_at).getTime() >= from && (who === "creator" ? l.kind === "creator" : l.kind !== "creator") && (!box || l.mailbox.toLowerCase() === box));
 
+
     return {
       funnel,
+      joined,
       contacted: cohort.length,
       repliedCount: stage(2),
       wonCount: stage(4),
@@ -234,6 +245,7 @@ export default function ReportsPage() {
   const top = report.funnel[0].value;
   const conversion = rateText(report.wonCount, report.contacted);
   const wonWord = who === "creator" ? "roster" : "signed";
+  const earlier = report.joined.filter((j) => j.earlier);
   const table = (title: string, rows: Row[], label: string) => <div className="dash-panel report-table"><div className="panel-heading"><div><span>{who === "creator" ? "Influencers" : "Brands"}</span><h2>{title}</h2></div></div>{rows.length ? <table><thead><tr><th>{label}</th><th>Reached</th><th>Reply rate</th><th>{who === "creator" ? "Roster" : "Signed"}</th></tr></thead><tbody>{rows.map((r) => <tr key={r.key}><td>{r.key}</td><td>{r.contacted}</td><td><span className="rate-bar"><i style={{ width: `${pct(r.replied, r.contacted)}%` }} />{pct(r.replied, r.contacted)}%</span></td><td><b>{r.won}</b> <small className="muted">{pct(r.won, r.contacted)}%</small></td></tr>)}</tbody></table> : <p className="muted-copy">No outreach in this range yet.</p>}</div>;
 
   return <div className="reports-page">
@@ -252,9 +264,10 @@ export default function ReportsPage() {
       </div>
       <ol className="funnel-steps">{report.funnel.map((step, i) => { const prev = i ? report.funnel[i - 1].value : 0; return <li key={step.key} className={`fs-${step.key}`}>
         {i > 0 && <span className="fs-conv" aria-hidden="true">→</span>}
-        <div className="fs-card"><span className="fs-icon"><step.icon size={15} /></span><b>{step.value}</b><small>{step.label}</small>{i === 0 && <span className="fs-step">first contact in this range</span>}{i > 0 && <span className="fs-step" title={`${step.value} of the ${prev} who ${report.funnel[i - 1].label.toLowerCase()}`}>{pct(step.value, prev)}% of {i === 1 ? "those reached" : i === 2 ? "those who replied" : "those negotiating"}</span>}{step.now && step.value !== Number.parseInt(step.now, 10) && <em className="fs-now" title="Counts everyone who reached this stage, including those who went on or ended later">{step.now}</em>}<i className="fs-bar"><em style={{ width: `${top ? Math.max(step.value ? 4 : 0, (step.value / top) * 100) : 0}%` }} /></i></div>
+        <div className="fs-card"><span className="fs-icon"><step.icon size={15} /></span><b>{step.value}</b><small>{step.label}</small>{i === 0 && <span className="fs-step">first contact in this range</span>}{i > 0 && step.key !== "won" && <span className="fs-step" title={`${step.value} of the ${prev} who ${report.funnel[i - 1].label.toLowerCase()}`}>{pct(step.value, prev)}% of {i === 1 ? "those reached" : "those who replied"}</span>}{step.key === "won" && <span className="fs-step">{who === "creator" ? "joined" : "signed"} in this range</span>}{step.now && step.value !== Number.parseInt(step.now, 10) && <em className="fs-now" title="Counts everyone who reached this stage, including those who went on or ended later">{step.now}</em>}<i className="fs-bar"><em style={{ width: `${top ? Math.min(100, Math.max(step.value ? 4 : 0, (step.value / top) * 100)) : 0}%` }} /></i></div>
       </li>; })}</ol>
       <p className="funnel-note">{report.contacted ? <>Out of every <b>10</b> {who === "creator" ? "influencers" : "brands"} you contact, about <b>{Math.round((report.repliedCount / report.contacted) * 10)}</b> reply and <b>{Math.round((report.wonCount / report.contacted) * 100) / 10}</b> {who === "creator" ? "join your roster" : "sign"}.{report.closedCount ? <> It takes about <b>{report.closeDays} day{report.closeDays === 1 ? "" : "s"}</b> from first contact to {wonWord}.</> : null}</> : "Your funnel appears as soon as your first outreach is logged or synced from Gmail."}</p>
+      {range !== "all" && earlier.length > 0 && <p className="funnel-joined"><Trophy size={14} aria-hidden="true" /><span>{who === "creator" ? "Joined roster" : "Signed"} counts the day it happened. {earlier.length === 1 ? "One was" : `${earlier.length} were`} first contacted before this range, so the steps before it and the {conversion}% above don't include {earlier.length === 1 ? "them" : "them"}: {earlier.map((j, k) => <span key={j.id}><Link to={`/app/${who === "creator" ? "influencers" : "brands"}/${j.id}`}>{j.name}</Link> <small>({j.inbound ? "wrote to you first" : j.startAt ? `first contact ${dateLabel(j.startAt)}` : "no contact date"} · {who === "creator" ? "joined" : "signed"} {dateLabel(j.at)})</small>{k < earlier.length - 1 ? ", " : "."}</span>)}</span></p>}
     </section>
 
     <section className="metric-row report-metrics">

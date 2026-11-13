@@ -219,6 +219,15 @@ const CHAPTER = /^\s*\(?((?:\d{1,2}:)?\d{1,2}:\d{2})\)?\s*[-–—:|•.]?\s*(.{
 // A call to action with a link: "Get NordVPN here ➼", "Try Notion free", "Head to brilliant.org/x".
 const CTA = /\b(?:get|try|check out|download|sign up(?: for)?|grab|head (?:over )?to|go to|visit|start your|claim)\b[^\n]{0,70}?\b(?:here|below|at|for free|free|today|now|deal|discount|trial|off|risk-free|offer)\b/i;
 const TRACKING = /[?&](?:ref|aff|affiliate|aff_id|affid|aff_sub|via|tag|partner|pid|irclickid|irgwc|sca_ref|rfsn|cjevent|clickid|coupon|discount|code|promo|utm_campaign|utm_source|utm_medium|sid|subid|wt_mc|pp|campaign)=|\/(?:ref|referral|aff|affiliate|go|discount|r|partner|invite|promo)\/[\w-]{2,}/i;
+// Credits, not deals: "🎵 Copyrighted music licensed from Lickd", "Music by Epidemic Sound", "Stock footage from Storyblocks".
+const CREDIT = /(?:[\u{1F3B5}\u{1F3B6}\u{1F3BC}]\s*|\b(?:copyrighted |royalty[- ]free |background |intro |outro )?(?:music|songs?|tracks?|soundtrack|beats?|sound effects|sfx|footage|b-?roll|stock (?:footage|video|clips?|images?|photos?)|thumbnail|artwork|font)\b)[^.\n|]{0,60}?\b(?:licensed|copyright|provided|courtesy|by|from|via|on)\b[^.\n|]*\.?/giu;
+const CREDIT_HOSTS = /(?:^|\.)(?:lickd\.co|epidemicsound\.com|artlist\.io|musicbed\.com|soundstripe\.com|uppbeat\.io|bensound\.com|audiojungle\.net|pond5\.com|envato\.com|storyblocks\.com|pexels\.com|incompetech\.com|ncs\.io|youtube\.com\/audiolibrary)$/i;
+/** The line without its credits, or null when it has none. A credit that says sponsored/sent is a deal, never cut. */
+function stripCredits(text: string): string | null {
+  let cut = false;
+  const out = text.replace(CREDIT, (m) => (SPONSOR.test(m) || /\b(?:sent|gifted|loaned|for sending)\b/i.test(m) ? m : ((cut = true), " ")));
+  return cut ? out.replace(/\s+/g, " ").trim() : null;
+}
 // "For business inquiries / sponsorships: email…" is the creator selling, not a sponsor.
 const INQUIRY = /business (?:inquir|enquir)|(?:sponsorship|partnership|collab\w*) (?:inquir|enquir|opportunit|request)|for (?:sponsorships?|business|collabs?|partnerships?)\b|interested in (?:sponsoring|working|partnering)|sponsor (?:me|this channel|the channel|a video|my)|become a (?:sponsor|member|patron)|(?:want|like) to sponsor|contact(?: me)?:|e-?mail:|\bpatreon\b|github sponsors/i;
 const STOP_NAMES = new Set(["sponsorship", "sponsorships", "partnership", "partnerships", "collab", "collaboration", "giveaway", "ad read", "kickstarter", "indiegogo", "patreon", "gofundme", "promotion", "promo", "sponsor", "sponsors", "deal", "deals", "discount", "code", "coupon", "link", "links", "website", "app", "store", "shop", "brand", "product", "werbung", "anzeige", "ad", "ads", "advertising", "nobody", "no one", "none", "myself", "no sponsor", "noone", "pc", "the pc", "gpu", "cpu", "case", "the case", "laptop", "phone", "monitor", "keyboard", "mouse", "car", "product", "products", "parts", "the parts", "unit", "sample", "company", "manufacturer", "manufacturers", "retailers", "retailer", "sellers", "mom", "dad", "my wife", "my brother", "viewer", "a fan", "fans", "subscriber", "subscribers", "patron", "me", "us", "you", "this", "that", "them", "it", "everyone", "today", "video", "the video", "this video", "channel", "sponsor", "our sponsor", "the sponsor", "link", "below", "here", "description", "the link", "him", "her", "my friend", "a friend", "friends", "my friends", "the team", "a viewer", "viewers", "patrons", "members", "supporters", "the company", "the brand", "a brand", "brands", "itself", "our partners", "partners", "my patrons", "you guys"]);
@@ -400,16 +409,22 @@ export function readVideo(v: VideoIn, ctx: ReadContext): Reading {
 
   // 1. Lines with a cue: the sentence names the brand, and/or a link sits on it (or just below).
   for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
+    let line = lines[i];
     const sec = sectionKind(line.section);
     if (sec === "music" || sec === "social") continue;
+    // "Presented by LEGENDZ 🎵 Copyrighted music licensed from Lickd": the soundtrack credit (and its link)
+    // is cut off; whatever else the line says is still read.
+    // (A credit with a referral link — "Music from Epidemic Sound: …/referral/abc" — earns them money: an affiliate, read as usual.)
+    const credited = line.urls.some((u) => TRACKING.test(u)) ? null : stripCredits(line.text.replace(URL_RE, " "));
+    if (credited !== null) {
+      if (!/[a-z]{3}/i.test(credited)) continue;
+      line = { ...line, text: credited, urls: line.urls.filter((u) => !CREDIT_HOSTS.test(hostOf(u))) };
+    }
     const naked = line.text.replace(URL_RE, " ");
     const prev = lines[i - 1];
     const prevCue = prev && !prev.urls.length ? prev.text : "";
     const cueText = line.urls.length && !SPONSOR.test(naked) && !SEEDED.test(naked) && !AFFILIATE.test(naked) && prevCue && i - 1 === prev.index ? `${prevCue} ${naked}` : naked;
     if (INQUIRY.test(cueText)) continue;
-    // "Copyrighted music licensed from Lickd" is the soundtrack, not a deal.
-    if (/\bcopyright|\blicensed (?:from|by|through)\b/i.test(naked)) continue;
     const ownLine = OWN.test(cueText) || sec === "own";
     const sponsorCue = SPONSOR.test(cueText) || sec === "sponsor";
     const seededCue = SEEDED.test(cueText);
@@ -514,8 +529,9 @@ export function readVideo(v: VideoIn, ctx: ReadContext): Reading {
   const sponsoredNow = () => [...found.values()].filter((m) => m.kind === "sponsored" && m.confidence >= 0.6);
   if ((sponsorSegs.length || paid) && !sponsoredNow().length && !notSponsored) {
     for (const line of lines.filter((l) => l.lead)) {
-      if (sectionKind(line.section) === "social" || OWN.test(line.text)) continue;
+      if (sectionKind(line.section) === "social" || sectionKind(line.section) === "music" || OWN.test(line.text)) continue;
       if (/\b(?:comes? from|i use|i used|my gear|i recommend)\b/i.test(line.text)) continue;
+      if (stripCredits(line.text.replace(URL_RE, " ")) !== null) continue;
       const target = line.urls.map(linkTarget).find((t) => t.kind === "brand" && t.domain && !isOwn(t.domain) && !/referral|[?&](?:ref|aff|affiliate|via)=|\/(?:ref|aff)\//i.test(t.url));
       if (!target) continue;
       const r = resolveKnown("", target.domain)!;
@@ -539,7 +555,9 @@ export function readVideo(v: VideoIn, ctx: ReadContext): Reading {
     // A brand we can't place on the web yet is less certain — "Linus sent me this GPU" may be a person.
     if (!m.domain) m.confidence = clamp(m.kind === "sponsored" ? m.confidence * 0.92 : Math.min(m.confidence * 0.92, 0.6));
   }
-  const mentions = [...found.values()].filter((m) => m.confidence >= 0.3).sort((a, b) => b.confidence - a.confidence);
+  // "thank you in advance for supporting the channel" → "in advance": a phrase, not a brand. A name that
+  // isn't brand-like only stays when a website that fits it backs it up ("febi" → febi.com).
+  const mentions = [...found.values()].filter((m) => m.confidence >= 0.3 && (m.store || brandish(m.name) || (!!m.domain && domainFits(m.name, m.domain)))).sort((a, b) => b.confidence - a.confidence);
   // Something is being promoted but nothing in the text says what: worth a listen.
   // (A link that was only promoted for sitting up top doesn't count as named: listening says who it really is.)
   const anyNamed = mentions.some((m) => (m.kind === "sponsored" || m.kind === "seeded") && m.confidence >= 0.6 && saysDeal(m));

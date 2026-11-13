@@ -1,5 +1,5 @@
 // Run: node --experimental-strip-types --import ./scripts/ts-hooks.mjs src/lib/match.test.ts
-import { brandDoubts, budgetOf, byCreator, foundBrands, matchOf, sellsOf, trustedLinks, type BrandLink, type MatchWorld } from "./match.ts";
+import { brandDoubts, brandTwin, budgetOf, byCreator, foundBrands, matchOf, sellsOf, trustedLinks, type BrandLink, type MatchWorld } from "./match.ts";
 import type { Brand, Campaign, Creator } from "../types/index.ts";
 
 let fail = 0;
@@ -83,5 +83,19 @@ const seenMap = new Map([seenOk("raycon.com", "Raycon", "raycon.com"), seenOk("n
 eq("trusted: verified sure deal yes; phrase, short link, no-words link, weak and unchecked no; your yes always", trustedLinks(raw, seenMap, [tryx]).map((l) => l.id), ["a", "f"]);
 const mk = (id: string, name: string, domain: string, extra: Record<string, unknown> = {}) => brand({ id, name, domain, created_at: `2026-11-1${id.length}`, discovered: { creator_id: "x", creator: "x", kind: "sponsored", at: "" }, ...extra } as never);
 eq("doubts: phrases, handles, trackers, copies, no site; real brands kept", [...brandDoubts([brand({ id: "own", name: "NZXT", domain: "nzxt.com", created_at: "2026-01-01" }), mk("1", "Asus and their Expertbook Ultra", "bestlaptop.deals"), mk("22", "@NZXTglobal", ""), mk("333", "RevenueCat", "sbck.me"), mk("4444", "Sony", ""), mk("55555", "febi", "febi.com"), mk("666666", "HOLY", "weareholy.com"), mk("7777777", "Nothing", "nothing.tech")]).keys()], ["1", "22", "333", "4444"]);
+
+// ---- Add: the found list and its button agree (Gamma "Added 0" bug) ----
+const tw = [
+  { id: "g", name: "Gamma", domain: "", archived_at: "2026-11-10", discovered: { creator_id: "x", creator: "x", kind: "sponsored", at: "", cleanup: true } },
+  { id: "m", name: "Meter.com", domain: "", archived_at: "2026-11-10", discovered: { creator_id: "x", creator: "x", kind: "sponsored", at: "", cleanup: true } },
+  { id: "u", name: "Anker", domain: "anker.com", archived_at: null, discovered: null },
+  { id: "y", name: "Mine", domain: "mine.com", archived_at: "2026-11-01", discovered: null },
+] as never as Brand[];
+eq("twin: archived clean-up copy is restored, not counted as 'have'", [brandTwin(tw, "Gamma", "gamma.app").cleanup?.id, brandTwin(tw, "Gamma", "gamma.app").active], ["g", undefined]);
+eq("twin: 'Meter.com' is the same brand as Meter", brandTwin(tw, "Meter", "meter.com").cleanup?.id, "m");
+eq("twin: active brand by website label", brandTwin(tw, "Ankerfast", "anker.com").active?.id, "u");
+eq("twin: a brand you archived is neither (the list never offers it)", brandTwin(tw, "Mine", "mine.com"), { cleanup: undefined });
+const w9 = { ...w3, brands: [], archivedBrands: tw.filter((b) => b.archived_at), links: w3.links.map((l) => ({ ...l })) } as MatchWorld;
+eq("found: a clean-up copy doesn't hide a verified find", foundBrands(w9).length, foundBrands({ ...w3, brands: [], archivedBrands: [] } as MatchWorld).length);
 
 if (fail) { console.log(`\n${fail} failing`); process.exit(1); } else console.log("\nall match tests pass");

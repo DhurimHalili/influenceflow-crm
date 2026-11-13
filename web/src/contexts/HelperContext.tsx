@@ -3,6 +3,7 @@ import { detectHelper, helperTranscript, type HelperResult } from "../lib/helper
 import { hasSupabase } from "../lib/supabase";
 import { useData } from "./DataContext";
 import { matchCall, useMatch } from "./MatchContext";
+import helperManifest from "../helper/manifest.json";
 
 // Transcripts, read by the free InfluenceFlow helper while a CRM tab is open.
 // YouTube lets people (not servers) read captions, so the helper reads them from
@@ -14,15 +15,24 @@ import { matchCall, useMatch } from "./MatchContext";
 const PACE_MS = 8_000;
 const DAILY = 1_500;
 const BLOCK_PAUSE_MS = 6 * 3600_000;
+// A plain refusal (403) is often the browser, not YouTube's limit: try again sooner.
+const REFUSED_PAUSE_MS = 3600_000;
 const STORE = "if.helper.v1";
+/** The helper this app ships; an older one installed is asked to update (1.0 was refused by YouTube). */
+const HELPER_LATEST = helperManifest.version;
+const newer = (a: string, b: string) => {
+  const x = a.split(".").map(Number), y = b.split(".").map(Number);
+  for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0);
+  return false;
+};
 
-type Saved = { paused: boolean; blockedUntil: number; day: string; count: number };
+type Saved = { paused: boolean; blockedUntil: number; blockedWhy: string; blockedBy: string; day: string; count: number };
 const today = () => new Date().toISOString().slice(0, 10);
 const load = (): Saved => {
   try {
     const s = JSON.parse(localStorage.getItem(STORE) || "{}") as Partial<Saved>;
-    return { paused: !!s.paused, blockedUntil: Number(s.blockedUntil) || 0, day: s.day === today() ? s.day : today(), count: s.day === today() ? Number(s.count) || 0 : 0 };
-  } catch { return { paused: false, blockedUntil: 0, day: today(), count: 0 }; }
+    return { paused: !!s.paused, blockedUntil: Number(s.blockedUntil) || 0, blockedWhy: String(s.blockedWhy || ""), blockedBy: String(s.blockedBy || ""), day: s.day === today() ? s.day : today(), count: s.day === today() ? Number(s.count) || 0 : 0 };
+  } catch { return { paused: false, blockedUntil: 0, blockedWhy: "", blockedBy: "", day: today(), count: 0 }; }
 };
 const save = (s: Saved) => { try { localStorage.setItem(STORE, JSON.stringify(s)); } catch { /* private mode: state lives in memory only */ } };
 
@@ -35,6 +45,11 @@ export type HelperState = {
   elsewhere: boolean;
   paused: boolean;
   blockedUntil: number;
+  /** Why it stopped: "bot check", "player 429", "player 403"… */
+  blockedWhy: string;
+  /** An older helper is installed: it must be updated before it reads. */
+  outdated: boolean;
+  latest: string;
   /** Read today on this device. */
   today: number;
   dailyCap: number;
@@ -82,6 +97,8 @@ export function HelperProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState("");
   const storedRef = useRef(stored);
   storedRef.current = stored;
+  const versionRef = useRef(version);
+  versionRef.current = version;
   const refreshRef = useRef(m.refresh);
   refreshRef.current = m.refresh;
 
@@ -96,7 +113,12 @@ export function HelperProvider({ children }: { children: ReactNode }) {
     return () => document.removeEventListener("visibilitychange", again);
   }, [cloud, version, recheck]);
 
-  const canRun = cloud && !!version && !stored.paused && stored.blockedUntil < Date.now() && stored.count < DAILY;
+  const outdated = !!version && newer(HELPER_LATEST, version);
+  // A stop recorded by an older helper version doesn't hold for the new one (1.0's stops were the browser's doing).
+  useEffect(() => {
+    if (version && stored.blockedUntil > Date.now() && stored.blockedBy && newer(version, stored.blockedBy)) update({ blockedUntil: 0, blockedWhy: "" });
+  }, [version, stored.blockedUntil, stored.blockedBy, update]);
+  const canRun = cloud && !!version && !outdated && !stored.paused && stored.blockedUntil < Date.now() && stored.count < DAILY;
   useEffect(() => {
     if (!canRun) return;
     let stop = false;
@@ -143,7 +165,8 @@ export function HelperProvider({ children }: { children: ReactNode }) {
             const r = await helperTranscript(item.id);
             if (r.status === "blocked") {
               // YouTube wants this connection to slow down: stop for hours, keep everything read so far.
-              update({ blockedUntil: Date.now() + BLOCK_PAUSE_MS });
+              const why = r.why || "";
+              update({ blockedUntil: Date.now() + (/403/.test(why) ? REFUSED_PAUSE_MS : BLOCK_PAUSE_MS), blockedWhy: why, blockedBy: versionRef.current || "" });
               stop = true;
               break;
             }
@@ -177,9 +200,9 @@ export function HelperProvider({ children }: { children: ReactNode }) {
   }, [stored.blockedUntil]);
 
   const value = useMemo<Value>(() => ({
-    version, running, elsewhere, paused: stored.paused, blockedUntil: stored.blockedUntil, today: stored.count, dailyCap: DAILY, session, left, current, error,
+    version, running, elsewhere, paused: stored.paused, blockedUntil: stored.blockedUntil, blockedWhy: stored.blockedWhy, outdated, latest: HELPER_LATEST, today: stored.count, dailyCap: DAILY, session, left, current, error,
     setPaused: (p) => update({ paused: p }), recheck,
-  }), [version, running, elsewhere, stored, session, left, current, error, update, recheck]);
+  }), [version, running, elsewhere, stored, outdated, session, left, current, error, update, recheck]);
   return <HelperContext.Provider value={value}>{children}</HelperContext.Provider>;
 }
 

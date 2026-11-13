@@ -8,7 +8,7 @@ import { Avatar, Button, EmptyState, Modal, PageHeader } from "../components/ui"
 import { useData } from "../contexts/DataContext";
 import { useMatch } from "../contexts/MatchContext";
 import { useToast } from "../contexts/ToastContext";
-import { brandDomain, brandDoubts, budgetOf, counts, domainTrust, foundBrands, isDeal, kindOf, linkIsBrand, marketsOf, matchOf, PROOF_LABEL, proofOf, sellsOf, sellsSource, type BrandLink, type Match } from "../lib/match";
+import { brandDomain, brandDoubts, brandTwin, budgetOf, counts, domainTrust, foundBrands, isDeal, kindOf, linkIsBrand, marketsOf, matchOf, PROOF_LABEL, proofOf, sellsOf, sellsSource, type BrandLink, type Match } from "../lib/match";
 import { KIND_LABEL, sureness, type DealKind } from "../lib/sponsors";
 import { topicLabel } from "../lib/taxonomy";
 import { compact, dateLabel, money } from "../lib/utils";
@@ -376,18 +376,42 @@ function DealsView({ found }: { found: ReturnType<typeof foundBrands> }) {
     }).filter((x) => x.why);
   }, [data.brands, m.links]);
   const [reviewOpen, setReviewOpen] = useState(false);
-  const add = (f: (typeof found)[number]) => {
-    // Never twice: a brand you already have (by website label or name) is not added again.
-    const label = (d: string) => d.split(".")[0].toLowerCase().replace(/[^a-z0-9]/g, "");
-    const flat = (x: string) => x.toLowerCase().replace(/[^a-z0-9]/g, "");
-    const twin = data.brands.find((b) => (f.seen.domain && brandDomain(b) && label(brandDomain(b)) === label(f.seen.domain)) || flat(b.name) === flat(f.seen.name));
-    if (twin) return twin;
+  /** Adds a found brand. `fresh` = it's in your active brands now and wasn't before (new, or a clean-up copy restored). */
+  const add = (f: (typeof found)[number]): { brand: Brand; fresh: boolean; restored: boolean; undo: () => void } => {
+    // Never twice: the same rule the found list uses (website label or name).
+    const twin = brandTwin(data.brands, f.seen.name, f.seen.domain);
+    if (twin.active) return { brand: twin.active, fresh: false, restored: false, undo: () => {} };
     const kind = kindOf(f.best);
     const who = creatorsById.get(f.best.creator_id)?.name || "a creator";
+    const at = new Date().toISOString();
+    if (twin.cleanup) {
+      // The clean-up archived an earlier copy (a handle, no website…). Bring it back with what is verified now.
+      const old = twin.cleanup;
+      data.updateBrand(old.id, {
+        archived_at: null, name: f.seen.name, domain: f.seen.domain || old.domain,
+        discovered: { ...(old.discovered || { creator_id: f.best.creator_id, creator: who, kind, at }), cleanup: false, why: "", auto: false },
+      }, { activity: `${f.seen.name} restored from Match — deal verified${f.seen.domain ? `, website ${f.seen.domain}` : ""}` });
+      return {
+        brand: { ...old, name: f.seen.name, domain: f.seen.domain || old.domain, archived_at: null }, fresh: true, restored: true,
+        // Back exactly as it was: archived by the clean-up, so it can be offered again.
+        undo: () => data.updateBrand(old.id, { archived_at: old.archived_at, name: old.name, domain: old.domain, discovered: old.discovered }, { quiet: true }),
+      };
+    }
     const top = f.seen.site?.topics?.[0]?.key;
     const when = f.best.last_at ? new Date(f.best.last_at).toLocaleString("en-US", { month: "short", year: "numeric" }) : "";
-    const b = data.addBrand({ ...brandValue({ ...blankBrand, name: f.seen.name, domain: f.seen.domain, brand_type: top ? topicLabel(top) : "", notes: `Found in ${who}'s videos — ${kind === "seeded" ? "sent them product" : "sponsored them"}${when ? ` (${when})` : ""}.` }), discovered: { creator_id: f.best.creator_id, creator: who, kind, at: new Date().toISOString(), auto: false } });
-    return b;
+    const b = data.addBrand({ ...brandValue({ ...blankBrand, name: f.seen.name, domain: f.seen.domain, brand_type: top ? topicLabel(top) : "", notes: `Found in ${who}'s videos — ${kind === "seeded" ? "sent them product" : "sponsored them"}${when ? ` (${when})` : ""}.` }), discovered: { creator_id: f.best.creator_id, creator: who, kind, at, auto: false } });
+    return { brand: b, fresh: true, restored: false, undo: () => data.archive("brand", [b.id]) };
+  };
+  const addAll = () => {
+    const done = sure.map(add).filter((d) => d.fresh);
+    const restored = done.filter((d) => d.restored).length;
+    if (!done.length) { toast("They're already in your brands.", "info"); return; }
+    toast(`Added ${done.length} verified brand${done.length === 1 ? "" : "s"}${restored ? ` (${restored} restored from Archive)` : ""} — their sites are read next.`, "success", { label: "Undo", run: () => { for (const d of done) d.undo(); } });
+  };
+  const addOne = (f: (typeof found)[number]) => {
+    const d = add(f);
+    if (!d.fresh) { toast(`${d.brand.name} is already in your brands.`, "info", { label: "Open", run: () => navigate(`/app/brands/${d.brand.id}`) }); return; }
+    toast(d.restored ? `${d.brand.name} restored from Archive with its verified website.` : `${d.brand.name} added.`, "success", { label: "Undo", run: d.undo });
   };
 
   return <div className="mx-deals">
@@ -410,7 +434,7 @@ function DealsView({ found }: { found: ReturnType<typeof foundBrands> }) {
     {<section className="mx-found">
       <div className="mx-found-head">
         <div><h3><Sparkles size={16} /> Brand deals found in their videos — not in your CRM</h3><p>Only Sure and Likely deals, only brands whose own website was verified (the creator's link really is theirs, or Wikidata lists it). Affiliate links, phrases, people and short links never show here.</p></div>
-        {sure.length > 1 && <Button size="sm" onClick={() => { const before = new Set(data.brands.map((b) => b.id)); const added = sure.map(add).filter((b) => !before.has(b.id)); toast(`Added ${added.length} verified brand${added.length === 1 ? "" : "s"} — their sites are read next.`, "success", { label: "Undo", run: () => data.archive("brand", added.map((b) => b.id)) }); }}><Plus size={13} /> Add the {sure.length} sure ones</Button>}
+        {sure.length > 1 && <Button size="sm" onClick={addAll}><Plus size={13} /> Add the {sure.length} sure ones</Button>}
       </div>
       <label className="mx-auto-add"><input type="checkbox" checked={autoAdd} onChange={(e) => { data.updateProfile({ preferences: { ...data.profile.preferences, match_auto_add: e.target.checked } }); toast(e.target.checked ? "Sure brands from creators you add are added by themselves." : "Found brands wait here for you."); }} /> Add sure brand deals by themselves when I add a creator <small>(their own words say it was paid for or sent, and YouTube's paid label, a sponsor segment, the title, a second video or their voice backs it up · website verified)</small></label>
       {shownFound.length ? <ul className="mx-found-list">{shownFound.slice(0, 60).map((f) => {
@@ -430,7 +454,7 @@ function DealsView({ found }: { found: ReturnType<typeof foundBrands> }) {
             <ProofTag link={f.best} />
           </div>
           <div className="mx-fb-actions">
-            <Button size="sm" variant="secondary" disabled={!f.seen.domain && f.best.confidence < 0.65} onClick={() => { const b = add(f); toast(`${b.name} added.`, "success", { label: "Open", run: () => navigate(`/app/brands/${b.id}`) }); }}><Plus size={13} /> Add</Button>
+            <Button size="sm" variant="secondary" disabled={!f.seen.domain && f.best.confidence < 0.65} onClick={() => addOne(f)}><Plus size={13} /> Add</Button>
             <button type="button" className="mx-icon-btn" onClick={() => { for (const k of f.keys) void m.hide(k, true); }} aria-label={`Hide ${f.seen.name}`} title="Hide — not a brand you'd pitch"><EyeOff size={14} /></button>
           </div>
         </li>;

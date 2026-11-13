@@ -1158,3 +1158,9 @@ body.pitch-open #root { display: none; }
   .pitch-doc { box-shadow: none; padding: 0; max-width: none; border-radius: 0; }
   .coach-toast, .coach-party, .toast-stack { display: none !important; }
 }
+.funnel-joined { display: flex; gap: 9px; align-items: flex-start; margin: 10px 0 0; padding: 10px 12px; border-radius: 12px; background: color-mix(in srgb, var(--success) 8%, var(--surface-solid)); border: 1px solid color-mix(in srgb, var(--success) 24%, var(--line)); color: var(--text-soft); font-size: 13px; line-height: 1.55; }
+.funnel-joined > svg { flex: none; margin-top: 3px; color: var(--success); }
+.funnel-joined b { color: var(--text); }
+.funnel-joined a { color: var(--text); font-weight: 650; text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--text) 30%, transparent); text-underline-offset: 2px; }
+.funnel-joined a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+.funnel-joined small { color: var(--muted); font-size: 12px; }

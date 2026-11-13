@@ -321,34 +321,67 @@ const PAGE = 1000;
 
 type PagedResult = { data: Record<string, unknown>[] | null; error: { message: string } | null };
 
-async function fetchAll(table: string, userId: string, opts?: { order?: string; max?: number }): Promise<PagedResult> {
+async function fetchAll(table: string, userId: string, opts?: { order?: string; max?: number; select?: string }): Promise<PagedResult> {
   const rows: Record<string, unknown>[] = [];
   const max = opts?.max ?? Infinity;
   for (let from = 0; from < max; from += PAGE) {
-    let query = supabase.from(table).select("*").eq("user_id", userId);
+    let query = supabase.from(table).select(opts?.select || "*").eq("user_id", userId);
     // A stable order is required for correct paging.
     query = opts?.order ? query.order(opts.order, { ascending: false }).order("id") : query.order("id");
     const to = Math.min(from + PAGE, max) - 1;
     const { data, error } = await query.range(from, to);
     if (error) return { data: null, error };
-    rows.push(...((data || []) as Record<string, unknown>[]));
+    rows.push(...((data || []) as unknown as Record<string, unknown>[]));
     if (!data || data.length < to - from + 1) break;
   }
   return { data: rows, error: null };
 }
 
-export async function loadCloudWorkspace(userId: string): Promise<WorkspaceData | null> {
+/** Parts of the workspace with their own fingerprint (`workspace_stamps()`, migration 20261124000000). */
+export type WorkspacePart = "profile" | "creators" | "brands" | "contacts" | "campaigns" | "joins" | "meetings" | "activities" | "followups" | "events";
+export type WorkspaceStamps = Partial<Record<WorkspacePart, string>>;
+
+/** A fingerprint per part, or null when the database can't say (older deploy, offline): then load everything. */
+export async function workspaceStamps(): Promise<WorkspaceStamps | null> {
+  const { data, error } = await supabase.rpc("workspace_stamps");
+  // Anything but the expected shape means "can't tell": load everything rather than skip.
+  if (error || !data || typeof data !== "object" || Array.isArray(data) || typeof (data as WorkspaceStamps).creators !== "string") return null;
+  return data as WorkspaceStamps;
+}
+
+/** The parts whose fingerprint changed (campaigns and their creator links travel together). */
+export function changedParts(before: WorkspaceStamps, now: WorkspaceStamps): Set<WorkspacePart> {
+  const out = new Set<WorkspacePart>();
+  for (const k of Object.keys(now) as WorkspacePart[]) if (before[k] !== now[k]) out.add(k);
+  if (out.has("joins")) out.add("campaigns");
+  if (out.has("campaigns")) out.add("joins");
+  return out;
+}
+
+// Only what the app shows of a Gmail row — never the server's bookkeeping columns.
+const EVENT_COLS = "id,user_id,gmail_id,thread_id,direction,entity_type,entity_id,counterpart,subject,snippet,at,created_at,mailbox,message_key,scheduled,reply_kind,in_reply_to,gone,gone_at";
+
+const skip: PagedResult = { data: null, error: null };
+
+/**
+ * The member's workspace. With `only` + `prev`, just the changed parts are downloaded and the rest
+ * is taken from `prev` (the last full copy) — a tab left open used to re-download every table every
+ * 45 s, which was most of the project's data transfer.
+ */
+export async function loadCloudWorkspace(userId: string, opts?: { only?: Set<WorkspacePart>; prev?: WorkspaceData | null }): Promise<WorkspaceData | null> {
+  const prev = opts?.only && opts.prev ? opts.prev : null;
+  const need = (p: WorkspacePart) => !prev || opts!.only!.has(p);
   // Every table is read in pages: PostgREST caps a single response (1000 rows
   // by default), and a silently truncated load would also truncate every
   // export and stat built from it.
   const [profile, creators, brands, contacts, campaigns, meetings, activities] = await Promise.all([
-    supabase.from("profiles").select("*").eq("id", userId).maybeSingle(),
-    fetchAll("creators", userId),
-    fetchAll("brands", userId),
-    fetchAll("brand_contacts", userId),
-    fetchAll("campaigns", userId),
-    fetchAll("meetings", userId),
-    fetchAll("activities", userId, { order: "at", max: 3000 }),
+    need("profile") ? supabase.from("profiles").select("*").eq("id", userId).maybeSingle() : Promise.resolve({ data: null, error: null }),
+    need("creators") ? fetchAll("creators", userId) : skip,
+    need("brands") ? fetchAll("brands", userId) : skip,
+    need("contacts") ? fetchAll("brand_contacts", userId) : skip,
+    need("campaigns") ? fetchAll("campaigns", userId) : skip,
+    need("meetings") ? fetchAll("meetings", userId) : skip,
+    need("activities") ? fetchAll("activities", userId, { order: "at", max: 3000 }) : skip,
   ]);
   // Core CRM tables must load; anything else degrades to empty instead of
   // blanking the whole workspace (no silent data loss on partial failure).
@@ -360,33 +393,56 @@ export async function loadCloudWorkspace(userId: string): Promise<WorkspaceData 
   const base = blankWorkspace(userId);
   const campaignRows = ((campaigns.data || []) as Record<string, unknown>[]);
   let links: JoinRow[] = [];
-  try {
-    links = await loadJoins(
-      userId,
-      campaignRows.map((c) => String(c.id ?? "")),
-    );
-  } catch {
-    links = [];
+  if (need("campaigns")) {
+    try {
+      links = await loadJoins(
+        userId,
+        campaignRows.map((c) => String(c.id ?? "")),
+      );
+    } catch {
+      links = [];
+    }
   }
   const storedProfile = (profile.data as Record<string, unknown> | null) || null;
   // Follow-up history is auxiliary: a missing table (pre-migration deploy)
   // degrades to empty instead of failing the whole workspace load.
   let followupRows: Record<string, unknown>[] = [];
-  try {
-    const res = await fetchAll("followups", userId, { order: "at", max: 5000 });
-    if (!res.error) followupRows = res.data || [];
-  } catch {
-    followupRows = [];
+  if (need("followups")) {
+    try {
+      const res = await fetchAll("followups", userId, { order: "at", max: 5000 });
+      if (!res.error) followupRows = res.data || [];
+    } catch {
+      followupRows = [];
+    }
   }
   // Gmail activity (read-only, written by the gmail-sync function). A
   // database without the table yet simply has none.
   let eventRows: Record<string, unknown>[] = [];
-  try {
-    const res = await fetchAll("email_events", userId, { order: "at", max: 6000 });
-    if (!res.error) eventRows = res.data || [];
-  } catch {
-    eventRows = [];
+  if (need("events")) {
+    try {
+      const res = await fetchAll("email_events", userId, { order: "at", max: 6000, select: EVENT_COLS });
+      if (!res.error) eventRows = res.data || [];
+    } catch {
+      eventRows = [];
+    }
   }
+  const full = buildWorkspace();
+  if (!prev) return full;
+  // Unchanged parts: exactly what the last download had.
+  return {
+    ...full,
+    profile: need("profile") ? full.profile : prev.profile,
+    creators: need("creators") ? full.creators : prev.creators,
+    brands: need("brands") ? full.brands : prev.brands,
+    contacts: need("contacts") ? full.contacts : prev.contacts,
+    campaigns: need("campaigns") ? full.campaigns : prev.campaigns,
+    followups: need("followups") ? full.followups : prev.followups,
+    meetings: need("meetings") ? full.meetings : prev.meetings,
+    activities: need("activities") ? full.activities : prev.activities,
+    emailEvents: need("events") ? full.emailEvents : prev.emailEvents,
+  };
+
+  function buildWorkspace(): WorkspaceData {
   return {
     emailEvents: eventRows.map(normalizeEmailEvent),
     profile: storedProfile
@@ -426,6 +482,7 @@ export async function loadCloudWorkspace(userId: string): Promise<WorkspaceData 
     })),
     demoSeeded: false,
   };
+  }
 }
 
 // Columns added by later migrations. If a deploy hasn't run one yet,

@@ -3,7 +3,7 @@ import { blankWorkspace } from "../lib/seed";
 import { EMPTY_RATES, normalizePreferences, normalizeRates } from "../lib/prefs";
 import { normalize, OUTREACH_STAGES, setActiveCurrency, overallStars, RATING_DIMS, ratedCount, sanitize, today, uid } from "../lib/utils";
 import { hasSupabase, supabase } from "../lib/supabase";
-import { loadCloudWorkspace, persistCloudWorkspace } from "../services/supabaseWorkspace";
+import { changedParts, loadCloudWorkspace, persistCloudWorkspace, workspaceStamps, type WorkspaceStamps } from "../services/supabaseWorkspace";
 import { mergeWorkspace, sameRecord, toBase } from "../lib/sync";
 import type { Activity, Brand, BrandContact, Campaign, Creator, Followup, Meeting, Profile, TeamMember, WorkspaceData } from "../types";
 import { useAuth } from "./AuthContext";
@@ -196,6 +196,10 @@ export function DataProvider({ children }: { children: ReactNode }) {
   // measured against it, so only records really changed here are pushed.
   const baseKey = `influenceflow.sync-base.${userId}`;
   const baseRef = useRef<WorkspaceData | null>(null);
+  // The last download as it came from the cloud, and the fingerprints it matched: a pull
+  // downloads only the parts whose fingerprint changed since (often nothing at all).
+  const lastCloud = useRef<WorkspaceData | null>(null);
+  const lastStamps = useRef<WorkspaceStamps | null>(null);
   const [data, setRawData] = useState<WorkspaceData>(() => blankWorkspace(userId));
   const [ready, setReady] = useState(false);
   const [syncState, setSyncState] = useState<SyncState>("loading");
@@ -320,12 +324,19 @@ export function DataProvider({ children }: { children: ReactNode }) {
     }
     setSyncState("loading");
     const owner = userId;
+    // Another account (or a fresh start): never reuse a previous download.
+    lastCloud.current = null;
+    lastStamps.current = null;
     let cancelled = false;
     let timer: number | undefined;
     const attempt = (n: number) => {
-      void loadCloudWorkspace(owner)
-        .then((cloud) => {
+      // Fingerprints first: whatever changes while the download runs shows up as a change next time.
+      void workspaceStamps().catch(() => null)
+        .then((stamps) => loadCloudWorkspace(owner).then((cloud) => ({ cloud, stamps })))
+        .then(({ cloud, stamps }) => {
           if (cancelled || !cloud || userRef.current !== owner) return;
+          lastCloud.current = cloud;
+          lastStamps.current = stamps;
           const fresh = cloudCopy(cloud, owner);
           const prevBase = baseRef.current;
           syncedActivities.current = new Set(cloud.activities.map((a) => a.id));
@@ -434,7 +445,16 @@ export function DataProvider({ children }: { children: ReactNode }) {
     }
     const owner = userRef.current;
     inFlight.current = true;
-    void loadCloudWorkspace(owner)
+    void (async () => {
+      const stamps = await workspaceStamps().catch(() => null);
+      const prev = lastCloud.current;
+      const only = stamps && lastStamps.current && prev ? changedParts(lastStamps.current, stamps) : undefined;
+      // Nothing changed in the cloud since the last download: nothing to download.
+      if (only && only.size === 0) return null;
+      const cloud = await loadCloudWorkspace(owner, only ? { only, prev } : undefined);
+      if (cloud && userRef.current === owner) { lastCloud.current = cloud; lastStamps.current = stamps; }
+      return cloud;
+    })()
       .then((cloud) => {
         if (!cloud || userRef.current !== owner) return;
         const fresh = cloudCopy(cloud, owner);

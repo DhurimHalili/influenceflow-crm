@@ -1,15 +1,28 @@
 {
   "manifest_version": 3,
   "name": "InfluenceFlow helper",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Reads YouTube captions for your InfluenceFlow CRM from your own connection, so brand deals said out loud in videos are found. Talks only to youtube.com.",
-  "host_permissions": ["https://www.youtube.com/*"],
-  "background": { "service_worker": "background.js" },
+  "host_permissions": [
+    "https://www.youtube.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
   "content_scripts": [
     {
-      "matches": ["https://dhurimhalili.github.io/*", "http://localhost/*", "http://127.0.0.1/*"],
-      "js": ["content.js"],
+      "matches": [
+        "https://dhurimhalili.github.io/*",
+        "http://localhost/*",
+        "http://127.0.0.1/*"
+      ],
+      "js": [
+        "content.js"
+      ],
       "run_at": "document_start"
     }
+  ],
+  "permissions": [
+    "declarativeNetRequestWithHostAccess"
   ]
 }

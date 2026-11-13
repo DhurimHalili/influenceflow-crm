@@ -41,7 +41,8 @@ type Value = {
   scan: (creatorId: string, opts?: { quiet?: boolean }) => Promise<Result>;
   research: (brandId: string) => Promise<Result>;
   verdict: (linkId: string, verdict: "" | "yes" | "no", kind?: DealKind | null) => Promise<void>;
-  addLink: (creatorId: string, brandId: string, kind: DealKind) => Promise<void>;
+  /** Saves a deal you know about; `retries` waits for a brand created a moment ago to finish saving. */
+  addLink: (creatorId: string, brandId: string, kind: DealKind, opts?: { retries?: number }) => Promise<boolean>;
   hide: (key: string, hidden: boolean) => Promise<void>;
   pitch: (brandId: string, creatorIds: string[], source?: "manual" | "pitch") => Promise<void>;
   unpitch: (brandId: string, creatorId: string) => Promise<void>;
@@ -201,11 +202,17 @@ export function MatchProvider({ children }: { children: ReactNode }) {
     if (v && undo) toast(v === "yes" ? "Marked as confirmed." : "Marked as wrong — it won't count anywhere.", "success", { label: "Undo", run: () => void supabase.rpc("set_brand_link", { p_id: linkId, p_verdict: undo.verdict, p_kind: undo.verdict_kind }).then(() => setLinks((ls) => ls.map((l) => (l.id === linkId ? undo : l)))) });
   }, [links, toast]);
 
-  const addLink = useCallback(async (creatorId: string, brandId: string, kind: DealKind) => {
-    const { error: e } = await supabase.rpc("add_brand_link", { p_creator: creatorId, p_brand: brandId, p_kind: kind });
-    if (e) { toast("Couldn't save that — try again.", "error"); return; }
+  const addLink = useCallback(async (creatorId: string, brandId: string, kind: DealKind, opts?: { retries?: number }) => {
+    let { error: e } = await supabase.rpc("add_brand_link", { p_creator: creatorId, p_brand: brandId, p_kind: kind });
+    // A brand added from the picker a moment ago may still be saving: wait for it (1.5 s steps).
+    for (let i = 0; e && i < (opts?.retries || 0); i++) {
+      await new Promise((ok) => setTimeout(ok, 1500));
+      ({ error: e } = await supabase.rpc("add_brand_link", { p_creator: creatorId, p_brand: brandId, p_kind: kind }));
+    }
+    if (e) { toast("Couldn't save the deal — check your connection and try again.", "error"); return false; }
     await refresh();
-    toast("Saved — they won't be pitched to this brand as new.");
+    toast("Deal saved — they won't be pitched to this brand as new.");
+    return true;
   }, [refresh, toast]);
 
   const hide = useCallback(async (key: string, hidden: boolean) => {
