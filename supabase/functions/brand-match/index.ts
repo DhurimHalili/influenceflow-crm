@@ -6,8 +6,8 @@ import { brandTopics, contentProfile, TOPIC, TOPICS, topicLabel, videoTopics, ty
 import { marketsOf, parseHtml, parseShopify, parseShopifyCollections, parseWoo, priceStats, readProgram, siteIsBrand, siteName, type Product, type SiteFacts } from "../_shared/brandSite.ts";
 import { clefStatus, decide, useClefBudget, type ClefQuestion } from "../_shared/clef.ts";
 import { listenConfigured, listenLeft, listenTo, useListenBudget } from "../_shared/listen.ts";
-import { askBrand, useBrandAskBudget } from "../_shared/brandAsk.ts";
-import { officialSite } from "../_shared/officialSite.ts";
+import { askBrand, searchSite, useBrandAskBudget } from "../_shared/brandAsk.ts";
+import { duckSite, officialSite } from "../_shared/officialSite.ts";
 
 // Brand ⇄ creator matching and "who works with whom" (see the migration
 // 20261122000000_brand_match.sql for the tables).
@@ -61,6 +61,14 @@ type VideoRow = {
 };
 
 const sleep = (ms: number) => new Promise((ok) => setTimeout(ok, ms));
+// Video text can hold broken characters (a lone half of an emoji, a NUL byte) that Postgres refuses as
+// JSON — one such title used to make a creator's whole save fail. Every string is made well-formed first.
+function wellFormed<T>(v: T): T {
+  if (typeof v === "string") return (((v as string).toWellFormed?.() ?? (v as string).replace(/[\uD800-\uDFFF]/g, "")).replace(/\u0000/g, "")) as T;
+  if (Array.isArray(v)) return v.map(wellFormed) as T;
+  if (v && typeof v === "object") return Object.fromEntries(Object.entries(v as Record<string, unknown>).map(([k, x]) => [k, wellFormed(x)])) as T;
+  return v;
+}
 const sha = async (text: string) => Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text))), (x) => x.toString(16).padStart(2, "0")).join("");
 async function pool<T, R>(items: T[], size: number, fn: (x: T) => Promise<R>): Promise<R[]> {
   const out: R[] = new Array(items.length);
@@ -364,7 +372,7 @@ async function scanCreator(admin: SupabaseClient, c: CreatorRow, deadline: numbe
 
   // 6. Save the videos.
   for (let i = 0; i < touched.length; i += 80) {
-    const batch = touched.slice(i, i + 80).map((r) => ({ ...r, updated_at: now.toISOString() }));
+    const batch = touched.slice(i, i + 80).map((r) => wellFormed({ ...r, updated_at: now.toISOString() }));
     const { error } = await admin.from("creator_videos").upsert(batch);
     if (error) throw new Error(`save videos: ${error.message}`);
   }
@@ -400,7 +408,7 @@ async function rebuildLinks(admin: SupabaseClient, c: CreatorRow, rows: VideoRow
     by_ai: l.evidence.some((e) => e.signals.includes("ai") || e.signals.includes("voice")), video_ids: l.videoIds, updated_at: now,
   }));
   for (let i = 0; i < payload.length; i += 100) {
-    const { error } = await admin.from("creator_brands").upsert(payload.slice(i, i + 100), { onConflict: "user_id,creator_id,brand_key" });
+    const { error } = await admin.from("creator_brands").upsert(wellFormed(payload.slice(i, i + 100)), { onConflict: "user_id,creator_id,brand_key" });
     if (error) throw new Error(`save links: ${error.message}`);
   }
   const gone = ((existing || []) as { id: string; brand_key: string; verdict: string; manual: boolean }[]).filter((e) => !keep.has(e.brand_key) && !e.verdict && !e.manual).map((e) => e.id);
@@ -408,7 +416,7 @@ async function rebuildLinks(admin: SupabaseClient, c: CreatorRow, rows: VideoRow
   // Brands not in the CRM: remember them for the "Found in videos" list — brand deals only
   // (shops and affiliate links aren't brands an agency pitches).
   const seen = payload.filter((p) => !p.brand_id && !p.store && p.kind !== "affiliate").map((p) => ({ user_id: c.user_id, brand_key: p.brand_key, name: p.brand_name, domain: p.domain }));
-  if (seen.length) await admin.from("seen_brands").upsert(seen, { onConflict: "user_id,brand_key", ignoreDuplicates: true });
+  if (seen.length) await admin.from("seen_brands").upsert(wellFormed(seen), { onConflict: "user_id,brand_key", ignoreDuplicates: true });
   return links.length;
 }
 
@@ -610,18 +618,25 @@ async function checkSeen(admin: SupabaseClient, s: SeenRow) {
         if (!site.topics) { const f = await look(domain).catch(() => null); if (f && !f.blocked) site = { ...describe(f), title: wd.label, description: wd.description }; }
       }
     }
-    // 3. name.com for a distinctive name with no usable link.
+    // 3. A search — never a guess: DuckDuckGo's official-site answer (free), then a real Google search
+    //    through Gemini for brands that have a real deal behind them. Whatever it says is checked:
+    //    the domain must fit the name and the page must call itself that.
     if (check !== "site" && check !== "blocked") {
-      const slug = norm(name);
-      if (slug.length >= 6 && !PLAIN.has(slug)) {
-        const g = `${slug}.com`;
-        const f = await look(g);
-        if (f && !f.blocked && siteIsBrand(name, g, f) && (landed === g || domainFits(name, landed))) {
-          const facts = describe(f);
-          domain = landed && domainFits(name, landed) ? landed : g;
-          check = facts.topics.length && new RegExp(norm(name).slice(0, 6), "i").test(norm(f.title + f.description)) ? "site" : "guess";
-          via = "guess"; site = facts;
+      let found = await duckSite(name).catch(() => "");
+      let how = "search";
+      if (!found) {
+        const { data: deal } = await admin.from("creator_brands").select("brand_name, evidence").eq("user_id", s.user_id).eq("brand_key", s.brand_key).in("kind", ["sponsored", "seeded"]).gte("confidence", 0.65).limit(1).maybeSingle();
+        if (deal) {
+          const quote = String(((deal.evidence as { quote?: string }[] | null) || [])[0]?.quote || "").slice(0, 160);
+          const got = await searchSite(name, `their words: ${quote}`).catch(() => null);
+          if (got) { found = normalizeDomain(got); how = "google"; }
         }
+      }
+      if (found && domainFits(name, found)) {
+        const f = await look(found);
+        const home = landed && domainFits(name, landed) ? landed : found;
+        if (f && !f.blocked && siteIsBrand(name, home, f)) { domain = home; check = "site"; via = how; site = describe(f); }
+        else if (f?.blocked) { domain = home; check = "site"; via = how; site = { title: name, description: "", topics: [] }; }
       }
     }
   } else domain = s.domain;
@@ -632,7 +647,6 @@ async function checkSeen(admin: SupabaseClient, s: SeenRow) {
   if (cleanName(name) && cleanName(name) !== s.name) await admin.from("creator_brands").update({ brand_name: cleanName(name) }).eq("user_id", s.user_id).eq("brand_key", s.brand_key);
   return { domain, check, name: cleanName(name) || s.name, via };
 }
-const PLAIN = new Set(["either", "segment", "teams", "spot", "advance", "store", "brand", "today", "video", "gaming", "music"]);
 const norm = (x: string) => String(x || "").toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/&/g, "and").replace(/[^a-z0-9]+/g, "");
 
 /** Add brands found in a NEW creator's videos when they're sure: a paid or seeded deal, the creator's own link, the site confirmed. */
@@ -902,7 +916,7 @@ Deno.serve(async (req) => {
       changed.push({ ...r, mentions: merged, listen: deal ? null : r.listen, transcript_status: "ok", transcript_lang: it.lang, transcript_kind: it.kind, transcript_at: now, transcript_hits: heard.hits, judged_at: null });
     }
     if (changed.length) {
-      const { error } = await admin.from("creator_videos").upsert(changed.map((r) => ({ ...r, updated_at: now })));
+      const { error } = await admin.from("creator_videos").upsert(changed.map((r) => wellFormed({ ...r, updated_at: now })));
       if (error) return json({ error: "Couldn't save the transcripts." }, 500);
     }
     // Who works with whom, again for the creators whose videos changed.

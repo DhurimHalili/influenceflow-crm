@@ -392,7 +392,7 @@ function DealsView({ found }: { found: ReturnType<typeof foundBrands> }) {
 
   return <div className="mx-deals">
     <CoverageStrip />
-    {autoLoose.length > 0 && <section className="mx-review">
+    {autoLoose.length > 0 && m.ready && !m.error && <section className="mx-review">
       <div className="mx-review-head">
         <CircleAlert size={16} aria-hidden="true" />
         <div><strong>{autoLoose.length === 1 ? "1 brand added from Match doesn't hold up" : `${autoLoose.length} brands added from Match don't hold up`}</strong><p>Not a real brand name, a website that isn't theirs, a copy, or no sure deal behind it. Only brands still at New are listed — nothing you've worked on. Archived brands can be restored from Archive.</p></div>

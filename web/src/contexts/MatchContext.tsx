@@ -57,16 +57,25 @@ export async function matchCall<T>(body: Record<string, unknown>): Promise<{ dat
   try { const parsed = res ? ((await res.clone().json()) as { error?: string }) : null; if (parsed?.error) message = parsed.error; } catch { /* keep the plain message */ }
   return { error: message };
 }
+// A request that fails for a moment (a busy server, a dropped connection) is tried again before giving up.
+async function retried<T>(run: () => PromiseLike<{ data: T | null; error: unknown; count?: number | null }>, tries = 3): Promise<{ data: T | null; count?: number | null }> {
+  let last: unknown = null;
+  for (let i = 0; i < tries; i++) {
+    const r = await run();
+    if (!r.error) return r;
+    last = r.error;
+    if (i < tries - 1) await new Promise((ok) => setTimeout(ok, 800 * 3 ** i));
+  }
+  throw last;
+}
 // All pages at once: count first, then every 1,000-row page in parallel.
 const pageAll = async <T,>(table: string, columns: string, userId: string): Promise<T[]> => {
-  const { count, error } = await supabase.from(table).select("user_id", { count: "exact", head: true }).eq("user_id", userId);
-  if (error) throw error;
+  const { count } = await retried(() => supabase.from(table).select("user_id", { count: "exact", head: true }).eq("user_id", userId));
   const pages = Math.min(50, Math.max(1, Math.ceil((count || 0) / 1000)));
-  const got = await Promise.all(Array.from({ length: pages }, (_, i) => supabase.from(table).select(columns).eq("user_id", userId).range(i * 1000, i * 1000 + 999)));
-  const bad = got.find((g) => g.error);
-  if (bad?.error) throw bad.error;
+  const got = await Promise.all(Array.from({ length: pages }, (_, i) => retried<T[]>(() => supabase.from(table).select(columns).eq("user_id", userId).range(i * 1000, i * 1000 + 999) as unknown as PromiseLike<{ data: T[] | null; error: unknown }>)));
   return got.flatMap((g) => (g.data || []) as T[]);
 };
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export function MatchProvider({ children }: { children: ReactNode }) {
   const data = useData();
@@ -87,12 +96,20 @@ export function MatchProvider({ children }: { children: ReactNode }) {
   const busy = useRef(false);
   // What the server last said changed (newest deal / read / site check); a poll reloads only when it moves.
   const stamp = useRef("");
-  const cloud = hasSupabase && !!userId && !data.demoSeeded;
+  // Only a real account id — the placeholder profile before sign-in finishes ("guest") must never be queried.
+  const cloud = hasSupabase && UUID_RE.test(userId || "") && !data.demoSeeded;
+  // A refresh asked for while one runs is not dropped: it runs right after (the account may have just loaded).
+  const again = useRef(false);
+  const current = useRef(userId);
+  current.current = userId;
+  const retryTimer = useRef(0);
 
   const refresh = useCallback(async () => {
-    if (!cloud || busy.current) return;
+    if (!cloud) return;
+    if (busy.current) { again.current = true; return; }
     busy.current = true;
     setLoading(true);
+    const forUser = userId;
     try {
       const [l, i, c, s, p] = await Promise.all([
         pageAll<BrandLink>("creator_brands", "id, creator_id, brand_key, brand_name, domain, brand_id, kind, confidence, store, videos, first_at, last_at, evidence, by_ai, manual, verdict, verdict_kind, verdict_at, updated_at, video_ids", userId),
@@ -101,6 +118,7 @@ export function MatchProvider({ children }: { children: ReactNode }) {
         pageAll<SeenBrand>("seen_brands", "brand_key, name, domain, domain_check, site, checked_at, hidden, added_brand_id", userId),
         pageAll<Pitch>("brand_pitches", "id, brand_id, creator_id, at, source", userId),
       ]);
+      if (current.current !== forUser) return;
       setLinks(l);
       setIntel(new Map(i.map((x) => [x.brand_id, x])));
       setContent(new Map(c.map((x) => [x.creator_id, x])));
@@ -111,13 +129,22 @@ export function MatchProvider({ children }: { children: ReactNode }) {
       const st = await matchCall<MatchStatus & { ok: boolean }>({ action: "status" });
       if (st.data) { setStatus(st.data); stamp.current = st.data.stamp || ""; }
     } catch (e) {
+      if (current.current !== forUser) return;
       // Before the migration runs the tables don't exist: say so plainly, keep the app working.
-      setError(e && typeof e === "object" && "message" in e && /relation|does not exist|schema cache/i.test(String((e as { message: string }).message)) ? "Matching isn't set up on the server yet." : "Couldn't load matches — check your connection.");
+      const missing = e && typeof e === "object" && "message" in e && /relation|does not exist|schema cache/i.test(String((e as { message: string }).message));
+      setError(missing ? "Matching isn't set up on the server yet." : "Couldn't reach the server — trying again in 30 seconds.");
+      // What was loaded before stays on screen; try again by itself.
+      window.clearTimeout(retryTimer.current);
+      if (!missing) retryTimer.current = window.setTimeout(() => { again.current = true; void refreshRef.current(); }, 30_000);
     } finally {
       busy.current = false;
       setLoading(false);
+      if (again.current) { again.current = false; void refreshRef.current(); }
     }
   }, [cloud, userId]);
+  const refreshRef = useRef(refresh);
+  refreshRef.current = refresh;
+  useEffect(() => () => window.clearTimeout(retryTimer.current), []);
 
   const load = useCallback(() => setWanted(true), []);
   useEffect(() => { if (wanted) void refresh(); }, [wanted, refresh]);

@@ -3,6 +3,7 @@ import { Archive, ArrowDownAZ, BadgeCheck, CirclePause, MessageCircleX, CircleSl
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { WriteEmail } from "../components/WriteEmail";
+import { BulkBar } from "../components/BulkBar";
 import { KanbanBoard } from "../components/KanbanBoard";
 import { ImportReport, SmartImport, type ImportSummary } from "../components/SmartImport";
 import { ExportDialog } from "../components/ExportDialog";
@@ -326,8 +327,8 @@ const linkedStatus = params.get("status");
       return visible.length === current.length ? current : visible;
     });
   }, [filtered]);
-  const setBulkStatus = (next: EntityStatus) => { picked.forEach((id) => data.updateCreator(id, { pipeline_status: next })); toast(`${picked.length} influencers moved to ${STATUS_LABELS[next]}`); setSelected([]); };
-  const bulkArchive = () => { data.archive("creator", picked); toast(`${picked.length} influencers moved to Archive`); setSelected([]); };
+  const setBulkStatus = (next: EntityStatus) => { const before = picked.map((id) => ({ id, status: data.creators.find((item) => item.id === id)?.pipeline_status })); picked.forEach((id) => data.updateCreator(id, { pipeline_status: next })); toast(`${picked.length} influencers moved to ${STATUS_LABELS[next]}`, "success", { label: "Undo", run: () => before.forEach((row) => row.status && data.updateCreator(row.id, { pipeline_status: row.status })) }); setSelected([]); };
+  const bulkArchive = () => { const ids = [...picked]; data.archive("creator", ids); toast(`${ids.length} influencers moved to Archive`, "success", { label: "Undo", run: () => data.archive("creator", ids, true) }); setSelected([]); };
   const [exportOpen, setExportOpen] = useState(false);
   const exportSelected = () => setExportOpen(true);
   // Follow-up day: log one for every ticked influencer in one go.
@@ -374,7 +375,12 @@ const linkedStatus = params.get("status");
       {countries.length > 1 && countries.slice(0, 5).map(([name, count]) => <button type="button" key={name} className={`qchip${country === name ? " on" : ""}`} onClick={() => setCountry(country === name ? "all" : name)} aria-pressed={country === name}><Globe2 size={12} /> {name} <b>{count}</b></button>)}
     </div>}
     <div className="results-meta"><span><strong>{filtered.length}</strong> influencers {filtered.length !== data.creators.filter((item) => !item.archived_at).length && "in this view"}</span>{narrowed && <button type="button" className="reset-view" onClick={resetAll} title="Clear search, filters and sort"><RotateCcw size={12} /> Reset</button>}</div>
-    {picked.length > 0 && <div className="bulk-bar"><span><b>{picked.length}</b> selected</span><label>Status <select defaultValue="" onChange={(event) => setBulkStatus(event.target.value as EntityStatus)}><option value="" disabled>Change to...</option>{ENTITY_STATUSES.map((item) => <option key={item} value={item}>{STATUS_LABELS[item]}</option>)}</select></label><button onClick={bulkFollowup} title="Log a follow-up for each selected influencer"><Send size={15} /> Log follow-up</button><button onClick={() => void copyEmails()} title="Copy their emails for To or BCC"><Mail size={15} /> Copy emails</button><button onClick={() => goTo(`/app/pitch?ids=${picked.join(",")}`)} title="A brand-ready PDF with verified audience and your marked-up prices"><FileText size={15} /> Pitch PDF</button><button onClick={exportSelected}><Download size={15} /> Export</button><button onClick={bulkArchive}><Archive size={15} /> Archive</button><button onClick={() => setSelected([])}><X size={15} /></button></div>}
+    {picked.length > 0 && <BulkBar noun="influencers" count={picked.length} total={filtered.length} onSelectAll={() => setSelected(filtered.map((item) => item.id))} onClear={() => setSelected([])} onStatus={setBulkStatus} onArchive={bulkArchive} actions={[
+      { key: "followup", label: "Log follow-up", icon: Send, onClick: bulkFollowup, title: "Log a follow-up for each selected influencer" },
+      { key: "emails", label: "Copy emails", icon: Mail, onClick: () => void copyEmails(), title: "Copy their emails for To or BCC" },
+      { key: "pitch", label: "Pitch PDF", icon: FileText, onClick: () => goTo(`/app/pitch?ids=${picked.join(",")}`), title: "A brand-ready PDF with verified audience and your marked-up prices" },
+      { key: "export", label: "Export", icon: Download, onClick: exportSelected, title: "Export the selected influencers" },
+    ]} />}
     {filtered.length > 0 && <ArchivedHits items={archivedHits} query={query.trim()} noun="influencer" to={(id) => `/app/influencers/${id}`} onRestore={restoreHit} />}
     {!filtered.length ? <EmptyState icon={archivedHits.length ? "archive" : "search"} title={archivedHits.length && !activeFilters ? `No active influencer matches “${query.trim()}”` : narrowed ? "No influencers match this view" : "Build your creator pipeline"} text={archivedHits.length && !activeFilters ? `${archivedHits.length === 1 ? "They're" : "They are"} in your archive — restore to bring them back with their history.` : narrowed ? "Your search and filters are kept while you move around — reset them to see everyone." : "Add creators manually or import a clean CSV with duplicate protection."} action={<>{narrowed ? <Button variant="secondary" onClick={resetAll}><RotateCcw size={15} /> {activeFilters ? "Reset filters" : "Clear search"}</Button> : <Button onClick={() => setCreateOpen(true)}><Plus size={15} /> Add influencer</Button>}<ArchivedHits items={archivedHits} query={query.trim()} noun="influencer" to={(id) => `/app/influencers/${id}`} onRestore={restoreHit} /></>} /> : view === "kanban" ? <CreatorKanban creators={filtered} boxOrder={boxOrder} /> : view === "cards" ? <CreatorCards creators={filtered} cyclePriority={cyclePriority} setStatus={setCardStatus} boxOrder={boxOrder} /> : <CreatorTable creators={filtered} selected={selected} setSelected={setSelected} density={density} cyclePriority={cyclePriority} setStatus={setCardStatus} boxOrder={boxOrder} />}
 

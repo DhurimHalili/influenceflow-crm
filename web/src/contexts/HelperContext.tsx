@@ -71,7 +71,7 @@ function makeTicker(): { after: (ms: number, fn: () => void) => () => void; clos
 export function HelperProvider({ children }: { children: ReactNode }) {
   const data = useData();
   const m = useMatch();
-  const cloud = hasSupabase && !!data.profile.id && !data.demoSeeded;
+  const cloud = hasSupabase && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(data.profile.id || "") && !data.demoSeeded;
   const [version, setVersion] = useState<string | null>(null);
   const [stored, setStored] = useState<Saved>(load);
   const [running, setRunning] = useState(false);
