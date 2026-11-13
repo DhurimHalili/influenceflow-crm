@@ -516,7 +516,8 @@ async function researchBrand(admin: SupabaseClient, b: BrandRow): Promise<Intel 
   }
   const name = (facts && !facts.blocked && siteName(facts, domain, b.name)) || b.name;
   const intel: Intel = {
-    v: INTEL_V, at: now.toISOString(), domain, url: pages[0] || `https://${domain}`, name, summary: (facts?.description || (asked?.isBrand ? asked.summary : "") || "").slice(0, 400), sells, by,
+    // Gemini was needed but couldn't answer (quota, busy): stay on the old version so the cron asks again later.
+    v: (!sells.length || blocked) && !asked ? 1 : INTEL_V, at: now.toISOString(), domain, url: pages[0] || `https://${domain}`, name, summary: (facts?.description || (asked?.isBrand ? asked.summary : "") || "").slice(0, 400), sells, by,
     products: products.length, examples: products.length ? products.slice(0, 10).map((p) => p.title) : asked?.isBrand ? asked.examples : [], price: priceStats(products, facts?.currency || ""), platform: facts?.platform || "",
     programs: programs.slice(0, 5), socials: (facts?.socials || []).slice(0, 8), markets: marketsOf(facts?.locales || []), currency: facts?.currency || "",
     wiki: wiki?.extract || "", works_with_creators: asked?.isBrand ? asked.creators : null, pages: pages.slice(0, 6), verified: facts ? siteIsBrand(b.name, domain, facts) || !!wiki?.verified : !!wiki?.verified,
