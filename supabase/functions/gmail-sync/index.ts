@@ -66,7 +66,7 @@ const SENDS_PER_DAY = 400; // per mailbox, well under Gmail's own limits
 const MAX_MAILBOXES = 5;
 
 type Admin = SupabaseClient;
-type TokenRow = { id: string; user_id: string; access_token: string | null; refresh_token: string; expiry: string | null; email: string | null; scopes: string; history_id: string | null; last_sync_at: string | null; backfilled: string[] | null; sync_error?: string; connected_at?: string | null; updated_at?: string | null; send_day?: string | null; send_count?: number; leads_scanned_at?: string | null; coverage?: unknown; lead_queue?: string[] | null; read_at?: string | null; watch_expires_at?: string | null };
+type TokenRow = { id: string; user_id: string; access_token: string | null; refresh_token: string; expiry: string | null; email: string | null; scopes: string; history_id: string | null; last_sync_at: string | null; backfilled: string[] | null; sync_error?: string; connected_at?: string | null; updated_at?: string | null; send_day?: string | null; send_count?: number; leads_scanned_at?: string | null; coverage?: unknown; lead_queue?: string[] | null; read_at?: string | null; watch_expires_at?: string | null; read_lock_until?: string | null; track_lock_until?: string | null };
 /** A CRM record an address belongs to; `via: "team"` = the address is on its team list (a manager / agency), not its own. */
 type Entity = { type: "creator" | "brand"; id: string; name?: string; via?: "team" };
 type TeamMember = { email: string; role?: string; removed?: boolean };
@@ -1155,8 +1155,24 @@ async function measureCoverage(admin: Admin, userId: string, sweep: string[], me
 
 const TRACK_LEASE_MS = 90_000;
 const READ_LEASE_MS = 150_000;
-const READ_EVERY_MS = 4 * 60_000;
+const READ_EVERY_MS = 2 * 60_000;
+// New mail announced by Gmail push is read (bodies, prices, replies) this soon after the last read.
+const READ_SOON_MS = 45_000;
 const LEAD_QUEUE_MAX = 200;
+
+// Mailboxes of one person are tracked side by side (Gmail's limit is per
+// mailbox), but the part that writes — de-duplicating mail between your own
+// mailboxes, saving it, moving statuses — runs one mailbox at a time, so two
+// mailboxes never log the same move twice.
+const userQueues = new Map<string, Promise<unknown>>();
+function oneAtATime<T>(key: string, work: () => Promise<T>): Promise<T> {
+  const prev = userQueues.get(key) || Promise.resolve();
+  const next = prev.catch(() => null).then(work);
+  const tail = next.catch(() => null);
+  userQueues.set(key, tail);
+  void tail.then(() => { if (userQueues.get(key) === tail) userQueues.delete(key); });
+  return next;
+}
 
 async function lease(admin: Admin, id: string, column: "track_lock_until" | "read_lock_until", ms: number) {
   const now = new Date().toISOString();
@@ -1297,17 +1313,18 @@ async function trackMailbox(admin: Admin, row: TokenRow, own: Set<string>, book:
   const metas = await fetchMetas(token, todo, deadline, tried);
   if (tried.size < todo.length) complete = false;
   const matched = await matchAll(admin, row.user_id, metas, book, own, mailbox);
-  const rows = await dropCrossMailboxDuplicates(admin, row.user_id, matched);
-  await storeEvents(admin, rows);
   const matchedIds = new Set(matched.map((r) => r.gmail_id));
-
-  // 5. Your answers to people who emailed you first; their enquiries wait for the read phase.
-  const leadReplies = await trackLeadReplies(admin, row.user_id, token, metas.filter((m) => !matchedIds.has(m.id)), own, mailbox, true, deadline).catch(() => ({ updated: 0, backfilled: false }));
   const candidates = metas.filter((m) => !matchedIds.has(m.id) && !isOutgoing(m, own) && precheck(scanInput(m, own)).ok).map((m) => m.id);
-
-  // 6. Managers and teams the mail revealed, then statuses.
-  const linked = await learnTeams(admin, row.user_id, rows, own, book).catch(() => 0);
-  const changed = await applyStatuses(admin, row.user_id, Array.from(new Set(rows.map((r) => r.entity_id))));
+  const { rows, leadReplies, linked, changed } = await oneAtATime(row.user_id, async () => {
+    const rows = await dropCrossMailboxDuplicates(admin, row.user_id, matched);
+    await storeEvents(admin, rows);
+    // 5. Your answers to people who emailed you first; their enquiries wait for the read phase.
+    const leadReplies = await trackLeadReplies(admin, row.user_id, token, metas.filter((m) => !matchedIds.has(m.id)), own, mailbox, true, deadline).catch(() => ({ updated: 0, backfilled: false }));
+    // 6. Managers and teams the mail revealed, then statuses.
+    const linked = await learnTeams(admin, row.user_id, rows, own, book).catch(() => 0);
+    const changed = await applyStatuses(admin, row.user_id, Array.from(new Set(rows.map((r) => r.entity_id))));
+    return { rows, leadReplies, linked, changed };
+  });
 
   // 7. Commit. A backfill group counts as done only when every one of its emails was read.
   const seen = (id: string) => known.has(id) || tried.has(id);
@@ -1449,35 +1466,35 @@ type SyncError = { mailbox: string; error: string; reconnect: boolean; status: n
 const errorOf = async (admin: Admin, row: TokenRow, e: unknown): Promise<SyncError> => ({ mailbox: mailboxOf(row), error: await recordError(admin, row, e), reconnect: e instanceof GmailError && e.reconnect, status: e instanceof GmailError ? e.status : 0, retryable: e instanceof GmailError && e.retryable });
 
 /** Track every mailbox of one user (each gets its own time, the least recent first), then read the ones due. */
-async function syncUser(admin: Admin, rows: TokenRow[], allRows: TokenRow[], deadline: number, opts: { force: boolean; read: "now" | "due" | "later" }) {
+async function syncUser(admin: Admin, rows: TokenRow[], allRows: TokenRow[], deadline: number, opts: { force: boolean; read: "now" | "soon" | "due" | "later" }) {
   const own = new Set(allRows.map(mailboxOf).filter(Boolean));
   const book = await addressBook(admin, allRows[0].user_id, own);
   const results: Record<string, unknown>[] = [];
   const errors: SyncError[] = [];
   const queue = [...rows].sort((a, b) => (a.last_sync_at || "").localeCompare(b.last_sync_at || ""));
   let deferred = 0;
-  for (let i = 0; i < queue.length; i++) {
-    const row = queue[i];
-    const left = deadline - Date.now();
-    if (left < 6_000) { deferred = queue.length - i; break; }
-    if (!opts.force && row.last_sync_at && Date.now() - new Date(row.last_sync_at).getTime() < USER_MIN_INTERVAL_MS - 10_000) continue;
-    if (!(await lease(admin, row.id, "track_lock_until", TRACK_LEASE_MS))) continue; // another run is tracking it right now
+  // Every mailbox at once, each with the whole time: Gmail's speed limit is per
+  // mailbox (calls are paced per mailbox by gmail()), so 5 mailboxes sync as
+  // fast as 1. Saving still goes one mailbox at a time (oneAtATime).
+  await Promise.all(queue.map(async (row) => {
+    if (deadline - Date.now() < 6_000) { deferred++; return; }
+    if (!opts.force && row.last_sync_at && Date.now() - new Date(row.last_sync_at).getTime() < USER_MIN_INTERVAL_MS - 10_000) return;
+    if (!(await lease(admin, row.id, "track_lock_until", TRACK_LEASE_MS))) return; // another run is tracking it right now
     try {
-      // A fair share of the time for each mailbox still waiting, so none starves.
-      results.push(await trackMailbox(admin, row, own, book, Date.now() + Math.max(8_000, Math.floor(left / (queue.length - i)))));
+      results.push(await trackMailbox(admin, row, own, book, deadline));
     } catch (e) {
       errors.push(await errorOf(admin, row, e));
     } finally {
       await release(admin, row.id, "track_lock_until");
     }
-  }
+  }));
   // A shared manager's mail filed under the wrong creator: move it first, so nothing below acts on it.
   if (deadline - Date.now() > 5_000) await rehomeTeamMail(admin, allRows[0].user_id, book, own).catch(() => 0);
   // Their reply just landed before a scheduled bump of yours went out: cancel it now.
   if (deadline - Date.now() > 5_000) await autoCancelCrossed(admin, allRows[0].user_id, allRows).catch(() => 0);
   if (deadline - Date.now() > 5_000) await rereadReplies(admin, allRows[0].user_id).catch(() => 0);
   const readAll = async (until: number) => {
-    const due = [...rows].filter((r) => opts.read === "now" || !r.read_at || Date.now() - new Date(r.read_at).getTime() >= READ_EVERY_MS).sort((a, b) => (a.read_at || "").localeCompare(b.read_at || ""));
+    const due = [...rows].filter((r) => opts.read === "now" || !r.read_at || Date.now() - new Date(r.read_at).getTime() >= (opts.read === "soon" ? READ_SOON_MS : READ_EVERY_MS)).sort((a, b) => (a.read_at || "").localeCompare(b.read_at || ""));
     const out: Record<string, unknown>[] = [];
     for (const row of due) {
       if (until - Date.now() < 15_000) break;
@@ -1667,7 +1684,9 @@ Deno.serve(async (req) => {
         const { data: all } = await admin.from("gmail_tokens").select("*").eq("user_id", row.user_id);
         const { data: member } = await admin.from("profiles").select("access").eq("id", row.user_id).maybeSingle();
         if (member?.access && member.access !== "approved") continue;
-        await syncUser(admin, [row], (all || [row]) as TokenRow[], Date.now() + 25_000, { force: true, read: "later" }).catch(() => null);
+        // Track within seconds, then read that mailbox's new mail right away (unless it was read < 45 s ago).
+        const run = await syncUser(admin, [row], (all || [row]) as TokenRow[], Date.now() + 25_000, { force: true, read: "soon" }).catch(() => null);
+        if (run) await run.readAll(Date.now() + 100_000).catch(() => []);
       }
     })();
     // deno-lint-ignore no-explicit-any
@@ -1709,7 +1728,6 @@ Deno.serve(async (req) => {
     // recently synced first), then READ the ones due with the time left.
     const started = Date.now();
     const trackUntil = started + 38_000;
-    const readUntil = started + 55_000;
     const { data } = await admin.from("gmail_tokens").select("*").order("last_sync_at", { ascending: true, nullsFirst: true }).limit(500);
     const { data: members } = await admin.from("profiles").select("id, access").in("id", Array.from(new Set(((data || []) as TokenRow[]).map((r) => r.user_id))));
     const approved = new Set((members || []).filter((m) => !m.access || m.access === "approved").map((m) => m.id));
@@ -1717,27 +1735,50 @@ Deno.serve(async (req) => {
     for (const row of (data || []) as TokenRow[]) if (approved.has(row.user_id)) byUser.set(row.user_id, [...(byUser.get(row.user_id) || []), row]);
     // Instant Gmail: keep every mailbox's watch alive (no-op without the topic secret).
     if (PUSH_TOPIC()) for (const rows of byUser.values()) for (const row of rows) if (Date.now() < trackUntil - 20_000) await ensureWatch(admin, row).catch(() => false);
-    let tracked = 0, read = 0;
-    const readers: ((until: number) => Promise<Record<string, unknown>[]>)[] = [];
-    const users = Array.from(byUser.values());
-    for (let i = 0; i < users.length; i++) {
-      const rows = users[i];
-      const left = trackUntil - Date.now();
-      if (left < 6_000) break;
+    let tracked = 0;
+    // Everyone at once (each mailbox has its own Gmail limit).
+    await Promise.all(Array.from(byUser.values()).map(async (rows) => {
       const due = rows.filter((r) => !r.last_sync_at || Date.now() - new Date(r.last_sync_at).getTime() >= 45_000);
       try {
-        const run = await syncUser(admin, due, rows, Date.now() + Math.max(10_000, Math.floor(left / (users.length - i))), { force: true, read: "due" });
+        const run = await syncUser(admin, due, rows, trackUntil, { force: true, read: "due" });
         tracked += run.results.length;
-        readers.push(run.readAll);
       } catch {
         // one user's trouble never stops everyone else's sync
       }
+    }));
+    // Reading (full bodies, prices, files, AI) is heavier: each due mailbox gets its own
+    // worker, so 5 mailboxes are read side by side instead of one per minute.
+    const secret = req.headers.get("x-cron-secret") || "";
+    const now = Date.now();
+    const toRead = Array.from(byUser.values()).flat().filter((r) => (!r.read_at || now - new Date(r.read_at).getTime() >= READ_EVERY_MS) && (!r.read_lock_until || new Date(r.read_lock_until).getTime() < now));
+    const workers = toRead.map((r) => fetch(`${supabaseUrl}/functions/v1/gmail-sync`, { method: "POST", headers: { "Content-Type": "application/json", "x-cron-secret": secret }, body: JSON.stringify({ action: "read_box", id: r.id }), signal: AbortSignal.timeout(140_000) }).then((res) => res.body?.cancel()).catch(() => null));
+    // deno-lint-ignore no-explicit-any
+    const runtime = (globalThis as any).EdgeRuntime as { waitUntil?: (p: Promise<unknown>) => void } | undefined;
+    if (runtime?.waitUntil) runtime.waitUntil(Promise.all(workers));
+    return json({ users: byUser.size, tracked, reading: toRead.length, ms: Date.now() - started });
+  }
+
+  // One mailbox's read phase in its own worker (started by the cron above).
+  if (action === "read_box") {
+    if (!(await cronAllowed())) return json({ error: "Unauthorized" }, 401);
+    if (!configured || typeof input.id !== "string" || !/^[0-9a-f-]{36}$/i.test(input.id)) return json({ error: "Invalid mailbox" }, 400);
+    const { data: row } = await admin.from("gmail_tokens").select("*").eq("id", input.id).maybeSingle();
+    if (!row) return json({ skipped: "gone" });
+    const { data: member } = await admin.from("profiles").select("access").eq("id", row.user_id).maybeSingle();
+    if (member?.access && member.access !== "approved") return json({ skipped: "not approved" });
+    const { data: all } = await admin.from("gmail_tokens").select("*").eq("user_id", row.user_id);
+    const rowsOf = (all || [row]) as TokenRow[];
+    const own = new Set(rowsOf.map(mailboxOf).filter(Boolean));
+    const book = await addressBook(admin, row.user_id, own);
+    if (!(await lease(admin, row.id, "read_lock_until", READ_LEASE_MS))) return json({ skipped: "busy" });
+    try {
+      const out = await readMailbox(admin, row as TokenRow, own, book, Date.now() + 100_000);
+      return json({ ok: true, ...out });
+    } catch {
+      return json({ ok: false });
+    } finally {
+      await release(admin, row.id, "read_lock_until");
     }
-    for (const readAll of readers) {
-      if (readUntil - Date.now() < 15_000) break;
-      read += (await readAll(readUntil).catch(() => [])).length;
-    }
-    return json({ users: byUser.size, tracked, read, ms: Date.now() - started });
   }
 
   const auth = req.headers.get("Authorization") || "";

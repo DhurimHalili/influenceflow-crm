@@ -1,5 +1,5 @@
 // Run: node --experimental-strip-types supabase/functions/_shared/sponsors.test.ts
-import { cleanName, combine, hostKind, linksToFollow, normalizeDomain, readVideo, sureness, type Known, type VideoIn } from "./sponsors.ts";
+import { cleanName, combine, dealProof, hostKind, linksToFollow, normalizeDomain, readVideo, sureness, type Known, type VideoIn } from "./sponsors.ts";
 
 let fail = 0;
 const eq = (name: string, got: unknown, want: unknown) => {
@@ -167,6 +167,27 @@ const links = combine([
 eq("combine: one row, two videos", links.map((l) => [l.key, l.kind, l.videos, l.first, l.last]), [["tryx.com", "seeded", 2, "2026-08-01", "2026-09-01"]]);
 yes("combine: two sightings surer than one", links[0].confidence > 0.7 && links[0].confidence < 0.97, links[0].confidence);
 eq("sureness words", [sureness(0.9), sureness(0.7), sureness(0.5), sureness(0.2), sureness(0.2, true)], ["Sure", "Likely", "Possible", "Unsure", "Confirmed"]);
+
+// ---- names and negations seen live ----
+eq("thanks FOR X for sponsoring", brands(readVideo(vid({ description: "Thanks for Grüns for sponsoring this video! Get up to 52% off! https://gruns.yt.link/Owa8xA3" }), ctx)).map((x) => x.split("|")[0]), ["Grüns"]);
+eq("no affiliation or sponsorship = not a deal", readVideo(vid({ description: "You can order a Pebble Watch from https://repebble.com/ (no affiliation or sponsorship)." }), ctx).mentions.filter((m) => m.kind !== "affiliate" && m.confidence >= 0.45).length, 0);
+eq("music licence line is not a deal", readVideo(vid({ description: "🎵 Copyrighted music licensed from Lickd. https://lickd.co" }), ctx).mentions.length, 0);
+
+// ---- proof: only real brand deals count ----
+const ev = (over: Record<string, unknown>) => ({ video: "v1", title: "Build", at: "2026-09-01", kind: "sponsored", confidence: 0.9, signals: ["description"], quote: "This video is sponsored by NordVPN", ...over }) as never;
+const P = (evidence: unknown[], kind = "sponsored", extra: Record<string, unknown> = {}) => dealProof({ kind: kind as never, evidence: evidence as never, ...extra }).level;
+eq("words + paid label = proven", P([ev({ signals: ["description", "paid_label"] })]), "proven");
+eq("words + sponsorblock = proven", P([ev({ signals: ["description", "sponsorblock"] })]), "proven");
+eq("words in one description only = stated", P([ev({})]), "stated");
+eq("words in two videos = proven", P([ev({}), ev({ video: "v2" })]), "proven");
+eq("seeded in description + title = proven", P([ev({ kind: "seeded", signals: ["description", "title"], quote: "TRYX sent me this PC" })], "seeded"), "proven");
+eq("heard in the video = proven", P([ev({ signals: ["voice"], quote: "thanks to Ridge for sponsoring today's video" })]), "proven");
+eq("a link up top in a paid video = hint", P([ev({ signals: ["description", "paid_label"], quote: "Get 20% off: https://aztech.example" })]), "hint");
+eq("a plain description link = hint (Aztech case)", P([ev({ quote: "Aztech wheels https://aztech.example" })]), "hint");
+eq("the reader's own paid-label note isn't their words", P([ev({ signals: ["title", "paid_label"], quote: "My build — YouTube shows \u201cIncludes paid promotion\u201d" })]), "hint");
+eq("affiliate never a deal", P([ev({ kind: "affiliate", quote: "use code ZAC" })], "affiliate"), "affiliate");
+eq("store never a deal", P([ev({})], "sponsored", { store: true }), "affiliate");
+eq("your yes = proven", P([ev({ quote: "x" })], "sponsored", { verdict: "yes" }), "proven");
 
 if (fail) { console.log(`\n${fail} failing`); (globalThis as { process?: { exit: (n: number) => void } }).process?.exit(1); }
 else console.log("\nall sponsor tests pass");

@@ -59,7 +59,7 @@ export const TOPICS: Topic[] = [
     catalog: W("cases?|chassis|tower|enclosure") },
   { key: "pc_cooling", label: "PC cooling", family: "pc",
     words: W("aio|liquid cool\\w*|water ?cool\\w*|cpu cooler|air cooler|case fans?|rgb fans?|argb|thermal paste|noctua|arctic|deepcool|thermalright|liquid freezer|custom loop|radiator|pccooler|cryorig|kraken|ek-?wb|cooling|temps|thermal pads?|fan curve"),
-    catalog: W("fans?|coolers?|aio|heatsinks?|radiators?|thermal|water blocks?|pumps?|cooling") },
+    catalog: W("(?:case |pc |cpu |rgb )?fans?(?! (?:club|page|merch))|cpu coolers?|aio|heatsinks?|radiators?|thermal paste|thermal pads?|water blocks?|(?:liquid|water|cpu|pc) cooling|cooling fans?") },
   { key: "pc_power", label: "Power supplies", family: "pc",
     words: W("psu|power supply|power supplies|seasonic|\\d{3,4} ?w psu|atx 3\\.\\d|12vhpwr|12v-2x6|power connector"),
     catalog: W("psu|power suppl\\w+|\\d{3,4} ?w(?:att)?") },
@@ -71,7 +71,7 @@ export const TOPICS: Topic[] = [
     catalog: W("motherboards?|processors?|cpus?|mainboards?") },
   { key: "memory_storage", label: "RAM & storage", family: "pc",
     words: W("ram|ddr[45]|ssd|ssds|nvme|m\\.2|hard drives?|hdd|nas|storage|pny|990 pro|crucial|kingston|wd black|sd cards?|flash drives?|usb drives?|external drive"),
-    catalog: W("ssd|nvme|memory|ram|ddr[45]|storage|flash drives?|memory cards?|sd cards?|hard drives?|enclosures?") },
+    catalog: W("ssd|nvme|memory (?:kits?|modules?)|ram|ddr[45]|storage|flash drives?|memory cards?|sd cards?|hard drives?|enclosures?") },
 
   // ---- Laptops & mini PCs --------------------------------------------------------
   { key: "laptops", label: "Laptops", family: "computers",
@@ -187,27 +187,53 @@ export const TOPICS: Topic[] = [
     words: W("smart home|home assistant|alexa|google home|homekit|robot vacuums?|security cameras?|ring doorbell|video doorbell|smart locks?|smart plugs?|matter|home automation"),
     catalog: W("smart home|smart plugs?|cameras?|doorbells?|locks?|sensors?|robot vacuums?") },
   { key: "home_appliances", label: "Home & kitchen", family: "home",
-    words: W("vacuums?|air purifiers?|kitchen gadgets?|appliances?|air fryers?|coffee machines?|espresso|blenders?|dyson|roomba|mattress\\w*|home tour|apartment tour"),
-    catalog: W("vacuums?|purifiers?|kitchen|appliances?|cookware|coffee makers?|mattress\\w*|bedding|home d[eé]cor|air fryers?") },
+    words: W("vacuums?|robot vacuums?|air purifiers?|kitchen gadgets?|appliances?|air fryers?|coffee machines?|espresso machines?|blenders?|dyson|roomba|home tour|apartment tour|cleaning|washing machines?|dishwashers?"),
+    catalog: W("vacuums?|purifiers?|kitchen|appliances?|cookware|coffee makers?|espresso machines?|air fryers?|cleaning|cleaners?|humidifiers?|fans|heaters?") },
   { key: "diy_tools", label: "Tools, DIY & 3D printing", family: "home",
     words: W("diy|power tools?|hand tools|tool reviews?|tool kits?|toolbox|drills?|impact driver|saws?|woodworking|workshop|3d print\\w*|bambu|prusa|laser engraver|cnc|soldering|electronics projects?|arduino|maker|fiberglass|composites?|epoxy|resin"),
     catalog: W("tools?|drills?|saws?|3d printers?|filament|lasers?|soldering|kits?|workbench") },
 
   // ---- Lifestyle (coarser) ---------------------------------------------------------
-  { key: "beauty", label: "Beauty & skincare", family: "style", words: W("makeup|skin ?care|beauty|grwm|lipstick|foundation|serums?|hair ?care|nails|fragrances?|perfumes?|cologne|grooming|shav\\w+|beard"), catalog: W("skin ?care|makeup|serums?|creams?|cleansers?|fragrances?|perfumes?|shampoo|razors?|grooming") },
-  { key: "fashion", label: "Fashion & accessories", family: "style", words: W("outfits?|haul|streetwear|style|lookbook|sneakers?|fashion|try on|ootd|thrift\\w*|watches|jewel(?:le)?ry|menswear|edc|wallets?"), catalog: W("shirts?|hoodies?|jackets?|shoes|sneakers?|apparel|clothing|wallets?|jewel(?:le)?ry|watches|bags?|backpacks?") },
+  { key: "beauty", label: "Beauty & skincare", family: "style", words: W("makeup|skin ?care|beauty|grwm|lipstick|foundation|serums?|nails|nail polish|lashes|sunscreen|spf"), catalog: W("skin ?care|makeup|serums?|creams?|cleansers?|moisturi[sz]ers?|cosmetics|lip\\w*|mascara|sunscreen") },
+  { key: "fashion", label: "Fashion & accessories", family: "style", words: W("outfits?|haul|streetwear|style|lookbook|sneakers?|fashion|try on|ootd|thrift\\w*|menswear|edc|wallets?|underwear|socks"), catalog: W("shirts?|t-shirts?|hoodies?|jackets?|shoes|sneakers?|apparel|clothing|wallets?|bags?|backpacks?|underwear|socks|jeans|dresses|hats?|caps?|sunglasses") },
   { key: "fitness", label: "Fitness", family: "body", words: W("workouts?|gym|fitness|bodybuilding|calisthenics|yoga|running|marathon|weight loss|training|hiit|home gym|treadmill"), catalog: W("dumbbells?|weights|treadmills?|yoga mats?|fitness|gym|resistance bands?") },
   { key: "nutrition", label: "Nutrition & supplements", family: "body", words: W("protein|supplements?|creatine|pre-?workout|vitamins|electrolytes|energy drinks?|ag1|athletic greens|meal replacement"), catalog: W("protein|supplements?|vitamins|powders?|capsules|electrolytes|gummies") },
-  { key: "health", label: "Health & wellness", family: "body", words: W("health|wellness|sleep|mental health|meditation|therapy|betterhelp|posture|dentist|teeth"), catalog: W("health|wellness|sleep|therapy") },
+  { key: "health", label: "Health & wellness", family: "body", words: W("health|wellness|posture|dentist|teeth|doctors?|telehealth|blood tests?|testosterone|hormones?|hearing aids?|glasses|contacts lenses|zocdoc|hims|hers|hone health"), catalog: W("health|wellness|telehealth|doctors?|clinics?|lab tests?|prescriptions?|hearing|vision|dental|toothbrush\\w*|teeth") },
   { key: "sports", label: "Sports", family: "body", words: W("football|soccer|nba|basketball|nfl|golf|tennis|ufc|mma|boxing|cycling|skateboard\\w*|surf\\w*|ski\\w*|snowboard\\w*"), catalog: W("golf|tennis|cycling|bikes?|skateboards?|balls?|rackets?") },
   { key: "food", label: "Food & cooking", family: "life", words: W("recipes?|cooking|baking|food|kitchen|chefs?|meal prep|mukbang|restaurants?|taste tests?|snacks?|bbq|grill\\w*"), catalog: W("snacks?|sauces?|spices?|food|meals?|grills?|knives") },
   { key: "travel", label: "Travel", family: "life", words: W("travel\\w*|trips?|vacation|hotels?|flights?|airports?|backpacking|luggage|van ?life|city guide|things to do"), catalog: W("luggage|suitcases?|travel|carry-?on") },
   { key: "outdoors", label: "Outdoors", family: "life", words: W("camping|fishing|hunting|hiking|bushcraft|survival|overlanding|kayak\\w*|outdoor gear|tents?"), catalog: W("tents?|camping|fishing|knives|flashlights?|outdoor") },
   { key: "pets", label: "Pets", family: "life", words: W("dogs?|cats?|puppy|kittens?|pets?|aquarium"), catalog: W("pets?|dogs?|cats?|leash|collars?") },
   { key: "kids_family", label: "Kids & family", family: "life", words: W("kids|toys?|baby|family vlog|parenting|toddlers?|lego"), catalog: W("toys?|kids|baby|lego") },
-  { key: "finance", label: "Money & finance", family: "money", words: W("investing|stocks?|crypto\\w*|bitcoin|money|budget\\w*|side hustles?|real estate|passive income|trading|finance|wealth|credit cards?|banking|savings|cash ?back|taxes"), catalog: W("invest\\w*|banking|budget\\w*|credit|cash ?back|trading|finance|money") },
-  { key: "education", label: "Learning & science", family: "learn", words: W("science|history|math|physics|chemistry|biology|documentary|lessons?|study tips|language learning|brilliant|skillshare|masterclass|coursera|courses?"), catalog: W("courses?|classes|learning|lessons?") },
+  { key: "finance", label: "Money & finance", family: "money", words: W("investing|stocks?|money|budget\\w*|side hustles?|real estate|passive income|trading|finance|wealth|credit cards?|banking|savings|cash ?back|taxes"), catalog: W("invest\\w*|banking|budget\\w*|credit|cash ?back|trading|finance|money") },
+  { key: "education", label: "Learning & science", family: "learn", words: W("science|history|math|physics|chemistry|biology|documentary|lessons?|study tips|explained|engineering|space|astronomy"), catalog: W("learning|science kits?|educational") },
   { key: "music_gear", label: "Music & instruments", family: "music", words: W("guitars?|pianos?|synths?|drums|bass|music production|producers?|daw|ableton|fl studio|audio interfaces?|pedals?|amps?|studio monitors"), catalog: W("guitars?|pianos?|synths?|drums|instruments?|pedals?|audio interfaces?|midi") },
+  // ---- added: what brands sponsor that the first list missed ------------------------------
+  { key: "grooming", label: "Grooming & haircare", family: "style", words: W("grooming|shav\\w+|beard\\w*|trimmers?|razors?|hair ?care|haircuts?|hairstyles?|manscaped|hair loss|balding|barber\\w*|deodorant|body wash"), catalog: W("razors?|trimmers?|shavers?|shampoo|conditioner|beard\\w*|hair ?care|deodorants?|body wash|grooming") },
+  { key: "watches_jewelry", label: "Watches & jewelry", family: "style", words: W("watch(?:es)? (?:review|collection)|wrist ?watch\\w*|rolex|seiko|omega|casio|g-?shock|tissot|horology|jewel(?:le)?ry|necklaces?|bracelets?|chains?|rings? review"), catalog: W("watches|watch straps?|jewel(?:le)?ry|necklaces?|bracelets?|rings|earrings|chains?|pendants?") },
+  { key: "fragrance", label: "Fragrance", family: "style", words: W("fragrances?|perfumes?|colognes?|scents?|smell good"), catalog: W("fragrances?|perfumes?|colognes?|eau de (?:parfum|toilette)|scents?") },
+  { key: "sleep", label: "Sleep & mattresses", family: "body", words: W("sleep\\w*|mattress\\w*|pillows?|insomnia|naps?|bedroom|helix|eight sleep|purple mattress"), catalog: W("mattress\\w*|pillows?|bedding|sheets|duvets?|sleep\\w*|beds?") },
+  { key: "mental_health", label: "Mental health & therapy", family: "body", words: W("mental health|therapy|therapists?|betterhelp|talkspace|meditat\\w+|mindfulness|anxiety|depression|burnout|calm app|headspace|journaling"), catalog: W("therapy|therapists?|counsel\\w+|meditation|mindfulness|mental health") },
+  { key: "meal_kits", label: "Meal kits & food delivery", family: "life", words: W("hellofresh|hello fresh|factor meals?|green chef|home ?chef|everyplate|meal kits?|meal delivery|food delivery|uber ?eats|doordash|deliveroo|just eat"), catalog: W("meal kits?|meals delivered|ready-?made meals|meal plans?|recipe boxes?|food delivery") },
+  { key: "drinks", label: "Drinks & coffee", family: "life", words: W("coffee(?! (?:machines?|makers?))|energy drinks?|pre-?workout drinks?|beers?|wines?|whiske?y|cocktails?|tea|matcha|sodas?|electrolytes?|hydration|liquid i\\.?v\\.?"), catalog: W("coffee(?! (?:machines?|makers?))|beans|tea|matcha|energy drinks?|drinks?|beverages?|beers?|wines?|spirits|electrolytes?|hydration") },
+  { key: "shopping", label: "Shopping & marketplaces", family: "life", words: W("temu|aliexpress|shein|ebay|whatnot|amazon finds|amazon must-?haves|wish haul|marketplace finds|online shopping|deals? haul"), catalog: W("marketplace|online shopping|discount store|auctions?|resale") },
+  { key: "home_decor", label: "Home decor & art", family: "home", words: W("home d[eé]cor|wall art|interior design|room makeover|room tour|posters?|art prints?|displate|candles?|rugs?|house ?plants?"), catalog: W("home d[eé]cor|wall art|posters?|prints|canvas prints?|picture frames|candles?|rugs?|vases?|metal posters?") },
+  { key: "garden", label: "Garden & yard", family: "home", words: W("garden\\w*|lawn\\w*|mowers?|yard work|backyard|greenhouse|landscaping|pressure wash\\w*|leaf blowers?|hedge trimmers?"), catalog: W("garden\\w*|lawn\\w*|mowers?|seeds|planters?|hoses?|pressure washers?|leaf blowers?|outdoor furniture") },
+  { key: "home_security", label: "Home security", family: "home", words: W("security cam\\w*|doorbell cam\\w*|video doorbells?|simplisafe|ring doorbell|alarm systems?|smart locks?|home security|safes?"), catalog: W("security cameras?|doorbells?|alarms?|smart locks?|locks|safes?|home security|sensors?") },
+  { key: "portable_power", label: "Power stations & solar", family: "home", words: W("power stations?|portable power|solar (?:panels?|generators?|power|setup)|ecoflow|bluetti|jackery|anker solix|home batter(?:y|ies)|backup power|off-?grid|generators?|power outage"), catalog: W("power stations?|portable power|solar (?:panels?|generators?)|generators?|batter(?:y|ies) backup|home batter(?:y|ies)|inverters?") },
+  { key: "crypto", label: "Crypto", family: "money", words: W("crypto\\w*|bitcoin|btc|ethereum|eth|blockchain|nfts?|web3|coinbase|binance|kraken|ledger wallet|altcoins?|defi|memecoins?"), catalog: W("crypto\\w*|bitcoin|blockchain|hardware wallets?|crypto wallets?|staking") },
+  { key: "insurance_loans", label: "Insurance & loans", family: "money", words: W("insurance|insurers?|loans?|mortgages?|debt relief|debt free|credit repair|refinanc\\w+|credit scores?|car finance|consolidat\\w+"), catalog: W("insurance|insurers?|loans?|mortgages?|debt|credit|refinanc\\w+") },
+  { key: "courses", label: "Online courses & coding", family: "learn", words: W("skillshare|brilliant|masterclass|coursera|udemy|boot\\.?dev|codecademy|online courses?|learn to code|coding (?:course|bootcamp)|bootcamps?|certifications?"), catalog: W("courses?|classes|lessons?|bootcamps?|certifications?|tutorials?|learn to code") },
+  { key: "languages", label: "Language learning", family: "learn", words: W("babbel|duolingo|rosetta stone|busuu|pimsleur|italki|language learning|learn(?:ing)? (?:spanish|french|german|japanese|korean|chinese|italian|english)|polyglot"), catalog: W("language (?:learning|courses?|lessons?)|learn (?:spanish|french|german|japanese|korean|english)") },
+  { key: "books", label: "Books & audiobooks", family: "learn", words: W("books?|audiobooks?|audible|kindle|book reviews?|reading list|novels?|blinkist|booktube|what i read"), catalog: W("books?|audiobooks?|e-?books?|novels?|reading|summaries") },
+  { key: "productivity", label: "Productivity & business tools", family: "software", words: W("productivity|notion|obsidian|to-?do (?:apps?|lists?)|calendar apps?|project management|note-?taking|shopify|e-?commerce|dropshipping|email marketing|invoic\\w+|freelanc\\w+|small business|crm"), catalog: W("productivity|project management|workspace|notes?|e-?commerce|online store builder|invoic\\w+|accounting|payroll|email marketing|crm|scheduling") },
+  { key: "mobile_games", label: "Mobile games", family: "gaming", words: W("mobile games?|mobile gaming|raid:? shadow legends|rise of kingdoms|genshin|hero wars|candy crush|clash of clans|clash royale|gacha|afk arena|honkai|monopoly go|royal match|state of survival|call of dragons|lords mobile"), catalog: W("mobile games?|free to play|play on (?:ios|android)|download (?:on|for) (?:ios|android)") },
+  { key: "streaming_tv", label: "Streaming & TV", family: "fun", words: W("netflix|disney\\+|hbo|max original|prime video|apple tv|crunchyroll|anime|tv shows?|series review|movie reviews?|trailers?|streaming services?"), catalog: W("streaming|series|movies?|shows?|anime") },
+  { key: "toys_collectibles", label: "Toys, LEGO & collectibles", family: "fun", words: W("lego|toys?|collectibles?|action figures?|funko|trading cards?|pok[eé]mon cards|tcg|card openings?|pack openings?|model kits?|gunpla|hot wheels|diecast"), catalog: W("lego|toys?|collectibles?|figures?|trading cards?|booster packs?|model kits?|diecast|plush\\w*") },
+  { key: "phone_plans", label: "Phone plans & eSIM", family: "mobile", words: W("e-?sims?|mobile plans?|phone plans?|mint mobile|visible wireless|saily|airalo|holafly|data plans?|unlimited data|sim cards?|roaming"), catalog: W("e-?sims?|mobile plans?|phone plans?|data plans?|sim cards?|unlimited data|roaming") },
+  { key: "drones", label: "Drones", family: "creator", words: W("drones?|fpv|dji (?:mini|air|mavic|avata|neo|flip)|quadcopters?|aerial (?:footage|shots?|photography)"), catalog: W("drones?|fpv|quadcopters?|propellers?|gimbals?") },
+  { key: "car_buying", label: "Buying & selling cars", family: "cars", words: W("car buying|buying (?:a|my) (?:used |new )?cars?|used cars?|car auctions?|auctions?|dealerships?|dealers?|carvertical|vin (?:check|decoder)|history reports?|carvana|cars (?:&|and) bids|bring a trailer|trade-?ins?|sell(?:ing)? my car|car prices?|cheapest cars?"), catalog: W("used cars?|car history|vin|vehicle history|auctions?|car finance|dealers?|buy a car|sell your car|car valuations?") },
+  { key: "motorcycles", label: "Motorcycles", family: "cars", words: W("motorcycles?|motorbikes?|sport ?bikes?|harley|ducati|kawasaki|triumph|ktm|dirt ?bikes?|motovlog\\w*|riding gear|track day on (?:a|my) bike"), catalog: W("motorcycles?|motorbikes?|riding gear|motorcycle helmets?|leathers") },
   { key: "entertainment", label: "Entertainment & vlogs", family: "fun", words: W("comedy|funny|sketch|pranks?|reacts?|reaction|challenges?|memes?|podcast|vlogs?|commentary|drama|news"), catalog: W("entertainment|streaming|movies?|shows?") },
 ];
 
@@ -231,6 +257,14 @@ const CLOSE: [string, string, number][] = [
   ["car_parts", "car_care", 0.6], ["car_parts", "diy_tools", 0.5], ["car_care", "car_accessories", 0.6], ["motorsport", "car_reviews", 0.6], ["ev_charging", "charging", 0.4], ["e_mobility", "ev", 0.45],
   ["smart_home", "home_appliances", 0.6], ["smart_home", "lighting", 0.6], ["smart_home", "connectivity", 0.5], ["diy_tools", "home_appliances", 0.4], ["charging", "outdoors", 0.45],
   ["fitness", "nutrition", 0.8], ["fitness", "wearables", 0.55], ["fitness", "health", 0.6], ["nutrition", "health", 0.6], ["sports", "fitness", 0.6], ["beauty", "fashion", 0.55],
+  ["grooming", "beauty", 0.7], ["fragrance", "beauty", 0.65], ["fragrance", "grooming", 0.55], ["watches_jewelry", "fashion", 0.7], ["grooming", "fashion", 0.35],
+  ["sleep", "health", 0.6], ["mental_health", "health", 0.65], ["sleep", "mental_health", 0.45], ["meal_kits", "food", 0.8], ["drinks", "food", 0.55], ["drinks", "nutrition", 0.45],
+  ["shopping", "fashion", 0.35], ["shopping", "home_appliances", 0.35], ["home_decor", "home_appliances", 0.5], ["home_decor", "desk_furniture", 0.45], ["garden", "diy_tools", 0.55], ["garden", "outdoors", 0.4],
+  ["home_security", "smart_home", 0.75], ["portable_power", "charging", 0.6], ["portable_power", "outdoors", 0.6], ["portable_power", "ev_charging", 0.4], ["portable_power", "smart_home", 0.35],
+  ["crypto", "finance", 0.7], ["insurance_loans", "finance", 0.65], ["courses", "education", 0.75], ["courses", "software", 0.45], ["languages", "education", 0.6], ["languages", "courses", 0.6], ["languages", "travel", 0.4], ["books", "education", 0.55],
+  ["productivity", "software", 0.7], ["productivity", "ai_tools", 0.55], ["productivity", "web_hosting", 0.55], ["mobile_games", "games", 0.7], ["streaming_tv", "entertainment", 0.7], ["toys_collectibles", "kids_family", 0.6], ["toys_collectibles", "games", 0.35],
+  ["phone_plans", "phones", 0.7], ["phone_plans", "travel", 0.45], ["drones", "cameras", 0.75], ["drones", "creator_gear", 0.5], ["drones", "travel", 0.35],
+  ["car_buying", "car_reviews", 0.75], ["car_buying", "insurance_loans", 0.35], ["motorcycles", "car_reviews", 0.45], ["motorcycles", "e_mobility", 0.4], ["motorcycles", "motorsport", 0.45],
   ["food", "home_appliances", 0.5], ["travel", "outdoors", 0.5], ["travel", "cameras", 0.45], ["finance", "software", 0.35], ["education", "software", 0.35], ["music_gear", "audio", 0.6], ["music_gear", "creator_gear", 0.45],
 ];
 const close = new Map<string, number>();
@@ -299,7 +333,7 @@ export type ContentProfile = {
   /** "rules" or "rules+ai" (Clef checked the unclear ones). */
   by: string;
 };
-export const CONTENT_VERSION = 1;
+export const CONTENT_VERSION = 2;
 
 /**
  * A creator's content mix from their latest videos. Newer videos weigh more

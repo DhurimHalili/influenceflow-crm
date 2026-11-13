@@ -1,11 +1,12 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { channelIdOf, uploadsPage, videoDetails, youtubeConfigured, YouTubeQuota, type FullVideo } from "../_shared/youtube.ts";
-import { cleanName, combine, DIRECTORY, hostKind, hostOf, knownIndex, linksToFollow, nameKey, namesIn, normalizeDomain, prettyName, readVideo, type DealKind, type Known, type Mention, type Segment } from "../_shared/sponsors.ts";
+import { cleanName, combine, dealProof, DIRECTORY, hostKind, hostOf, knownIndex, linksToFollow, nameKey, namesIn, normalizeDomain, prettyName, readVideo, type DealKind, type Known, type Mention, type Segment } from "../_shared/sponsors.ts";
 import { brandTopics, contentProfile, TOPIC, TOPICS, topicLabel, videoTopics, type ContentVideo } from "../_shared/taxonomy.ts";
 import { marketsOf, parseHtml, parseShopify, parseShopifyCollections, parseWoo, priceStats, readProgram, siteIsBrand, siteName, type Product, type SiteFacts } from "../_shared/brandSite.ts";
 import { clefStatus, decide, useClefBudget, type ClefQuestion } from "../_shared/clef.ts";
 import { listenConfigured, listenLeft, listenTo, useListenBudget } from "../_shared/listen.ts";
+import { askBrand, useBrandAskBudget } from "../_shared/brandAsk.ts";
 
 // Brand ⇄ creator matching and "who works with whom" (see the migration
 // 20261122000000_brand_match.sql for the tables).
@@ -35,7 +36,9 @@ import { listenConfigured, listenLeft, listenTo, useListenBudget } from "../_sha
 const APP_URL = (Deno.env.get("APP_URL") || "https://dhurimhalili.github.io/influenceflow-crm").replace(/\/$/, "");
 const ALLOWED_ORIGINS = new Set([new URL(APP_URL).origin, "http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:4173", "http://localhost:5199"]);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const READER_V = 4;
+const READER_V = 5;
+// Brand research version: 2 = Gemini reads sites that block robots or say too little.
+const INTEL_V = 2;
 const DAY = 86400_000;
 const BACK_DAYS = 400;
 const RESCAN_DAYS = 7;
@@ -372,8 +375,9 @@ async function rebuildLinks(admin: SupabaseClient, c: CreatorRow, rows: VideoRow
   }
   const gone = ((existing || []) as { id: string; brand_key: string; verdict: string; manual: boolean }[]).filter((e) => !keep.has(e.brand_key) && !e.verdict && !e.manual).map((e) => e.id);
   if (gone.length) await admin.from("creator_brands").delete().in("id", gone).eq("user_id", c.user_id);
-  // Brands not in the CRM: remember them for the "Found in videos" list (shops aren't brands to pitch).
-  const seen = payload.filter((p) => !p.brand_id && !p.store).map((p) => ({ user_id: c.user_id, brand_key: p.brand_key, name: p.brand_name, domain: p.domain }));
+  // Brands not in the CRM: remember them for the "Found in videos" list — brand deals only
+  // (shops and affiliate links aren't brands an agency pitches).
+  const seen = payload.filter((p) => !p.brand_id && !p.store && p.kind !== "affiliate").map((p) => ({ user_id: c.user_id, brand_key: p.brand_key, name: p.brand_name, domain: p.domain }));
   if (seen.length) await admin.from("seen_brands").upsert(seen, { onConflict: "user_id,brand_key", ignoreDuplicates: true });
   return links.length;
 }
@@ -416,10 +420,10 @@ async function listenSome(admin: SupabaseClient, deadline: number): Promise<numb
 // ---- researching a brand ------------------------------------------------------------------
 
 type Intel = {
-  v: 1; at: string; domain: string; url: string; name: string; summary: string; sells: { key: string; weight: number }[]; by: string;
+  v: number; at: string; domain: string; url: string; name: string; summary: string; sells: { key: string; weight: number }[]; by: string;
   products: number; examples: string[]; price: { min: number; median: number; max: number; currency: string } | null; platform: string;
   programs: { kind: string; url: string; text: string; commission?: string; network?: string }[]; socials: { platform: string; url: string }[];
-  markets: string[]; currency: string; wiki: string; works_with_creators: number | null; pages: string[]; verified: boolean;
+  markets: string[]; currency: string; wiki: string; works_with_creators: boolean | number | null; pages: string[]; verified: boolean;
 };
 
 /**
@@ -504,14 +508,20 @@ async function researchBrand(admin: SupabaseClient, b: BrandRow): Promise<Intel 
       if (sum > 0) { sells = w.map((x) => ({ key: x.key, weight: Math.round((x.weight / sum) * 1000) / 1000 })).sort((a, b) => b.weight - a.weight).slice(0, 8); by = "rules+ai"; }
     }
   }
+  // The site blocked us, didn't load, or said too little: Gemini reads it (Google's reader + Search), our topics only.
+  let asked: Awaited<ReturnType<typeof askBrand>> = null;
+  if (!sells.length || blocked) {
+    asked = await askBrand(b.name, domain).catch(() => null);
+    if (asked?.isBrand && asked.sells.length) { sells = asked.sells; by = "gemini"; }
+  }
   const name = (facts && !facts.blocked && siteName(facts, domain, b.name)) || b.name;
   const intel: Intel = {
-    v: 1, at: now.toISOString(), domain, url: pages[0] || `https://${domain}`, name, summary: (facts?.description || "").slice(0, 400), sells, by,
-    products: products.length, examples: products.slice(0, 10).map((p) => p.title), price: priceStats(products, facts?.currency || ""), platform: facts?.platform || "",
+    v: INTEL_V, at: now.toISOString(), domain, url: pages[0] || `https://${domain}`, name, summary: (facts?.description || (asked?.isBrand ? asked.summary : "") || "").slice(0, 400), sells, by,
+    products: products.length, examples: products.length ? products.slice(0, 10).map((p) => p.title) : asked?.isBrand ? asked.examples : [], price: priceStats(products, facts?.currency || ""), platform: facts?.platform || "",
     programs: programs.slice(0, 5), socials: (facts?.socials || []).slice(0, 8), markets: marketsOf(facts?.locales || []), currency: facts?.currency || "",
-    wiki: wiki?.extract || "", works_with_creators: null, pages: pages.slice(0, 6), verified: facts ? siteIsBrand(b.name, domain, facts) || !!wiki?.verified : !!wiki?.verified,
+    wiki: wiki?.extract || "", works_with_creators: asked?.isBrand ? asked.creators : null, pages: pages.slice(0, 6), verified: facts ? siteIsBrand(b.name, domain, facts) || !!wiki?.verified : !!wiki?.verified,
   };
-  const status = facts && !facts.blocked ? "ok" : blocked && wiki ? "ok" : facts?.blocked ? "blocked" : "unreachable";
+  const status = facts && !facts.blocked ? "ok" : blocked && (wiki || by === "gemini") ? "ok" : facts?.blocked ? "blocked" : "unreachable";
   await admin.from("brand_intel").upsert({ brand_id: b.id, user_id: b.user_id, intel, status, researched_at: now.toISOString(), updated_at: now.toISOString() });
   return intel;
 }
@@ -567,13 +577,20 @@ async function autoAdd(admin: SupabaseClient, s: SeenRow, checked: { domain: str
   if (checked.check !== "site" || !checked.domain) return;
   const { data: me } = await admin.from("profiles").select("preferences").eq("id", s.user_id).maybeSingle();
   if ((me?.preferences as { match_auto_add?: boolean } | null)?.match_auto_add === false) return;
-  const { data: links } = await admin.from("creator_brands").select("creator_id, kind, confidence, last_at, verdict").eq("user_id", s.user_id).eq("brand_key", s.brand_key).in("kind", ["sponsored", "seeded"]).gte("confidence", 0.85).neq("verdict", "no").limit(20);
-  if (!links?.length) return;
+  // Only a PROVEN brand deal (their own words + something else backs it up) — never an affiliate link,
+  // a store, or a link that only sat up top in a paid video.
+  const { data: rows } = await admin.from("creator_brands").select("creator_id, kind, confidence, last_at, verdict, verdict_kind, manual, store, evidence").eq("user_id", s.user_id).eq("brand_key", s.brand_key).in("kind", ["sponsored", "seeded"]).gte("confidence", 0.85).neq("verdict", "no").limit(20);
+  const links = (rows || []).filter((l) => !l.store && dealProof(l as Parameters<typeof dealProof>[0]).level === "proven");
+  if (!links.length) return;
   const { data: fresh } = await admin.from("creators").select("id, name, created_at").eq("user_id", s.user_id).in("id", links.map((l) => l.creator_id)).gte("created_at", new Date(Date.now() - 14 * DAY).toISOString()).limit(5);
   if (!fresh?.length) return;
   // Never twice: not if any brand (archived ones too — you removed it once) already has this domain.
-  const { data: all } = await admin.from("brands").select("id, domain").eq("user_id", s.user_id).limit(5000);
-  if ((all || []).some((b: { domain: string | null }) => normalizeDomain(b.domain || "") === checked.domain)) return;
+  // …nor the same brand on another country domain or under its name (autodoc.de vs autodoc.com vs "AUTODOC").
+  const label = (d: string) => normalizeDomain(d || "").split(".")[0].toLowerCase().replace(/[^a-z0-9]+/g, "");
+  const flat = (n: string) => String(n || "").toLowerCase().normalize("NFKD").replace(/&/g, "and").replace(/[^a-z0-9]+/g, "");
+  const mine = new Set([label(checked.domain), flat(checked.name), flat(s.name)].filter((x) => x.length >= 3));
+  const { data: all } = await admin.from("brands").select("id, name, domain").eq("user_id", s.user_id).limit(5000);
+  if ((all || []).some((b: { name: string; domain: string | null }) => normalizeDomain(b.domain || "") === checked.domain || mine.has(label(b.domain || "")) || mine.has(flat(b.name)))) return;
   const from = fresh[0] as { id: string; name: string };
   const link = links.find((l) => l.creator_id === from.id) || links[0];
   const kindWord = link.kind === "seeded" ? "sent them product" : "sponsored them";
@@ -644,6 +661,13 @@ async function cron(admin: SupabaseClient) {
       try { await researchBrand(admin, b); log.brands = Number(log.brands) + 1; } catch { await admin.from("brand_intel").upsert({ brand_id: b.id, user_id: b.user_id, status: "error", researched_at: new Date().toISOString() }); }
     }
   }
+  // 2b. Brands read before Gemini could help whose site blocked us or said nothing: once, a few a run.
+  if (Date.now() < deadline - 60_000) {
+    const { data: rows } = await admin.from("brand_intel").select("brand_id, status, intel").in("user_id", ids).in("status", ["blocked", "unreachable", "ok"]).limit(5000);
+    const todo = ((rows || []) as { brand_id: string; status: string; intel: Intel | null }[]).filter((r) => (r.intel?.v || 0) < INTEL_V && (r.status !== "ok" || !(r.intel?.sells || []).length)).map((r) => r.brand_id).slice(0, 3);
+    const { data: list } = todo.length ? await admin.from("brands").select("id, user_id, name, domain, archived_at").in("id", todo).is("archived_at", null) : { data: [] };
+    for (const b of (list || []) as BrandRow[]) { if (Date.now() > deadline - 45_000) break; await researchBrand(admin, b).catch(() => null); log.brands = Number(log.brands) + 1; }
+  }
   // 3. Brands found in videos: check the domain is theirs (then maybe add them).
   {
     const { data: list } = await admin.from("seen_brands").select("user_id, brand_key, name, domain, domain_check, checked_at").in("user_id", ids).eq("hidden", false).or(`checked_at.is.null,and(domain_check.eq.none,domain.neq.,checked_at.lt.${new Date(Date.now() - 2 * DAY).toISOString()})`).limit(14);
@@ -686,6 +710,7 @@ Deno.serve(async (req) => {
   const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
   useClefBudget(admin);
   useListenBudget(admin);
+  useBrandAskBudget(admin);
   let input: Record<string, unknown> = {};
   try { input = await req.json(); } catch { return json({ error: "Invalid JSON" }, 400); }
 
@@ -705,14 +730,25 @@ Deno.serve(async (req) => {
   if (!userId) return json({ error: "Unauthorized" }, 401);
 
   if (input.action === "status") {
-    const [{ count: creators }, { count: read }, { count: brands }, { count: researched }, clef] = await Promise.all([
-      admin.from("creators").select("id", { count: "exact", head: true }).eq("user_id", userId).is("archived_at", null),
-      admin.from("creator_content").select("creator_id", { count: "exact", head: true }).eq("user_id", userId),
+    const newest = (table: string, col: string) => admin.from(table).select(col).eq("user_id", userId).order(col, { ascending: false, nullsFirst: false }).limit(1).maybeSingle();
+    const [{ data: people }, { data: done }, { count: brands }, { count: researched }, clef, l1, l2, l3, { count: links }] = await Promise.all([
+      admin.from("creators").select("id, socials").eq("user_id", userId).is("archived_at", null).limit(5000),
+      admin.from("creator_content").select("creator_id, scanned_at").eq("user_id", userId).limit(5000),
       admin.from("brands").select("id", { count: "exact", head: true }).eq("user_id", userId).is("archived_at", null),
       admin.from("brand_intel").select("brand_id", { count: "exact", head: true }).eq("user_id", userId),
       clefStatus(),
+      newest("creator_brands", "updated_at"), newest("brand_intel", "researched_at"), newest("seen_brands", "checked_at"),
+      admin.from("creator_brands").select("id", { count: "exact", head: true }).eq("user_id", userId),
     ]);
-    return json({ ok: true, creators: creators || 0, read: read || 0, brands: brands || 0, researched: researched || 0, youtube: youtubeConfigured(), clef, listen: { configured: listenConfigured(), secondsLeft: await listenLeft() } });
+    // Changes when anything the app shows changed: the app reloads only then.
+    const at = (r: { data: unknown }, col: string) => String(((r.data || {}) as Record<string, unknown>)[col] || "");
+    const stamp = [at(l1, "updated_at"), at(l2, "researched_at"), at(l3, "checked_at"), links || 0, (done || []).length].join("|");
+    // Only creators with a YouTube channel can be read; the rest never count as "waiting".
+    const withYoutube = ((people || []) as { id: string; socials: CreatorRow["socials"] }[]).filter((c) => youtubeOf(c.socials)).map((c) => c.id);
+    const readAt = new Map(((done || []) as { creator_id: string; scanned_at: string | null }[]).map((d) => [d.creator_id, d.scanned_at || ""]));
+    const creators = withYoutube.length, read = withYoutube.filter((id) => readAt.has(id)).length;
+    const lastRead = [...readAt.values()].sort().pop() || null;
+    return json({ ok: true, stamp, creators, read, noYoutube: (people || []).length - creators, lastRead, everyMin: 3, perRun: 4, rescanDays: RESCAN_DAYS, brandDays: BRAND_DAYS, brands: brands || 0, researched: researched || 0, youtube: youtubeConfigured(), clef, listen: { configured: listenConfigured(), secondsLeft: await listenLeft() } });
   }
 
   if (input.action === "scan_creator") {

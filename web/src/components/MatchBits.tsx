@@ -1,8 +1,8 @@
-import { BadgeDollarSign, Bot, Check, ChevronRight, CircleAlert, Ear, ExternalLink, FileText, Gift, Link2, ListVideo, Loader2, Pencil, Play, ScanSearch, Store, Tags, X } from "lucide-react";
+import { BadgeCheck, BadgeDollarSign, Bot, Check, ChevronRight, CircleAlert, CircleHelp, Ear, ExternalLink, FileText, Gift, Link2, ListVideo, Loader2, Pencil, Play, ScanSearch, Store, Tags, X } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useMatch } from "../contexts/MatchContext";
-import { counts, kindOf, linkIsBrand, type BrandLink, type Match } from "../lib/match";
+import { counts, isDeal, kindOf, linkIsBrand, PROOF_LABEL, proofOf, type BrandLink, type Match } from "../lib/match";
 import { KIND_LABEL, sureness, type DealKind, type Evidence, type Signal } from "../lib/sponsors";
 import { familyOf, FAMILIES, TOPICS, topicLabel, type FamilyKey } from "../lib/taxonomy";
 import { dateLabel } from "../lib/utils";
@@ -48,11 +48,37 @@ const KIND_ICON: Record<DealKind, typeof Gift> = { sponsored: BadgeDollarSign, s
 export function DealChip({ link, onOpen, showName = true, compact = false }: { link: BrandLink; onOpen?: () => void; showName?: boolean; compact?: boolean }) {
   const kind = kindOf(link);
   const Icon = link.store ? Store : KIND_ICON[kind];
-  const sure = sureness(link.confidence, link.verdict === "yes");
-  const label = `${showName ? `${link.brand_name} · ` : ""}${link.store ? "Store affiliate" : KIND_LABEL[kind]}${compact ? "" : ` · ${sure}`}`;
-  const body = <><Icon size={12} aria-hidden="true" />{showName && <b>{link.brand_name}</b>}<span>{link.store ? "Store" : KIND_LABEL[kind]}</span>{!compact && <em className={`sure-${sure.toLowerCase()}`}>{sure}</em>}</>;
+  // A brand deal says how proven it is; an affiliate link says how sure the reading is.
+  const proof = proofOf(link).level;
+  const word = isDeal(link) ? PROOF_LABEL[proof] : sureness(link.confidence, link.verdict === "yes");
+  const tone = isDeal(link) ? `proof-${proof}` : `sure-${word.toLowerCase()}`;
+  const label = `${showName ? `${link.brand_name} · ` : ""}${link.store ? "Store affiliate" : KIND_LABEL[kind]}${compact ? "" : ` · ${word}`}`;
+  const body = <><Icon size={12} aria-hidden="true" />{showName && <b>{link.brand_name}</b>}<span>{link.store ? "Store" : KIND_LABEL[kind]}</span>{!compact && <em className={tone}>{word}</em>}</>;
   return onOpen ? <button type="button" className={`mx-deal k-${link.store ? "store" : kind}`} onClick={onOpen} aria-label={`${label} — see why`}>{body}</button> : <span className={`mx-deal k-${link.store ? "store" : kind}`} aria-label={label}>{body}</span>;
 }
+
+/** "Proven" / "Said once" / "Not confirmed" — is it really a brand deal? */
+export function ProofTag({ link, why = false }: { link: BrandLink; why?: boolean }) {
+  const p = proofOf(link);
+  const Icon = p.level === "proven" ? BadgeCheck : p.level === "affiliate" ? Link2 : CircleHelp;
+  return <span className={`mx-proof ${p.level}`} title={p.why}><Icon size={12} aria-hidden="true" />{PROOF_LABEL[p.level]}{why && <small>{p.why}</small>}</span>;
+}
+
+/** "today", "3d ago", else a date. */
+export const ago = (iso?: string | null) => {
+  if (!iso) return "";
+  const ms = Date.now() - new Date(iso).getTime();
+  if (ms < 3600_000) return `${Math.max(1, Math.round(ms / 60_000))} min ago`;
+  if (ms < 86400_000) return `${Math.round(ms / 3600_000)} h ago`;
+  const d = Math.floor(ms / 86400000);
+  return d < 45 ? `${d}d ago` : dateLabel(iso);
+};
+/** "in 5 days" from a last read and a cycle. */
+export const nextIn = (iso: string | null | undefined, days: number) => {
+  if (!iso) return "";
+  const left = Math.ceil((new Date(iso).getTime() + days * 86400000 - Date.now()) / 86400000);
+  return left <= 0 ? "due now" : left === 1 ? "tomorrow" : `in ${left} days`;
+};
 
 const SIGNAL: Record<Signal, { icon: typeof Gift; text: string }> = {
   paid_label: { icon: BadgeDollarSign, text: "YouTube shows “Includes paid promotion”" },
@@ -78,9 +104,10 @@ export function EvidenceModal({ link, creator, onClose }: { link: BrandLink | nu
   const sure = sureness(live.confidence, live.verdict === "yes");
   const check = m.seen.get(live.brand_key)?.domain_check || "";
   const decide = async (v: "" | "yes" | "no", k: DealKind | null = live.verdict_kind) => { setBusy(true); await m.verdict(live.id, v, k); setBusy(false); };
-  return <Modal open onClose={onClose} title={`${live.brand_name} × ${creator?.name || "creator"}`} description={live.manual ? "Added by you." : `${live.store ? "Store affiliate" : KIND_LABEL[kind]} · ${sure}${live.verdict ? "" : ` (${Math.round(live.confidence * 100)}%)`} · ${live.videos} video${live.videos === 1 ? "" : "s"}${live.last_at ? ` · latest ${dateLabel(live.last_at)}` : ""}`}>
+  return <Modal open onClose={onClose} title={`${live.brand_name} × ${creator?.name || "creator"}`} description={live.manual ? "Added by you." : `${live.store ? "Store affiliate" : KIND_LABEL[kind]}${isDeal(live) ? "" : ` · ${sure}`} · ${live.videos} video${live.videos === 1 ? "" : "s"}${live.last_at ? ` · latest ${dateLabel(live.last_at)}` : ""}`}>
     <div className="mx-evidence">
-      {live.verdict === "no" && <p className="mx-note warn"><CircleAlert size={14} /> You marked this as wrong — it doesn't count anywhere.</p>}
+      {live.verdict === "no" ? <p className="mx-note warn"><CircleAlert size={14} /> You marked this as wrong — it doesn't count anywhere.</p>
+        : <div className={`mx-proof-box ${proofOf(live).level}`}><ProofTag link={live} /><p>{proofOf(live).why}{proofOf(live).level === "stated" || proofOf(live).level === "hint" ? " Not added to your CRM by itself — open the video and decide below." : proofOf(live).level === "affiliate" ? " Fine to pitch them a real brand deal." : ""}</p></div>}
       {live.domain && <p className="mx-ev-site"><Link2 size={13} /> <a href={`https://${live.domain}`} target="_blank" rel="noopener noreferrer">{live.domain}</a><span>{live.brand_id ? "· their website in your CRM" : check === "guess" ? "· found by their name — check it's theirs" : check === "site" ? "· from the creator's own link, site checked" : check === "mismatch" ? "· the site's name differs — check it" : "· from the creator's link"}</span></p>}
       {live.evidence.length ? <ol className="mx-ev-list">{live.evidence.map((e) => <li key={e.video}>
         <a className="mx-ev-video" href={watch(e)} target="_blank" rel="noopener noreferrer"><Play size={13} /><span><strong>{e.title || "Video"}</strong><small>{e.at ? dateLabel(e.at) : ""}{e.t !== undefined ? ` · at ${stamp(e.t)}` : ""} · {KIND_LABEL[e.kind]}</small></span><ExternalLink size={13} /></a>
@@ -95,7 +122,7 @@ export function EvidenceModal({ link, creator, onClose }: { link: BrandLink | nu
         </div>
         {live.verdict !== "no" && !live.store && <label className="mx-kind">It's a<select value={kind} onChange={(e) => decide("yes", e.target.value as DealKind)}>{(Object.keys(KIND_LABEL) as DealKind[]).map((k) => <option key={k} value={k}>{KIND_LABEL[k].toLowerCase()} deal</option>)}</select></label>}
       </div>}
-      <p className="mx-fine">Sponsored = paid placement. Seeded = the brand sent the product. Affiliate = a link or code that pays commission. Your answer is kept for good — a new scan never changes it.</p>
+      <p className="mx-fine">{live.manual ? "" : `Read from their videos ${ago(live.updated_at)} · checked again with their new videos every week. `}Sponsored = paid placement. Seeded = the brand sent the product. Affiliate = a link or code that pays commission. Your answer is kept for good — a new scan never changes it.</p>
     </div>
   </Modal>;
 }
@@ -132,12 +159,12 @@ export function useBrandDeals(brand: Pick<Brand, "id" | "domain" | "name">) {
 }
 
 /** A quiet line that says the reader is still working, or what it couldn't do. */
-export function ReadState({ status, note, scanning, onScan, when }: { status?: string; note?: string; scanning?: boolean; onScan?: () => void; when?: string | null }): ReactNode {
+export function ReadState({ status, note, scanning, onScan, when, every = 7 }: { status?: string; note?: string; scanning?: boolean; onScan?: () => void; when?: string | null; every?: number }): ReactNode {
   if (scanning) return <span className="mx-state busy"><Loader2 size={12} className="spin" /> Reading their videos…</span>;
   if (!status) return <span className="mx-state">Not read yet — the CRM reads new creators within a few minutes{onScan && <> · <button type="button" onClick={onScan}>Read now</button></>}</span>;
   if (status === "no_channel") return <span className="mx-state warn">No YouTube channel to read</span>;
   if (status === "error") return <span className="mx-state warn" title={note}>Couldn't read their videos{onScan && <> · <button type="button" onClick={onScan}>Try again</button></>}</span>;
-  return <span className="mx-state">Read {when ? dateLabel(when) : ""}{onScan && <> · <button type="button" onClick={onScan}>Read again</button></>}</span>;
+  return <span className="mx-state" title={when ? `Last read ${dateLabel(when)}. New videos are read every ${every} days.` : undefined}>Videos read {when ? ago(when) : ""}{when && <> · next {nextIn(when, every)}</>}{onScan && <> · <button type="button" onClick={onScan}>Read again</button></>}</span>;
 }
 
 export function MatchLink({ to, children }: { to: string; children: ReactNode }) {

@@ -4,7 +4,7 @@ import { Link } from "react-router-dom";
 import { useData } from "../contexts/DataContext";
 import { useMatch } from "../contexts/MatchContext";
 import { useToast } from "../contexts/ToastContext";
-import { brandDomain, budgetOf, matchOf, sellsOf, sellsSource, type BrandLink } from "../lib/match";
+import { brandDomain, budgetOf, isDeal, matchOf, sellsOf, sellsSource, type BrandLink } from "../lib/match";
 import { KIND_LABEL, type DealKind } from "../lib/sponsors";
 import { compact, money } from "../lib/utils";
 import { STATUS_LABELS, type Brand, type Creator } from "../types";
@@ -32,7 +32,8 @@ export function BrandMatchPanel({ brand }: { brand: Brand }) {
   const program = intel?.programs.find((p) => p.kind === "affiliate") || intel?.programs.find((p) => p.kind !== "partner");
   const domain = brandDomain(brand);
   const byId = new Map(creators.map((c) => [c.id, c]));
-  const workers = Array.from(new Map(works.map((l) => [l.creator_id, l])).values());
+  const workers = Array.from(new Map(works.filter(isDeal).map((l) => [l.creator_id, l])).values());
+  const affiliates = Array.from(new Map(works.filter((l) => !isDeal(l) && !workers.some((w) => w.creator_id === l.creator_id)).map((l) => [l.creator_id, l])).values());
 
   return <section className="detail-section mx-panel">
     <div className="detail-section-head"><div><span>Match</span><h2>Who fits {brand.name}</h2></div><Link to={`/app/match?id=${brand.id}`} className="btn btn-secondary btn-sm">All matches <ArrowRight size={13} /></Link></div>
@@ -45,7 +46,8 @@ export function BrandMatchPanel({ brand }: { brand: Brand }) {
       {program && <div className="mx-fact"><small>Creator program</small><b><a href={program.url} target="_blank" rel="noopener noreferrer">{program.kind === "affiliate" ? "Affiliate" : "Creators"}{program.commission ? ` · ${program.commission}` : ""}</a></b><span>{program.network || "on their site"}</span></div>}
     </div>
     {intel?.summary && <p className="mx-words small">“{intel.summary}”</p>}
-    {workers.length > 0 && <div className="mx-works"><p><Handshake size={14} /> <b>Already work with them</b> — don't pitch as new</p><div className="mx-works-list">{workers.map((l) => { const c = byId.get(l.creator_id); return c ? <CreatorChip key={l.id} creator={c} onClick={() => setProof({ link: l, creator: c })}><DealChip link={l} showName={false} compact /></CreatorChip> : null; })}</div></div>}
+    {workers.length > 0 && <div className="mx-works"><p><Handshake size={14} /> <b>Already work with them</b> — don't pitch as new</p><div className="mx-works-list">{workers.map((l) => { const c = byId.get(l.creator_id); return c ? <CreatorChip key={l.id} creator={c} onClick={() => setProof({ link: l, creator: c })}><DealChip link={l} showName={false} /></CreatorChip> : null; })}</div></div>}
+    {affiliates.length > 0 && <div className="mx-works aff"><p><b>Affiliate links only</b> — not a brand deal, fine to pitch</p><div className="mx-works-list">{affiliates.map((l) => { const c = byId.get(l.creator_id); return c ? <CreatorChip key={l.id} creator={c} onClick={() => setProof({ link: l, creator: c })}><DealChip link={l} showName={false} compact /></CreatorChip> : null; })}</div></div>}
     {!sells.length ? null : top.length ? <ol className="mx-rows compact">{top.map(({ c, x }) => <li key={c.id} className={`mx-row tone-${x.tone}`}>
       <ScoreRing match={x} size="sm" />
       <Link to={`/app/influencers/${c.id}`} className="mx-row-main"><span className="mx-row-who"><Avatar name={c.name} path={c.avatar_path} size="sm" /><span><strong>{c.name}</strong><small>{[STATUS_LABELS[c.pipeline_status], c.avg_views ? `${compact(c.avg_views)} views` : ""].filter(Boolean).join(" · ")}</small></span></span>
@@ -69,14 +71,17 @@ export function CreatorMatchPanel({ creator }: { creator: Creator }) {
   const brands = m.world.brands;
   const fits = useMemo(() => brands.map((b) => ({ b, x: matchOf(b, creator, m.world) })).filter((r) => !r.x.missing && !r.x.flags.works && r.x.score >= 55).sort((a, b) => b.x.score - a.x.score).slice(0, 4), [brands, creator, m.world]);
   const hasYouTube = (creator.socials || []).some((s) => s.platform === "YouTube" && (s.url || s.handle));
-  const brandDeals = deals.filter((l) => !l.store);
+  // Brand deals (paid / product sent) first; affiliate links are listed apart — they are not deals.
+  const brandDeals = deals.filter(isDeal);
+  const affiliates = deals.filter((l) => !l.store && !isDeal(l));
   const stores = deals.filter((l) => l.store);
 
   return <section className="detail-side-section mx-side">
     <span>Brand deals</span><h2>Who they work with</h2>
-    {hasYouTube && <p className="mx-side-state"><ReadState status={row?.status} note={row?.note} scanning={m.scanning.has(creator.id)} when={row?.scanned_at} onScan={() => void m.scan(creator.id)} /></p>}
+    {hasYouTube && <p className="mx-side-state"><ReadState status={row?.status} note={row?.note} scanning={m.scanning.has(creator.id)} when={row?.scanned_at} every={m.status?.rescanDays} onScan={() => void m.scan(creator.id)} /></p>}
     {brandDeals.length ? <div className="mx-side-deals">{brandDeals.map((l) => <DealChip key={l.id} link={l} onOpen={() => setProof(l)} />)}</div>
-      : row?.status === "ok" ? <p className="muted-copy">No sponsors, seeded products or affiliate links found in their last {content?.videos || ""} videos.</p> : !hasYouTube ? <p className="muted-copy">Add their YouTube channel — the CRM reads their videos for brand deals.</p> : null}
+      : row?.status === "ok" ? <p className="muted-copy">No paid deals or seeded products found in their last {content?.videos || ""} videos.</p> : !hasYouTube ? <p className="muted-copy">Add their YouTube channel — the CRM reads their videos for brand deals.</p> : null}
+    {affiliates.length > 0 && <div className="mx-side-aff"><small>Affiliate links only — not a deal</small><div className="mx-side-deals">{affiliates.map((l) => <DealChip key={l.id} link={l} onOpen={() => setProof(l)} />)}</div></div>}
     {stores.length > 0 && <p className="mx-side-stores">Store affiliate: {stores.map((l) => l.brand_name).join(", ")}</p>}
     {adding ? <form className="mx-add-deal" onSubmit={async (e) => { e.preventDefault(); if (!pick.brand) return; await m.addLink(creator.id, pick.brand, pick.kind); setAdding(false); setPick({ brand: "", kind: "sponsored" }); }}>
       <select value={pick.brand} onChange={(e) => setPick({ ...pick, brand: e.target.value })} aria-label="Brand" required><option value="">Pick a brand…</option>{data.brands.filter((b) => !b.archived_at).sort((a, b) => a.name.localeCompare(b.name)).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select>

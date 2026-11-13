@@ -213,7 +213,7 @@ const SPONSOR = /\b(?:sponsor(?:ed|ing|s)?|today'?s sponsor|paid (?:promotion|pa
 const SEEDED = /\b(?:sent (?:me|us|over|this|these|them|it|the)|(?:has|have|kindly) sent|provided (?:by|this|these|the|me|us|a|an)|(?:review|press|loaner|test) (?:units?|samples?|models?)|samples? (?:was |were )?(?:provided|sent|supplied)|courtesy of|gifted|loaned|on loan|free of charge|supplied (?:by|me|us)|was given (?:to me|to us)|(?:given|lent) to (?:me|us)|for sending (?:this|these|it|me|us|over))\b/i;
 const AFFILIATE = /\b(?:affiliate|commission|(?:use|with|enter|apply) (?:my |the |our |promo |discount |coupon )?(?:code|link)\b|(?:discount|promo|coupon) code|code:\s*\w|\d{1,2} ?% off|save \d{1,2} ?%|ref(?:erral)? link|as an amazon associate|i (?:may|might|will) (?:earn|receive|get)|(?:earn|get) a (?:small )?(?:commission|kickback)|support (?:the|this) channel (?:by|when)|using (?:my|these|the) links?)\b/i;
 const OWN = /\b(?:my (?:own )?(?:merch|store|shop|course|book|app|company|brand|patreon|website|site|newsletter|discord|podcast|second channel|other channel|clothing|apparel|presets|luts|template)|our (?:merch|store|shop|course|discord|podcast|newsletter)|merch(?:andise)?\b|join (?:the |this )?(?:channel|membership)|channel membership)/i;
-const NOT_SPONSORED = /\b(?:(?:is|was|are|were)(?: not|n'?t) (?:a )?(?:sponsored|paid|an ad)|not (?:a )?sponsored|no (?:one|body) (?:paid|sponsored)|nobody (?:paid|sponsored)|unsponsored|no sponsors?|bought (?:it|this|these|them|the \w+) (?:myself|with my own money)|purchased (?:it|this|these|them) (?:myself|with my own))\b/i;
+const NOT_SPONSORED = /\b(?:no (?:affiliation|sponsorship)|not (?:affiliated|endorsed)|(?:is|was|are|were)(?: not|n'?t) (?:a )?(?:sponsored|paid|an ad)|not (?:a )?sponsored|no (?:one|body) (?:paid|sponsored)|nobody (?:paid|sponsored)|unsponsored|no sponsors?|bought (?:it|this|these|them|the \w+) (?:myself|with my own money)|purchased (?:it|this|these|them) (?:myself|with my own))\b/i;
 const HEADER = /^[\W_]*(gear|my gear|my setup|setup|equipment|kit|my kit|parts|pc parts|parts list|build|the build|components|specs|products?(?: (?:used|mentioned|in this video|featured))?|links?|useful links|music|songs?|socials?|follow(?: me)?|connect|find me|sponsors?|partners?|affiliates?|affiliate links|support|support the channel|merch|chapters|timestamps|tools|software|apps|camera gear|what i use|stuff i use|things i use|recommended)\b[^\n]{0,40}$/i;
 const CHAPTER = /^\s*\(?((?:\d{1,2}:)?\d{1,2}:\d{2})\)?\s*[-–—:|•.]?\s*(.{2,90})$/;
 // A call to action with a link: "Get NordVPN here ➼", "Try Notion free", "Head to brilliant.org/x".
@@ -221,14 +221,14 @@ const CTA = /\b(?:get|try|check out|download|sign up(?: for)?|grab|head (?:over 
 const TRACKING = /[?&](?:ref|aff|affiliate|aff_id|affid|aff_sub|via|tag|partner|pid|irclickid|irgwc|sca_ref|rfsn|cjevent|clickid|coupon|discount|code|promo|utm_campaign|utm_source|utm_medium|sid|subid|wt_mc|pp|campaign)=|\/(?:ref|referral|aff|affiliate|go|discount|r|partner|invite|promo)\/[\w-]{2,}/i;
 // "For business inquiries / sponsorships: email…" is the creator selling, not a sponsor.
 const INQUIRY = /business (?:inquir|enquir)|(?:sponsorship|partnership|collab\w*) (?:inquir|enquir|opportunit|request)|for (?:sponsorships?|business|collabs?|partnerships?)\b|interested in (?:sponsoring|working|partnering)|sponsor (?:me|this channel|the channel|a video|my)|become a (?:sponsor|member|patron)|(?:want|like) to sponsor|contact(?: me)?:|e-?mail:|\bpatreon\b|github sponsors/i;
-const STOP_NAMES = new Set(["promotion", "promo", "sponsor", "sponsors", "deal", "deals", "discount", "code", "coupon", "link", "links", "website", "app", "store", "shop", "brand", "product", "werbung", "anzeige", "ad", "ads", "advertising", "nobody", "no one", "none", "myself", "no sponsor", "noone", "pc", "the pc", "gpu", "cpu", "case", "the case", "laptop", "phone", "monitor", "keyboard", "mouse", "car", "product", "products", "parts", "the parts", "unit", "sample", "company", "manufacturer", "mom", "dad", "my wife", "my brother", "viewer", "a fan", "fans", "subscriber", "subscribers", "patron", "me", "us", "you", "this", "that", "them", "it", "everyone", "today", "video", "the video", "this video", "channel", "sponsor", "our sponsor", "the sponsor", "link", "below", "here", "description", "the link", "him", "her", "my friend", "a friend", "friends", "my friends", "the team", "a viewer", "viewers", "patrons", "members", "supporters", "the company", "the brand", "a brand", "brands", "itself", "our partners", "partners", "my patrons", "you guys"]);
+const STOP_NAMES = new Set(["promotion", "promo", "sponsor", "sponsors", "deal", "deals", "discount", "code", "coupon", "link", "links", "website", "app", "store", "shop", "brand", "product", "werbung", "anzeige", "ad", "ads", "advertising", "nobody", "no one", "none", "myself", "no sponsor", "noone", "pc", "the pc", "gpu", "cpu", "case", "the case", "laptop", "phone", "monitor", "keyboard", "mouse", "car", "product", "products", "parts", "the parts", "unit", "sample", "company", "manufacturer", "manufacturers", "retailers", "retailer", "sellers", "mom", "dad", "my wife", "my brother", "viewer", "a fan", "fans", "subscriber", "subscribers", "patron", "me", "us", "you", "this", "that", "them", "it", "everyone", "today", "video", "the video", "this video", "channel", "sponsor", "our sponsor", "the sponsor", "link", "below", "here", "description", "the link", "him", "her", "my friend", "a friend", "friends", "my friends", "the team", "a viewer", "viewers", "patrons", "members", "supporters", "the company", "the brand", "a brand", "brands", "itself", "our partners", "partners", "my patrons", "you guys"]);
 
 const secondsOf = (stamp: string) => stamp.split(":").reduce((s, p) => s * 60 + Number(p), 0);
 
 /** Tidy a brand name cut out of a sentence; "" when it isn't a usable name. */
 export function cleanName(raw: string): string {
   let s = String(raw || "").replace(/[\u{1F000}-\u{1FFFF}\u{2600}-\u{27BF}\u{FE0F}]/gu, " ").replace(/\s+/g, " ").trim();
-  s = s.replace(/^(?:the (?:folks|team|people|guys|crew) (?:at|over at|from)|(?:our|my) (?:good )?(?:friends?|partners?|sponsors?) (?:at|over at|from)|(?:our|my) (?:friends?|partners?|sponsors?)|friends (?:at|over at)|everyone (?:at|over at)|the amazing|our|my|the|this|today'?s sponsor,?)\s+/i, "");
+  s = s.replace(/^(?:the (?:folks|team|people|guys|crew) (?:at|over at|from)|(?:our|my) (?:good )?(?:friends?|partners?|sponsors?) (?:at|over at|from)|(?:our|my) (?:friends?|partners?|sponsors?)|friends (?:at|over at)|everyone (?:at|over at)|the amazing|for|our|my|the|this|today'?s sponsor,?)\s+/i, "");
   s = s.split(/\s+(?:for|to|with|at|and get|and use|who|which|that|because|on|in|so|via|-|–|—|\||:)\s+|\s*[|:;,!?(["“”]\s*|\s+[-–—]\s*|\.\s/)[0].trim();
   s = s.replace(/\s+(?:today|again|this video|this episode|for this|here|below|everyone)$/i, "").replace(/[.'’"]+$/, "").trim();
   if (s.length < 2 || s.length > 40 || !/[a-z]/i.test(s) || s.split(" ").length > 4) return "";
@@ -354,6 +354,8 @@ export function readVideo(v: VideoIn, ctx: ReadContext): Reading {
     const prevCue = prev && !prev.urls.length ? prev.text : "";
     const cueText = line.urls.length && !SPONSOR.test(naked) && !SEEDED.test(naked) && !AFFILIATE.test(naked) && prevCue && i - 1 === prev.index ? `${prevCue} ${naked}` : naked;
     if (INQUIRY.test(cueText)) continue;
+    // "Copyrighted music licensed from Lickd" is the soundtrack, not a deal.
+    if (/\bcopyright|\blicensed (?:from|by|through)\b/i.test(naked)) continue;
     const ownLine = OWN.test(cueText) || sec === "own";
     const sponsorCue = SPONSOR.test(cueText) || sec === "sponsor";
     const seededCue = SEEDED.test(cueText);
@@ -485,7 +487,8 @@ export function readVideo(v: VideoIn, ctx: ReadContext): Reading {
   }
   const mentions = [...found.values()].filter((m) => m.confidence >= 0.3).sort((a, b) => b.confidence - a.confidence);
   // Something is being promoted but nothing in the text says what: worth a listen.
-  const anyNamed = mentions.some((m) => (m.kind === "sponsored" || m.kind === "seeded") && m.confidence >= 0.6);
+  // (A link that was only promoted for sitting up top doesn't count as named: listening says who it really is.)
+  const anyNamed = mentions.some((m) => (m.kind === "sponsored" || m.kind === "seeded") && m.confidence >= 0.6 && saysDeal(m));
   let listen: Reading["listen"];
   if (!anyNamed && !notSponsored) {
     const seg = sponsorSegs[0] || segments.find((s) => s.category === "exclusive_access" && s.action !== "full");
@@ -557,3 +560,46 @@ export function combine(itemsIn: { video: { id: string; title: string; at: strin
 /** Words for a confidence, the same everywhere. */
 export const sureness = (c: number, confirmed = false) => (confirmed ? "Confirmed" : c >= 0.85 ? "Sure" : c >= 0.65 ? "Likely" : c >= 0.45 ? "Possible" : "Unsure");
 export const KIND_LABEL: Record<DealKind, string> = { sponsored: "Sponsored", seeded: "Seeded", affiliate: "Affiliate" };
+
+// ---- how sure a deal is a REAL brand deal ------------------------------------------------
+//
+// An agency pitches brand deals, so a brand only counts as "worked with them"
+// when something says the video was paid for or the product was sent:
+//   proven  their own words ("sponsored by X", "X sent me this", a sponsor
+//           chapter, heard in the video) AND something else backs it up:
+//           YouTube's paid-promotion label, a SponsorBlock sponsor segment, the
+//           title, or the same words in a second video.
+//   stated  their words say it in ONE place only (e.g. one description line).
+//   hint    nothing says it in words: a link up top in a paid video, a name.
+//   affiliate  a link or code that pays commission — never a brand deal.
+// Only "proven" brands are added to the CRM by themselves.
+
+export type Proof = "proven" | "stated" | "hint" | "affiliate";
+const SAYS_DEAL = new RegExp(`${SPONSOR.source}|${SEEDED.source}`, "i");
+// Quotes the reader wrote itself ("<title> — YouTube shows …") are not their words.
+const madeUp = (q: string) => /— (?:YouTube shows|marked ")/.test(q);
+const BACKING: Signal[] = ["paid_label", "sponsorblock", "title", "chapters", "voice"];
+
+/** Did they say it in words in this video? */
+export const saysDeal = (e: Pick<Evidence, "kind" | "signals" | "quote">) =>
+  e.kind !== "affiliate" && (e.signals.includes("voice") || e.signals.includes("chapters") || (!madeUp(e.quote) && SAYS_DEAL.test(e.quote)));
+
+export function dealProof(l: { kind: DealKind; store?: boolean; evidence: Evidence[]; verdict?: string; verdict_kind?: DealKind | null; manual?: boolean }): { level: Proof; why: string } {
+  const kind = l.verdict_kind || l.kind;
+  if (l.store || kind === "affiliate") return { level: "affiliate", why: "Only a link or code that pays them commission — not a brand deal." };
+  if (l.verdict === "yes" || l.manual) return { level: "proven", why: "You confirmed it." };
+  const deal = l.evidence.filter((e) => e.kind !== "affiliate");
+  const said = deal.filter(saysDeal);
+  const heard = said.find((e) => e.signals.includes("voice") && e.quote.split(/\s+/).length >= 4);
+  if (heard) return { level: "proven", why: "Heard them say it in the video." };
+  const backed = said.find((e) => new Set(e.signals.filter((s) => BACKING.includes(s) || s === "description")).size >= 2);
+  if (backed) {
+    const also = backed.signals.filter((s) => BACKING.includes(s) && s !== "chapters");
+    return { level: "proven", why: `Said in their own words, and ${also.includes("paid_label") ? "YouTube marks the video as paid" : also.includes("sponsorblock") ? "viewers marked the sponsor segment" : also.includes("title") ? "the title says it too" : "the chapters say it too"}.` };
+  }
+  const videos = new Set(said.map((e) => e.video)).size;
+  if (videos >= 2) return { level: "proven", why: `Said in their own words in ${videos} videos.` };
+  if (said.length) return { level: "stated", why: "Said once in the description — nothing in the video itself backs it up yet." };
+  if (deal.some((e) => e.signals.includes("paid_label") || e.signals.includes("sponsorblock"))) return { level: "hint", why: "The video is marked as paid, but no words name this brand — it may be a different sponsor." };
+  return { level: "hint", why: "Only a link or a name — nothing says it was paid for or sent." };
+}

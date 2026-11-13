@@ -1,13 +1,13 @@
-import { ArrowLeft, BadgeCheck, Building2, Check, ChevronDown, CircleAlert, EyeOff, FileText, Globe2, Handshake, Loader2, Plus, RefreshCw, Search, Send, ShieldCheck, Sparkles, Store, Users, X } from "lucide-react";
+import { ArrowLeft, BadgeCheck, Building2, Check, ChevronDown, CircleAlert, CircleHelp, EyeOff, FileText, Globe2, Handshake, Loader2, Plus, RefreshCw, Search, Send, ShieldCheck, Sparkles, Store, Users, X } from "lucide-react";
 import { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { blankBrand, brandValue } from "../components/BrandForm";
-import { ContentBar, CreatorChip, DealChip, EditTopicsButton, EvidenceModal, ReadState, ScoreRing, TopicChips, TopicPicker, topicColor } from "../components/MatchBits";
-import { Avatar, Button, EmptyState, PageHeader } from "../components/ui";
+import { ago, ContentBar, CreatorChip, DealChip, EditTopicsButton, EvidenceModal, nextIn, ProofTag, ReadState, ScoreRing, TopicChips, TopicPicker, topicColor } from "../components/MatchBits";
+import { Avatar, Button, EmptyState, Modal, PageHeader } from "../components/ui";
 import { useData } from "../contexts/DataContext";
 import { useMatch } from "../contexts/MatchContext";
 import { useToast } from "../contexts/ToastContext";
-import { brandDomain, budgetOf, counts, domainTrust, foundBrands, kindOf, linkIsBrand, marketsOf, matchOf, sellsOf, sellsSource, type BrandLink, type Match } from "../lib/match";
+import { brandDomain, budgetOf, counts, domainTrust, foundBrands, isDeal, kindOf, linkIsBrand, marketsOf, matchOf, PROOF_LABEL, proofOf, sellsOf, sellsSource, type BrandLink, type Match } from "../lib/match";
 import { KIND_LABEL, sureness, type DealKind } from "../lib/sponsors";
 import { topicLabel } from "../lib/taxonomy";
 import { compact, dateLabel, money } from "../lib/utils";
@@ -26,11 +26,6 @@ type Row = { creator: Creator; match: Match };
 type BrandRow = { brand: Brand; sells: { key: string; weight: number }[]; great: number; good: number; works: number; state: "ok" | "reading" | "no_site" | "blocked" | "pick" };
 
 const pct = (x: number) => `${Math.round(x * 100)}%`;
-const ago = (iso?: string | null) => {
-  if (!iso) return "";
-  const d = Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
-  return d < 1 ? "today" : d < 45 ? `${d}d ago` : dateLabel(iso);
-};
 
 export default function MatchPage() {
   const m = useMatch();
@@ -44,11 +39,13 @@ export default function MatchPage() {
   const st = m.status;
   const found = useMemo(() => foundBrands(m.world).filter((f) => !f.seen.hidden), [m.world]);
   const reading = st && st.read < st.creators;
+  const [how, setHow] = useState(false);
 
   return <div className="entity-page mx-page">
     <PageHeader eyebrow="Brands ⇄ creators" title="Match" description="Who fits which brand, read from what creators post and what brands sell — and who already works with whom, so you never pitch twice."
       actions={<div className="mx-head-actions">
         {reading ? <span className="mx-progress" title="New creators are read within minutes; everyone is re-read weekly."><Loader2 size={13} className="spin" /> Reading videos · {st!.read} of {st!.creators}</span> : st ? <span className="mx-progress ok"><ShieldCheck size={13} /> {st.read} creators · {st.researched} brands read</span> : null}
+        <Button size="sm" variant="ghost" onClick={() => setHow(true)}><CircleHelp size={14} /> How it works</Button>
         <div className="mx-switch" role="tablist" aria-label="View">
           <button type="button" role="tab" aria-selected={view === "match"} className={view === "match" ? "on" : ""} onClick={() => set({ view: "" })}><Sparkles size={14} /> Matches</button>
           <button type="button" role="tab" aria-selected={view === "deals"} className={view === "deals" ? "on" : ""} onClick={() => set({ view: "deals" })}><Handshake size={14} /> Who works with whom{found.length > 0 && <b>{found.length}</b>}</button>
@@ -58,7 +55,45 @@ export default function MatchPage() {
     {!m.ready && !m.error ? <div className="mx-loading" aria-busy="true"><Loader2 size={18} className="spin" /> Loading matches…</div>
       : view === "deals" ? <DealsView found={found} />
       : <MatchView by={by} id={id} set={set} creators={creators} brands={brands} />}
+    {how && <HowItWorks onClose={() => setHow(false)} />}
   </div>;
+}
+
+/** Plain words on what is read, how often, and when to trust it — with today's numbers. */
+function HowItWorks({ onClose }: { onClose: () => void }) {
+  const st = useMatch().status;
+  const waiting = st ? st.creators - st.read : 0;
+  const mins = st && waiting > 0 ? Math.ceil(waiting / (st.perRun || 4)) * (st.everyMin || 3) : 0;
+  return <Modal open onClose={onClose} title="How Match works" description="What the CRM reads, how often, and when to trust it.">
+    <div className="mx-how">
+      {st && <div className="mx-how-live">
+        <div><small>Creators read</small><b>{st.read} of {st.creators}</b><span>{waiting > 0 ? `the rest in about ${mins < 60 ? `${mins} min` : `${Math.round(mins / 60 * 10) / 10} h`}` : st.lastRead ? `last read ${ago(st.lastRead)}` : "all done"}{st.noYoutube ? ` · ${st.noYoutube} have no YouTube` : ""}</span></div>
+        <div><small>Brand sites read</small><b>{st.researched} of {st.brands}</b><span>again every {st.brandDays || 14} days</span></div>
+        <div><small>Decision AI today</small><b>{st.clef.configured ? `${Math.round((st.clef.left / Math.max(1, st.clef.cap)) * 100)}% left` : "Off"}</b><span>{st.clef.pausedUntil ? "paused — rules decide until it resets" : "resets at midnight UTC"}</span></div>
+        <div><small>Listening today</small><b>{st.listen.configured ? `${Math.floor(st.listen.secondsLeft / 60)} min left` : "Off"}</b><span>short clips only</span></div>
+      </div>}
+      <section><h4>What it reads</h4><p>Each creator's uploads from the last year (up to 150 videos): titles, descriptions, chapters, YouTube's own “Includes paid promotion” label, and the sponsor segments viewers mark on SponsorBlock. It does not read full transcripts — YouTube blocks them for servers. Almost every deal is found from this text — that's why many creators already show brands. Only when a video is marked paid but nothing written names the brand does the AI watch that clip (under 3 minutes, a few a day) to hear who it is. Brand websites are read directly; when a site blocks robots or says too little, Gemini reads it instead (a few a day).</p></section>
+      <section><h4>How often</h4><p>New creators: their whole last year, within minutes of adding them ({st?.perRun || 4} every {st?.everyMin || 3} min). After that, only their new videos, every {st?.rescanDays || 7} days — old videos aren't read again. Each profile shows when it was last read and when it's next.</p></section>
+      <section><h4>Kinds of deal</h4>
+        <ul className="mx-how-proof">
+          <li><b>Sponsored</b> — the brand paid for the video or an ad read in it (“this video is sponsored by…”, #ad, a sponsor segment). A brand deal.</li>
+          <li><b>Seeded</b> — the brand sent, lent or gave them the product to show (“X sent me this”, “review unit provided by X”). A brand deal too, usually unpaid or a first step.</li>
+          <li><b>Affiliate</b> — only a link or discount code that pays them commission per sale. Not a brand deal: never added as a brand.</li>
+        </ul>
+        <p>Affiliate links also show Sure / Likely / Possible: how sure the reading of the link is (Sure = 85%+, Likely = 65%+, Possible = 45%+). Brand deals use the labels below instead.</p>
+      </section>
+      <section><h4>When to trust a deal</h4>
+        <ul className="mx-how-proof">
+          <li><span className="mx-proof proven">{PROOF_LABEL.proven}</span> Their own words say it was paid for or sent (“sponsored by…”, “X sent me this”), and something else backs it up: YouTube's paid label, a sponsor segment, the title, a second video, or the AI heard it. Only these are added to your CRM by themselves.</li>
+          <li><span className="mx-proof stated">{PROOF_LABEL.stated}</span> Said in one description line only. Very likely — open the video and confirm.</li>
+          <li><span className="mx-proof hint">{PROOF_LABEL.hint}</span> No words say it: a link at the top of a paid video, or just a name. Could be a different sponsor.</li>
+          <li><span className="mx-proof affiliate">{PROOF_LABEL.affiliate}</span> A link or code that earns them commission. Never a brand deal, never added as a brand — fine to pitch.</li>
+        </ul>
+        <p>Your “Yes” or “No, wrong” on a deal is kept for good — a new read never changes it.</p>
+      </section>
+      <section><h4>The match score</h4><p>Mostly content (60%): how much of their recent videos sit on or close to what the brand sells. Size, price, market and your criteria count only where known, and can't lift an off-topic creator. 80+ is a great fit, 62+ good, 45+ fair.</p></section>
+    </div>
+  </Modal>;
 }
 
 // ---- Matches ----------------------------------------------------------------------------------
@@ -71,21 +106,22 @@ function MatchView({ by, id, set, creators, brands }: { by: "brand" | "creator";
     const row = m.intel.get(b.id);
     const sells = sellsOf(b, row?.intel);
     let great = 0, good = 0, works = 0;
-    if (sells.length) for (const c of creators) {
+    // Only the rail on screen is scored (each rail is brands × creators matches).
+    if (sells.length && by === "brand") for (const c of creators) {
       const x = matchOf(b, c, m.world);
       if (x.flags.works) works++;
       else if (!x.missing && !x.flags.pitched) { if (x.score >= 80) great++; else if (x.score >= 62) good++; }
     }
     const state: BrandRow["state"] = sells.length ? "ok" : !brandDomain(b) ? "no_site" : !row ? "reading" : row.status === "blocked" || row.status === "unreachable" ? "blocked" : "pick";
     return { brand: b, sells, great, good, works, state };
-  }).sort((a, b) => b.great - a.great || b.good - a.good || Number(b.state === "ok") - Number(a.state === "ok") || a.brand.name.localeCompare(b.brand.name)), [brands, creators, m.intel, m.world]);
+  }).sort((a, b) => b.great - a.great || b.good - a.good || Number(b.state === "ok") - Number(a.state === "ok") || a.brand.name.localeCompare(b.brand.name)), [brands, creators, m.intel, m.world, by]);
 
   const creatorRows = useMemo(() => creators.map((c) => {
     const row = m.content.get(c.id);
     let great = 0;
-    if (row?.content?.topics.length) for (const b of brands) { const x = matchOf(b, c, m.world); if (!x.missing && !x.flags.works && x.score >= 80) great++; }
+    if (row?.content?.topics.length && by === "creator") for (const b of brands) { const x = matchOf(b, c, m.world); if (!x.missing && !x.flags.works && x.score >= 80) great++; }
     return { creator: c, content: row?.content || null, status: row?.status || "", great, deals: (m.linksBy.get(c.id) || []).filter((l) => counts(l) && !l.store).length };
-  }).sort((a, b) => b.great - a.great || Number(!!b.content) - Number(!!a.content) || a.creator.name.localeCompare(b.creator.name)), [creators, brands, m.content, m.world, m.linksBy]);
+  }).sort((a, b) => b.great - a.great || Number(!!b.content) - Number(!!a.content) || a.creator.name.localeCompare(b.creator.name)), [creators, brands, m.content, m.world, m.linksBy, by]);
 
   const firstBrand = brandRows.find((r) => r.state === "ok")?.brand.id || brandRows[0]?.brand.id || "";
   const firstCreator = creatorRows[0]?.creator.id || "";
@@ -154,6 +190,7 @@ function BrandPane({ brand, creators }: { brand: Brand; creators: Creator[] }) {
 
   const rows = useMemo<Row[]>(() => creators.map((creator) => ({ creator, match: matchOf(brand, creator, m.world) })).sort((a, b) => b.match.score - a.match.score), [brand, creators, m.world]);
   const works = rows.filter((r) => r.match.flags.works);
+  const affiliates = rows.filter((r) => r.match.flags.affiliate);
   const scored = rows.filter((r) => !r.match.flags.works && !r.match.missing);
   const pitched = scored.filter((r) => r.match.flags.pitched);
   const fresh = scored.filter((r) => !r.match.flags.pitched);
@@ -171,13 +208,13 @@ function BrandPane({ brand, creators }: { brand: Brand; creators: Creator[] }) {
       <Avatar name={brand.name} path={brand.avatar_path} size="lg" />
       <div className="mx-ph-main">
         <h2><Link to={`/app/brands/${brand.id}`}>{brand.name}</Link>{intel?.verified && <BadgeCheck size={16} className="mx-verified" aria-label="Website checked" />}</h2>
-        <p className="mx-ph-sub">{domain ? <a href={intel?.url || `https://${domain}`} target="_blank" rel="noopener noreferrer"><Globe2 size={12} /> {domain}</a> : <Link to={`/app/brands/${brand.id}?edit=1`}>Add their website</Link>}<span>· {STATUS_LABELS[brand.pipeline_status]}</span>{row?.researched_at && <span>· site read {ago(row.researched_at)}</span>}</p>
+        <p className="mx-ph-sub">{domain ? <a href={intel?.url || `https://${domain}`} target="_blank" rel="noopener noreferrer"><Globe2 size={12} /> {domain}</a> : <Link to={`/app/brands/${brand.id}?edit=1`}>Add their website</Link>}<span>· {STATUS_LABELS[brand.pipeline_status]}</span>{row?.researched_at && <span title={`Their site is read again every ${m.status?.brandDays || 14} days`}>· site read {ago(row.researched_at)} · next {nextIn(row.researched_at, m.status?.brandDays || 14)}</span>}</p>
       </div>
       {domain && <Button size="sm" variant="secondary" loading={researching} onClick={() => void m.research(brand.id)} aria-label="Read their website again"><RefreshCw size={13} /> <span className="hide-sm">Read site again</span></Button>}
     </header>
     {intel?.summary && <p className="mx-words">“{intel.summary}”</p>}
     <div className="mx-sells">
-      <small>Sells {source === "you" ? <em>· set by you</em> : source === "site" ? <em>· from their site{intel?.by === "rules+ai" ? " + AI" : ""}</em> : sells.length ? <em>· from their type</em> : null}</small>
+      <small>Sells {source === "you" ? <em>· set by you</em> : source === "site" ? <em>· from their site{intel?.by === "rules+ai" ? " + AI" : intel?.by === "gemini" ? " · read by Gemini" : ""}</em> : sells.length ? <em>· from their type</em> : null}</small>
       <div className="mx-fact-row">{sells.length ? <TopicChips items={sells} max={6} /> : <span className="muted-copy">{row?.status === "blocked" ? "Their site blocks robots." : !domain ? "No website yet." : !row ? "Reading their site…" : "Couldn't tell from their site."}</span>}<EditTopicsButton onClick={() => setPicker(true)} /></div>
     </div>
     <div className="mx-facts">
@@ -189,7 +226,11 @@ function BrandPane({ brand, creators }: { brand: Brand; creators: Creator[] }) {
 
     {works.length > 0 && <div className="mx-works">
       <p><Handshake size={14} /> <b>Already work with {brand.name}</b> — don't pitch these as new.</p>
-      <div className="mx-works-list">{works.map((r) => <CreatorChip key={r.creator.id} creator={r.creator} onClick={() => setProof({ link: r.match.flags.works!, creator: r.creator })}><DealChip link={r.match.flags.works!} showName={false} compact /></CreatorChip>)}</div>
+      <div className="mx-works-list">{works.map((r) => <CreatorChip key={r.creator.id} creator={r.creator} onClick={() => setProof({ link: r.match.flags.works!, creator: r.creator })}><DealChip link={r.match.flags.works!} showName={false} /></CreatorChip>)}</div>
+    </div>}
+    {affiliates.length > 0 && <div className="mx-works aff">
+      <p><b>Affiliate links only</b> — they earn commission from {brand.name}, no brand deal yet. Fine to pitch.</p>
+      <div className="mx-works-list">{affiliates.map((r) => <CreatorChip key={r.creator.id} creator={r.creator} onClick={() => setProof({ link: r.match.flags.affiliate!, creator: r.creator })}><DealChip link={r.match.flags.affiliate!} showName={false} compact /></CreatorChip>)}</div>
     </div>}
 
     <div className="mx-list-head">
@@ -253,16 +294,19 @@ function CreatorPane({ creator, brands }: { creator: Creator; brands: Brand[] })
   const row = m.content.get(creator.id);
   const content = row?.content || null;
   const [proof, setProof] = useState<BrandLink | null>(null);
-  const deals = (m.linksBy.get(creator.id) || []).filter((l) => counts(l)).sort((a, b) => Number(a.store) - Number(b.store) || b.confidence - a.confidence);
+  const all = (m.linksBy.get(creator.id) || []).filter((l) => counts(l)).sort((a, b) => Number(a.store) - Number(b.store) || b.confidence - a.confidence);
+  const deals = all.filter(isDeal);
+  const affiliates = all.filter((l) => !isDeal(l));
   const rows = useMemo(() => brands.map((b) => ({ brand: b, match: matchOf(b, creator, m.world) })).filter((x) => !x.match.missing || x.match.flags.works).sort((a, b) => Number(!!b.match.flags.works) - Number(!!a.match.flags.works) || b.match.score - a.match.score), [brands, creator, m.world]);
   const unknown = brands.length - rows.length;
   return <div className="mx-creator">
     <header className="mx-pane-head">
       <Avatar name={creator.name} path={creator.avatar_path} size="lg" />
-      <div className="mx-ph-main"><h2><Link to={`/app/influencers/${creator.id}`}>{creator.name}</Link></h2><p className="mx-ph-sub"><span>{STATUS_LABELS[creator.pipeline_status]}</span>{(creator.avg_views || 0) > 0 && <span>· {compact(creator.avg_views)} avg views</span>}<span>· <ReadState status={row?.status} note={row?.note} scanning={m.scanning.has(creator.id)} when={row?.scanned_at} onScan={() => void m.scan(creator.id)} /></span></p></div>
+      <div className="mx-ph-main"><h2><Link to={`/app/influencers/${creator.id}`}>{creator.name}</Link></h2><p className="mx-ph-sub"><span>{STATUS_LABELS[creator.pipeline_status]}</span>{(creator.avg_views || 0) > 0 && <span>· {compact(creator.avg_views)} avg views</span>}<span>· <ReadState status={row?.status} note={row?.note} scanning={m.scanning.has(creator.id)} when={row?.scanned_at} every={m.status?.rescanDays} onScan={() => void m.scan(creator.id)} /></span></p></div>
     </header>
     {content?.topics.length ? <div className="mx-mix"><ContentBar topics={content.topics} height={12} /><TopicChips items={content.topics} max={7} /><small>From their last {content.videos} videos{content.by === "rules+ai" ? " · AI checked the unclear ones" : ""}</small></div> : null}
-    {deals.length > 0 && <div className="mx-works"><p><Handshake size={14} /> <b>Works with</b></p><div className="mx-works-list">{deals.map((l) => <DealChip key={l.id} link={l} onOpen={() => setProof(l)} />)}</div></div>}
+    {deals.length > 0 && <div className="mx-works"><p><Handshake size={14} /> <b>Brand deals</b></p><div className="mx-works-list">{deals.map((l) => <DealChip key={l.id} link={l} onOpen={() => setProof(l)} />)}</div></div>}
+    {affiliates.length > 0 && <div className="mx-works aff"><p><b>Affiliate links</b> — not deals</p><div className="mx-works-list">{affiliates.map((l) => <DealChip key={l.id} link={l} onOpen={() => setProof(l)} />)}</div></div>}
     <div className="mx-list-head"><h3>Brands that fit {creator.name.split(" ")[0]} <span>{rows.length}</span></h3></div>
     {!content?.topics.length ? <p className="mx-none">{m.scanning.has(creator.id) ? "Reading their videos…" : "Their videos haven't been read yet — brands are ranked once they are."}</p>
       : !rows.length ? <p className="mx-none">No brand has what-they-sell on file yet.</p>
@@ -285,7 +329,8 @@ function DealsView({ found }: { found: ReturnType<typeof foundBrands> }) {
   const navigate = useNavigate();
   const m = useMatch();
   const { toast } = useToast();
-  const [kinds, setKinds] = useState<DealKind[]>(["sponsored", "seeded", "affiliate"]);
+  // Brand deals first: affiliate links are a filter away (they are not deals).
+  const [kinds, setKinds] = useState<DealKind[]>(["sponsored", "seeded"]);
   const [stores, setStores] = useState(false);
   const [possible, setPossible] = useState(false);
   const [q, setQ] = useState("");
@@ -293,9 +338,9 @@ function DealsView({ found }: { found: ReturnType<typeof foundBrands> }) {
   const [proof, setProof] = useState<{ link: BrandLink; creator?: Creator } | null>(null);
   const [showHidden, setShowHidden] = useState(false);
   const autoAdd = data.profile.preferences.match_auto_add !== false;
-  // "Possible" finds (a name with no clear words, maybe a person) wait behind a toggle.
+  // Only PROVEN brand deals show by default; "said once" and unconfirmed finds wait behind a toggle.
   const [showUnsure, setShowUnsure] = useState(false);
-  const unsureFound = found.filter((f) => f.best.verdict !== "yes" && f.best.confidence < 0.65);
+  const unsureFound = found.filter((f) => proofOf(f.best).level !== "proven");
   const shownFound = showUnsure ? found : found.filter((f) => !unsureFound.includes(f));
   const creatorsById = useMemo(() => new Map(m.world.creators.map((c) => [c.id, c])), [m.world.creators]);
   const hiddenCount = useMemo(() => [...m.seen.values()].filter((s) => s.hidden).length, [m.seen]);
@@ -318,23 +363,45 @@ function DealsView({ found }: { found: ReturnType<typeof foundBrands> }) {
       .sort((a, b) => new Set(b.links.map((l) => l.creator_id)).size - new Set(a.links.map((l) => l.creator_id)).size || a.name.localeCompare(b.name));
   }, [m.links, m.world.brands, m.seen, kinds, stores, possible, query, creatorsById]);
 
-  const sure = found.filter((f) => f.best.confidence >= 0.85 && f.seen.domain && (f.seen.domain_check === "site" || f.seen.domain_check === "guess"));
+  const sure = found.filter((f) => proofOf(f.best).level === "proven" && f.best.confidence >= 0.85 && f.seen.domain && f.seen.domain_check === "site");
+  // Brands the CRM added by itself under the older, looser rule that aren't proven now — yours to keep or archive.
+  const autoLoose = useMemo(() => data.brands.filter((b) => !b.archived_at && b.discovered?.auto && b.pipeline_status === "new").map((b) => {
+    const theirs = m.links.filter((l) => linkIsBrand(l, b) && isDeal(l) && counts(l));
+    const best = theirs.sort((x, y) => Number(proofOf(y).level === "proven") - Number(proofOf(x).level === "proven"))[0];
+    return { brand: b, best, why: best ? proofOf(best).why : "No deal found in the videos any more." };
+  }).filter((x) => !x.best || proofOf(x.best).level !== "proven"), [data.brands, m.links]);
+  const [reviewOpen, setReviewOpen] = useState(false);
   const add = (f: (typeof found)[number]) => {
     const kind = kindOf(f.best);
     const who = creatorsById.get(f.best.creator_id)?.name || "a creator";
     const top = f.seen.site?.topics?.[0]?.key;
     const when = f.best.last_at ? new Date(f.best.last_at).toLocaleString("en-US", { month: "short", year: "numeric" }) : "";
-    const b = data.addBrand({ ...brandValue({ ...blankBrand, name: f.seen.name, domain: f.seen.domain, brand_type: top ? topicLabel(top) : "", notes: `Found in ${who}'s videos — ${kind === "seeded" ? "sent them product" : kind === "affiliate" ? "affiliate link" : "sponsored them"}${when ? ` (${when})` : ""}.` }), discovered: { creator_id: f.best.creator_id, creator: who, kind, at: new Date().toISOString(), auto: false } });
+    const b = data.addBrand({ ...brandValue({ ...blankBrand, name: f.seen.name, domain: f.seen.domain, brand_type: top ? topicLabel(top) : "", notes: `Found in ${who}'s videos — ${kind === "seeded" ? "sent them product" : "sponsored them"}${when ? ` (${when})` : ""}.` }), discovered: { creator_id: f.best.creator_id, creator: who, kind, at: new Date().toISOString(), auto: false } });
     return b;
   };
 
   return <div className="mx-deals">
+    {autoLoose.length > 0 && <section className="mx-review">
+      <div className="mx-review-head">
+        <CircleAlert size={16} aria-hidden="true" />
+        <div><strong>{autoLoose.length === 1 ? "1 brand the CRM added isn't a proven deal" : `${autoLoose.length} brands the CRM added aren't proven deals`}</strong><p>{autoLoose.length === 1 ? "It was" : "They were"} added before the stricter rule. Only brands still at New are listed — nothing you've worked on.</p></div>
+        <div className="mx-review-btns">
+          <Button size="sm" variant="ghost" onClick={() => setReviewOpen(!reviewOpen)} aria-expanded={reviewOpen}>{reviewOpen ? "Hide" : "Review"}</Button>
+          <Button size="sm" variant="secondary" onClick={() => { const ids = autoLoose.map((x) => x.brand.id); data.archive("brand", ids); toast(`Archived ${ids.length} unproven brand${ids.length === 1 ? "" : "s"}.`, "success", { label: "Undo", run: () => data.archive("brand", ids, true) }); }}>Archive {autoLoose.length === 1 ? "it" : `all ${autoLoose.length}`}</Button>
+        </div>
+      </div>
+      {reviewOpen && <ul className="mx-review-list">{autoLoose.map((x) => <li key={x.brand.id}>
+        <Link to={`/app/brands/${x.brand.id}`}><Avatar name={x.brand.name} path={x.brand.avatar_path} size="sm" /><span><strong>{x.brand.name}</strong><small>{x.why}</small></span></Link>
+        {x.best && <button type="button" className="link-btn" onClick={() => setProof({ link: x.best!, creator: creatorsById.get(x.best!.creator_id) })}>See proof</button>}
+        <button type="button" className="mx-icon-btn" aria-label={`Archive ${x.brand.name}`} title="Archive" onClick={() => { data.archive("brand", [x.brand.id]); toast(`${x.brand.name} archived.`, "success", { label: "Undo", run: () => data.archive("brand", [x.brand.id], true) }); }}><X size={14} /></button>
+      </li>)}</ul>}
+    </section>}
     {<section className="mx-found">
       <div className="mx-found-head">
-        <div><h3><Sparkles size={16} /> Found in their videos — not in your CRM</h3><p>Brands your creators work with. The website comes from the creator's own link and is checked against the brand's site.</p></div>
-        {sure.length > 1 && <Button size="sm" onClick={() => { const added = sure.map(add); toast(`Added ${added.length} brands — their sites are read next.`, "success"); }}><Plus size={13} /> Add the {sure.length} sure ones</Button>}
+        <div><h3><Sparkles size={16} /> Brand deals found in their videos — not in your CRM</h3><p>Paid or seeded only — affiliate links never count. The website comes from the creator's own link and is checked against the brand's site.</p></div>
+        {sure.length > 1 && <Button size="sm" onClick={() => { const added = sure.map(add); toast(`Added ${added.length} brands — their sites are read next.`, "success"); }}><Plus size={13} /> Add the {sure.length} proven ones</Button>}
       </div>
-      <label className="mx-auto-add"><input type="checkbox" checked={autoAdd} onChange={(e) => { data.updateProfile({ preferences: { ...data.profile.preferences, match_auto_add: e.target.checked } }); toast(e.target.checked ? "Sure brands from creators you add are added by themselves." : "Found brands wait here for you."); }} /> Add sure ones by themselves when I add a creator <small>(paid or seeded, the creator's own link, site checked)</small></label>
+      <label className="mx-auto-add"><input type="checkbox" checked={autoAdd} onChange={(e) => { data.updateProfile({ preferences: { ...data.profile.preferences, match_auto_add: e.target.checked } }); toast(e.target.checked ? "Sure brands from creators you add are added by themselves." : "Found brands wait here for you."); }} /> Add proven brand deals by themselves when I add a creator <small>(their own words say it was paid for or sent, and YouTube's paid label, a sponsor segment, the title or a second video backs it up · site checked)</small></label>
       {shownFound.length ? <ul className="mx-found-list">{shownFound.slice(0, 60).map((f) => {
         const trust = domainTrust(f.seen);
         const kindsHere = Array.from(new Set(f.links.map(kindOf)));
@@ -348,15 +415,16 @@ function DealsView({ found }: { found: ReturnType<typeof foundBrands> }) {
           </div>
           <div className="mx-fb-who">
             <span className="mx-fb-kinds">{kindsHere.map((k) => <span key={k} className={`mx-dot k-${k}`}>{KIND_LABEL[k]}</span>)}</span>
-            <button type="button" className="mx-faces" onClick={() => setProof({ link: f.best, creator: creatorsById.get(f.best.creator_id) })} aria-label={`See why: ${who.map((c) => c.name).join(", ")}`}>{who.slice(0, 4).map((c) => <Avatar key={c.id} name={c.name} path={c.avatar_path} size="sm" />)}{who.length > 4 && <b>+{who.length - 4}</b>}<span>{who.length === 1 ? who[0].name : `${who.length} creators`} · {sureness(f.best.confidence, f.best.verdict === "yes")}</span></button>
+            <button type="button" className="mx-faces" onClick={() => setProof({ link: f.best, creator: creatorsById.get(f.best.creator_id) })} aria-label={`See why: ${who.map((c) => c.name).join(", ")}`}>{who.slice(0, 4).map((c) => <Avatar key={c.id} name={c.name} path={c.avatar_path} size="sm" />)}{who.length > 4 && <b>+{who.length - 4}</b>}<span>{who.length === 1 ? who[0].name : `${who.length} creators`}</span></button>
+            <ProofTag link={f.best} />
           </div>
           <div className="mx-fb-actions">
             <Button size="sm" variant="secondary" disabled={!f.seen.domain && f.best.confidence < 0.65} onClick={() => { const b = add(f); toast(`${b.name} added.`, "success", { label: "Open", run: () => navigate(`/app/brands/${b.id}`) }); }}><Plus size={13} /> Add</Button>
-            <button type="button" className="mx-icon-btn" onClick={() => void m.hide(f.seen.brand_key, true)} aria-label={`Hide ${f.seen.name}`} title="Hide — not a brand you'd pitch"><EyeOff size={14} /></button>
+            <button type="button" className="mx-icon-btn" onClick={() => { for (const k of f.keys) void m.hide(k, true); }} aria-label={`Hide ${f.seen.name}`} title="Hide — not a brand you'd pitch"><EyeOff size={14} /></button>
           </div>
         </li>;
-      })}</ul> : <p className="mx-none">{found.length ? "Only unsure finds so far — show them below." : "Nothing new — every brand found in videos is in your CRM or hidden."}</p>}
-      {unsureFound.length > 0 && <button type="button" className="link-btn mx-hidden-toggle" onClick={() => setShowUnsure(!showUnsure)}>{showUnsure ? "Hide" : "Show"} {unsureFound.length} unsure find{unsureFound.length === 1 ? "" : "s"}</button>}
+      })}</ul> : <p className="mx-none">{found.length ? "No proven deals to add yet — the ones below were said once. Open one to check the video." : "Nothing new — every brand deal found in videos is in your CRM or hidden."}</p>}
+      {unsureFound.length > 0 && <button type="button" className="link-btn mx-hidden-toggle" onClick={() => setShowUnsure(!showUnsure)}>{showUnsure ? "Hide" : "Show"} {unsureFound.length} said once</button>}
       {hiddenCount > 0 && <button type="button" className="link-btn mx-hidden-toggle" onClick={() => setShowHidden(!showHidden)}>{showHidden ? "Hide" : "Show"} {hiddenCount} hidden</button>}
       {showHidden && <ul className="mx-hidden-list">{[...m.seen.values()].filter((s) => s.hidden).map((s) => <li key={s.brand_key}><span>{s.name}{s.domain ? ` · ${s.domain}` : ""}</span><button type="button" className="link-btn" onClick={() => void m.hide(s.brand_key, false)}>Show again</button></li>)}</ul>}
     </section>}
@@ -376,7 +444,7 @@ function DealsView({ found }: { found: ReturnType<typeof foundBrands> }) {
           for (const l of g.links) { const prev = byCreator.get(l.creator_id); if (!prev || l.confidence > prev.confidence) byCreator.set(l.creator_id, l); }
           return <li key={g.key}>
             <div className="mx-map-brand">{g.brand ? <Link to={`/app/brands/${g.brand.id}`}><Avatar name={g.name} path={g.brand.avatar_path} size="sm" /><span><strong>{g.name}</strong><small>In your CRM · {STATUS_LABELS[g.brand.pipeline_status]}</small></span></Link> : <span className="mx-map-out"><Avatar name={g.name} size="sm" /><span><strong>{g.name}</strong><small>{g.domain || "Not in your CRM"}</small></span></span>}</div>
-            <div className="mx-map-creators">{[...byCreator.entries()].map(([cid, l]) => { const c = creatorsById.get(cid)!; return <button type="button" key={cid} className={`mx-pair k-${l.store ? "store" : kindOf(l)}`} onClick={() => setProof({ link: l, creator: c })}><Avatar name={c.name} path={c.avatar_path} size="sm" /><span><strong>{c.name}</strong><small>{l.store ? "Store" : KIND_LABEL[kindOf(l)]} · {l.verdict === "yes" ? "Confirmed" : sureness(l.confidence)}{l.last_at ? ` · ${dateLabel(l.last_at)}` : ""}</small></span></button>; })}</div>
+            <div className="mx-map-creators">{[...byCreator.entries()].map(([cid, l]) => { const c = creatorsById.get(cid)!; return <button type="button" key={cid} className={`mx-pair k-${l.store ? "store" : kindOf(l)}`} onClick={() => setProof({ link: l, creator: c })}><Avatar name={c.name} path={c.avatar_path} size="sm" /><span><strong>{c.name}</strong><small>{l.store ? "Store" : KIND_LABEL[kindOf(l)]} · {l.verdict === "yes" ? "Confirmed" : isDeal(l) ? PROOF_LABEL[proofOf(l).level] : sureness(l.confidence)}{l.last_at ? ` · ${dateLabel(l.last_at)}` : ""}</small></span></button>; })}</div>
           </li>;
         })}</ul>}
     </section>

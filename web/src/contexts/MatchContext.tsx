@@ -19,7 +19,7 @@ import { useToast } from "./ToastContext";
 // A creator you add with a YouTube channel is read right away (not at the
 // next 3-minute cron), and a toast says what was found.
 
-export type MatchStatus = { creators: number; read: number; brands: number; researched: number; youtube: boolean; clef: { configured: boolean; left: number; cap: number; pausedUntil: string | null }; listen: { configured: boolean; secondsLeft: number } };
+export type MatchStatus = { stamp?: string; creators: number; read: number; noYoutube?: number; lastRead?: string | null; everyMin?: number; perRun?: number; rescanDays?: number; brandDays?: number; brands: number; researched: number; youtube: boolean; clef: { configured: boolean; left: number; cap: number; pausedUntil: string | null }; listen: { configured: boolean; secondsLeft: number } };
 type Result = { ok: boolean; message: string };
 type Value = {
   ready: boolean;
@@ -57,15 +57,15 @@ async function call<T>(body: Record<string, unknown>): Promise<{ data?: T; error
   try { const parsed = res ? ((await res.clone().json()) as { error?: string }) : null; if (parsed?.error) message = parsed.error; } catch { /* keep the plain message */ }
   return { error: message };
 }
+// All pages at once: count first, then every 1,000-row page in parallel.
 const pageAll = async <T,>(table: string, columns: string, userId: string): Promise<T[]> => {
-  const out: T[] = [];
-  for (let from = 0; from < 50_000; from += 1000) {
-    const { data, error } = await supabase.from(table).select(columns).eq("user_id", userId).range(from, from + 999);
-    if (error) throw error;
-    out.push(...((data || []) as T[]));
-    if (!data || data.length < 1000) break;
-  }
-  return out;
+  const { count, error } = await supabase.from(table).select("user_id", { count: "exact", head: true }).eq("user_id", userId);
+  if (error) throw error;
+  const pages = Math.min(50, Math.max(1, Math.ceil((count || 0) / 1000)));
+  const got = await Promise.all(Array.from({ length: pages }, (_, i) => supabase.from(table).select(columns).eq("user_id", userId).range(i * 1000, i * 1000 + 999)));
+  const bad = got.find((g) => g.error);
+  if (bad?.error) throw bad.error;
+  return got.flatMap((g) => (g.data || []) as T[]);
 };
 
 export function MatchProvider({ children }: { children: ReactNode }) {
@@ -85,6 +85,8 @@ export function MatchProvider({ children }: { children: ReactNode }) {
   const [scanning, setScanning] = useState<Set<string>>(new Set());
   const [researching, setResearching] = useState<Set<string>>(new Set());
   const busy = useRef(false);
+  // What the server last said changed (newest deal / read / site check); a poll reloads only when it moves.
+  const stamp = useRef("");
   const cloud = hasSupabase && !!userId && !data.demoSeeded;
 
   const refresh = useCallback(async () => {
@@ -107,7 +109,7 @@ export function MatchProvider({ children }: { children: ReactNode }) {
       setReady(true);
       setError("");
       const st = await call<MatchStatus & { ok: boolean }>({ action: "status" });
-      if (st.data) setStatus(st.data);
+      if (st.data) { setStatus(st.data); stamp.current = st.data.stamp || ""; }
     } catch (e) {
       // Before the migration runs the tables don't exist: say so plainly, keep the app working.
       setError(e && typeof e === "object" && "message" in e && /relation|does not exist|schema cache/i.test(String((e as { message: string }).message)) ? "Matching isn't set up on the server yet." : "Couldn't load matches — check your connection.");
@@ -119,11 +121,19 @@ export function MatchProvider({ children }: { children: ReactNode }) {
 
   const load = useCallback(() => setWanted(true), []);
   useEffect(() => { if (wanted) void refresh(); }, [wanted, refresh]);
-  // While creators or brands are still being read, look again every minute.
+  // While creators or brands are still being read, ask the server every minute
+  // whether anything changed — and only then load it again (a reload re-scores everything).
   const pending = !!status && (status.read < status.creators || status.researched < status.brands);
   useEffect(() => {
     if (!wanted || !pending) return;
-    const t = window.setInterval(() => { if (document.visibilityState === "visible") void refresh(); }, 60_000);
+    const t = window.setInterval(async () => {
+      if (document.visibilityState !== "visible" || busy.current) return;
+      const st = await call<MatchStatus & { ok: boolean }>({ action: "status" });
+      if (!st.data) return;
+      if (st.data.stamp && st.data.stamp === stamp.current) { setStatus(st.data); return; }
+      stamp.current = st.data.stamp || "";
+      void refresh();
+    }, 60_000);
     return () => window.clearInterval(t);
   }, [wanted, pending, refresh]);
 
@@ -218,7 +228,7 @@ export function MatchProvider({ children }: { children: ReactNode }) {
   const linksBy = useMemo(() => byCreator(links), [links]);
   const criteria = useMemo(() => normalizeCriteria(data.profile.preferences.youtube_criteria), [data.profile.preferences.youtube_criteria]);
   const world = useMemo<MatchWorld>(() => ({
-    links, linksBy, pitches, campaigns: data.campaigns, creators: data.creators.filter((c) => !c.archived_at), brands: data.brands.filter((b) => !b.archived_at),
+    links, linksBy, pitches, campaigns: data.campaigns, creators: data.creators.filter((c) => !c.archived_at), brands: data.brands.filter((b) => !b.archived_at), archivedBrands: data.brands.filter((b) => b.archived_at),
     intel, content, seen, criteria,
   }), [links, linksBy, pitches, data.campaigns, data.creators, data.brands, intel, content, seen, criteria]);
 
