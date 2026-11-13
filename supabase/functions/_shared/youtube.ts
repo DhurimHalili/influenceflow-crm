@@ -297,3 +297,36 @@ export async function channelFacts(input: string, now = new Date(), opts: { incl
   };
   return { ...facts, stars: starsFor(facts) };
 }
+
+// ---- reading a channel's videos (brand-match) ------------------------------------
+
+export type FullVideo = { id: string; title: string; description: string; tags: string[]; at: string; secs: number; views: number; paid: boolean; live: string; stream: boolean };
+
+/** The channel id behind a link / handle / id (1 unit, 0 for a plain id). */
+export async function channelIdOf(input: string): Promise<string | null> {
+  const ref = parseChannelRef(input);
+  return ref ? await channelIdFor(ref) : null;
+}
+
+/** One page (50) of a channel's uploads, newest first: ids + publish dates. 1 unit. */
+export async function uploadsPage(channelId: string, pageToken = ""): Promise<{ items: { id: string; at: string }[]; next: string }> {
+  if (!/^UC[\w-]{22}$/.test(channelId)) return { items: [], next: "" };
+  const got = await api("playlistItems", { part: "contentDetails", playlistId: `UU${channelId.slice(2)}`, maxResults: "50", ...(pageToken ? { pageToken } : {}) });
+  const items = (got.items || []).map((i: { contentDetails?: { videoId?: string; videoPublishedAt?: string } }) => ({ id: String(i.contentDetails?.videoId || ""), at: String(i.contentDetails?.videoPublishedAt || "") })).filter((x: { id: string }) => /^[\w-]{11}$/.test(x.id));
+  return { items, next: typeof got.nextPageToken === "string" ? got.nextPageToken : "" };
+}
+
+/** Full details of up to 50 videos per unit: description, tags, YouTube's paid-promotion label. */
+export async function videoDetails(ids: string[]): Promise<FullVideo[]> {
+  const out: FullVideo[] = [];
+  for (let i = 0; i < ids.length; i += 50) {
+    const got = await api("videos", { part: "snippet,contentDetails,statistics,liveStreamingDetails,paidProductPlacementDetails", id: ids.slice(i, i + 50).join(",") });
+    for (const v of got.items || []) out.push({
+      id: String(v.id || ""), title: String(v.snippet?.title || "").slice(0, 300), description: String(v.snippet?.description || "").slice(0, 6000),
+      tags: Array.isArray(v.snippet?.tags) ? v.snippet.tags.map(String).slice(0, 40) : [], at: String(v.snippet?.publishedAt || ""),
+      secs: seconds(v.contentDetails?.duration || ""), views: Number(v.statistics?.viewCount || 0),
+      paid: v.paidProductPlacementDetails?.hasPaidProductPlacement === true, live: String(v.snippet?.liveBroadcastContent || "none"), stream: !!v.liveStreamingDetails?.actualStartTime,
+    });
+  }
+  return out;
+}

@@ -1,0 +1,59 @@
+// Run: node --experimental-strip-types --import ./scripts/ts-hooks.mjs src/lib/match.test.ts
+import { budgetOf, byCreator, foundBrands, matchOf, sellsOf, type BrandLink, type MatchWorld } from "./match.ts";
+import type { Brand, Campaign, Creator } from "../types/index.ts";
+
+let fail = 0;
+const eq = (name: string, got: unknown, want: unknown) => { const ok = JSON.stringify(got) === JSON.stringify(want); if (!ok) fail++; console.log(ok ? "ok  " : "FAIL", name, ok ? "" : `got ${JSON.stringify(got)} want ${JSON.stringify(want)}`); };
+const yes = (name: string, cond: boolean, info?: unknown) => { if (!cond) fail++; console.log(cond ? "ok  " : "FAIL", name, cond ? "" : JSON.stringify(info)); };
+
+const brand = (over: Partial<Brand> & { match_topics?: string[] }): Brand & { match_topics?: string[] } => ({ id: "b1", user_id: "u", name: "TRYX", domain: "https://www.tryx.com/en", brand_type: "", contact_email: "", secondary_email: "", secondary_email_label: "", brief: { niches: [], platforms: [], formats: [], tiers: [], budget_min: 0, budget_max: 0, budget_period: "campaign", goals: [], markets: [], ages: [], gender: "", payment_terms: "", usage_rights: "", exclusivity: "", gifting: false, avoid: [], next_launch: null }, socials: [], pipeline_status: "new", date_contacted: null, status_updated_at: "", draft_subject: "", draft_body: "", notes: "", priority: "none", next_action_date: null, lost_reason: "", lost_at: null, archived_at: null, created_at: "", ...over } as Brand);
+const creator = (id: string, over: Partial<Creator> = {}): Creator => ({ id, user_id: "u", name: id, contact_email: "", secondary_email: "", secondary_email_label: "", channel_link: "", socials: [], niche: "", country: "United States", avg_views: 120_000, engagement_rate: 3, stars: 0, stars_consistency: 0, stars_demographics: 0, stars_niche: 0, stars_engagement: 0, rates: {} as Creator["rates"], draft_subject: "", draft_body: "", platform: "YouTube", pipeline_status: "new", on_roster: false, date_contacted: null, status_updated_at: "", notes: "", lost_reason: "", lost_at: null, followup_count: 0, last_followup_at: null, priority: "none", next_action_date: null, archived_at: null, created_at: "", youtube: { channel_id: "UCxxxxxxxxxxxxxxxxxxxxxx", subscribers: 300_000 }, ...over } as Creator);
+const content = (topics: [string, number][]) => ({ creator_id: "", status: "ok", scanned_at: "", content: { v: 1, at: "", videos: 40, clear: 36, shorts: 0, topics: topics.map(([key, share]) => ({ key, share, videos: Math.round(share * 40) })), examples: {}, newest: "", by: "rules" } });
+const link = (over: Partial<BrandLink>): BrandLink => ({ id: Math.random().toString(36).slice(2), creator_id: "", brand_key: "", brand_name: "", domain: "", brand_id: null, kind: "sponsored", confidence: 0.9, store: false, videos: 1, first_at: "2026-10-01", last_at: "2026-10-01", evidence: [], by_ai: false, manual: false, verdict: "", verdict_kind: null, verdict_at: null, updated_at: "", ...over });
+
+const tryx = brand({ intel: undefined } as never);
+const world = (over: Partial<MatchWorld> = {}): MatchWorld => {
+  const w: MatchWorld = {
+    links: [], pitches: [], campaigns: [], creators: [creator("builder"), creator("mixed"), creator("cars")], brands: [tryx],
+    intel: new Map([["b1", { brand_id: "b1", status: "ok", researched_at: "", intel: { v: 1, at: "", domain: "tryx.com", url: "", name: "TRYX", summary: "", sells: [{ key: "pc_cases", weight: 0.6 }, { key: "pc_cooling", weight: 0.4 }], by: "rules", products: 0, examples: [], price: null, platform: "", programs: [], socials: [], markets: ["US"], currency: "USD", wiki: "", pages: [], verified: true } }]]),
+    content: new Map([["builder", content([["pc_builds", 0.7], ["gpus", 0.2]])], ["mixed", content([["pc_builds", 0.35], ["games", 0.5]])], ["cars", content([["car_reviews", 0.9]])]]),
+    seen: new Map(), now: new Date("2026-11-13T00:00:00Z"), ...over,
+  };
+  w.linksBy = byCreator(w.links);
+  return w;
+};
+
+const w0 = world();
+const [mb, mm, mc] = ["builder", "mixed", "cars"].map((id) => matchOf(tryx, w0.creators.find((c) => c.id === id)!, w0));
+yes("PC builder is a great match for a case + cooler brand", mb.score >= 75 && mb.tone !== "weak", mb);
+yes("half PC, half gameplay is close but lower", mm.score < mb.score && mm.score >= 35, mm);
+yes("car channel is a weak match", mc.score < 20, mc);
+eq("reason names their content", mb.reasons[0].text, "90% of their videos: PC builds + Graphics cards");
+yes("pure PC channel reads great", mb.tone === "great", mb.score);
+
+// Already working with them (by domain), pitched, rival.
+const w1 = world({ links: [link({ creator_id: "builder", brand_key: "tryx.com", brand_name: "TRYX", domain: "tryx.com", kind: "seeded" }), link({ creator_id: "mixed", brand_key: "nzxt.com", brand_name: "NZXT", domain: "nzxt.com", kind: "sponsored", last_at: "2026-10-20" })],
+  pitches: [{ id: "p", brand_id: "b1", creator_id: "cars", at: "2026-11-01", source: "pitch" }],
+  seen: new Map([["nzxt.com", { brand_key: "nzxt.com", name: "NZXT", domain: "nzxt.com", domain_check: "site", site: { topics: [{ key: "pc_cases", weight: 0.5 }, { key: "pc_builds", weight: 0.5 }] }, checked_at: "", hidden: false, added_brand_id: null }]]) });
+eq("works with them (seeded)", matchOf(tryx, w1.creators[0], w1).flags.works?.kind, "seeded");
+eq("rival deal 24 days ago", matchOf(tryx, w1.creators[1], w1).flags.rival?.name, "NZXT");
+eq("already pitched", !!matchOf(tryx, w1.creators[2], w1).flags.pitched, true);
+eq("a rejected link doesn't count", matchOf(tryx, w1.creators[0], world({ links: [link({ creator_id: "builder", brand_key: "tryx.com", domain: "tryx.com", verdict: "no" })] })).flags.works, undefined);
+
+// What a brand sells: yours wins, then the site, then its type.
+eq("sells: your pick", sellsOf(brand({ match_topics: ["keyboards", "mice"] })), [{ key: "keyboards", weight: 0.5 }, { key: "mice", weight: 0.5 }]);
+eq("sells: from the brand type", sellsOf(brand({ brand_type: "Laptops" })).map((s) => s.key), ["laptops"]);
+eq("no data → missing brand", matchOf(brand({ id: "b9" }), w0.creators[0], w0).missing, "brand");
+eq("no videos read → missing creator", matchOf(tryx, creator("new"), w0).missing, "creator");
+
+// Budget.
+const camp = { id: "c", brand_id: "b1", status: "completed", agreed_payment: 6000, creator_ids: ["a", "b"] } as unknown as Campaign;
+eq("budget from deals", budgetOf(tryx, { links: [], creators: [], campaigns: [camp] }), { kind: "deals", low: 3000, high: 3000, per: "campaign", from: "1 deal you closed", n: 1 });
+const est = budgetOf(tryx, { links: [link({ creator_id: "builder", brand_key: "tryx.com", domain: "tryx.com" })], creators: [creator("builder", { avg_views: 200_000 })], campaigns: [] });
+eq("budget estimate from who they sponsor", [est?.kind, est?.low, est?.high], ["estimate", 3000, 7000]);
+
+// Found brands: not in the CRM, shops left out.
+const w2 = world({ links: [link({ creator_id: "builder", brand_key: "raycon.com", brand_name: "Raycon", domain: "raycon.com" }), link({ creator_id: "mixed", brand_key: "raycon.com", brand_name: "Raycon", domain: "raycon.com" }), link({ creator_id: "mixed", brand_key: "amazon.com", brand_name: "Amazon", domain: "amazon.com", store: true, kind: "affiliate" }), link({ creator_id: "builder", brand_key: "tryx.com", brand_name: "TRYX", domain: "tryx.com" })] });
+eq("found brands", foundBrands(w2).map((f) => [f.seen.name, f.creators]), [["Raycon", 2]]);
+
+if (fail) { console.log(`\n${fail} failing`); process.exit(1); } else console.log("\nall match tests pass");

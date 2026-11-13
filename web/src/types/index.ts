@@ -65,6 +65,8 @@ export interface WorkspacePreferences {
   youtube_auto: boolean;
   /** Average views also count videos younger than a day (off: only videos 1 day+ old). */
   youtube_recent?: boolean;
+  /** Match: add brands found in a newly added creator's videos by themselves when sure (default on). */
+  match_auto_add?: boolean;
   /** Your bar for YouTube influencers (lib/criteria). */
   youtube_criteria?: YouTubeCriteria;
   /** Weekly report by email: Monday morning (last week), Sunday evening (this week) or off. */
@@ -348,6 +350,10 @@ export interface Brand {
   secondary_email_label: string;
   brief: BrandBrief;
   socials: SocialLink[];
+  /** What they sell, set by you (topic keys from lib/taxonomy.ts) — wins over their site for matching. */
+  match_topics?: string[];
+  /** Set when the brand came from a creator's video (Match → found in videos). */
+  discovered?: { creator_id: string; creator: string; kind: string; at: string; auto?: boolean } | null;
   pipeline_status: EntityStatus;
   date_contacted: string | null;
   status_updated_at: string;

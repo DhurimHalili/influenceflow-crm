@@ -7,6 +7,7 @@ import { ToastProvider } from "./contexts/ToastContext";
 import { UpdateWatcher } from "./components/UpdateWatcher";
 import { GmailProvider } from "./contexts/GmailContext";
 import { YouTubeProvider } from "./contexts/YouTubeContext";
+import { MatchProvider } from "./contexts/MatchContext";
 import { AccessProvider, AccessWaiting, useAccess } from "./contexts/AccessContext";
 
 const AppShell = lazy(() => import("./components/AppShell"));
@@ -23,6 +24,7 @@ const ReportsPage = lazy(() => import("./pages/ReportsPage"));
 const LeadsPage = lazy(() => import("./pages/LeadsPage"));
 const InvoicesPage = lazy(() => import("./components/Money").then((m) => ({ default: m.InvoicesPage })));
 const PitchPage = lazy(() => import("./pages/PitchPage"));
+const MatchPage = lazy(() => import("./pages/MatchPage"));
 const MediaKitPage = lazy(() => import("./pages/MediaKitPage"));
 const InfluencersPage = lazy(() => import("./pages/InfluencersPage"));
 const InfluencerDetailPage = lazy(() => import("./pages/InfluencersPage").then((module) => ({ default: module.InfluencerDetailPage })));
@@ -70,6 +72,7 @@ export default function App() {
           <DataProvider>
             <GmailProvider>
             <YouTubeProvider>
+            <MatchProvider>
             <UpdateWatcher />
             <Suspense fallback={<LoadingScreen />}>
               <Routes>
@@ -95,6 +98,7 @@ export default function App() {
                   <Route path="leads" element={<LeadsPage />} />
                   <Route path="invoices" element={<InvoicesPage />} />
                   <Route path="pitch" element={<PitchPage />} />
+                  <Route path="match" element={<MatchPage />} />
                   <Route path="settings" element={<SettingsPage />} />
                   <Route path="members" element={<MembersPage />} />
                   <Route path="themes" element={<ThemesPage />} />
@@ -105,6 +109,7 @@ export default function App() {
                 <Route path="*" element={<NotFound />} />
               </Routes>
             </Suspense>
+            </MatchProvider>
             </YouTubeProvider>
             </GmailProvider>
           </DataProvider>
