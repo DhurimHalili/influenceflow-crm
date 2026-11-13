@@ -8,7 +8,7 @@ import { clefStatus, decide, useClefBudget, type ClefQuestion } from "../_shared
 import { listenConfigured, listenLeft, listenTo, useListenBudget } from "../_shared/listen.ts";
 import { fetchTranscript, txConfigured, txLeft, txProviders } from "../_shared/transcriptApis.ts";
 import { askBrand, searchSite, useBrandAskBudget } from "../_shared/brandAsk.ts";
-import { duckSite, officialSite } from "../_shared/officialSite.ts";
+import { companyCountry, duckSite, officialSite } from "../_shared/officialSite.ts";
 
 // Brand ⇄ creator matching and "who works with whom" (see the migration
 // 20261122000000_brand_match.sql for the tables).
@@ -596,7 +596,23 @@ type Intel = {
   products: number; examples: string[]; price: { min: number; median: number; max: number; currency: string } | null; platform: string;
   programs: { kind: string; url: string; text: string; commission?: string; network?: string }[]; socials: { platform: string; url: string }[];
   markets: string[]; currency: string; wiki: string; works_with_creators: boolean | number | null; pages: string[]; verified: boolean;
+  /** Where the shop is: its store's own country (Shopify meta.json) and the company's home (Wikidata). */
+  geo?: { shop?: string; hq?: string; at: string };
 };
+
+/**
+ * Where a brand's shop is: a Shopify store publishes its own country (/meta.json, public); Wikidata knows
+ * where the company is based. Both free. The app adds the country domain, the shop currency, the
+ * countries the site serves and where the creators they pay are, to rank the brand's markets.
+ */
+async function brandGeo(name: string, domain: string, origin: string): Promise<NonNullable<Intel["geo"]>> {
+  const geo: NonNullable<Intel["geo"]> = { at: new Date().toISOString() };
+  const meta = origin ? await getJson(`${origin.replace(/\/$/, "")}/meta.json`).catch(() => null) as { country?: unknown; currency?: unknown; myshopify_domain?: unknown } | null : null;
+  if (meta && typeof meta.country === "string" && /^[A-Z]{2}$/.test(meta.country) && (typeof meta.myshopify_domain === "string" || typeof meta.currency === "string")) geo.shop = meta.country;
+  const hq = await companyCountry(name, domain).catch(() => "");
+  if (hq) geo.hq = hq;
+  return geo;
+}
 
 /**
  * A Wikipedia summary — ONLY when Wikidata's "official website" for that page is
@@ -621,6 +637,9 @@ async function researchBrand(admin: SupabaseClient, b: BrandRow): Promise<Intel 
   const now = new Date();
   const domain = normalizeDomain(b.domain || "");
   if (!domain) { await admin.from("brand_intel").upsert({ brand_id: b.id, user_id: b.user_id, status: "no_domain", researched_at: now.toISOString(), updated_at: now.toISOString() }); return null; }
+  const { data: before } = await admin.from("brand_intel").select("intel").eq("brand_id", b.id).maybeSingle();
+  const prev = (before?.intel || null) as Intel | null;
+  const keptGeo = prev?.geo && prev.domain === domain ? prev.geo : null;
   // The address as you saved it first (a locale path like /en often has the real page), then the bare domain.
   const saved = (() => { try { const u = new URL(/^https?:\/\//i.test(b.domain || "") ? b.domain! : `https://${b.domain}`); return `${u.origin}${u.pathname}`.replace(/\/$/, ""); } catch { return ""; } })();
   const tries = Array.from(new Set([saved, `https://${domain}`, `https://www.${domain}`].filter(Boolean)));
@@ -693,6 +712,8 @@ async function researchBrand(admin: SupabaseClient, b: BrandRow): Promise<Intel 
     products: products.length, examples: products.length ? products.slice(0, 10).map((p) => p.title) : asked?.isBrand ? asked.examples : [], price: priceStats(products, facts?.currency || ""), platform: facts?.platform || "",
     programs: programs.slice(0, 5), socials: (facts?.socials || []).slice(0, 8), markets: marketsOf(facts?.locales || []), currency: facts?.currency || "",
     wiki: wiki?.extract || "", works_with_creators: asked?.isBrand ? asked.creators : null, pages: pages.slice(0, 6), verified: facts ? siteIsBrand(b.name, domain, facts) || !!wiki?.verified : !!wiki?.verified,
+    // Where the shop is doesn't change: looked up once per website and kept on every later read.
+    geo: keptGeo || await brandGeo(b.name, domain, origin || `https://${domain}`).catch(() => ({ at: now.toISOString() })),
   };
   const status = facts && !facts.blocked ? "ok" : blocked && (wiki || by === "gemini") ? "ok" : facts?.blocked ? "blocked" : "unreachable";
   await admin.from("brand_intel").upsert({ brand_id: b.id, user_id: b.user_id, intel, status, researched_at: now.toISOString(), updated_at: now.toISOString() });
@@ -912,6 +933,18 @@ async function cron(admin: SupabaseClient) {
     for (const c of (list || []) as CreatorRow[]) {
       if (Date.now() > deadline - 50_000) break;
       try { await scanCreator(admin, c, deadline - 30_000); log.creators = Number(log.creators) + 1; } catch (e) { if (e instanceof YouTubeQuota) { log.quota = "youtube"; break; } }
+    }
+  }
+  // 4b. Brands read before markets were looked up: where their shop is (free, a few a run).
+  if (Date.now() < deadline - 45_000) {
+    const { data: rows } = await admin.from("brand_intel").select("brand_id, user_id, intel").in("user_id", ids).eq("status", "ok").is("intel->geo", null).limit(6);
+    for (const r of (rows || []) as { brand_id: string; user_id: string; intel: Intel | null }[]) {
+      if (Date.now() > deadline - 35_000 || !r.intel?.domain) continue;
+      const { data: b } = await admin.from("brands").select("name, domain").eq("id", r.brand_id).maybeSingle();
+      const origin = (() => { try { return new URL(r.intel!.url).origin; } catch { return `https://${r.intel!.domain}`; } })();
+      const geo = await brandGeo(b?.name || r.intel.name, r.intel.domain, origin).catch(() => ({ at: new Date().toISOString() }));
+      await admin.from("brand_intel").update({ intel: { ...r.intel, geo } }).eq("brand_id", r.brand_id).eq("user_id", r.user_id);
+      log.geo = Number(log.geo || 0) + 1;
     }
   }
   // 5. Brands not researched for two weeks.

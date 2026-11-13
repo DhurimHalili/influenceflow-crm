@@ -35,6 +35,9 @@ const cars = topicFit(tryx, [{ key: "car_reviews", share: 1 }]);
 yes("pure PC creator fits best", builder.fit > 0.8, builder);
 yes("half PC is close, not perfect", mixed.fit > 0.4 && mixed.fit < builder.fit, mixed);
 eq("cars don't fit", cars.fit, 0);
+const broadTech = topicFit(tryx, [{ key: "phones", share: 0.3 }, { key: "pc_builds", share: 0.25 }, { key: "laptops", share: 0.2 }, { key: "audio", share: 0.15 }]);
+yes("a broad tech reviewer who regularly builds PCs fits a PC brand well (same audience)", broadTech.fit >= 0.5 && broadTech.fit < builder.fit, broadTech);
+yes("a phones-only channel doesn't get that credit", topicFit(tryx, [{ key: "phones", share: 0.9 }]).fit < 0.3, topicFit(tryx, [{ key: "phones", share: 0.9 }]));
 yes("unclear videos don't count as off-topic", topicFit(tryx, [{ key: "pc_builds", share: 0.5 }]).fit > topicFit(tryx, [{ key: "pc_builds", share: 0.5 }, { key: "food", share: 0.5 }]).fit);
 eq("competitors overlap", overlap([{ key: "pc_cases", weight: 0.6 }, { key: "pc_cooling", weight: 0.4 }], [{ key: "pc_cooling", weight: 1 }]), 0.4);
 
