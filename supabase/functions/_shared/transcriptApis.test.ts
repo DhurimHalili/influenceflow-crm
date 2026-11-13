@@ -19,7 +19,8 @@ globalThis.fetch = ((input: string | URL | Request, init?: RequestInit) => {
 }) as typeof fetch;
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
-eq("stamped markdown → ms", parseStamped("# Title\nlanguage: en\n\n[0:05] Hello there\n[1:02:03] This video is sponsored by NordVPN\nno stamp"), [[5000, "Hello there"], [3723000, "This video is sponsored by NordVPN"]]);
+eq("a paragraph over several lines stays whole", parseStamped("Title: X\nLanguage: en\n\n**[0:05]** Hey everyone, today's video\nis sponsored by Ridge, the wallet\nthat lasts.\n\n[0:20] Let's get into it"), [[5000, "Hey everyone, today's video is sponsored by Ridge, the wallet that lasts."], [20000, "Let's get into it"]]);
+eq("stamped markdown → ms", parseStamped("# Title\nlanguage: en\n\n[0:05] Hello there\n[1:02:03] This video is sponsored by NordVPN\nno stamp"), [[5000, "Hello there"], [3723000, "This video is sponsored by NordVPN no stamp"]]);
 
 const by = (name: string) => PROVIDERS.find((p) => p.name === name)!;
 route = () => json({ content: [{ text: "Thanks to Ridge for sponsoring", offset: 61000, duration: 3000, lang: "en" }], lang: "en", availableLangs: ["en"] });
