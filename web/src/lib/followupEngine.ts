@@ -1,5 +1,5 @@
 import type { Brand, Creator, EmailEvent, EntityStatus, Followup, FollowupRules } from "../types";
-import { dayKey, parseDay } from "./days.ts";
+import { dateFmt, dayKey, parseDay } from "./days.ts";
 import { isAck, quotedOwnDate } from "./replyReader.ts";
 
 // The follow-up engine: who is waiting on whom, and when to follow up.
@@ -379,20 +379,20 @@ const weekday = (key: string) => {
   const diff = Math.round((d.getTime() - today.getTime()) / 86400000);
   if (diff === 0) return "today";
   if (diff === 1) return "tomorrow";
-  return new Intl.DateTimeFormat("en-US", diff > 0 && diff < 7 ? { weekday: "long" } : { weekday: "short", month: "short", day: "numeric" }).format(d);
+  return dateFmt(diff > 0 && diff < 7 ? { weekday: "long" } : { weekday: "short", month: "short", day: "numeric" }).format(d);
 };
 
 /** "today 9:00", "tomorrow 14:30", "Tue 9:00" — or "" once the time has passed (Gmail's date may be when it was written). */
 export const sendsAt = (iso: string, now = new Date()) => {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime()) || d <= now) return "";
-  const time = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(d);
+  const time = dateFmt({ hour: "numeric", minute: "2-digit" }, undefined).format(d);
   const today = new Date(now);
   today.setHours(0, 0, 0, 0);
   const day = new Date(d);
   day.setHours(0, 0, 0, 0);
   const diff = Math.round((day.getTime() - today.getTime()) / 86400000);
-  const date = diff === 0 ? "today" : diff === 1 ? "tomorrow" : new Intl.DateTimeFormat("en-US", diff < 7 ? { weekday: "short" } : { month: "short", day: "numeric" }).format(d);
+  const date = diff === 0 ? "today" : diff === 1 ? "tomorrow" : dateFmt(diff < 7 ? { weekday: "short" } : { month: "short", day: "numeric" }).format(d);
   return `${date} ${time}`;
 };
 

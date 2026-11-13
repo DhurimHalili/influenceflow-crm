@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useSyncExternalStore } from "react";
 import { useData } from "../contexts/DataContext";
 import { chaseList, type Chase } from "../lib/followupEngine";
 import { dayShort, dayWord, followupsPaused, followupsResume, modeOn, normalizeWeekend, sendingPaused, sendingResumes, type DayMode } from "../lib/dayMode";
@@ -8,17 +8,21 @@ import { latestReplies, noVerdict, notInterested, type NoLevel, type NoVerdict }
 
 export type NoEntry = { verdict: NoVerdict | null; group: NoLevel | "denied"; type: "creator" | "brand"; denied: boolean };
 
-/** Re-render at local midnight so "due today" flips without a reload. */
+/** Re-render at local midnight so "due today" flips without a reload. One clock for the whole app
+ *  (it used to be one timer per row — 400 timers on a long brand list). */
+const dayListeners = new Set<() => void>();
+let currentDay = new Date().toDateString();
+let dayTimer = 0;
+const subscribeDay = (fn: () => void) => {
+  dayListeners.add(fn);
+  if (!dayTimer) dayTimer = window.setInterval(() => {
+    const now = new Date().toDateString();
+    if (now !== currentDay) { currentDay = now; for (const l of dayListeners) l(); }
+  }, 60_000);
+  return () => { dayListeners.delete(fn); if (!dayListeners.size) { window.clearInterval(dayTimer); dayTimer = 0; } };
+};
 export function useToday() {
-  const [day, setDay] = useState(() => new Date().toDateString());
-  useEffect(() => {
-    const tick = window.setInterval(() => {
-      const now = new Date().toDateString();
-      setDay((prev) => (prev === now ? prev : now));
-    }, 60_000);
-    return () => window.clearInterval(tick);
-  }, []);
-  return day;
+  return useSyncExternalStore(subscribeDay, () => currentDay, () => currentDay);
 }
 
 export type DayInfo = {
@@ -40,14 +44,23 @@ export function useDayMode(): DayInfo {
   const data = useData();
   const day = useToday();
   const weekend = data.profile.preferences?.weekend;
-  return useMemo(() => {
+  return useMemo(() => dayInfoFor(weekend, day), [weekend, day]);
+}
+
+// Every flag on a list asks for the same answer: work it out once per day and settings.
+let dayCache: { key: string; info: DayInfo } | null = null;
+function dayInfoFor(weekend: unknown, day: string): DayInfo {
+  const key = `${day}|${JSON.stringify(weekend ?? null)}`;
+  if (dayCache?.key === key) return dayCache.info;
+  const info = (() => {
     const now = new Date();
-    const w = normalizeWeekend(weekend);
+    const w = normalizeWeekend(weekend as Parameters<typeof normalizeWeekend>[0]);
     const mode = modeOn(now, w);
     const r = followupsResume(now, w), rr = sendingResumes(now, w);
     return { mode, followupsPaused: followupsPaused(mode), sendingPaused: sendingPaused(mode), resume: dayWord(r, now), resumeShort: dayShort(r), replyResume: dayWord(rr, now), replyResumeShort: dayShort(rr) };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [weekend, day]);
+  })();
+  dayCache = { key, info };
+  return info;
 }
 
 /** Follow-up state of every influencer and brand, by id. */

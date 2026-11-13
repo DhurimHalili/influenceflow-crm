@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "npm run build:backup && tsc -b && vite build",
+    "build:backup": "vite build --config vite.backup.config.ts",
     "lint": "oxlint",
     "preview": "vite preview",
     "deploy:pages": "npm run build && npx --yes gh-pages -d dist -r https://github.com/DhurimHalili/influenceflow-crm.git"

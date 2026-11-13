@@ -6,6 +6,7 @@ import { brandTopics, contentProfile, TOPIC, TOPICS, topicLabel, videoTopics, ty
 import { marketsOf, parseHtml, parseShopify, parseShopifyCollections, parseWoo, priceStats, readProgram, siteIsBrand, siteName, type Product, type SiteFacts } from "../_shared/brandSite.ts";
 import { clefStatus, decide, useClefBudget, type ClefQuestion } from "../_shared/clef.ts";
 import { listenConfigured, listenLeft, listenTo, useListenBudget } from "../_shared/listen.ts";
+import { fetchTranscript, txConfigured, txLeft, txProviders } from "../_shared/transcriptApis.ts";
 import { askBrand, searchSite, useBrandAskBudget } from "../_shared/brandAsk.ts";
 import { duckSite, officialSite } from "../_shared/officialSite.ts";
 
@@ -514,6 +515,80 @@ async function listenSome(admin: SupabaseClient, deadline: number): Promise<numb
   return done;
 }
 
+type TxItem = { id: string; status: "ok" | "none" | "error"; lang: string; kind: string; caps: Caption[] };
+/**
+ * Captions read for a member's videos — by the helper in their browser or by a transcript service — are
+ * read for spoken sponsors, saved, and who-works-with-whom is rebuilt. One path for both sources.
+ */
+async function applyTranscripts(admin: SupabaseClient, userId: string, items: TxItem[]): Promise<{ saved: number; found: number }> {
+  if (!items.length) return { saved: 0, found: 0 };
+  // Only this member's own videos.
+  const { data: own } = await admin.from("creator_videos").select("*").eq("user_id", userId).in("video_id", items.map((i) => i.id));
+  const rowsById = new Map<string, VideoRow[]>();
+  for (const r of (own || []) as VideoRow[]) rowsById.set(r.video_id, [...(rowsById.get(r.video_id) || []), r]);
+  const { known } = await knownFor(admin, userId);
+  const creatorIds = Array.from(new Set(((own || []) as VideoRow[]).map((r) => r.creator_id)));
+  const { data: people } = creatorIds.length ? await admin.from("creators").select("id, user_id, name, socials, youtube, created_at, archived_at").eq("user_id", userId).in("id", creatorIds) : { data: [] };
+  const byCreator = new Map(((people || []) as CreatorRow[]).map((c) => [c.id, c]));
+  const now = new Date().toISOString();
+  const changed: VideoRow[] = [];
+  let found = 0;
+  for (const it of items) for (const r of rowsById.get(it.id) || []) {
+    if (it.status === "error") { const tries = (r.transcript_tries || 0) + 1; changed.push({ ...r, transcript_tries: tries, transcript_status: tries >= 3 ? "error" : "", transcript_at: now }); continue; }
+    if (it.status === "none") { changed.push({ ...r, transcript_status: "none", transcript_at: now, transcript_hits: [] }); continue; }
+    const c = byCreator.get(r.creator_id);
+    const ownDomains = (c?.socials || []).filter((x) => x && !["YouTube", "Instagram", "TikTok", "X", "Twitch", "Kick", "Facebook", "LinkedIn", "Snapchat", "Pinterest", "Threads", "WhatsApp"].includes(x.platform)).map((x) => normalizeDomain(x.url)).filter(Boolean);
+    const base = r.mentions.filter((m) => !m.signals.includes("transcript"));
+    const heard = readTranscript(it.caps, { creator: c?.name || "", handle: typeof c?.youtube?.handle === "string" ? c.youtube.handle : "", ownDomains, known, resolved: {}, local: base, paid: r.paid });
+    // The same brand from the description and from their words: one finding with both signals.
+    const merged = [...base];
+    for (const m of heard.mentions) {
+      const i = merged.findIndex((x) => x.key === m.key);
+      if (i < 0) { merged.push(m); continue; }
+      const x = merged[i];
+      const spokenWins = m.confidence >= x.confidence || (x.kind === "affiliate" && m.kind !== "affiliate");
+      merged[i] = { ...(spokenWins ? m : x), domain: x.domain || m.domain, domainFrom: x.domain ? x.domainFrom : m.domainFrom, signals: Array.from(new Set([...x.signals, ...m.signals])), confidence: Math.min(0.97, Math.max(x.confidence, m.confidence) + (x.kind === m.kind ? 0.04 : 0)), t: m.t ?? x.t };
+    }
+    if (heard.notSponsored) for (const m of merged) if (m.kind === "sponsored" && !/sponsor/i.test(m.quote)) m.confidence = Math.min(m.confidence, 0.35);
+    const deal = heard.mentions.some((m) => m.kind !== "affiliate" && m.confidence >= 0.8);
+    found += heard.mentions.filter((m) => m.kind !== "affiliate").length;
+    changed.push({ ...r, mentions: merged, listen: deal ? null : r.listen, transcript_status: "ok", transcript_lang: it.lang, transcript_kind: it.kind, transcript_at: now, transcript_hits: heard.hits, judged_at: null });
+  }
+  if (changed.length) {
+    await saveVideos(admin, changed, now);
+  }
+  // Who works with whom, again for the creators whose videos changed.
+  for (const cid of Array.from(new Set(changed.filter((r) => r.transcript_status === "ok").map((r) => r.creator_id)))) {
+    const c = byCreator.get(cid);
+    if (!c) continue;
+    await rebuildLinks(admin, c, await linkRows(admin, userId, cid)).catch(() => 0);
+  }
+  return { saved: changed.length, found };
+}
+
+/** Priority captions from the transcript services (free allowances): paid-labelled videos with no brand
+ *  named in writing first (the listening queue), then other paid videos — so the videos most likely to
+ *  hold a deal get read even when nobody has a CRM tab open. Whatever is left waits for the helper. */
+async function txSome(admin: SupabaseClient, deadline: number): Promise<number> {
+  if (!txConfigured()) return 0;
+  const left = Math.min(5, await txLeft(admin));
+  if (left <= 0) return 0;
+  const since = new Date(Date.now() - 400 * DAY).toISOString();
+  const base = () => admin.from("creator_videos").select("user_id, video_id").eq("transcript_status", "").gt("secs", 60).gte("published_at", since);
+  const { data: a } = await base().not("listen", "is", null).order("paid", { ascending: false }).order("published_at", { ascending: false }).limit(left);
+  const { data: b } = (a || []).length < left ? await base().eq("paid", true).is("listen", null).order("published_at", { ascending: false }).limit(left - (a || []).length) : { data: [] };
+  let done = 0;
+  for (const v of [...(a || []), ...(b || [])] as { user_id: string; video_id: string }[]) {
+    if (Date.now() > deadline - 40_000) break;
+    const got = await fetchTranscript(admin, v.video_id);
+    if (!got) break; // every service is out for now
+    const item: TxItem = got.status === "ok" ? { id: v.video_id, status: "ok", lang: got.lang.replace(/[^\w-]/g, "").slice(0, 12), kind: got.kind, caps: got.caps } : { id: v.video_id, status: "none", lang: "", kind: "", caps: [] };
+    await applyTranscripts(admin, v.user_id, [item]).catch(() => null);
+    done++;
+  }
+  return done;
+}
+
 // ---- researching a brand ------------------------------------------------------------------
 
 type Intel = {
@@ -847,6 +922,8 @@ async function cron(admin: SupabaseClient) {
     for (const b of (list || []) as BrandRow[]) { if (Date.now() > deadline - 35_000) break; await researchBrand(admin, b).catch(() => null); log.brands = Number(log.brands) + 1; }
   }
   // 6. Listen to promoted clips nothing written names.
+  // Transcript services first (they read the whole video for a credit), Gemini listens to what's left.
+  if (Date.now() < deadline - 50_000) log.transcribed = await txSome(admin, deadline).catch(() => 0);
   if (Date.now() < deadline - 50_000) log.listened = await listenSome(admin, deadline).catch(() => 0);
   log.ms = Date.now() - start;
   return log;
@@ -911,7 +988,7 @@ Deno.serve(async (req) => {
       vc((q) => q), vc((q) => q.eq("paid", true)), vc((q) => q.eq("transcript_status", "ok")), vc((q) => q.eq("transcript_status", "none")),
       vc((q) => q.eq("transcript_status", "").gt("secs", 60)), vc((q) => q.not("listened_at", "is", null)), vc((q) => q.not("listen", "is", null).is("listened_at", null)),
     ]);
-    return json({ ok: true, stamp, creators, read, failed, backfilling, videos, paidVideos, transcripts, noCaptions, transcriptWaiting: waiting, listened, listenQueue, noYoutube: (people || []).length - creators, lastRead, everyMin: 3, perRun: 4, rescanDays: RESCAN_DAYS, brandDays: BRAND_DAYS, brands: brands || 0, researched: researched || 0, youtube: youtubeConfigured(), clef, listen: { configured: listenConfigured(), secondsLeft: await listenLeft() } });
+    return json({ ok: true, stamp, creators, read, failed, backfilling, videos, paidVideos, transcripts, noCaptions, transcriptWaiting: waiting, listened, listenQueue, noYoutube: (people || []).length - creators, lastRead, everyMin: 3, perRun: 4, rescanDays: RESCAN_DAYS, brandDays: BRAND_DAYS, brands: brands || 0, researched: researched || 0, youtube: youtubeConfigured(), clef, listen: { configured: listenConfigured(), secondsLeft: await listenLeft() }, tx: { services: txProviders().map((p) => p.name), left: await txLeft(admin).catch(() => 0) } });
   }
 
   // ---- transcripts from the browser helper (the member's own connection; YouTube blocks servers) ----
@@ -928,8 +1005,7 @@ Deno.serve(async (req) => {
 
   if (input.action === "transcript_save") {
     const raw = Array.isArray(input.items) ? input.items.slice(0, 8) : [];
-    type In = { id: string; status: "ok" | "none" | "error"; lang: string; kind: string; caps: Caption[] };
-    const items: In[] = [];
+    const items: TxItem[] = [];
     let chars = 0;
     for (const x of raw as Record<string, unknown>[]) {
       const id = typeof x?.id === "string" && /^[\w-]{11}$/.test(x.id) ? x.id : "";
@@ -946,49 +1022,11 @@ Deno.serve(async (req) => {
       items.push({ id, status: status === "ok" && !caps.length ? "none" : status, lang: String(x.lang || "").replace(/[^\w-]/g, "").slice(0, 12), kind: x.kind === "asr" ? "asr" : x.kind === "manual" ? "manual" : "", caps });
     }
     if (!items.length) return json({ ok: true, saved: 0, found: 0 });
-    // Only this member's own videos.
-    const { data: own } = await admin.from("creator_videos").select("*").eq("user_id", userId).in("video_id", items.map((i) => i.id));
-    const rowsById = new Map<string, VideoRow[]>();
-    for (const r of (own || []) as VideoRow[]) rowsById.set(r.video_id, [...(rowsById.get(r.video_id) || []), r]);
-    const { known } = await knownFor(admin, userId);
-    const creatorIds = Array.from(new Set(((own || []) as VideoRow[]).map((r) => r.creator_id)));
-    const { data: people } = creatorIds.length ? await admin.from("creators").select("id, user_id, name, socials, youtube, created_at, archived_at").eq("user_id", userId).in("id", creatorIds) : { data: [] };
-    const byCreator = new Map(((people || []) as CreatorRow[]).map((c) => [c.id, c]));
-    const now = new Date().toISOString();
-    const changed: VideoRow[] = [];
-    let found = 0;
-    for (const it of items) for (const r of rowsById.get(it.id) || []) {
-      if (it.status === "error") { const tries = (r.transcript_tries || 0) + 1; changed.push({ ...r, transcript_tries: tries, transcript_status: tries >= 3 ? "error" : "", transcript_at: now }); continue; }
-      if (it.status === "none") { changed.push({ ...r, transcript_status: "none", transcript_at: now, transcript_hits: [] }); continue; }
-      const c = byCreator.get(r.creator_id);
-      const ownDomains = (c?.socials || []).filter((x) => x && !["YouTube", "Instagram", "TikTok", "X", "Twitch", "Kick", "Facebook", "LinkedIn", "Snapchat", "Pinterest", "Threads", "WhatsApp"].includes(x.platform)).map((x) => normalizeDomain(x.url)).filter(Boolean);
-      const base = r.mentions.filter((m) => !m.signals.includes("transcript"));
-      const heard = readTranscript(it.caps, { creator: c?.name || "", handle: typeof c?.youtube?.handle === "string" ? c.youtube.handle : "", ownDomains, known, resolved: {}, local: base, paid: r.paid });
-      // The same brand from the description and from their words: one finding with both signals.
-      const merged = [...base];
-      for (const m of heard.mentions) {
-        const i = merged.findIndex((x) => x.key === m.key);
-        if (i < 0) { merged.push(m); continue; }
-        const x = merged[i];
-        const spokenWins = m.confidence >= x.confidence || (x.kind === "affiliate" && m.kind !== "affiliate");
-        merged[i] = { ...(spokenWins ? m : x), domain: x.domain || m.domain, domainFrom: x.domain ? x.domainFrom : m.domainFrom, signals: Array.from(new Set([...x.signals, ...m.signals])), confidence: Math.min(0.97, Math.max(x.confidence, m.confidence) + (x.kind === m.kind ? 0.04 : 0)), t: m.t ?? x.t };
-      }
-      if (heard.notSponsored) for (const m of merged) if (m.kind === "sponsored" && !/sponsor/i.test(m.quote)) m.confidence = Math.min(m.confidence, 0.35);
-      const deal = heard.mentions.some((m) => m.kind !== "affiliate" && m.confidence >= 0.8);
-      found += heard.mentions.filter((m) => m.kind !== "affiliate").length;
-      changed.push({ ...r, mentions: merged, listen: deal ? null : r.listen, transcript_status: "ok", transcript_lang: it.lang, transcript_kind: it.kind, transcript_at: now, transcript_hits: heard.hits, judged_at: null });
+    try {
+      return json({ ok: true, ...(await applyTranscripts(admin, userId, items)) });
+    } catch {
+      return json({ error: "Couldn't save the transcripts." }, 500);
     }
-    if (changed.length) {
-      const saved = await saveVideos(admin, changed, now).then(() => true, () => false);
-      if (!saved) return json({ error: "Couldn't save the transcripts." }, 500);
-    }
-    // Who works with whom, again for the creators whose videos changed.
-    for (const cid of Array.from(new Set(changed.filter((r) => r.transcript_status === "ok").map((r) => r.creator_id)))) {
-      const c = byCreator.get(cid);
-      if (!c) continue;
-      await rebuildLinks(admin, c, await linkRows(admin, userId, cid)).catch(() => 0);
-    }
-    return json({ ok: true, saved: changed.length, found });
   }
 
   if (input.action === "scan_creator") {

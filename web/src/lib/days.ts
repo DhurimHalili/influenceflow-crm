@@ -12,3 +12,20 @@ export const parseDay = (value?: string | null) => {
 
 export const dayKey = (date: Date) =>
   `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+
+// Intl formatters are slow to create and lists format a date or amount on every row:
+// each distinct (locale, options) is built once and reused.
+const dateFormats = new Map<string, Intl.DateTimeFormat>();
+const numberFormats = new Map<string, Intl.NumberFormat>();
+export const dateFmt = (options: Intl.DateTimeFormatOptions, locale: string | undefined = "en-US"): Intl.DateTimeFormat => {
+  const key = `${locale ?? ""}|${JSON.stringify(options)}`;
+  let f = dateFormats.get(key);
+  if (!f) { f = new Intl.DateTimeFormat(locale, options); dateFormats.set(key, f); }
+  return f;
+};
+export const numberFmt = (options: Intl.NumberFormatOptions, locale = "en-US"): Intl.NumberFormat => {
+  const key = `${locale}|${JSON.stringify(options)}`;
+  let f = numberFormats.get(key);
+  if (!f) { f = new Intl.NumberFormat(locale, options); numberFormats.set(key, f); }
+  return f;
+};

@@ -14,7 +14,7 @@ import { businessDaysBetween, timeline } from "../lib/followupEngine";
 import { mailboxStats } from "../lib/mailboxStats";
 import { declined, replyTone } from "../lib/replyReader";
 import { DEFAULT_FOLLOWUP_RULES } from "../lib/prefs";
-import { dateLabel, lossReasonLabel, money } from "../lib/utils";
+import { lossReasonLabel, money } from "../lib/utils";
 import type { Activity, Brand, Creator, EntityStatus } from "../types";
 
 // What's working: how many people you reach turn into replies, deals and
@@ -245,7 +245,6 @@ export default function ReportsPage() {
   const top = report.funnel[0].value;
   const conversion = rateText(report.wonCount, report.contacted);
   const wonWord = who === "creator" ? "roster" : "signed";
-  const earlier = report.joined.filter((j) => j.earlier);
   const table = (title: string, rows: Row[], label: string) => <div className="dash-panel report-table"><div className="panel-heading"><div><span>{who === "creator" ? "Influencers" : "Brands"}</span><h2>{title}</h2></div></div>{rows.length ? <table><thead><tr><th>{label}</th><th>Reached</th><th>Reply rate</th><th>{who === "creator" ? "Roster" : "Signed"}</th></tr></thead><tbody>{rows.map((r) => <tr key={r.key}><td>{r.key}</td><td>{r.contacted}</td><td><span className="rate-bar"><i style={{ width: `${pct(r.replied, r.contacted)}%` }} />{pct(r.replied, r.contacted)}%</span></td><td><b>{r.won}</b> <small className="muted">{pct(r.won, r.contacted)}%</small></td></tr>)}</tbody></table> : <p className="muted-copy">No outreach in this range yet.</p>}</div>;
 
   return <div className="reports-page">
@@ -267,7 +266,6 @@ export default function ReportsPage() {
         <div className="fs-card"><span className="fs-icon"><step.icon size={15} /></span><b>{step.value}</b><small>{step.label}</small>{i === 0 && <span className="fs-step">first contact in this range</span>}{i > 0 && step.key !== "won" && <span className="fs-step" title={`${step.value} of the ${prev} who ${report.funnel[i - 1].label.toLowerCase()}`}>{pct(step.value, prev)}% of {i === 1 ? "those reached" : "those who replied"}</span>}{step.key === "won" && <span className="fs-step">{who === "creator" ? "joined" : "signed"} in this range</span>}{step.now && step.value !== Number.parseInt(step.now, 10) && <em className="fs-now" title="Counts everyone who reached this stage, including those who went on or ended later">{step.now}</em>}<i className="fs-bar"><em style={{ width: `${top ? Math.min(100, Math.max(step.value ? 4 : 0, (step.value / top) * 100)) : 0}%` }} /></i></div>
       </li>; })}</ol>
       <p className="funnel-note">{report.contacted ? <>Out of every <b>10</b> {who === "creator" ? "influencers" : "brands"} you contact, about <b>{Math.round((report.repliedCount / report.contacted) * 10)}</b> reply and <b>{Math.round((report.wonCount / report.contacted) * 100) / 10}</b> {who === "creator" ? "join your roster" : "sign"}.{report.closedCount ? <> It takes about <b>{report.closeDays} day{report.closeDays === 1 ? "" : "s"}</b> from first contact to {wonWord}.</> : null}</> : "Your funnel appears as soon as your first outreach is logged or synced from Gmail."}</p>
-      {range !== "all" && earlier.length > 0 && <p className="funnel-joined"><Trophy size={14} aria-hidden="true" /><span>{who === "creator" ? "Joined roster" : "Signed"} counts the day it happened. {earlier.length === 1 ? "One was" : `${earlier.length} were`} first contacted before this range, so the steps before it and the {conversion}% above don't include {earlier.length === 1 ? "them" : "them"}: {earlier.map((j, k) => <span key={j.id}><Link to={`/app/${who === "creator" ? "influencers" : "brands"}/${j.id}`}>{j.name}</Link> <small>({j.inbound ? "wrote to you first" : j.startAt ? `first contact ${dateLabel(j.startAt)}` : "no contact date"} · {who === "creator" ? "joined" : "signed"} {dateLabel(j.at)})</small>{k < earlier.length - 1 ? ", " : "."}</span>)}</span></p>}
     </section>
 
     <section className="metric-row report-metrics">

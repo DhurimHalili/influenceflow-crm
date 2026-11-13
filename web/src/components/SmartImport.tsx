@@ -2,7 +2,7 @@ import Papa from "papaparse";
 import { ArrowRight, Check, ClipboardPaste, FileSpreadsheet, Sparkles, TriangleAlert, Upload, Wand2 } from "lucide-react";
 import { useMemo, useRef, useState, type ChangeEvent, type DragEvent } from "react";
 import { useGmail } from "../contexts/GmailContext";
-import { aiQuestion, fieldsFor, planColumns, readSheet, statusValues, toCanonical, toCsv, type ColumnPlan, type Confidence, type ImportKind, type Sheet } from "../lib/smartImport";
+import { aiQuestion, fieldsFor, isCrmExport, planColumns, readSheet, statusValues, toCanonical, toCsv, type ColumnPlan, type Confidence, type ImportKind, type Sheet } from "../lib/smartImport";
 import { supabase } from "../lib/supabase";
 import { readXlsx, type Workbook } from "../lib/xlsxRead";
 import { ENTITY_STATUSES, STATUS_LABELS } from "../types";
@@ -17,7 +17,7 @@ import { Button, Textarea } from "./ui";
 //      rules weren't sure about. Then the page's own preview takes over
 //      (validation, duplicates, import).
 
-export type ImportSummary = { rows: number; rowNumbers: number[]; sheetName: string; skippedTop: number; sections: number; kept: string[]; ignored: string[]; statuses: { raw: string; status: string; count: number }[]; fixes: Record<string, number>; guessedNames: number; ai: boolean };
+export type ImportSummary = { crm?: boolean; rows: number; rowNumbers: number[]; sheetName: string; skippedTop: number; sections: number; kept: string[]; ignored: string[]; statuses: { raw: string; status: string; count: number }[]; fixes: Record<string, number>; guessedNames: number; ai: boolean };
 
 const CONF_LABEL: Record<Confidence, string> = { sure: "Sure", guess: "Best guess", ai: "AI", you: "Your pick", none: "No match" };
 
@@ -45,6 +45,11 @@ export function SmartImport({ kind, onReady, template }: { kind: ImportKind; onR
     setError("");
     const s = readSheet(rows, kind);
     if (!s.rows.length) { setError("No rows found — check that the sheet has data under its header."); return; }
+    // An InfluenceFlow export or weekly backup: straight to the importer, every column read by its own name.
+    if (isCrmExport(s, kind)) {
+      onReady(toCsv({ header: s.header, rows: s.rows }), { crm: true, rows: s.rows.length, rowNumbers: s.rowNumbers, sheetName: name, skippedTop: s.skippedTop, sections: s.sections, kept: [], ignored: [], statuses: [], fixes: {}, guessedNames: 0, ai: false });
+      return;
+    }
     setGrid({ rows, name });
     setPlan(planColumns(s, kind));
     setStatusMap({});
@@ -205,6 +210,11 @@ export function SmartImport({ kind, onReady, template }: { kind: ImportKind; onR
 export function ImportReport({ summary, youtube }: { summary: ImportSummary; youtube?: number }) {
   const fixes = Object.entries(summary.fixes).filter(([, n]) => n > 0);
   const translated = summary.statuses.filter((s) => s.status && s.raw.toLowerCase().replace(/\s+/g, "_") !== s.status);
+  if (summary.crm) return <div className="si-report">
+    <strong><Wand2 size={14} /> An InfluenceFlow backup</strong>
+    <ul><li>Every column is read by its own name — prices, ratings{summary.rows ? `, ${summary.rows.toLocaleString("en-US")} rows` : ""}. Anyone already in your CRM shows up as a duplicate below, so nothing is added twice.</li>
+      {youtube ? <li className="si-yt">After import, {youtube} YouTube channel{youtube === 1 ? "" : "s"} get read again</li> : null}</ul>
+  </div>;
   return <div className="si-report">
     <strong><Wand2 size={14} /> Cleaned up for you</strong>
     <ul>
