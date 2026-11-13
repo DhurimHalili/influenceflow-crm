@@ -9,7 +9,8 @@
 // climb up on good numbers: the total is capped near the content fit.
 //
 // Never pitch twice — every pair also carries flags:
-//   works   they already work with this brand (sponsored / seeded / affiliate)
+//   works   they already had a BRAND DEAL with this brand (sponsored / seeded)
+//   affiliate  they only link it for commission — not a deal, pitching is fine
 //   rival   they had a paid or seeded deal with a competitor in the last 4 months
 //   pitched you already pitched them to this brand (or they're in a campaign)
 // Pure — tested in match.test.ts.
@@ -17,7 +18,7 @@
 import type { Brand, Campaign, Creator } from "../types";
 import { judge, youtubeSubs } from "./criteria";
 import { findCountry } from "./countries";
-import { normalizeDomain, type DealKind, type Evidence } from "./sponsors";
+import { dealProof, normalizeDomain, type DealKind, type Evidence, type Proof } from "./sponsors";
 import { overlap, scoreText, topicFit, topicLabel, TOPIC, type ContentProfile } from "./taxonomy";
 
 // ---- what the server writes ---------------------------------------------------------------
@@ -44,12 +45,35 @@ export type Pitch = { id: string; brand_id: string; creator_id: string; at: stri
 
 // ---- small helpers ------------------------------------------------------------------------
 
-const squash = (s: string) => String(s || "").toLowerCase().normalize("NFKD").replace(/[̀-ͯ]/g, "").replace(/&/g, "and").replace(/[^a-z0-9]+/g, "");
+// Both run inside brands × creators loops: remember answers (names and domains repeat endlessly).
+const squashed = new Map<string, string>();
+const squash = (raw: string) => {
+  const key = String(raw || "");
+  let v = squashed.get(key);
+  if (v === undefined) { v = key.toLowerCase().normalize("NFKD").replace(/[̀-ͯ]/g, "").replace(/&/g, "and").replace(/[^a-z0-9]+/g, ""); if (squashed.size > 20000) squashed.clear(); squashed.set(key, v); }
+  return v;
+};
+const domains = new Map<string, string>();
 /** The kind you set wins over what was read. */
 export const kindOf = (l: BrandLink): DealKind => l.verdict_kind || l.kind;
 /** A link that counts: not rejected by you, and at least "possible" (or confirmed by you). */
 export const counts = (l: BrandLink, min = 0.45) => l.verdict !== "no" && (l.verdict === "yes" || l.confidence >= min);
-export const brandDomain = (b: Pick<Brand, "domain">) => normalizeDomain(b.domain || "");
+/** A brand deal (paid or product sent) — affiliate links and stores are not. */
+export const isDeal = (l: BrandLink) => !l.store && kindOf(l) !== "affiliate";
+/** How sure it's a real brand deal: proven / stated (said once) / hint / affiliate. */
+const proofCache = new WeakMap<BrandLink, { level: Proof; why: string }>();
+export const proofOf = (l: BrandLink): { level: Proof; why: string } => {
+  let p = proofCache.get(l);
+  if (!p) { p = dealProof(l); proofCache.set(l, p); }
+  return p;
+};
+export const PROOF_LABEL: Record<Proof, string> = { proven: "Proven", stated: "Said once", hint: "Not confirmed", affiliate: "Affiliate" };
+export const brandDomain = (b: Pick<Brand, "domain">) => {
+  const key = b.domain || "";
+  let v = domains.get(key);
+  if (v === undefined) { v = normalizeDomain(key); if (domains.size > 20000) domains.clear(); domains.set(key, v); }
+  return v;
+};
 
 /** Is this link about this brand? (same CRM record, same domain, or the same name). */
 export function linkIsBrand(l: Pick<BrandLink, "brand_id" | "domain" | "brand_name" | "brand_key">, b: Pick<Brand, "id" | "domain" | "name">) {
@@ -106,8 +130,10 @@ export function budgetOf(b: Brand, ctx: { links: BrandLink[]; creators: Creator[
     const per = deals.map((d) => d.agreed_payment / Math.max(1, d.creator_ids?.length || 1));
     return { kind: "deals", low: Math.min(...per), high: Math.max(...per), per: "campaign", from: `${deals.length} deal${deals.length === 1 ? "" : "s"} you closed`, n: deals.length };
   }
-  const paid = ctx.links.filter((l) => linkIsBrand(l, b) && counts(l, 0.65) && kindOf(l) === "sponsored");
-  const who = paid.map((l) => ctx.creators.find((c) => c.id === l.creator_id)).filter((c): c is Creator => !!c);
+  const idx = "brands" in ctx ? indexOf(ctx as MatchWorld) : null;
+  const paid = (idx ? idx.linksFor(b) : ctx.links.filter((l) => linkIsBrand(l, b))).filter((l) => counts(l, 0.65) && kindOf(l) === "sponsored");
+  const byId = idx ? idx.creatorById : new Map(ctx.creators.map((c) => [c.id, c]));
+  const who = paid.map((l) => byId.get(l.creator_id)).filter((c): c is Creator => !!c);
   if (!who.length) return null;
   const rates = who.map((c) => c.rates?.video || c.rates?.dedicated || 0).filter((x) => x > 0);
   if (rates.length) return { kind: "estimate", low: Math.min(...rates), high: Math.max(...rates), per: "video", from: `the rates of ${rates.length} creator${rates.length === 1 ? "" : "s"} they sponsor`, n: rates.length };
@@ -121,6 +147,7 @@ export function budgetOf(b: Brand, ctx: { links: BrandLink[]; creators: Creator[
 export type Reason = { text: string; tone: "good" | "warn" | "bad" | "info" };
 export type Flags = {
   works?: BrandLink;
+  affiliate?: BrandLink;
   rival?: { link: BrandLink; name: string; days: number };
   pitched?: { at: string; how: "pitch" | "campaign" };
 };
@@ -149,6 +176,8 @@ export type MatchWorld = {
   content: Map<string, ContentRow>;
   seen: Map<string, SeenBrand>;
   criteria?: Parameters<typeof judge>[1];
+  /** Brands you archived: never suggested again as "found". */
+  archivedBrands?: Pick<Brand, "domain" | "name">[];
   now?: Date;
 };
 
@@ -157,25 +186,94 @@ const WEIGHTS = { content: 0.6, size: 0.14, price: 0.1, market: 0.08, quality: 0
 const pct = (x: number) => `${Math.round(x * 100)}%`;
 const k = (n: number) => (n >= 1e6 ? `${Math.round(n / 1e5) / 10}M` : n >= 1e3 ? `${Math.round(n / 100) / 10}K` : String(Math.round(n)));
 
+// ---- one index per world: matchOf runs brands × creators times, so nothing in it may scan every link or brand ----
+
+type Index = {
+  creatorById: Map<string, Creator>;
+  brandOf: (l: BrandLink) => Brand | null;
+  linksFor: (b: Pick<Brand, "id" | "domain" | "name">) => BrandLink[];
+  sells: (b: Brand) => { key: string; weight: number }[];
+  topics: (l: BrandLink) => { key: string; weight: number }[];
+  memo: Map<string, unknown>;
+};
+const indexes = new WeakMap<MatchWorld, Index>();
+function indexOf(w: MatchWorld): Index {
+  const hit = indexes.get(w);
+  if (hit) return hit;
+  const brandById = new Map(w.brands.map((b) => [b.id, b]));
+  const brandByDomain = new Map<string, Brand>(), brandByName = new Map<string, Brand>();
+  for (const b of w.brands) {
+    const d = brandDomain(b); if (d && !brandByDomain.has(d)) brandByDomain.set(d, b);
+    const n = squash(b.name); if (n.length >= 3 && !brandByName.has(n)) brandByName.set(n, b);
+  }
+  const byBrandId = new Map<string, BrandLink[]>(), byDomain = new Map<string, BrandLink[]>(), byName = new Map<string, BrandLink[]>();
+  const push = (m: Map<string, BrandLink[]>, k: string, l: BrandLink) => { if (k) (m.get(k) || m.set(k, []).get(k)!).push(l); };
+  for (const l of w.links) {
+    if (l.brand_id) push(byBrandId, l.brand_id, l);
+    push(byDomain, l.domain, l);
+    if (l.brand_key && l.brand_key !== l.domain) push(byDomain, l.brand_key, l);
+    const n = squash(l.brand_name); if (n.length >= 3) push(byName, n, l);
+  }
+  const ofLink = new Map<string, Brand | null>(), forBrand = new Map<string, BrandLink[]>(), sellsBy = new Map<string, { key: string; weight: number }[]>(), topicsBy = new Map<string, { key: string; weight: number }[]>();
+  const idx: Index = {
+    creatorById: new Map(w.creators.map((c) => [c.id, c])),
+    // Same rule as linkIsBrand: your record, then the domain, then the name.
+    brandOf: (l) => {
+      if (ofLink.has(l.id)) return ofLink.get(l.id)!;
+      const b = (l.brand_id && brandById.get(l.brand_id)) || brandByDomain.get(l.domain) || brandByDomain.get(l.brand_key) || brandByName.get(squash(l.brand_name)) || null;
+      ofLink.set(l.id, b);
+      return b;
+    },
+    linksFor: (b) => {
+      const hit = forBrand.get(b.id);
+      if (hit) return hit;
+      const d = brandDomain(b), n = squash(b.name);
+      const all = new Set<BrandLink>([...(byBrandId.get(b.id) || []), ...(d ? byDomain.get(d) || [] : []), ...(n.length >= 3 ? byName.get(n) || [] : [])]);
+      const out = [...all];
+      forBrand.set(b.id, out);
+      return out;
+    },
+    sells: (b) => {
+      let x = sellsBy.get(b.id);
+      if (!x) { x = sellsOf(b as Brand & { match_topics?: string[] }, w.intel.get(b.id)?.intel); sellsBy.set(b.id, x); }
+      return x;
+    },
+    topics: (l) => {
+      let x = topicsBy.get(l.id);
+      if (!x) { const crm = idx.brandOf(l); x = crm ? idx.sells(crm) : w.seen.get(l.brand_key)?.site?.topics || []; topicsBy.set(l.id, x); }
+      return x;
+    },
+    memo: new Map(),
+  };
+  indexes.set(w, idx);
+  return idx;
+}
+const memo = <T,>(w: MatchWorld, key: string, make: () => T): T => {
+  const m = indexOf(w).memo;
+  if (!m.has(key)) m.set(key, make());
+  return m.get(key) as T;
+};
+
 /** The topics another brand sells (CRM brand → its site; a brand found in videos → its site check). */
 export function topicsOfLink(l: BrandLink, w: MatchWorld): { key: string; weight: number }[] {
-  const crm = l.brand_id ? w.brands.find((b) => b.id === l.brand_id) : w.brands.find((b) => linkIsBrand(l, b));
-  if (crm) return sellsOf(crm as Brand & { match_topics?: string[] }, w.intel.get(crm.id)?.intel);
-  return w.seen.get(l.brand_key)?.site?.topics || [];
+  return indexOf(w).topics(l);
 }
 
 /** How well one creator fits one brand, with the reasons and the "don't pitch" flags. */
 export function matchOf(b: Brand & { match_topics?: string[] }, c: Creator, w: MatchWorld): Match {
   const now = w.now || new Date();
   const intel = w.intel.get(b.id)?.intel || null;
-  const sells = sellsOf(b, intel);
+  const idx = indexOf(w);
+  const sells = idx.sells(b);
   const content = w.content.get(c.id)?.content || null;
   const mine = w.linksBy?.get(c.id) || w.links.filter((l) => l.creator_id === c.id);
   const reasons: Reason[] = [];
   const flags: Flags = {};
 
   // Flags first — they matter even with no score.
-  flags.works = mine.find((l) => linkIsBrand(l, b) && counts(l));
+  const withBrand = mine.filter((l) => linkIsBrand(l, b) && counts(l));
+  flags.works = withBrand.filter(isDeal).sort((x, y) => Number(proofOf(y).level === "proven") - Number(proofOf(x).level === "proven") || y.confidence - x.confidence)[0];
+  if (!flags.works) flags.affiliate = withBrand[0];
   const pitch = w.pitches.find((p) => p.brand_id === b.id && p.creator_id === c.id);
   const camp = w.campaigns.find((x) => x.brand_id === b.id && (x.creator_ids || []).includes(c.id) && x.status !== "cancelled");
   if (pitch) flags.pitched = { at: pitch.at, how: "pitch" };
@@ -213,7 +311,8 @@ export function matchOf(b: Brand & { match_topics?: string[] }, c: Creator, w: M
     parts.size = inTier ? 1 : near ? 0.6 : 0.25;
     reasons.push({ text: inTier ? "The size they asked for" : near ? "Close to the size they want" : "Not the size they want", tone: inTier ? "good" : near ? "info" : "warn" });
   } else if (views > 0) {
-    const theirs = w.links.filter((l) => linkIsBrand(l, b) && counts(l, 0.65) && l.creator_id !== c.id).map((l) => w.creators.find((x) => x.id === l.creator_id)).filter((x): x is Creator => !!x).map(reach);
+    const pool = memo(w, `size:${b.id}`, () => idx.linksFor(b).filter((l) => isDeal(l) && counts(l, 0.65)).map((l) => ({ id: l.creator_id, views: reach(idx.creatorById.get(l.creator_id) || ({} as Creator)) })).filter((x) => x.views > 0));
+    const theirs = pool.filter((x) => x.id !== c.id).map((x) => x.views);
     const m = median(theirs);
     if (m > 0) {
       const r = Math.abs(Math.log10(views / m));
@@ -224,7 +323,7 @@ export function matchOf(b: Brand & { match_topics?: string[] }, c: Creator, w: M
 
   // Price: the creator's rate against what the brand pays.
   const rate = c.rates?.video || c.rates?.dedicated || c.rates?.short || 0;
-  const budget = budgetOf(b, w);
+  const budget = memo(w, `budget:${b.id}`, () => budgetOf(b, w));
   if (rate > 0 && budget && budget.high > 0) {
     parts.price = rate <= budget.high ? 1 : rate <= budget.high * 1.25 ? 0.6 : 0.2;
     reasons.push({ text: rate <= budget.high ? "Their rate fits the budget" : rate <= budget.high * 1.25 ? "Rate a little over budget" : "Rate over budget", tone: rate <= budget.high ? "good" : rate <= budget.high * 1.25 ? "info" : "warn" });
@@ -254,6 +353,7 @@ export function matchOf(b: Brand & { match_topics?: string[] }, c: Creator, w: M
   let score = Math.round((sum / weight) * 100);
   // Content is the gate: good numbers can't lift an off-topic creator.
   score = Math.max(0, Math.min(score, Math.round(tf.fit * 100) + 12, 99));
+  if (flags.affiliate) reasons.push({ text: `Has an affiliate link to ${b.name} — no deal yet`, tone: "info" });
   if (flags.rival) reasons.push({ text: `${kindOf(flags.rival.link) === "seeded" ? "Seeded" : "Sponsored"} by ${flags.rival.name} ${flags.rival.days < 14 ? "this month" : `${Math.round(flags.rival.days / 7)} wk ago`}`, tone: "warn" });
   return { score, tone: toneOf(score), fit: tf.fit, onTopic: tf.onTopic, carriers: tf.carriers, parts, reasons, flags, missing: "" };
 }
@@ -266,23 +366,53 @@ export const byCreator = (links: BrandLink[]) => {
 };
 
 /** Brands found in videos that aren't in your CRM, with who works with them. */
-export function foundBrands(w: MatchWorld): { seen: SeenBrand; links: BrandLink[]; best: BrandLink; creators: number }[] {
-  const crmDomains = new Set(w.brands.map(brandDomain).filter(Boolean));
-  const crmNames = new Set(w.brands.map((b) => squash(b.name)).filter((n) => n.length >= 3));
-  const out: { seen: SeenBrand; links: BrandLink[]; best: BrandLink; creators: number }[] = [];
-  const groups = new Map<string, BrandLink[]>();
+export type Found = { seen: SeenBrand; links: BrandLink[]; best: BrandLink; creators: number; keys: string[] };
+/** The words that name one brand: its domain's main label ("autodoc" for autodoc.de and autodoc.com) and its name. */
+const tokensOf = (domain: string, name: string) => {
+  const label = squash(normalizeDomain(domain || "").split(".")[0] || "");
+  return [label.length >= 3 ? `d:${label}` : "", squash(name).length >= 3 ? `d:${squash(name)}` : ""].filter(Boolean);
+};
+/**
+ * Brand DEALS found in videos for brands you don't have. One row per brand
+ * even when creators link it differently (autodoc.de / autodoc.com / "AUTODOC"),
+ * never a brand you already have (archived ones too — you removed it once),
+ * never an affiliate link or a store, and never a bare hint: only "proven" or "said once".
+ */
+export function foundBrands(w: MatchWorld): Found[] {
+  const have = new Set<string>();
+  for (const b of [...w.brands, ...(w.archivedBrands || [])]) for (const t of tokensOf(b.domain || "", b.name)) have.add(t);
+  // Group links that share a domain label or a name (union-find over tokens).
+  const parent = new Map<string, string>();
+  const find = (x: string): string => { let r = x; while (parent.get(r) !== r) r = parent.get(r)!; parent.set(x, r); return r; };
+  const join = (a: string, b: string) => { for (const x of [a, b]) if (!parent.has(x)) parent.set(x, x); const ra = find(a), rb = find(b); if (ra !== rb) parent.set(ra, rb); };
+  const kept: BrandLink[] = [];
   for (const l of w.links) {
-    if (l.store || l.brand_id || !counts(l)) continue;
-    if ((l.domain && crmDomains.has(l.domain)) || crmNames.has(squash(l.brand_name))) continue;
-    (groups.get(l.brand_key) || groups.set(l.brand_key, []).get(l.brand_key)!).push(l);
+    if (!isDeal(l) || l.brand_id || !counts(l)) continue;
+    const level = proofOf(l).level;
+    if (level !== "proven" && level !== "stated") continue;
+    const toks = tokensOf(l.domain, l.brand_name);
+    if (toks.some((t) => have.has(t))) continue;
+    if (w.seen.get(l.brand_key)?.added_brand_id) continue;
+    const id = `k:${l.brand_key}`;
+    join(id, id);
+    for (const t of toks) join(id, t);
+    kept.push(l);
   }
-  for (const [key, links] of groups) {
-    const seen = w.seen.get(key) || { brand_key: key, name: links[0].brand_name, domain: links[0].domain, domain_check: "", site: null, checked_at: null, hidden: false, added_brand_id: null };
-    if (seen.added_brand_id) continue;
-    const best = [...links].sort((a, b) => (b.verdict === "yes" ? 2 : 0) + b.confidence - ((a.verdict === "yes" ? 2 : 0) + a.confidence))[0];
-    out.push({ seen, links, best, creators: new Set(links.map((l) => l.creator_id)).size });
+  const groups = new Map<string, BrandLink[]>();
+  for (const l of kept) { const r = find(`k:${l.brand_key}`); (groups.get(r) || groups.set(r, []).get(r)!).push(l); }
+  const rank = (l: BrandLink) => ({ proven: 3, stated: 2, hint: 1, affiliate: 0 })[proofOf(l).level] + l.confidence;
+  const check = (s?: SeenBrand) => (!s ? 0 : s.domain_check === "site" ? 4 : s.domain_check === "guess" ? 3 : s.domain ? 2 : 1);
+  const out: Found[] = [];
+  for (const links of groups.values()) {
+    const keys = Array.from(new Set(links.map((l) => l.brand_key)));
+    if (keys.some((k) => w.seen.get(k)?.hidden)) continue;
+    const best = [...links].sort((a, b) => rank(b) - rank(a))[0];
+    // The record with the best-checked website speaks for the brand.
+    const key = [...keys].sort((a, b) => check(w.seen.get(b)) - check(w.seen.get(a)) || Number(b === best.brand_key) - Number(a === best.brand_key))[0];
+    const seen = w.seen.get(key) || { brand_key: key, name: best.brand_name, domain: best.domain, domain_check: "", site: null, checked_at: null, hidden: false, added_brand_id: null };
+    out.push({ seen, links, best, creators: new Set(links.map((l) => l.creator_id)).size, keys });
   }
-  return out.sort((a, b) => b.creators - a.creators || b.best.confidence - a.best.confidence);
+  return out.sort((a, b) => b.creators - a.creators || rank(b.best) - rank(a.best));
 }
 
 /** "Sure" when the domain is the creator's own link AND the site says it's that brand. */

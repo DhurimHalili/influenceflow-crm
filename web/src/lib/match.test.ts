@@ -38,6 +38,7 @@ const w1 = world({ links: [link({ creator_id: "builder", brand_key: "tryx.com", 
 eq("works with them (seeded)", matchOf(tryx, w1.creators[0], w1).flags.works?.kind, "seeded");
 eq("rival deal 24 days ago", matchOf(tryx, w1.creators[1], w1).flags.rival?.name, "NZXT");
 eq("already pitched", !!matchOf(tryx, w1.creators[2], w1).flags.pitched, true);
+eq("an affiliate link is not a deal", (() => { const x = matchOf(tryx, w1.creators[0], world({ links: [link({ creator_id: "builder", brand_key: "tryx.com", domain: "tryx.com", kind: "affiliate" })] })); return [!!x.flags.works, x.flags.affiliate?.kind]; })(), [false, "affiliate"]);
 eq("a rejected link doesn't count", matchOf(tryx, w1.creators[0], world({ links: [link({ creator_id: "builder", brand_key: "tryx.com", domain: "tryx.com", verdict: "no" })] })).flags.works, undefined);
 
 // What a brand sells: yours wins, then the site, then its type.
@@ -53,7 +54,18 @@ const est = budgetOf(tryx, { links: [link({ creator_id: "builder", brand_key: "t
 eq("budget estimate from who they sponsor", [est?.kind, est?.low, est?.high], ["estimate", 3000, 7000]);
 
 // Found brands: not in the CRM, shops left out.
-const w2 = world({ links: [link({ creator_id: "builder", brand_key: "raycon.com", brand_name: "Raycon", domain: "raycon.com" }), link({ creator_id: "mixed", brand_key: "raycon.com", brand_name: "Raycon", domain: "raycon.com" }), link({ creator_id: "mixed", brand_key: "amazon.com", brand_name: "Amazon", domain: "amazon.com", store: true, kind: "affiliate" }), link({ creator_id: "builder", brand_key: "tryx.com", brand_name: "TRYX", domain: "tryx.com" })] });
+const w2 = world({ links: [link({ creator_id: "builder", brand_key: "raycon.com", brand_name: "Raycon", domain: "raycon.com", evidence: [{ video: "r1", title: "t", at: "2026-10-01", kind: "sponsored", confidence: 0.9, signals: ["description", "paid_label"], quote: "Sponsored by Raycon" }] }), link({ creator_id: "mixed", brand_key: "raycon.com", brand_name: "Raycon", domain: "raycon.com", evidence: [{ video: "r2", title: "t", at: "2026-10-01", kind: "sponsored", confidence: 0.9, signals: ["description"], quote: "Thanks to Raycon for sponsoring" }] }), link({ creator_id: "mixed", brand_key: "amazon.com", brand_name: "Amazon", domain: "amazon.com", store: true, kind: "affiliate" }), link({ creator_id: "builder", brand_key: "tryx.com", brand_name: "TRYX", domain: "tryx.com" })] });
 eq("found brands", foundBrands(w2).map((f) => [f.seen.name, f.creators]), [["Raycon", 2]]);
+const said = (q: string, sig: string[] = ["description", "paid_label"]) => [{ video: "v" + q.length, title: "t", at: "2026-10-01", kind: "sponsored", confidence: 0.9, signals: sig, quote: q }] as never;
+const w3 = world({ links: [
+  link({ creator_id: "builder", brand_key: "autodoc.de", brand_name: "AUTODOC", domain: "autodoc.de", evidence: said("Sponsored by AUTODOC") }),
+  link({ creator_id: "mixed", brand_key: "autodoc.com", brand_name: "Autodoc", domain: "autodoc.com", evidence: said("This video is sponsored by Autodoc") }),
+  link({ creator_id: "cars", brand_key: "n:autodoc", brand_name: "Autodoc", domain: "", evidence: said("Thanks to Autodoc for sponsoring") }),
+  link({ creator_id: "builder", brand_key: "aztech.com", brand_name: "Aztech", domain: "aztech.com", evidence: said("Aztech wheels https://aztech.com") }),
+  link({ creator_id: "builder", brand_key: "epidemicsound.com", brand_name: "Epidemic Sound", domain: "epidemicsound.com", kind: "affiliate", evidence: said("Music: https://epidemicsound.com/referral/x") }),
+  link({ creator_id: "mixed", brand_key: "tryx.com", brand_name: "TRYX", domain: "tryx.com", evidence: said("TRYX sent me this PC", ["description", "title"]) }),
+  link({ creator_id: "cars", brand_key: "oldbrand.com", brand_name: "Old Brand", domain: "oldbrand.com", evidence: said("Sponsored by Old Brand") }),
+], archivedBrands: [{ name: "Old Brand", domain: "oldbrand.com" }] });
+eq("found: one row per brand across domains and names; no hint, affiliate, CRM or archived brand", foundBrands(w3).map((f) => [f.seen.name, f.creators]), [["AUTODOC", 3]]);
 
 if (fail) { console.log(`\n${fail} failing`); process.exit(1); } else console.log("\nall match tests pass");
