@@ -176,7 +176,7 @@ eq("music licence line is not a deal", readVideo(vid({ description: "🎵 Copyri
 // ---- names and domains from real junk ----
 eq("handle → name", ["@NZXTglobal", "@HerschelSupply#ad", "@LIANLIHQ", "@adidas", "@NoctuaVideos"].map(cleanName), ["NZXT", "Herschel Supply", "LIANLI", "adidas", "Noctua"]);
 eq("phrases cut to the brand", ["Asus and their Expertbook Ultra", "Google and shoutout Skullcandy", "Gamma sponsorship", "- Keysfan.com", "FSA Store®"].map(cleanName), ["Asus", "Google", "Gamma", "Keysfan.com", "FSA Store"]);
-eq("junk is not a brand", ["either", "segment", "teams", "in advance", "10% off)", "Spot", "spot"].map(brandish), [false, false, false, false, false, false, false]);
+eq("junk is not a brand", ["either", "segment", "teams", "in advance", "10% off)", "Spot", "spot", "Sponsorship", "Kickstarter"].map(brandish), [false, false, false, false, false, false, false, false, false]);
 eq("real names are", ["NZXT", "eBay", "Eight Sleep", "Keysfan.com", "GL.iNET", "Abacus.AI", "3M"].map(brandish), [true, true, true, true, true, true, true]);
 eq("name that is a domain", ["Monday.com", "Keysfan.com", "Boot.dev", "Ridge"].map(nameAsDomain), ["monday.com", "keysfan.com", "boot.dev", ""]);
 eq("domain fits: prefixes and suffixes", [["HOLY", "weareholy.com"], ["Surfshark", "getsurfshark.com"], ["Ridge", "ridgewallet.com"], ["Away", "awaytravel.com"], ["Holy", "holiday.com"]].map(([n, d]) => domainFits(n, d)), [true, true, true, true, false]);
