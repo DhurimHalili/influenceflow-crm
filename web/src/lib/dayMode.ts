@@ -58,10 +58,13 @@ export const dayWord = (day: Date, now = new Date()) => {
   const b = new Date(day.getFullYear(), day.getMonth(), day.getDate()).getTime();
   const diff = Math.round((b - a) / 86400000);
   if (diff === 1) return "tomorrow";
-  return new Intl.DateTimeFormat("en-US", { weekday: "long" }).format(day);
+  return LONG_DAY.format(day);
 };
+// Built once: creating an Intl formatter is slow, and lists ask for these on every row.
+const LONG_DAY = new Intl.DateTimeFormat("en-US", { weekday: "long" });
+const SHORT_DAY = new Intl.DateTimeFormat("en-US", { weekday: "short" });
 /** "Mon" style short weekday. */
-export const dayShort = (day: Date) => new Intl.DateTimeFormat("en-US", { weekday: "short" }).format(day);
+export const dayShort = (day: Date) => SHORT_DAY.format(day);
 
 export const MODE_LABEL: Record<DayMode, string> = { normal: "Normal day", light: "No follow-ups", scout: "Scout day" };
 

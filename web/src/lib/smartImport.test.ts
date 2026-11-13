@@ -1,5 +1,6 @@
 // Run: cd web && node --experimental-strip-types --import ./scripts/ts-hooks.mjs src/lib/smartImport.test.ts
-import { countryOf, dateOf, numberOf, planColumns, priorityWord, readSheet, statusValues, statusWord, toCanonical } from "./smartImport.ts";
+import { BRAND_HEADERS, CREATOR_HEADERS } from "./exports.ts";
+import { countryOf, dateOf, isCrmExport, numberOf, planColumns, priorityWord, readSheet, statusValues, statusWord, toCanonical } from "./smartImport.ts";
 
 let fail = 0;
 const eq = (name: string, got: unknown, want: unknown) => {
@@ -60,5 +61,11 @@ const bp = planColumns(brands, "brand");
 eq("brand columns", bp.map((p) => p.field), ["name", "domain", "email", "contact_name", "brand_type", "status"]);
 const bo = toCanonical(brands, bp, "brand", {});
 eq("brand domain cleaned, name from domain, won = signed", [bo.rows[0][bo.header.indexOf("Domain")], bo.rows[1][bo.header.indexOf("Company")], bo.rows[1][bo.header.indexOf("Status")]], ["nordaudio.com", "Keychron", "signed"]);
+
+// The CRM's own export / weekly backup goes straight to the importer (every column by name).
+eq("own export (influencers) is recognised", isCrmExport({ header: Object.values(CREATOR_HEADERS) }, "creator"), true);
+eq("own export (brands) is recognised", isCrmExport({ header: Object.values(BRAND_HEADERS) }, "brand"), true);
+eq("a random sheet is not", isCrmExport({ header: ["Name", "Email", "Subscribers", "Notes"] }, "creator"), false);
+eq("a brand export is not an influencer one", isCrmExport({ header: Object.values(BRAND_HEADERS) }, "creator"), false);
 
 if (fail) { console.log(`${fail} failed`); (globalThis as { process?: { exit(n: number): void } }).process?.exit(1); } else console.log("all smart import tests pass");

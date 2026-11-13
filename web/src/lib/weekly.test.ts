@@ -63,6 +63,12 @@ eq("names are escaped", [mail.html.includes("Ana <script>"), mail.html.includes(
 eq("links point into the app", mail.html.includes("https://example.com/crm/#/app/influencers?follow=due"), true);
 eq("plain-text part", mail.text.includes("Sent 12 / 25 goal (48%)"), true);
 eq("greets by first name", mail.html.includes("Dhurim, here's your week"), true);
+// The weekly backup: listed only when files are attached, names escaped, in the text part too.
+eq("no backup section without files", mail.html.includes("Your backup"), false);
+const withBackup = renderWeeklyEmail(r, { backup: { files: [{ name: "influencers-<x>.xlsx", rows: 321, noun: "influencers", bytes: 230000 }, { name: "brands-2026-11-15.xlsx", rows: 408, noun: "brands", bytes: 2_400_000 }] } });
+eq("backup listed with rows and size", [withBackup.html.includes("Your backup"), withBackup.html.includes("321 influencers · 225 KB"), withBackup.html.includes("408 brands · 2.3 MB")], [true, true, true]);
+eq("backup file names escaped", withBackup.html.includes("influencers-&lt;x&gt;.xlsx"), true);
+eq("backup in the plain-text part", withBackup.text.includes("To restore: Influencers or Brands → Import"), true);
 
 // "This week so far" on Sunday evening: future days are not judged.
 const sunday = weeklyReport({ ...base, which: "this", now: new Date("2026-10-28T17:00:00Z") });

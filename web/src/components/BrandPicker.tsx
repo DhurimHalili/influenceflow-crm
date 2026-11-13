@@ -107,7 +107,8 @@ export function BrandPicker({ brands, value, onChange, taken, suggested, onCreat
       onFocus={() => { setOpen(true); setActive(firstPickable()); }}
       onBlur={() => setOpen(false)}
       onKeyDown={onKeyDown}
-      placeholder={`Search ${brands.length.toLocaleString("en-US")} brand${brands.length === 1 ? "" : "s"} — name or website`}
+      placeholder={`Search ${brands.length.toLocaleString("en-US")} brand${brands.length === 1 ? "" : "s"}`}
+      title="Search by name or website"
       role="combobox"
       aria-label="Brand"
       aria-expanded={open}

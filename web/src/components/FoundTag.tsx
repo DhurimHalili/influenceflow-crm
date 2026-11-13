@@ -4,10 +4,12 @@ import type { Brand } from "../types";
 // Brands that came from Match (found in a creator's videos) carry this tag everywhere they're listed,
 // so you always know which brands you added yourself and which the CRM found.
 
+const DATE = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" });
+
 /** Who added it and from where, in one sentence. */
 export function foundWhy(d: NonNullable<Brand["discovered"]>): string {
   const what = d.kind === "seeded" ? "sent them product" : d.kind === "affiliate" ? "affiliate link" : "sponsored them";
-  const when = d.at ? new Date(d.at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "";
+  const when = d.at ? DATE.format(new Date(d.at)) : "";
   return `${d.auto ? "Added by the CRM" : "Added by you from Match"}${when ? ` on ${when}` : ""} — found in ${d.creator || "a creator"}'s videos (${what}).`;
 }
 

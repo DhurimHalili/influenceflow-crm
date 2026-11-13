@@ -1,4 +1,4 @@
-import { Captions, CheckCircle2, Download, Ear, FileVideo, Pause, Play, PlugZap, ShieldCheck, TimerReset } from "lucide-react";
+import { Captions, CheckCircle2, Download, AudioWaveform, FileVideo, Pause, Play, PlugZap, ShieldCheck, TimerReset } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useHelper } from "../contexts/HelperContext";
@@ -49,7 +49,7 @@ export function CoverageStrip() {
       <div title={st.failed ? `${st.failed} channel${st.failed === 1 ? "" : "s"} couldn't be read — check their YouTube link.` : undefined}><FileVideo size={15} aria-hidden="true" /><span><b>{n(st.videos)}</b><small>videos, last 12 months</small>{st.backfilling ? <em>{st.backfilling} creator{st.backfilling === 1 ? "" : "s"} still filling their year</em> : st.failed ? <em className="warn">{st.failed} channel{st.failed === 1 ? "" : "s"} couldn't be read</em> : null}</span></div>
       <div><ShieldCheck size={15} aria-hidden="true" /><span><b>{n(st.paidVideos)}</b><small>marked paid by YouTube</small></span></div>
       <div><Captions size={15} aria-hidden="true" /><span><b>{h.version ? `${spokenPct}%` : n(st.transcripts)}</b><small>{h.version ? "spoken words read" : "videos with spoken words read"}</small>{h.version && st.transcriptWaiting ? <em>{n(st.transcriptWaiting)} videos to go</em> : null}</span></div>
-      <div><Ear size={15} aria-hidden="true" /><span><b>{n(st.listened)}</b><small>ad clips listened to</small>{st.listenQueue ? <em>{n(st.listenQueue)} waiting · ~20 a day</em> : null}</span></div>
+      <div><AudioWaveform size={15} aria-hidden="true" /><span><b>{n(st.listened)}</b><small>ad clips listened to</small>{st.listenQueue ? <em>{n(st.listenQueue)} waiting · ~20 a day</em> : null}</span></div>
     </div>
     <button type="button" className={`mx-helper-pill ${line.tone}`} onClick={() => setSheet(true)} aria-haspopup="dialog">
       {line.tone === "live" ? <i className="mx-live-dot" aria-hidden="true" /> : line.tone === "off" ? <PlugZap size={14} aria-hidden="true" /> : line.tone === "warn" ? <TimerReset size={14} aria-hidden="true" /> : <CheckCircle2 size={14} aria-hidden="true" />}
@@ -66,8 +66,11 @@ export function downloadHelper() {
   download("influenceflow-helper.zip", new Blob([blob], { type: "application/zip" }), "application/zip");
 }
 
+const TX_NAME: Record<string, string> = { ytai: "youtube-transcript.ai", supadata: "Supadata", tubealfred: "TubeAlfred", transcriptapi: "TranscriptAPI" };
+
 function HelperSheet({ onClose }: { onClose: () => void }) {
   const h = useHelper();
+  const m = useMatch();
   const line = useHelperLine();
   const [checking, setChecking] = useState(false);
   return <Modal open onClose={onClose} title="Read what creators say" description="Captions show sponsors said out loud that no description mentions. Free, from your own browser.">
@@ -98,6 +101,7 @@ function HelperSheet({ onClose }: { onClose: () => void }) {
         </ol>
         <div className="mx-helper-actions"><Button size="sm" variant="secondary" loading={checking} onClick={async () => { setChecking(true); await h.recheck(); setChecking(false); }}>I've installed it — check</Button></div>
       </>}
+      {m.status?.tx?.services.length ? <p className="mx-helper-tx"><Captions size={14} aria-hidden="true" /><span><b>Transcript services: {m.status.tx.services.map((x) => TX_NAME[x] || x).join(", ")}</b> read paid-labelled videos first, from the server — {m.status.tx.left ? `${m.status.tx.left} more today` : "today's free allowance is used, more tomorrow"}. The helper reads everything else.</span></p> : null}
       <section className="mx-helper-why">
         <h4>Why a helper?</h4>
         <p>YouTube lets people read captions but blocks servers, so the CRM can't fetch them itself. The helper reads them from your browser, anonymously, like opening the video would — paid-labelled videos first, then the newest. A busy year of 16,000 videos takes a few days of the CRM being open; after that it keeps up with new uploads.</p>

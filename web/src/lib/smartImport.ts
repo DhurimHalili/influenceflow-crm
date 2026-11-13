@@ -159,6 +159,20 @@ const STATUS_DICT: [RegExp, string][] = [
 ];
 
 /** The CRM status a free-text status word means, or "" when it can't tell. */
+/**
+ * The CRM's own export or weekly backup (same columns as Export): it goes to the importer as it is —
+ * every column (all prices, the three sub-ratings, the brand brief, people) is read by name, nothing guessed.
+ */
+const CRM_MARKERS: Record<ImportKind, string[]> = {
+  creator: ["name", "email", "email_2", "channel", "niche", "country", "platform", "avg_views", "rating", "niche_fit", "engagement_stars", "consistency", "status", "date_contacted", "added_on"],
+  brand: ["company", "domain", "type", "email", "creator_niches", "platforms", "budget_min", "budget_max", "markets", "status", "people", "added_on"],
+};
+export function isCrmExport(sheet: Pick<Sheet, "header">, kind: ImportKind): boolean {
+  const keys = new Set(sheet.header.map(keyOf));
+  const want = CRM_MARKERS[kind];
+  return want.filter((k) => keys.has(k)).length >= want.length - 1;
+}
+
 export function statusWord(value: string, kind: ImportKind): string {
   const v = value.toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
   if (!v) return "";

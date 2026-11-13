@@ -16,6 +16,7 @@ import { CreatorMatchPanel } from "../components/MatchPanels";
 import { detectPlatform, extractFromText, SOCIAL_META, socialKey } from "../lib/socials";
 import { ArchivedBanner, Avatar, Button, EmptyState, FieldMergeReview, Input, Modal, PageHeader, SearchInput, Select, StarInput, Stars, StatusBadge, Tabs, Textarea } from "../components/ui";
 import { useSaveOnLeave } from "../hooks/useSaveOnLeave";
+import { useProgressive } from "../hooks/useProgressive";
 import { useScrollMemory, useSessionState } from "../hooks/useSessionState";
 import { useData } from "../contexts/DataContext";
 import { useYouTube } from "../contexts/YouTubeContext";
@@ -99,7 +100,6 @@ export default function InfluencersPage() {
   const [sort, setSort] = useSessionState("creators.sort", () => readSavedFilters().sort || "newest");
   const [filtersOpen, setFiltersOpen] = useSessionState("creators.filtersOpen", false);
   // A link such as /app/influencers?status=replied (dashboard) picks that status.
-    useScrollMemory("creators", data.ready);
 const linkedStatus = params.get("status");
   useEffect(() => { if (linkedStatus) setStatus(linkedStatus); }, [linkedStatus, setStatus]);
   // The coach links straight to ?follow=due / ?follow=reply.
@@ -235,6 +235,9 @@ const linkedStatus = params.get("status");
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data.creators, query, status, platform, niche, engagement, rating, priorityFilter, country, followFilter, minViews, critFilter, contactFilter, boxFilter, criteria, sort, weights, chase, dups.byId]);
+  // First rows at once, the rest right after — and the scroll position comes back once all are in.
+  const [shownRows, allShown] = useProgressive(filtered);
+  useScrollMemory("creators", data.ready && allShown);
   // Someone you archived is hidden from the list — but a search for them says so.
   const archivedHits = useMemo(() => (query.trim() ? data.creators.filter((item) => item.archived_at && matchesCreatorQuery(item, query.trim())) : []), [data.creators, query]);
   const restoreHit = (item: { id: string; name: string }) => { data.archive("creator", [item.id], true); toast(`${item.name} restored from the archive`); };
@@ -382,7 +385,7 @@ const linkedStatus = params.get("status");
       { key: "export", label: "Export", icon: Download, onClick: exportSelected, title: "Export the selected influencers" },
     ]} />}
     {filtered.length > 0 && <ArchivedHits items={archivedHits} query={query.trim()} noun="influencer" to={(id) => `/app/influencers/${id}`} onRestore={restoreHit} />}
-    {!filtered.length ? <EmptyState icon={archivedHits.length ? "archive" : "search"} title={archivedHits.length && !activeFilters ? `No active influencer matches “${query.trim()}”` : narrowed ? "No influencers match this view" : "Build your creator pipeline"} text={archivedHits.length && !activeFilters ? `${archivedHits.length === 1 ? "They're" : "They are"} in your archive — restore to bring them back with their history.` : narrowed ? "Your search and filters are kept while you move around — reset them to see everyone." : "Add creators manually or import a clean CSV with duplicate protection."} action={<>{narrowed ? <Button variant="secondary" onClick={resetAll}><RotateCcw size={15} /> {activeFilters ? "Reset filters" : "Clear search"}</Button> : <Button onClick={() => setCreateOpen(true)}><Plus size={15} /> Add influencer</Button>}<ArchivedHits items={archivedHits} query={query.trim()} noun="influencer" to={(id) => `/app/influencers/${id}`} onRestore={restoreHit} /></>} /> : view === "kanban" ? <CreatorKanban creators={filtered} boxOrder={boxOrder} /> : view === "cards" ? <CreatorCards creators={filtered} cyclePriority={cyclePriority} setStatus={setCardStatus} boxOrder={boxOrder} /> : <CreatorTable creators={filtered} selected={selected} setSelected={setSelected} density={density} cyclePriority={cyclePriority} setStatus={setCardStatus} boxOrder={boxOrder} />}
+    {!filtered.length ? <EmptyState icon={archivedHits.length ? "archive" : "search"} title={archivedHits.length && !activeFilters ? `No active influencer matches “${query.trim()}”` : narrowed ? "No influencers match this view" : "Build your creator pipeline"} text={archivedHits.length && !activeFilters ? `${archivedHits.length === 1 ? "They're" : "They are"} in your archive — restore to bring them back with their history.` : narrowed ? "Your search and filters are kept while you move around — reset them to see everyone." : "Add creators manually or import a clean CSV with duplicate protection."} action={<>{narrowed ? <Button variant="secondary" onClick={resetAll}><RotateCcw size={15} /> {activeFilters ? "Reset filters" : "Clear search"}</Button> : <Button onClick={() => setCreateOpen(true)}><Plus size={15} /> Add influencer</Button>}<ArchivedHits items={archivedHits} query={query.trim()} noun="influencer" to={(id) => `/app/influencers/${id}`} onRestore={restoreHit} /></>} /> : view === "kanban" ? <CreatorKanban creators={shownRows} boxOrder={boxOrder} /> : view === "cards" ? <CreatorCards creators={shownRows} cyclePriority={cyclePriority} setStatus={setCardStatus} boxOrder={boxOrder} /> : <CreatorTable creators={shownRows} selected={selected} setSelected={setSelected} density={density} cyclePriority={cyclePriority} setStatus={setCardStatus} boxOrder={boxOrder} />}
 
     <Modal open={createOpen} onClose={closeCreate} title="Add influencer" description="Start with the essentials. You can enrich the record anytime." wide>
       <form ref={formRef} onSubmit={create} className="entity-form creator-form" onKeyDown={(event) => { if ((event.metaKey || event.ctrlKey) && event.key === "Enter") { event.preventDefault(); event.currentTarget.requestSubmit(); } }}><CreatorFields draft={draft} setDraft={setDraft} mode="add" />

@@ -71,6 +71,8 @@ export interface WorkspacePreferences {
   youtube_criteria?: YouTubeCriteria;
   /** Weekly report by email: Monday morning (last week), Sunday evening (this week) or off. */
   weekly_report?: "monday" | "sunday" | "off";
+  /** Attach every influencer and brand as Excel files to the weekly report (default on). */
+  weekly_backup?: boolean;
   /** Your time zone (IANA, from the browser) — the weekly report's days and send time. */
   timezone?: string;
   /** Record pairs you said are different people / companies ("creator:idA|idB"); never flagged as duplicates again. */

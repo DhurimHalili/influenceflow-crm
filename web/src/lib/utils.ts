@@ -1,5 +1,5 @@
 import { formatDistanceToNow, isBefore } from "date-fns";
-import { dayKey, parseDay } from "./days.ts";
+import { dateFmt, dayKey, numberFmt, parseDay } from "./days.ts";
 
 export { dayKey, parseDay };
 
@@ -20,25 +20,25 @@ export const setActiveCurrency = (currency: string) => {
   activeCurrency = currency || "USD";
 };
 export const currencySymbol = () =>
-  new Intl.NumberFormat("en-US", { style: "currency", currency: activeCurrency }).formatToParts(0).find((p) => p.type === "currency")?.value || "$";
+  numberFmt({ style: "currency", currency: activeCurrency }).formatToParts(0).find((p) => p.type === "currency")?.value || "$";
 
 export const money = (value: number) =>
-  new Intl.NumberFormat("en-US", { style: "currency", currency: activeCurrency, maximumFractionDigits: 0 }).format(value || 0);
+  numberFmt({ style: "currency", currency: activeCurrency, maximumFractionDigits: 0 }).format(value || 0);
 
 export const compact = (value: number) =>
-  new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(value || 0);
+  numberFmt({ notation: "compact", maximumFractionDigits: 1 }).format(value || 0);
 
 export const dateLabel = (value?: string | null) => {
   const d = parseDay(value);
   if (!d) return "Not set";
-  return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(d);
+  return dateFmt({ month: "short", day: "numeric", year: "numeric" }).format(d);
 };
 
 export const shortDate = (value?: string | null) => {
   const d = parseDay(value);
   if (!d) return "";
   const sameYear = d.getFullYear() === new Date().getFullYear();
-  return new Intl.DateTimeFormat("en-US", sameYear ? { month: "short", day: "numeric" } : { month: "short", day: "numeric", year: "numeric" }).format(d);
+  return dateFmt(sameYear ? { month: "short", day: "numeric" } : { month: "short", day: "numeric", year: "numeric" }).format(d);
 };
 
 // "Due today", "Due tomorrow", "Overdue · 3 days", "Due Friday", "Due Oct 12".
@@ -51,12 +51,12 @@ export const dueLabel = (value?: string | null) => {
   if (diff === 0) return "Due today";
   if (diff === 1) return "Due tomorrow";
   if (diff < 0) return `Overdue · ${-diff} day${diff === -1 ? "" : "s"}`;
-  if (diff < 7) return `Due ${new Intl.DateTimeFormat("en-US", { weekday: "long" }).format(d)}`;
+  if (diff < 7) return `Due ${dateFmt({ weekday: "long" }).format(d)}`;
   return `Due ${shortDate(value)}`;
 };
 
 export const timeLabel = (value: string) =>
-  new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit" }).format(new Date(value));
+  dateFmt({ hour: "numeric", minute: "2-digit" }).format(new Date(value));
 
 export const relativeTime = (value: string) => formatDistanceToNow(new Date(value), { addSuffix: true });
 
@@ -86,7 +86,7 @@ export const daysAgoLabel = (value?: string | null) => {
 export const stampLabel = (value: string) => {
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return "";
-  return `${new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" }).format(d)} · ${new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit" }).format(d)}`;
+  return `${dateFmt({ weekday: "short", month: "short", day: "numeric", year: "numeric" }).format(d)} · ${dateFmt({ hour: "numeric", minute: "2-digit" }).format(d)}`;
 };
 
 export const initials = (name: string) =>

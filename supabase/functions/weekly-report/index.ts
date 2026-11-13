@@ -2,7 +2,10 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 import nodemailer from "npm:nodemailer@6.9.16";
 import { safeZone, tzParts, weekStart, weeklyReport, type WeeklyReport } from "../../../web/src/lib/weekly.ts";
-import { renderWeeklyEmail } from "../../../web/src/lib/weeklyEmail.ts";
+import { renderWeeklyEmail, type BackupNote } from "../../../web/src/lib/weeklyEmail.ts";
+import { Buffer } from "node:buffer";
+// Compiled from web/src/lib/backupBook.ts by `npm run build` (same columns as the app's Export).
+import { backupFiles } from "../_shared/generated/backupBook.js";
 
 // The weekly report email (the numbers and the design live in
 // web/src/lib/weekly.ts + weeklyEmail.ts, shared with the app's preview, so
@@ -48,11 +51,11 @@ const record = (r: Row) => ({ ...r, name: text(r.name), pipeline_status: text(r.
 const event = (r: Row) => ({ id: text(r.id), gmail_id: text(r.gmail_id), thread_id: text(r.thread_id), direction: r.direction === "in" ? "in" : "out", entity_type: r.entity_type === "brand" ? "brand" : "creator", entity_id: text(r.entity_id), counterpart: text(r.counterpart), subject: text(r.subject), snippet: text(r.snippet), at: text(r.at), mailbox: text(r.mailbox).toLowerCase(), scheduled: r.scheduled === true, reply_kind: ["no", "team", "auto", "managed_no", "reaction"].includes(text(r.reply_kind)) ? text(r.reply_kind) : "", message_key: text(r.message_key), in_reply_to: text(r.in_reply_to) });
 const followup = (r: Row) => ({ id: text(r.id), user_id: text(r.user_id), creator_id: typeof r.creator_id === "string" ? r.creator_id : null, brand_id: typeof r.brand_id === "string" ? r.brand_id : null, kind: r.kind === "reply" ? "reply" : "followup", channel: text(r.channel), note: "", at: text(r.at) });
 
-type Prefs = { weekly_report?: string; timezone?: string; daily_email_goal?: number; followup_rules?: Record<string, unknown> };
+type Prefs = { weekly_report?: string; weekly_backup?: boolean; timezone?: string; daily_email_goal?: number; followup_rules?: Record<string, unknown> };
 
 async function reportFor(admin: SupabaseClient, userId: string, which: "last" | "this", now = new Date()) {
   const [{ data: profile }, creators, brands, contacts, campaigns, activities, followups, events, leads] = await Promise.all([
-    admin.from("profiles").select("display_name, preferences").eq("id", userId).maybeSingle(),
+    admin.from("profiles").select("display_name, preferences, rating_weights").eq("id", userId).maybeSingle(),
     all(admin, "creators", userId), all(admin, "brands", userId), all(admin, "brand_contacts", userId), all(admin, "campaigns", userId),
     all(admin, "activities", userId, { order: "at", max: 3000, columns: "id, text, at, entity_type, entity_id" }),
     all(admin, "followups", userId, { order: "at", max: 5000 }),
@@ -81,15 +84,29 @@ async function reportFor(admin: SupabaseClient, userId: string, which: "last" | 
     },
     name: text(profile?.display_name), timeZone: safeZone(prefs.timezone), which, now, appUrl: APP_URL,
   });
-  return report;
+  // The weekly backup (default on): every influencer and brand, archived ones too, built in memory
+  // only when the email goes out — never stored anywhere.
+  const backup = prefs.weekly_backup === false ? null : async () => {
+    const stamp = dateOf(Date.now() - 12 * 3600000, report.timeZone); // today, in their time zone
+    const files = await backupFiles({ creators, brands, contacts, weights: (profile?.rating_weights || null) as never, stamp });
+    // Gmail takes up to 25 MB per email: leave room for the report itself.
+    return files.reduce((n, f) => n + f.content.length, 0) > 18 * 1024 * 1024 ? null : files;
+  };
+  return Object.assign(report, { backup });
 }
 
 let transport: ReturnType<typeof nodemailer.createTransport> | null = null;
-async function send(to: string, report: WeeklyReport) {
+async function send(to: string, report: WeeklyReport & { backup?: (() => Promise<Awaited<ReturnType<typeof backupFiles>> | null>) | null }) {
   if (!SMTP_PASSWORD) throw new Error("not_configured");
   transport ||= nodemailer.createTransport({ host: SMTP_HOST, port: 465, secure: true, auth: { user: SMTP_USER, pass: SMTP_PASSWORD } });
-  const mail = renderWeeklyEmail(report);
-  await transport.sendMail({ from: { name: FROM_NAME, address: SMTP_USER }, to, subject: mail.subject, html: mail.html, text: mail.text, headers: { "X-Entity-Ref-ID": `weekly-${report.startMs}` } });
+  // A backup that can't be built never blocks the report: it goes out without files.
+  const files = report.backup ? await report.backup().catch(() => null) : null;
+  const note: BackupNote | null = files ? { files: files.map((f, i) => ({ name: f.filename, rows: f.rows, noun: i === 0 ? "influencers" : "brands", bytes: f.content.length })) } : null;
+  const mail = renderWeeklyEmail(report, { backup: note });
+  await transport.sendMail({
+    from: { name: FROM_NAME, address: SMTP_USER }, to, subject: mail.subject, html: mail.html, text: mail.text, headers: { "X-Entity-Ref-ID": `weekly-${report.startMs}` },
+    attachments: (files || []).map((f) => ({ filename: f.filename, content: Buffer.from(f.content), contentType: f.contentType })),
+  });
 }
 
 const dateOf = (ms: number, tz: string) => { const p = tzParts(ms + 12 * 3600000, tz); return `${p.y}-${String(p.m).padStart(2, "0")}-${String(p.d).padStart(2, "0")}`; };

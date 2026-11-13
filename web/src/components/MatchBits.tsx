@@ -1,4 +1,4 @@
-import { BadgeCheck, BadgeDollarSign, Bot, Captions, Check, ChevronRight, CircleAlert, CircleHelp, Ear, ExternalLink, FileText, Gift, Link2, ListVideo, Loader2, Pencil, Play, ScanSearch, Store, Tags, X } from "lucide-react";
+import { BadgeCheck, BadgeDollarSign, Bot, Captions, Check, ChevronRight, CircleAlert, CircleHelp, AudioWaveform, ExternalLink, FileText, Gift, Link2, ListVideo, Loader2, Pencil, Play, ScanSearch, Store, Tags, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { loadProof, quickProof, type ProofVideo } from "../lib/videoProof";
 import { Link } from "react-router-dom";
@@ -87,7 +87,7 @@ const SIGNAL: Record<Signal, { icon: typeof Gift; text: string }> = {
   title: { icon: Tags, text: "The video title" },
   chapters: { icon: ListVideo, text: "The video's chapters" },
   sponsorblock: { icon: ScanSearch, text: "SponsorBlock — viewers marked the segment" },
-  voice: { icon: Ear, text: "Heard in the video" },
+  voice: { icon: AudioWaveform, text: "Heard in the video" },
   transcript: { icon: Captions, text: "Said in the video (captions)" },
   ai: { icon: Bot, text: "AI double-checked the wording" },
   you: { icon: Check, text: "You confirmed it" },

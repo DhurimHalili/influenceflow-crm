@@ -545,5 +545,15 @@ button.mx-deal:hover { border-color: var(--kc); box-shadow: var(--shadow-sm); }
 .mx-kind-seg .k-sponsored { --kc: var(--k-sponsored); }
 .bp-chosen > :first-child { flex: none; }
 .bp-chosen .link-btn { flex: none; font-size: 12.5px; }
-.mx-side .mx-kind-seg button { padding: 6px 7px; }
-.mx-side .mx-kind-seg button small { font-size: 10.5px; }
+
+/* The deal kinds fit any width: three across when there's room, one per row (name + meaning side by side) when not. */
+.mx-add-deal { container-type: inline-size; }
+.mx-kind-seg button strong, .mx-kind-seg button small { min-width: 0; overflow-wrap: normal; }
+@container (max-width: 330px) {
+  .mx-kind-seg { grid-template-columns: 1fr; gap: 5px; }
+  .mx-kind-seg button { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; min-height: 38px; padding: 8px 11px; }
+  .mx-kind-seg button small { text-align: right; }
+}
+.mx-helper-tx { display: flex; gap: 9px; align-items: flex-start; margin: 12px 0 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-alt); color: var(--text-soft); font-size: 12.5px; line-height: 1.5; }
+.mx-helper-tx > svg { flex: none; margin-top: 2px; color: var(--accent); }
+.mx-helper-tx b { color: var(--text); }
