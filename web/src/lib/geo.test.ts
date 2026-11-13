@@ -50,4 +50,10 @@ yes("a global brand reaches a market it doesn't list, a little", global.global &
 
 eq("affinity is symmetric and 1 for the same country", [affinity("US", "US"), affinity("GB", "IE"), affinity("IE", "GB"), affinity("US", "DE")], [1, 0.8, 0.8, 0]);
 
+// Electronics brands based or registered in China / Hong Kong sell abroad: that country isn't their market.
+const ancel = brandMarkets({ domain: "ancel.com" }, { currency: "EUR", geo: { shop: "HK", cur: "USD", hq: "CN" } });
+eq("HK-registered store with USD base currency → US first", ancel.list[0]?.code, "US");
+yes("…and Hong Kong / China don't lead", !ancel.list.slice(0, 1).some((m) => ["HK", "CN"].includes(m.code)), ancel.list);
+eq("base currency beats a page currency that followed the visitor", brandMarkets({ domain: "jowua-life.com" }, { currency: "EUR", geo: { shop: "CA", cur: "CAD" } }).list[0]?.code, "CA");
+
 if (fail) { console.log(`\n${fail} failing`); (globalThis as { process?: { exit(n: number): void } }).process?.exit(1); } else console.log("\nall geo tests pass");

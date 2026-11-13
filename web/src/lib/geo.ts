@@ -12,7 +12,7 @@
 
 import { findCountry } from "./countries.ts";
 
-export type GeoSignals = { shop?: string; tld?: string; hq?: string; at?: string };
+export type GeoSignals = { shop?: string; cur?: string; tld?: string; hq?: string; at?: string };
 export type MarketEntry = { code: string; weight: number; why: string[] };
 export type BrandMarkets = { list: MarketEntry[]; source: "you" | "found" | "none"; global: boolean };
 export type AudienceEntry = { code: string; share: number };
@@ -40,6 +40,8 @@ export const tldCountry = (domain: string) => {
 };
 /** A currency used by one country only says where the shop is aimed (EUR covers 20 countries: says nothing alone). */
 const CURRENCY_HOME: Record<string, string> = { USD: "US", GBP: "GB", CAD: "CA", AUD: "AU", NZD: "NZ", JPY: "JP", SEK: "SE", NOK: "NO", DKK: "DK", CHF: "CH", PLN: "PL", INR: "IN", SGD: "SG", BRL: "BR", MXN: "MX", KRW: "KR", CZK: "CZ", HUF: "HU", TRY: "TR", ZAR: "ZA" };
+
+const HUBS = new Set(["CN", "HK", "TW"]);
 
 // ---- regions: how close two markets are --------------------------------------------------------
 const GROUPS: [string[], number][] = [
@@ -80,10 +82,17 @@ export function brandMarkets(b: BrandLike, intel?: IntelLike, sponsored: string[
   const score = new Map<string, { s: number; why: string[] }>();
   const add = (code: string, s: number, why: string) => { if (!code) return; const x = score.get(code) || { s: 0, why: [] }; x.s += s; if (!x.why.includes(why)) x.why.push(why); score.set(code, x); };
   const geo = intel?.geo || {};
-  add(codeOf(geo.shop), 1, "their store's country");
+  // China / Hong Kong / Taiwan: where many electronics brands are based or register their store — they
+  // sell abroad, so that country says little about their market.
+  const hub = (c: string) => HUBS.has(c);
+  const shop = codeOf(geo.shop), hq = codeOf(geo.hq);
+  add(shop, hub(shop) ? 0.15 : 1, "their store's country");
   add(tldCountry(b.domain || "") || codeOf(geo.tld), 1, "their country website");
-  add(CURRENCY_HOME[String(intel?.currency || "").toUpperCase()] || "", 0.6, "their shop currency");
-  add(codeOf(geo.hq), 0.35, "where the company is based");
+  // The store's own base currency (Shopify) is exact; a page's currency can follow the visitor's location.
+  const baseCur = String(geo.cur || "").toUpperCase();
+  add(CURRENCY_HOME[baseCur] || "", 0.8, "their store's currency");
+  if (!baseCur) add(CURRENCY_HOME[String(intel?.currency || "").toUpperCase()] || "", 0.6, "their shop currency");
+  add(hq, hub(hq) ? 0.1 : 0.35, "where the company is based");
   const locales = Array.from(new Set((intel?.markets || []).map(codeOf).filter(Boolean)));
   const global = locales.length >= 8;
   for (const c of locales) add(c, global ? 0.15 : 0.3, "their site serves it");
