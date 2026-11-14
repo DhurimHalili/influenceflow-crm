@@ -8,6 +8,7 @@
 // member asks, one credit per brand; the answer is kept so the credit is never spent twice.
 
 import { normalizeDomain } from "./sponsors.ts";
+import { cred } from "./keyring.ts";
 
 export type CompanyFacts = {
   /** The domain these facts were looked up for — a new website looks again. */
@@ -71,7 +72,7 @@ export async function wikidataLinkedin(name: string, domain: string, get: Fetche
 
 export type HunterAnswer<T> = { ok: true; value: T } | { ok: false; why: "no_key" | "quota" | "bad_key" | "busy" | "none" | "error" };
 
-const hunterKey = () => env("HUNTER_API_KEY");
+const hunterKey = () => cred("HUNTER_API_KEY");
 export const hunterConfigured = () => !!hunterKey();
 const hunterStatus = (status: number): HunterAnswer<never> | null =>
   status === 401 ? { ok: false, why: "bad_key" }
@@ -141,7 +142,7 @@ export async function hunterPeople(domain: string, get: Fetcher = defaultFetch, 
 // Its company search by website gives the LinkedIn page, revenue, size, industry and country; its people
 // search gives who works there by job title (LinkedIn, no email). One result = one of the 100.
 
-const clayKey = () => env("CLAY_API_KEY");
+const clayKey = () => cred("CLAY_API_KEY");
 export const clayConfigured = () => !!clayKey();
 const CLAY = "https://api.clay.com/public/v0";
 type Poster = (url: string, body: unknown, headers: Record<string, string>) => Promise<{ status: number; body: unknown } | null>;

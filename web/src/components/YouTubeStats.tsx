@@ -80,8 +80,8 @@ export function YouTubePanel({ creator }: { creator: Creator }) {
         <div><small>Uploads</small><strong>{f.uploads_90d ?? 0}</strong><em>in the last 90 days</em></div>
       </div>
       {f.sample && f.sample.length > 0 && <VideoSample sample={f.sample} avg={f.avg_views || 0} recent={!!f.includes_recent} />}
-      {(f.niche || (f.kept || []).length > 0) && <p className="yt-facts">{f.niche && <span className="yt-chip">{f.niche}{f.sub_niche ? ` · ${f.sub_niche}` : ""}</span>}{(f.kept || []).length > 0 && <span className="yt-kept">Kept your {(f.kept || []).map((k) => KEPT_LABEL[k] || k).join(", ")} — the hourly refresh leaves your edit; press Refresh to take YouTube's</span>}</p>}
-      <p className="yt-foot">Updated {relativeTime(at)} · refreshes every hour{!yt.enabled && " (off in Settings)"} · <a href={f.url || link} target="_blank" rel="noreferrer">Open channel <ExternalLink size={11} /></a>
+      {(f.niche || (f.kept || []).length > 0) && <p className="yt-facts">{f.niche && <span className="yt-chip">{f.niche}{f.sub_niche ? ` · ${f.sub_niche}` : ""}</span>}{(f.kept || []).length > 0 && <span className="yt-kept">Kept your {(f.kept || []).map((k) => KEPT_LABEL[k] || k).join(", ")} — the automatic refresh leaves your edit; press Refresh to take YouTube's</span>}</p>}
+      <p className="yt-foot">Updated {relativeTime(at)} · refreshes every 6 hours{!yt.enabled && " (off in Settings)"} · <a href={f.url || link} target="_blank" rel="noreferrer">Open channel <ExternalLink size={11} /></a>
         {f.business_email_hidden && !creator.contact_email && <> · No email in the description — <a href={`${f.url || link}/about`} target="_blank" rel="noreferrer">check “View email address” <ExternalLink size={11} /></a></>}</p>
     </> : <p className="yt-foot">{busy ? "Reading the channel — last 12 videos, engagement, subscribers…" : yt.enabled ? "Not read yet — press Refresh, or it happens within the hour." : <>Automatic YouTube stats are off. <Link to="/app/settings#youtube">Turn them on</Link> or press Refresh.</>}</p>}
   </section>;

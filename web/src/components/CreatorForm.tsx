@@ -313,7 +313,7 @@ function AutoHint({ field, draft, setDraft }: { field: AutoKey; draft: CreatorDr
     return <span className="yt-hint mine"><i aria-hidden="true" />Yours — YouTube says {field === "avg_views" ? compact(Number(yours)) : yours}{field === "engagement_rate" ? "%" : ""} <button type="button" onClick={() => setDraft({ ...draft, [field]: yours, youtube: { ...draft.youtube, auto: { ...(draft.youtube?.auto || {}), [field]: yours } }, youtube_dirty: true })}>Use it</button></span>;
   }
   if (sameAuto(field, draft[field], auto)) return <span className="yt-hint yt" title="Refreshes with the channel until you change it"><i aria-hidden="true" />From YouTube · stays fresh</span>;
-  return <span className="yt-hint mine" role="status"><i aria-hidden="true" />Your edit — the hourly refresh keeps it{yours && !blankAuto(field, yours) ? <> <button type="button" onClick={() => setDraft({ ...draft, [field]: yours, youtube: { ...draft.youtube, auto: { ...(draft.youtube?.auto || {}), [field]: yours } }, youtube_dirty: true })}>Use YouTube's{field === "avg_views" ? ` (${compact(Number(yours))})` : field === "engagement_rate" ? ` (${yours}%)` : ""}</button></> : null}</span>;
+  return <span className="yt-hint mine" role="status"><i aria-hidden="true" />Your edit — the automatic refresh keeps it{yours && !blankAuto(field, yours) ? <> <button type="button" onClick={() => setDraft({ ...draft, [field]: yours, youtube: { ...draft.youtube, auto: { ...(draft.youtube?.auto || {}), [field]: yours } }, youtube_dirty: true })}>Use YouTube's{field === "avg_views" ? ` (${compact(Number(yours))})` : field === "engagement_rate" ? ` (${yours}%)` : ""}</button></> : null}</span>;
 }
 
 /** Live check against your YouTube criteria while you add or edit (numbers you type count). */

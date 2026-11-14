@@ -24,6 +24,7 @@
 // +100 for a /c/ name search). The videos behind the average are kept (sample).
 // Pure helpers are exported for tests; nothing here touches the database.
 
+import { cred } from "./keyring.ts";
 const YT = "https://www.googleapis.com/youtube/v3";
 
 export type ChannelRef = { kind: "id" | "handle" | "user" | "custom" | "video"; value: string };
@@ -207,7 +208,8 @@ export function nicheOf(input: { topics: string[]; description: string; titles: 
 
 // ---- API ------------------------------------------------------------------------
 
-const keys = () => Array.from(new Set(`${Deno.env.get("YOUTUBE_API_KEYS") || ""},${Deno.env.get("YOUTUBE_API_KEY") || ""}`.split(/[\s,;]+/).map((k) => k.trim()).filter((k) => /^[\w-]{20,60}$/.test(k))));
+// The work's own YouTube keys (keyring.ts): a member's own, or the owner's workspace key.
+const keys = () => Array.from(new Set(`${cred("YOUTUBE_API_KEYS")},${cred("YOUTUBE_API_KEY")}`.split(/[\s,;]+/).map((k) => k.trim()).filter((k) => /^[\w-]{20,60}$/.test(k))));
 export const youtubeConfigured = () => keys().length > 0;
 const dead = new Set<string>();
 
@@ -215,8 +217,9 @@ const dead = new Set<string>();
 async function api(path: string, params: Record<string, string>): Promise<any> {
   for (const key of keys()) {
     if (dead.has(key)) continue;
-    const q = new URLSearchParams({ ...params, key });
-    const res = await fetch(`${YT}/${path}?${q}`, { signal: AbortSignal.timeout(15_000) }).catch(() => null);
+    // The key travels in a header, never in the URL (URLs end up in logs).
+    const q = new URLSearchParams(params);
+    const res = await fetch(`${YT}/${path}?${q}`, { headers: { "X-Goog-Api-Key": key }, signal: AbortSignal.timeout(15_000) }).catch(() => null);
     if (!res) throw new Error("YouTube didn't answer — try again in a moment");
     if (res.status === 403 || res.status === 429) {
       const body = await res.text().catch(() => "");

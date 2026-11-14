@@ -20,6 +20,7 @@ import { useChase } from "../hooks/useChase";
 import { useLeadActions } from "../hooks/useLeadActions";
 import { CoachLayer, CoachRing } from "./Coach";
 import { DayBriefLayer } from "./DayBrief";
+import { KeysNoticeLayer } from "./KeysNotice";
 import { YouTubeProgress } from "./YouTubeStats";
 import { isPastDay, isTodayDay, LOSS_REASONS } from "../lib/utils";
 import type { SearchResult, ThemeName } from "../types";
@@ -413,6 +414,7 @@ export default function AppShell() {
       </Modal>
     <CoachLayer />
     <DayBriefLayer />
+    <KeysNoticeLayer />
     <YouTubeProgress />
     </div>
   );

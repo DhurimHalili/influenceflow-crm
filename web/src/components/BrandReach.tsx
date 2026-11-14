@@ -126,7 +126,7 @@ export function BrandReach({ brand, contacts }: { brand: Brand; contacts: BrandC
       <div className="reach-chips">{ROLES.map((r) => <a key={r.label} href={search(r.words)} target="_blank" rel="noopener noreferrer">{r.label}<ExternalLink size={11} aria-hidden="true" /></a>)}</div>
     </div>
 
-    {!services.length && domain && m.status ? <p className="reach-connect"><Sparkles size={13} aria-hidden="true" /><span>See who works there — with work emails and LinkedIn — and company facts: <Link to="/app/settings#lookups">connect Clay or Hunter in Settings</Link>.</span></p> : null}
+    {!services.length && domain && m.status ? <p className="reach-connect"><Sparkles size={13} aria-hidden="true" /><span>See who works there — with work emails and LinkedIn — and company facts: <Link to="/app/settings#keys">add your Clay or Hunter key in Settings</Link>.</span></p> : null}
     {services.length && domain ? <div className="reach-people">
       <div className="reach-people-head">
         <span><Sparkles size={13} aria-hidden="true" /> <b>People who work there</b>{people ? <small> · {dateLabel(people.at)}{people.total > people.list.length ? ` · ${people.total} known in all` : ""}</small> : <small> · from {services.join(" + ")}, deal-makers first</small>}</span>

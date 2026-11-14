@@ -687,7 +687,7 @@ export async function drainQueue(ctx: { admin: Admin; userId: string; currency: 
 
 /** "Check it with AI" on one file (an upload, or one saved before AI was on). */
 export async function analyzeStoredFile(admin: Admin, userId: string, fileId: string, currency: string, getFor: (mailbox: string) => Fetcher | null) {
-  if (!aiEnabled()) return { error: "AI reading isn't set up on the server (add GEMINI_API_KEYS or ANTHROPIC_API_KEY)." };
+  if (!aiEnabled()) return { error: "Add an AI key to read files — Settings → Your API keys (Gemini is free)." };
   const { data: file } = await admin.from("creator_files").select(FILE_COLS).eq("id", fileId).eq("user_id", userId).maybeSingle();
   if (!file) return { error: "File not found." };
   const f = file as FileRow;

@@ -2,6 +2,7 @@ import Anthropic from "npm:@anthropic-ai/sdk";
 import { RATE_KEYS, type RateKey } from "./negotiation.ts";
 import type { LeadCategory } from "./leadScanner.ts";
 import { decide } from "./clef.ts";
+import { cred } from "./keyring.ts";
 
 // AI reads what rules can't: what a media kit, rate card or stats screenshot
 // shows, what a creator's email says about prices / audience / an agreed price,
@@ -37,9 +38,10 @@ const CLAUDE_MODEL = "claude-opus-5-5";
 const env = (name: string) => (Deno.env.get(name) || "").trim();
 const modelEnv = (name: string, fallback: string) => (env(name) || fallback).replace(/[^\w.:@/-]/g, "");
 let client: Anthropic | null = null;
-const api = () => (client ??= new Anthropic({ apiKey: env("ANTHROPIC_API_KEY"), maxRetries: 2, timeout: 60_000 }));
+const api = () => (client ??= new Anthropic({ apiKey: cred("ANTHROPIC_API_KEY"), maxRetries: 2, timeout: 60_000 }));
 
-const keysOf = (...names: string[]) => Array.from(new Set(names.map(env).join(" ")
+// Credentials come from the key ring of the work running now (a member's own keys, or the owner's).
+const keysOf = (...names: string[]) => Array.from(new Set(names.map(cred).join(" ")
   .split(/[\s,;]+/)
   .map((k) => k.trim().replace(/^["']+|["']+$/g, ""))
   // AQ. (Gemini) keys contain a dot; others don't. Room for future formats, no absurd values.
@@ -69,7 +71,7 @@ const order = (): AiProvider[] => {
 function routes(): Route[] {
   const out: Route[] = [];
   for (const p of order()) {
-    if (p === "claude" && env("ANTHROPIC_API_KEY")) out.push({ provider: p, model: CLAUDE_MODEL, key: env("ANTHROPIC_API_KEY"), url: "", can: ["text", "image", "pdf"], format: "schema" });
+    if (p === "claude" && cred("ANTHROPIC_API_KEY")) out.push({ provider: p, model: CLAUDE_MODEL, key: cred("ANTHROPIC_API_KEY"), url: "", can: ["text", "image", "pdf"], format: "schema" });
     if (p === "gemini") for (const key of keysOf("GEMINI_API_KEYS", "GEMINI_API_KEY")) out.push({ provider: p, model: modelEnv("GEMINI_MODEL", DEFAULTS.gemini), key, url: "", can: ["text", "image", "pdf"], format: "schema" });
     if (p === "groq") {
       const url = "https://api.groq.com/openai/v1/chat/completions";
@@ -82,7 +84,7 @@ function routes(): Route[] {
       }
     }
     if (p === "cloudflare") {
-      const account = env("CLOUDFLARE_ACCOUNT_ID").replace(/[^a-f0-9]/gi, "");
+      const account = cred("CLOUDFLARE_ACCOUNT_ID").replace(/[^a-f0-9]/gi, "");
       const url = `https://api.cloudflare.com/client/v4/accounts/${account}/ai/v1/chat/completions`;
       const vision = modelEnv("CLOUDFLARE_VISION_MODEL", DEFAULTS.cloudflareVision);
       if (account.length >= 16) for (const key of keysOf("CLOUDFLARE_AI_TOKENS", "CLOUDFLARE_AI_TOKEN")) {

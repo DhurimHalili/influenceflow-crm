@@ -14,9 +14,10 @@
 // re-checked here, nothing applied unless the model heard it said.
 
 import { cleanName, normalizeDomain, type DealKind } from "./sponsors.ts";
+import { cred, scoped } from "./keyring.ts";
 
 const env = (name: string) => (Deno.env.get(name) || "").trim();
-const keys = () => Array.from(new Set(`${env("GEMINI_API_KEYS")} ${env("GEMINI_API_KEY")}`.split(/[\s,;]+/).map((k) => k.trim().replace(/^["']+|["']+$/g, "")).filter((k) => /^[\w.-]{20,300}$/.test(k))));
+const keys = () => Array.from(new Set(`${cred("GEMINI_API_KEYS")} ${cred("GEMINI_API_KEY")}`.split(/[\s,;]+/).map((k) => k.trim().replace(/^["']+|["']+$/g, "")).filter((k) => /^[\w.-]{20,300}$/.test(k))));
 const model = () => (env("GEMINI_LISTEN_MODEL") || env("GEMINI_MODEL") || "gemini-3.5-flash").replace(/[^\w.:@/-]/g, "");
 const dailySeconds = () => Math.max(0, Number(env("LISTEN_DAILY_SECONDS")) || 3600);
 // Clips a day: Gemini's free daily requests are shared with media-kit and price reading.
@@ -31,22 +32,26 @@ const nextPacificMidnight = () => {
 // deno-lint-ignore no-explicit-any
 type Admin = { from: (t: string) => any; rpc: (fn: string, args: Record<string, unknown>) => any };
 let admin: Admin | null = null;
-let state: { day: string; used: number; paused: number; clips: number } | null = null;
-export function useListenBudget(a: Admin) { admin = a; state = null; }
+// One budget per key owner (the owner's workspace keys, or a member's own key): "listen" / "listen@<id>".
+const states = new Map<string, { day: string; used: number; paused: number; clips: number }>();
+export function useListenBudget(a: Admin) { admin = a; states.clear(); }
 const utcDay = () => new Date().toISOString().slice(0, 10);
 async function load() {
   const day = utcDay();
-  if (state && state.day === day) return state;
-  state = { day, used: 0, paused: 0, clips: 0 };
+  const route = scoped("listen");
+  const have = states.get(route);
+  if (have && have.day === day) return have;
+  let state = { day, used: 0, paused: 0, clips: 0 };
   if (admin) {
-    const { data } = await admin.from("ai_budget").select("units, calls, paused_until").eq("route", "listen").eq("day", day).maybeSingle();
+    const { data } = await admin.from("ai_budget").select("units, calls, paused_until").eq("route", route).eq("day", day).maybeSingle();
     if (data) state = { day, used: Number(data.units) || 0, paused: data.paused_until ? new Date(data.paused_until).getTime() : 0, clips: Number(data.calls) || 0 };
   }
+  states.set(route, state);
   return state;
 }
 const pause = async (until: number, note: string) => {
   const s = await load(); s.paused = until;
-  if (admin) await Promise.resolve(admin.from("ai_budget").upsert({ route: "listen", day: s.day, units: s.used, paused_until: new Date(until).toISOString(), note: note.slice(0, 200) })).catch(() => null);
+  if (admin) await Promise.resolve(admin.from("ai_budget").upsert({ route: scoped("listen"), day: s.day, units: s.used, paused_until: new Date(until).toISOString(), note: note.slice(0, 200) })).catch(() => null);
 };
 
 export const listenConfigured = () => keys().length > 0;
@@ -118,7 +123,7 @@ Only brands actually said or shown in this clip. If nothing is promoted, return 
       return null;
     }
     s.used += to - from; s.clips += 1;
-    if (admin) await Promise.resolve(admin.rpc("ai_budget_use", { p_route: "listen", p_units: to - from })).catch(() => null);
+    if (admin) await Promise.resolve(admin.rpc("ai_budget_use", { p_route: scoped("listen"), p_units: to - from })).catch(() => null);
     const body = await res.json().catch(() => null) as { candidates?: { content?: { parts?: { text?: string; thought?: boolean }[] } }[] } | null;
     const raw = (body?.candidates?.[0]?.content?.parts || []).filter((p) => !p.thought && p.text).map((p) => p.text).join("");
     let out: { brands?: unknown[]; instructions_in_video?: boolean } | null = null;
