@@ -24,6 +24,7 @@ const clock = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: "2-dig
 function useHelperLine() {
   const h = useHelper();
   if (h.version === null) return { tone: "info", text: "Checking for the helper…", action: "" } as const;
+  if (!h.version && h.missing) return { tone: "warn", text: "The helper is gone from this browser", action: "install" } as const;
   if (!h.version) return { tone: "off", text: "Spoken words aren't read yet", action: "install" } as const;
   if (h.outdated) return { tone: "warn", text: `Update the helper · ${h.version} → ${h.latest}`, action: "update" } as const;
   if (h.blockedUntil > Date.now()) return { tone: "warn", text: /403/.test(h.blockedWhy) ? `YouTube refused this browser · trying again at ${clock(h.blockedUntil)}` : `YouTube asked this connection to slow down · back at ${clock(h.blockedUntil)}`, action: "" } as const;
@@ -49,12 +50,12 @@ export function CoverageStrip() {
       <div title={st.failed ? `${st.failed} channel${st.failed === 1 ? "" : "s"} couldn't be read — check their YouTube link.` : undefined}><FileVideo size={15} aria-hidden="true" /><span><b>{n(st.videos)}</b><small>videos, last 12 months</small>{st.backfilling ? <em>{st.backfilling} creator{st.backfilling === 1 ? "" : "s"} still filling their year</em> : st.failed ? <em className="warn">{st.failed} channel{st.failed === 1 ? "" : "s"} couldn't be read</em> : null}</span></div>
       <div><ShieldCheck size={15} aria-hidden="true" /><span><b>{n(st.paidVideos)}</b><small>marked paid by YouTube</small></span></div>
       <div><Captions size={15} aria-hidden="true" /><span><b>{h.version ? `${spokenPct}%` : n(st.transcripts)}</b><small>{h.version ? "spoken words read" : "videos with spoken words read"}</small>{h.version && st.transcriptWaiting ? <em>{n(st.transcriptWaiting)} videos to go</em> : null}</span></div>
-      <div><AudioWaveform size={15} aria-hidden="true" /><span><b>{n(st.listened)}</b><small>ad clips listened to</small>{st.listenQueue ? <em>{n(st.listenQueue)} waiting · ~20 a day</em> : null}</span></div>
+      <div><AudioWaveform size={15} aria-hidden="true" /><span><b>{n(st.listened)}</b><small>ad clips listened to</small>{st.listenQueue ? <em title="Gemini listens to the ad part of a paid video when nothing in writing names the brand. Its free daily limit is shared with media-kit reading; videos whose captions get read drop out of this queue.">{n(st.listenQueue)} waiting · {st.listen?.secondsLeft ? "up to 20 a day" : "free limit used · more tomorrow"}</em> : null}</span></div>
     </div>
     <button type="button" className={`mx-helper-pill ${line.tone}`} onClick={() => setSheet(true)} aria-haspopup="dialog">
       {line.tone === "live" ? <i className="mx-live-dot" aria-hidden="true" /> : line.tone === "off" ? <PlugZap size={14} aria-hidden="true" /> : line.tone === "warn" ? <TimerReset size={14} aria-hidden="true" /> : <CheckCircle2 size={14} aria-hidden="true" />}
       <span>{line.text}</span>
-      <em>{line.action === "install" ? "Turn on — free" : line.action === "update" ? "Update" : "Details"}</em>
+      <em>{line.action === "install" ? (h.missing ? "Add it back" : "Turn on — free") : line.action === "update" ? "Update" : "Details"}</em>
     </button>
     {sheet && <HelperSheet onClose={() => setSheet(false)} />}
   </section>;
@@ -93,11 +94,12 @@ function HelperSheet({ onClose }: { onClose: () => void }) {
           <span className="mx-fine">Version {h.version}. It reads while a CRM tab is open — one video every ~10 seconds, so it never bothers YouTube.</span>
         </div>
       </> : <>
+        {h.missing ? <p className="mx-helper-gone"><b>Why it disappeared:</b> the browser loads the helper from its folder every time it starts. When that folder is deleted or moved — or it was opened straight from the zip, which Windows keeps in a temporary folder it empties on restart — the helper is gone. Put it in a folder you keep and it stays for good.</p> : null}
         <ol className="mx-helper-steps">
-          <li><b>Download the helper</b><Button size="sm" onClick={downloadHelper}><Download size={13} /> influenceflow-helper.zip</Button><span>Unzip it — you get a folder called <code>influenceflow-helper</code>.</span></li>
+          <li><b>Download the helper</b><Button size="sm" onClick={downloadHelper}><Download size={13} /> influenceflow-helper.zip</Button><span>Right-click the zip → <em>Extract All…</em> and extract it into a folder you keep, for example <code>Documents</code>. Not Downloads, and not by opening the zip — that folder gets cleaned up.</span></li>
           <li><b>Open your extensions page</b><span>In Chrome, Edge or Brave type <code>chrome://extensions</code> in the address bar and turn on <em>Developer mode</em> (top right).</span></li>
-          <li><b>Load it</b><span>Click <em>Load unpacked</em> and pick the <code>influenceflow-helper</code> folder.</span></li>
-          <li><b>Reload this page</b><span>It connects by itself and starts reading — nothing else to set up.</span></li>
+          <li><b>Load it</b><span>Click <em>Load unpacked</em> and pick the extracted <code>influenceflow-helper</code> folder. Leave the folder where it is — the browser reads it at every start.</span></li>
+          <li><b>Reload this page</b><span>It connects by itself and starts reading — nothing else to set up. It stays after restarts.</span></li>
         </ol>
         <div className="mx-helper-actions"><Button size="sm" variant="secondary" loading={checking} onClick={async () => { setChecking(true); await h.recheck(); setChecking(false); }}>I've installed it — check</Button></div>
       </>}

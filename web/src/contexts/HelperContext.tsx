@@ -26,13 +26,13 @@ const newer = (a: string, b: string) => {
   return false;
 };
 
-type Saved = { paused: boolean; blockedUntil: number; blockedWhy: string; blockedBy: string; day: string; count: number };
+type Saved = { paused: boolean; blockedUntil: number; blockedWhy: string; blockedBy: string; day: string; count: number; seen: string };
 const today = () => new Date().toISOString().slice(0, 10);
 const load = (): Saved => {
   try {
     const s = JSON.parse(localStorage.getItem(STORE) || "{}") as Partial<Saved>;
-    return { paused: !!s.paused, blockedUntil: Number(s.blockedUntil) || 0, blockedWhy: String(s.blockedWhy || ""), blockedBy: String(s.blockedBy || ""), day: s.day === today() ? s.day : today(), count: s.day === today() ? Number(s.count) || 0 : 0 };
-  } catch { return { paused: false, blockedUntil: 0, blockedWhy: "", blockedBy: "", day: today(), count: 0 }; }
+    return { paused: !!s.paused, blockedUntil: Number(s.blockedUntil) || 0, blockedWhy: String(s.blockedWhy || ""), blockedBy: String(s.blockedBy || ""), day: s.day === today() ? s.day : today(), count: s.day === today() ? Number(s.count) || 0 : 0, seen: String(s.seen || "") };
+  } catch { return { paused: false, blockedUntil: 0, blockedWhy: "", blockedBy: "", day: today(), count: 0, seen: "" }; }
 };
 const save = (s: Saved) => { try { localStorage.setItem(STORE, JSON.stringify(s)); } catch { /* private mode: state lives in memory only */ } };
 
@@ -49,6 +49,8 @@ export type HelperState = {
   blockedWhy: string;
   /** An older helper is installed: it must be updated before it reads. */
   outdated: boolean;
+  /** This browser had the helper before and it's gone now (usually: the folder it was loaded from was deleted or moved). */
+  missing: boolean;
   latest: string;
   /** Read today on this device. */
   today: number;
@@ -114,6 +116,8 @@ export function HelperProvider({ children }: { children: ReactNode }) {
   }, [cloud, version, recheck]);
 
   const outdated = !!version && newer(HELPER_LATEST, version);
+  // Remember that this browser had it, so a helper that vanished (folder deleted or moved) is told apart from a first install.
+  useEffect(() => { if (version && stored.seen !== version) update({ seen: version }); }, [version, stored.seen, update]);
   // A stop recorded by an older helper version doesn't hold for the new one (1.0's stops were the browser's doing).
   useEffect(() => {
     if (version && stored.blockedUntil > Date.now() && stored.blockedBy && newer(version, stored.blockedBy)) update({ blockedUntil: 0, blockedWhy: "" });
@@ -200,7 +204,7 @@ export function HelperProvider({ children }: { children: ReactNode }) {
   }, [stored.blockedUntil]);
 
   const value = useMemo<Value>(() => ({
-    version, running, elsewhere, paused: stored.paused, blockedUntil: stored.blockedUntil, blockedWhy: stored.blockedWhy, outdated, latest: HELPER_LATEST, today: stored.count, dailyCap: DAILY, session, left, current, error,
+    version, running, elsewhere, missing: version === "" && !!stored.seen, paused: stored.paused, blockedUntil: stored.blockedUntil, blockedWhy: stored.blockedWhy, outdated, latest: HELPER_LATEST, today: stored.count, dailyCap: DAILY, session, left, current, error,
     setPaused: (p) => update({ paused: p }), recheck,
   }), [version, running, elsewhere, stored, outdated, session, left, current, error, update, recheck]);
   return <HelperContext.Provider value={value}>{children}</HelperContext.Provider>;
