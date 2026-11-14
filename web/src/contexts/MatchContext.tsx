@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { hasSupabase, supabase } from "../lib/supabase";
-import { byCreator, trustedLinks, type BrandLink, type ContentRow, type IntelRow, type MatchWorld, type Pitch, type SeenBrand } from "../lib/match";
+import { byCreator, trustedLinks, type BrandIntel, type BrandLink, type CompanyFacts, type ContentRow, type IntelRow, type MatchWorld, type Pitch, type SeenBrand } from "../lib/match";
 import { normalizeCriteria } from "../lib/criteria";
 import type { DealKind } from "../lib/sponsors";
 import { useData } from "./DataContext";
@@ -19,7 +19,7 @@ import { useToast } from "./ToastContext";
 // A creator you add with a YouTube channel is read right away (not at the
 // next 3-minute cron), and a toast says what was found.
 
-export type MatchStatus = { stamp?: string; creators: number; read: number; failed?: number; backfilling?: number; videos?: number; paidVideos?: number; transcripts?: number; noCaptions?: number; transcriptWaiting?: number; listened?: number; listenQueue?: number; noYoutube?: number; lastRead?: string | null; everyMin?: number; perRun?: number; rescanDays?: number; brandDays?: number; brands: number; researched: number; youtube: boolean; clef: { configured: boolean; left: number; cap: number; pausedUntil: string | null }; listen: { configured: boolean; secondsLeft: number }; tx?: { services: string[]; left: number } };
+export type MatchStatus = { stamp?: string; creators: number; read: number; failed?: number; backfilling?: number; videos?: number; paidVideos?: number; transcripts?: number; noCaptions?: number; transcriptWaiting?: number; listened?: number; listenQueue?: number; noYoutube?: number; lastRead?: string | null; everyMin?: number; perRun?: number; rescanDays?: number; brandDays?: number; brands: number; researched: number; youtube: boolean; clef: { configured: boolean; left: number; cap: number; pausedUntil: string | null }; listen: { configured: boolean; secondsLeft: number }; tx?: { services: string[]; left: number }; hunter?: { configured: boolean; left: number } };
 type Result = { ok: boolean; message: string };
 type Value = {
   ready: boolean;
@@ -40,6 +40,9 @@ type Value = {
   refresh: () => Promise<void>;
   scan: (creatorId: string, opts?: { quiet?: boolean }) => Promise<Result>;
   research: (brandId: string) => Promise<Result>;
+  /** Hunter: the company record ("company") or people with work emails ("people") for one of your brands — one credit. */
+  lookup: (brandId: string, what: "company" | "people") => Promise<Result>;
+  looking: Set<string>;
   verdict: (linkId: string, verdict: "" | "yes" | "no", kind?: DealKind | null) => Promise<void>;
   /** Saves a deal you know about; `retries` waits for a brand created a moment ago to finish saving. */
   addLink: (creatorId: string, brandId: string, kind: DealKind, opts?: { retries?: number }) => Promise<boolean>;
@@ -193,6 +196,30 @@ export function MatchProvider({ children }: { children: ReactNode }) {
     }
   }, [refresh, toast]);
 
+  const [looking, setLooking] = useState<Set<string>>(new Set());
+  const lookup = useCallback(async (brandId: string, what: "company" | "people"): Promise<Result> => {
+    const tag = `${what}:${brandId}`;
+    setLooking((s) => new Set(s).add(tag));
+    try {
+      const r = await matchCall<{ ok: boolean; company?: CompanyFacts; people?: BrandIntel["people"]; found?: boolean; hunter?: { left: number } }>({ action: what === "company" ? "company_lookup" : "people_find", id: brandId });
+      if (r.error || !r.data) { toast(r.error || "Hunter didn't answer — try again in a minute.", "error"); return { ok: false, message: r.error || "" }; }
+      const d = r.data;
+      setIntel((map) => {
+        const row = map.get(brandId);
+        if (!row?.intel) return map;
+        const next = new Map(map);
+        next.set(brandId, { ...row, intel: { ...row.intel, ...(d.company ? { company: d.company } : {}), ...(d.people ? { people: d.people } : {}) } });
+        return next;
+      });
+      if (d.hunter) setStatus((st) => (st ? { ...st, hunter: { configured: true, left: d.hunter!.left } } : st));
+      if (what === "company") toast(d.found === false ? "Hunter has no record for this website." : d.company?.linkedin ? "Company facts added." : "Company facts added — Hunter has no LinkedIn page for them.", d.found === false ? "info" : "success");
+      else toast(d.people?.list.length ? `${d.people.list.length} ${d.people.list.length === 1 ? "person" : "people"} found.` : "Hunter knows no one at this website yet.", d.people?.list.length ? "success" : "info");
+      return { ok: true, message: "" };
+    } finally {
+      setLooking((s) => { const n = new Set(s); n.delete(tag); return n; });
+    }
+  }, [toast]);
+
   const verdict = useCallback(async (linkId: string, v: "" | "yes" | "no", kind: DealKind | null = null) => {
     const before = links;
     setLinks((ls) => ls.map((l) => (l.id === linkId ? { ...l, verdict: v, verdict_kind: kind, verdict_at: v ? new Date().toISOString() : null } : l)));
@@ -269,8 +296,8 @@ export function MatchProvider({ children }: { children: ReactNode }) {
     intel, content, seen, criteria,
   }), [shown, linksBy, pitches, data.campaigns, data.creators, data.brands, activeBrands, intel, content, seen, criteria]);
 
-  const value = useMemo<Value>(() => ({ ready, loading, error, links: shown, linksBy, intel, content, seen, pitches, status, scanning, researching, world, load, refresh, scan, research, verdict, addLink, hide, pitch, unpitch }),
-    [ready, loading, error, shown, linksBy, intel, content, seen, pitches, status, scanning, researching, world, load, refresh, scan, research, verdict, addLink, hide, pitch, unpitch]);
+  const value = useMemo<Value>(() => ({ ready, loading, error, links: shown, linksBy, intel, content, seen, pitches, status, scanning, researching, world, load, refresh, scan, research, lookup, looking, verdict, addLink, hide, pitch, unpitch }),
+    [ready, loading, error, shown, linksBy, intel, content, seen, pitches, status, scanning, researching, world, load, refresh, scan, research, lookup, looking, verdict, addLink, hide, pitch, unpitch]);
   return <MatchContext.Provider value={value}>{children}</MatchContext.Provider>;
 }
 

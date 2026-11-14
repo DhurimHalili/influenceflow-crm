@@ -31,9 +31,31 @@ export type BrandIntel = {
   markets: string[]; currency: string; wiki: string; pages: string[]; verified: boolean;
   /** Where the shop is: its store country (Shopify), country domain, the company's home (Wikidata). */
   geo?: GeoSignals | null;
+  /** LinkedIn page + company facts — from their own site, Wikidata or Hunter, always by this domain. */
+  company?: CompanyFacts | null;
+  /** People at the company Hunter knows (only when you asked). */
+  people?: { at: string; domain: string; total: number; list: HunterPerson[] } | null;
 };
+export type CompanyFacts = {
+  domain: string; at: string; linkedin?: string; linkedin_via?: "site" | "wikidata" | "hunter"; wd_at?: string; hunter_at?: string;
+  size?: string; employees?: number; revenue?: string; industry?: string; country?: string; founded?: number; name?: string;
+};
+export type HunterPerson = { first: string; last: string; title: string; email: string; linkedin: string; confidence: number; department: string; seniority: string };
 export type IntelRow = { brand_id: string; intel: BrandIntel | null; status: string; researched_at: string | null };
 export type ContentRow = { creator_id: string; content: ContentProfile | null; status: string; note?: string; scanned_at: string | null };
+
+/** Why a creator has no content mix to rank brands by — a short rail label and a sentence for the pane. */
+export function unreadWhy(row: ContentRow | undefined, scanning: boolean): { short: string; long: string } {
+  if (scanning) return { short: "Reading videos…", long: "Reading their videos…" };
+  if (row?.status === "no_channel") return { short: "No YouTube channel", long: "No YouTube channel on file — add their channel link to rank brands for them." };
+  if (row?.status === "error" || row?.status === "quota") return { short: "Couldn't read videos", long: "Their channel couldn't be read last time — check their YouTube link, then read again." };
+  if ((row?.status === "ok" || row?.status === "empty") && row.content) {
+    const v = row.content.videos || 0;
+    if (!v) return { short: "No uploads this year", long: "No uploads in the last 12 months, so there's no content to rank brands by." };
+    return { short: `${v} video${v === 1 ? "" : "s"} read · no product topic`, long: `All ${v} video${v === 1 ? "" : "s"} from the last year ${v === 1 ? "was" : "were"} read. None is about something brands sell (life stories, commentary, vlogs), so brands can't be ranked by content. Their deals still show above.` };
+  }
+  return { short: "Videos not read yet", long: "Their videos haven't been read yet — brands are ranked once they are." };
+}
 export type BrandLink = {
   id: string; creator_id: string; brand_key: string; brand_name: string; domain: string; brand_id: string | null; kind: DealKind; confidence: number;
   store: boolean; videos: number; first_at: string | null; last_at: string | null; evidence: Evidence[]; by_ai: boolean; manual: boolean;

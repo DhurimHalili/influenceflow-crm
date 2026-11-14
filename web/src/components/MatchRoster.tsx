@@ -6,7 +6,7 @@ import { useMatch } from "../contexts/MatchContext";
 import { useToast } from "../contexts/ToastContext";
 import { searchCountries } from "../lib/countries";
 import { audienceOf, type BrandMarkets } from "../lib/geo";
-import { countryName, matchOf, type Match } from "../lib/match";
+import { countryName, matchOf, unreadWhy, type Match } from "../lib/match";
 import { normalizeBrief } from "../lib/brandBrief";
 import type { Brand, Creator } from "../types";
 import { ScoreRing } from "./MatchBits";
@@ -132,7 +132,7 @@ export function RosterBoard({ creators, brands }: { creators: Creator[]; brands:
           <Avatar name={c.name} path={c.avatar_path} />
           <span><strong>{c.name}</strong><small>{a.list[0] ? <>{a.source === "kit" ? <><UsersRound size={11} aria-hidden="true" /> {a.list.slice(0, 2).map((x) => `${x.code} ${Math.round(x.share * 100)}%`).join(" · ")}</> : countryName(a.list[0].code)}</> : "No country"}{works > 0 && <> · <Handshake size={11} aria-hidden="true" /> {works}</>}</small></span>
         </Link>
-        {!read ? <p className="mx-board-wait">Videos not read yet</p> : top.length ? <ol className={`mx-board-list${weak ? " weak" : ""}`}>{top.map(({ brand: b, match }) => <li key={b.id}>
+        {!read ? <p className="mx-board-wait">{unreadWhy(m.content.get(c.id), m.scanning.has(c.id)).short}</p> : top.length ? <ol className={`mx-board-list${weak ? " weak" : ""}`}>{top.map(({ brand: b, match }) => <li key={b.id}>
           <Link to={`/app/match?id=${b.id}&open=${c.id}`} className={`tone-${match.tone}`}>
             <ScoreRing match={match} size="sm" />
             <span className="mx-board-brand"><strong>{b.name}</strong><small>{match.reasons[0]?.text || ""}</small></span>
