@@ -37,10 +37,10 @@ export type BrandIntel = {
   people?: { at: string; domain: string; total: number; list: HunterPerson[] } | null;
 };
 export type CompanyFacts = {
-  domain: string; at: string; linkedin?: string; linkedin_via?: "site" | "wikidata" | "hunter"; wd_at?: string; hunter_at?: string;
+  domain: string; at: string; linkedin?: string; linkedin_via?: "site" | "wikidata" | "hunter" | "clay"; wd_at?: string; hunter_at?: string; clay_at?: string; facts_via?: "hunter" | "clay";
   size?: string; employees?: number; revenue?: string; industry?: string; country?: string; founded?: number; name?: string;
 };
-export type HunterPerson = { first: string; last: string; title: string; email: string; linkedin: string; confidence: number; department: string; seniority: string };
+export type HunterPerson = { first: string; last: string; title: string; email: string; linkedin: string; confidence: number; department: string; seniority: string; via?: "hunter" | "clay" };
 export type IntelRow = { brand_id: string; intel: BrandIntel | null; status: string; researched_at: string | null };
 export type ContentRow = { creator_id: string; content: ContentProfile | null; status: string; note?: string; scanned_at: string | null };
 

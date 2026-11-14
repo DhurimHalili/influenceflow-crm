@@ -9,7 +9,7 @@ import { listenConfigured, listenLeft, listenTo, useListenBudget } from "../_sha
 import { fetchTranscript, txConfigured, txLeft, txProviders } from "../_shared/transcriptApis.ts";
 import { askBrand, searchSite, useBrandAskBudget } from "../_shared/brandAsk.ts";
 import { companyCountry, duckSite, officialSite } from "../_shared/officialSite.ts";
-import { hunterCompany, hunterConfigured, hunterPeople, siteLinkedin, wikidataLinkedin, type CompanyFacts, type People } from "../_shared/companyInfo.ts";
+import { clayCompany, clayConfigured, clayPeople, hunterCompany, hunterConfigured, hunterPeople, mergePeople, siteLinkedin, wikidataLinkedin, type CompanyFacts, type People, type Person } from "../_shared/companyInfo.ts";
 
 // Brand ⇄ creator matching and "who works with whom" (see the migration
 // 20261122000000_brand_match.sql for the tables).
@@ -627,6 +627,36 @@ async function hunterStop(admin: SupabaseClient, why: string) {
   if (until) await Promise.resolve(admin.from("ai_budget").upsert({ route: "hunter", day: new Date().toISOString().slice(0, 10), paused_until: new Date(until).toISOString(), note: `hunter ${why}` })).catch(() => null);
 }
 
+// ---- Clay: free plan 100 search results per rolling 30 days -----------------------------------------
+// CLAY_MONTHLY (100) results in 30 days; the cron uses at most CLAY_AUTO_DAILY (2) a day and keeps
+// CLAY_KEEP (40) for searches you ask for. Units = results returned. 402 = a limit → a day's pause.
+async function clayState(admin: SupabaseClient): Promise<{ used: number; today: number; paused: number; left: number }> {
+  const since = new Date(Date.now() - 29 * DAY).toISOString().slice(0, 10);
+  const { data } = await admin.from("ai_budget").select("day, units, paused_until").eq("route", "clay").gte("day", since);
+  const rows = (data || []) as { day: string; units: number; paused_until: string | null }[];
+  const used = rows.reduce((n, r) => n + (Number(r.units) || 0), 0);
+  const today = Number(rows.find((r) => r.day === new Date().toISOString().slice(0, 10))?.units) || 0;
+  const paused = Math.max(0, ...rows.map((r) => (r.paused_until ? new Date(r.paused_until).getTime() : 0)));
+  return { used, today, paused, left: paused > Date.now() || !clayConfigured() ? 0 : Math.max(0, envNum("CLAY_MONTHLY", 100) - used) };
+}
+const clayUse = (admin: SupabaseClient, results: number) => Promise.resolve(admin.rpc("ai_budget_use", { p_route: "clay", p_units: Math.max(0, results) })).catch(() => null);
+async function clayStop(admin: SupabaseClient, why: string) {
+  const until = why === "quota" || why === "bad_key" ? Date.now() + DAY : why === "busy" ? Date.now() + 60_000 : 0;
+  if (until) await Promise.resolve(admin.from("ai_budget").upsert({ route: "clay", day: new Date().toISOString().slice(0, 10), paused_until: new Date(until).toISOString(), note: `clay ${why}` })).catch(() => null);
+}
+
+/** Clay's company record merged in (LinkedIn only if none was found on their own site / Wikidata). */
+async function clayFill(admin: SupabaseClient, co: CompanyFacts): Promise<{ co: CompanyFacts; why?: string }> {
+  const r = await clayCompany(co.domain);
+  if (r.results) await clayUse(admin, r.results);
+  if (!r.ok) { if (r.why !== "none" && r.why !== "no_key") await clayStop(admin, r.why); return { co: r.why === "none" ? { ...co, clay_at: new Date().toISOString() } : co, why: r.why }; }
+  const v = r.value;
+  const facts = Object.fromEntries(Object.entries(v).filter(([k, x]) => k !== "linkedin" && x !== undefined && x !== ""));
+  const next: CompanyFacts = { ...co, ...(co.facts_via === "hunter" ? {} : { ...facts, facts_via: "clay" as const }), clay_at: new Date().toISOString() };
+  if (!co.linkedin && v.linkedin) { next.linkedin = v.linkedin; next.linkedin_via = "clay"; }
+  return { co: next };
+}
+
 /** LinkedIn from the site (or kept), Wikidata once per domain when the site has none. */
 async function companyOf(name: string, domain: string, socials: { platform: string; url: string }[] | undefined, kept: CompanyFacts | null | undefined): Promise<CompanyFacts> {
   const now = new Date().toISOString();
@@ -647,7 +677,7 @@ async function hunterFill(admin: SupabaseClient, co: CompanyFacts): Promise<{ co
   if (!r.ok) { if (r.why !== "none" && r.why !== "no_key") await hunterStop(admin, r.why); if (r.why === "none" || r.why === "error") await hunterUse(admin); return { co: r.why === "none" ? { ...co, hunter_at: new Date().toISOString() } : co, why: r.why }; }
   await hunterUse(admin);
   const v = r.value;
-  const next: CompanyFacts = { ...co, ...Object.fromEntries(Object.entries(v).filter(([k, x]) => k !== "linkedin" && x !== undefined && x !== "")), hunter_at: new Date().toISOString() };
+  const next: CompanyFacts = { ...co, ...Object.fromEntries(Object.entries(v).filter(([k, x]) => k !== "linkedin" && x !== undefined && x !== "")), facts_via: "hunter", hunter_at: new Date().toISOString() };
   if (!co.linkedin && v.linkedin) { next.linkedin = v.linkedin; next.linkedin_via = "hunter"; }
   return { co: next };
 }
@@ -1016,7 +1046,7 @@ async function cron(admin: SupabaseClient) {
   }
   // 4e. Found brands checked before their menu / products were kept: read their verified site once more for "what they sell".
   if (Date.now() < deadline - 45_000) {
-    const { data: rows } = await admin.from("seen_brands").select("user_id, brand_key, domain, site").in("user_id", ids).eq("domain_check", "site").eq("hidden", false).is("site->menu", null).limit(6);
+    const { data: rows } = await admin.from("seen_brands").select("user_id, brand_key, domain, site").in("user_id", ids).eq("domain_check", "site").eq("hidden", false).is("site->menu", null).limit(15);
     for (const r of (rows || []) as { user_id: string; brand_key: string; domain: string; site: Record<string, unknown> | null }[]) {
       if (Date.now() > deadline - 40_000 || !r.domain) continue;
       const page = await getText(`https://${r.domain}`, { timeout: 9000, max: 1_500_000 });
@@ -1029,7 +1059,7 @@ async function cron(admin: SupabaseClient) {
   }
   // 4c. LinkedIn pages for brands read before they were looked for: their site's link (already read), else Wikidata.
   if (Date.now() < deadline - 45_000) {
-    const { data: rows } = await admin.from("brand_intel").select("brand_id, user_id, intel").in("user_id", ids).not("intel", "is", null).is("intel->company", null).limit(8);
+    const { data: rows } = await admin.from("brand_intel").select("brand_id, user_id, intel").in("user_id", ids).not("intel", "is", null).is("intel->company", null).limit(40);
     for (const r of (rows || []) as { brand_id: string; user_id: string; intel: Intel | null }[]) {
       if (Date.now() > deadline - 35_000 || !r.intel?.domain) continue;
       const { data: b } = await admin.from("brands").select("name").eq("id", r.brand_id).maybeSingle();
@@ -1038,21 +1068,32 @@ async function cron(admin: SupabaseClient) {
       log.linkedin = Number(log.linkedin || 0) + 1;
     }
   }
-  // 4d. Hunter (if a key is set): one brand a day with no LinkedIn yet — brands you're talking to first.
-  if (hunterConfigured() && Date.now() < deadline - 40_000) {
-    const h = await hunterState(admin);
-    if (h.left > envNum("HUNTER_KEEP", 15) && h.today < envNum("HUNTER_AUTO_DAILY", 1)) {
-      const { data: rows } = await admin.from("brand_intel").select("brand_id, user_id, intel").in("user_id", ids).not("intel->company", "is", null).is("intel->company->>linkedin", null).is("intel->company->>hunter_at", null).limit(60);
-      const list = (rows || []) as { brand_id: string; user_id: string; intel: Intel }[];
-      const { data: bs } = list.length ? await admin.from("brands").select("id, pipeline_status, updated_at").in("id", list.map((r) => r.brand_id)).is("archived_at", null) : { data: [] };
-      const STAGE: Record<string, number> = { negotiating: 6, replied: 5, inbound: 5, contacted: 4, no_reply: 3, roster: 3, signed: 3, new: 2, denied: 0 };
+  // 4d. Clay / Hunter (when their keys are set): a few brands a day with no LinkedIn yet — brands you're talking to first.
+  if ((clayConfigured() || hunterConfigured()) && Date.now() < deadline - 40_000) {
+    const STAGE: Record<string, number> = { negotiating: 6, replied: 5, inbound: 5, contacted: 4, no_reply: 3, roster: 3, signed: 3, new: 2, denied: 0 };
+    const nextBrand = async (asked: "clay_at" | "hunter_at") => {
+      const { data: rows } = await admin.from("brand_intel").select("brand_id").in("user_id", ids).not("intel->company", "is", null).is("intel->company->>linkedin", null).is(`intel->company->>${asked}`, null).limit(500);
+      const bids = ((rows || []) as { brand_id: string }[]).map((r) => r.brand_id);
+      if (!bids.length) return null;
+      const { data: bs } = await admin.from("brands").select("id, pipeline_status, updated_at").in("id", bids.slice(0, 300)).is("archived_at", null);
       const pick = ((bs || []) as { id: string; pipeline_status: string; updated_at: string }[]).filter((b) => (STAGE[b.pipeline_status] ?? 1) > 0)
         .sort((a, b) => (STAGE[b.pipeline_status] ?? 1) - (STAGE[a.pipeline_status] ?? 1) || b.updated_at.localeCompare(a.updated_at))[0];
-      const r = pick && list.find((x) => x.brand_id === pick.id);
-      if (r?.intel.company) {
-        const { co } = await hunterFill(admin, r.intel.company);
-        await admin.from("brand_intel").update({ intel: { ...r.intel, company: co } }).eq("brand_id", r.brand_id).eq("user_id", r.user_id);
-        log.hunter = 1;
+      if (!pick) return null;
+      const { data: r } = await admin.from("brand_intel").select("brand_id, user_id, intel").eq("brand_id", pick.id).maybeSingle();
+      return (r as { brand_id: string; user_id: string; intel: Intel } | null)?.intel?.company ? r as { brand_id: string; user_id: string; intel: Intel } : null;
+    };
+    if (clayConfigured()) {
+      const c = await clayState(admin);
+      if (c.left > envNum("CLAY_KEEP", 40) && c.today < envNum("CLAY_AUTO_DAILY", 2)) {
+        const r = await nextBrand("clay_at");
+        if (r) { const { co } = await clayFill(admin, r.intel.company!); await admin.from("brand_intel").update({ intel: { ...r.intel, company: co } }).eq("brand_id", r.brand_id).eq("user_id", r.user_id); log.clay = 1; }
+      }
+    }
+    if (hunterConfigured() && Date.now() < deadline - 35_000) {
+      const h = await hunterState(admin);
+      if (h.left > envNum("HUNTER_KEEP", 15) && h.today < envNum("HUNTER_AUTO_DAILY", 1)) {
+        const r = await nextBrand("hunter_at");
+        if (r) { const { co } = await hunterFill(admin, r.intel.company!); await admin.from("brand_intel").update({ intel: { ...r.intel, company: co } }).eq("brand_id", r.brand_id).eq("user_id", r.user_id); log.hunter = 1; }
       }
     }
   }
@@ -1130,7 +1171,7 @@ Deno.serve(async (req) => {
       vc((q) => q), vc((q) => q.eq("paid", true)), vc((q) => q.eq("transcript_status", "ok")), vc((q) => q.eq("transcript_status", "none")),
       vc((q) => q.eq("transcript_status", "").gt("secs", 60)), vc((q) => q.not("listened_at", "is", null)), vc((q) => q.not("listen", "is", null).is("listened_at", null).neq("transcript_status", "ok")),
     ]);
-    return json({ ok: true, stamp, creators, read, failed, backfilling, videos, paidVideos, transcripts, noCaptions, transcriptWaiting: waiting, listened, listenQueue, noYoutube: (people || []).length - creators, lastRead, everyMin: 3, perRun: 4, rescanDays: RESCAN_DAYS, brandDays: BRAND_DAYS, brands: brands || 0, researched: researched || 0, youtube: youtubeConfigured(), clef, listen: { configured: listenConfigured(), secondsLeft: await listenLeft() }, tx: { services: txProviders().map((p) => p.name), left: await txLeft(admin).catch(() => 0) }, hunter: { configured: hunterConfigured(), left: hunterConfigured() ? (await hunterState(admin).catch(() => null))?.left ?? 0 : 0 } });
+    return json({ ok: true, stamp, creators, read, failed, backfilling, videos, paidVideos, transcripts, noCaptions, transcriptWaiting: waiting, listened, listenQueue, noYoutube: (people || []).length - creators, lastRead, everyMin: 3, perRun: 4, rescanDays: RESCAN_DAYS, brandDays: BRAND_DAYS, brands: brands || 0, researched: researched || 0, youtube: youtubeConfigured(), clef, listen: { configured: listenConfigured(), secondsLeft: await listenLeft() }, tx: { services: txProviders().map((p) => p.name), left: await txLeft(admin).catch(() => 0) }, hunter: { configured: hunterConfigured(), left: hunterConfigured() ? (await hunterState(admin).catch(() => null))?.left ?? 0 : 0 }, clay: { configured: clayConfigured(), left: clayConfigured() ? (await clayState(admin).catch(() => null))?.left ?? 0 : 0 } });
   }
 
   // ---- transcripts from the browser helper (the member's own connection; YouTube blocks servers) ----
@@ -1199,36 +1240,51 @@ Deno.serve(async (req) => {
     catch (e) { return json({ error: e instanceof Error ? e.message : "Couldn't read their site." }, 502); }
   }
 
-  // A brand's company record / people from Hunter — only when you ask, for your own brand, within the free credits.
+  // A brand's company record / people from Clay and Hunter — only when you ask, for your own brand, by its website, within the free allowances.
   if (input.action === "company_lookup" || input.action === "people_find") {
     const id = typeof input.id === "string" && UUID.test(input.id) ? input.id : "";
     const { data: b } = id ? await admin.from("brands").select("id, user_id, name, domain, archived_at").eq("id", id).eq("user_id", userId).maybeSingle() : { data: null };
     if (!b) return json({ error: "That brand isn't in your CRM (or hasn't saved yet) — try again in a moment." }, 404);
     const domain = normalizeDomain((b as BrandRow).domain || "");
     if (!domain) return json({ error: "Add their website first — lookups go by website, never by name." }, 400);
-    if (!hunterConfigured()) return json({ error: "Hunter isn't connected yet — add HUNTER_API_KEY in Supabase → Edge Functions → Secrets.", setup: true }, 400);
-    const h = await hunterState(admin);
-    if (h.left <= 0) return json({ error: h.paused > Date.now() ? `Hunter's free credits are used up — back on ${new Date(h.paused).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}.` : "This month's Hunter credits are used up — more on the 1st.", quota: true }, 429);
+    if (!hunterConfigured() && !clayConfigured()) return json({ error: "No lookup service is connected — add HUNTER_API_KEY or CLAY_API_KEY in Supabase → Edge Functions → Secrets.", setup: true }, 400);
+    const [h, c] = await Promise.all([hunterState(admin), clayState(admin)]);
+    const left = () => ({ hunter: { configured: hunterConfigured(), left: h.left }, clay: { configured: clayConfigured(), left: c.left } });
+    if (h.left <= 0 && c.left <= 0) return json({ error: "This month's free lookups are used up — Hunter refills on the 1st, Clay a little every day.", quota: true }, 429);
     const { data: row } = await admin.from("brand_intel").select("intel").eq("brand_id", id).eq("user_id", userId).maybeSingle();
     let intel = (row?.intel || null) as Intel | null;
     if (!intel || intel.domain !== domain) intel = await researchBrand(admin, b as BrandRow).catch(() => null);
     if (!intel) return json({ error: "Couldn't read their site yet — try again in a minute." }, 502);
-    const company = intel.company && intel.company.domain === domain ? intel.company : await companyOf((b as BrandRow).name, domain, intel.socials, null);
+    let company = intel.company && intel.company.domain === domain ? intel.company : await companyOf((b as BrandRow).name, domain, intel.socials, null);
+    const said = (why?: string) => why === "quota" ? "the free allowance is used up" : why === "bad_key" ? "the key was refused" : "it didn't answer";
     if (input.action === "company_lookup") {
-      const { co, why } = await hunterFill(admin, company);
-      await admin.from("brand_intel").update({ intel: { ...intel, company: co } }).eq("brand_id", id).eq("user_id", userId);
-      if (why && why !== "none") return json({ error: why === "quota" ? "Hunter's free credits are used up for this month." : why === "bad_key" ? "Hunter refused the key — check HUNTER_API_KEY." : "Hunter didn't answer — try again in a minute." }, why === "quota" ? 429 : 502);
-      return json({ ok: true, company: co, found: why !== "none", hunter: { left: Math.max(0, h.left - 1) } });
+      const notes: string[] = [];
+      let found = false;
+      if (c.left > 0 && !company.clay_at) { const r = await clayFill(admin, company); company = r.co; if (r.why && r.why !== "none") notes.push(`Clay: ${said(r.why)}`); else if (!r.why) { found = true; c.left = Math.max(0, c.left - 1); } }
+      if (h.left > 0 && !company.hunter_at && (!company.linkedin || !company.size)) { const r = await hunterFill(admin, company); company = r.co; if (r.why && r.why !== "none") notes.push(`Hunter: ${said(r.why)}`); else { h.left = Math.max(0, h.left - 1); if (!r.why) found = true; } }
+      await admin.from("brand_intel").update({ intel: { ...intel, company } }).eq("brand_id", id).eq("user_id", userId);
+      if (!found && notes.length) return json({ error: `No company facts — ${notes.join("; ")}.` }, 502);
+      return json({ ok: true, company, found, ...left() });
     }
-    const r = await hunterPeople(domain);
-    if (!r.ok) {
-      if (r.why !== "none") { await hunterStop(admin, r.why); if (r.why === "error") await hunterUse(admin); }
-      if (r.why !== "none") return json({ error: r.why === "quota" ? "Hunter's free credits are used up for this month." : r.why === "bad_key" ? "Hunter refused the key — check HUNTER_API_KEY." : "Hunter didn't answer — try again in a minute." }, r.why === "quota" ? 429 : 502);
+    const notes: string[] = [];
+    let fromHunter: Person[] = [], fromClay: Person[] = [], total = 0;
+    if (h.left > 0) {
+      const r = await hunterPeople(domain);
+      if (r.ok) { await hunterUse(admin); h.left = Math.max(0, h.left - 1); fromHunter = r.value.list; total = r.value.total; }
+      else if (r.why !== "none") { await hunterStop(admin, r.why); if (r.why === "error") await hunterUse(admin); notes.push(`Hunter: ${said(r.why)}`); }
+      else { await hunterUse(admin); h.left = Math.max(0, h.left - 1); }
     }
-    await hunterUse(admin);
-    const people: People = { at: new Date().toISOString(), domain, list: r.ok ? r.value.list : [], total: r.ok ? r.value.total : 0 };
+    if (c.left > 0) {
+      const r = await clayPeople(domain, Math.min(5, c.left));
+      if (r.results) { await clayUse(admin, r.results); c.left = Math.max(0, c.left - r.results); }
+      if (r.ok) fromClay = r.value;
+      else if (r.why !== "none") { await clayStop(admin, r.why); notes.push(`Clay: ${said(r.why)}`); }
+    }
+    if (!fromHunter.length && !fromClay.length && notes.length) return json({ error: `No people found — ${notes.join("; ")}.` }, 502);
+    const list = mergePeople(fromHunter, fromClay);
+    const people: People = { at: new Date().toISOString(), domain, list, total: Math.max(total, list.length) };
     await admin.from("brand_intel").update({ intel: { ...intel, company, people } }).eq("brand_id", id).eq("user_id", userId);
-    return json({ ok: true, people, hunter: { left: Math.max(0, h.left - 1) } });
+    return json({ ok: true, people, ...left() });
   }
 
   return json({ error: "Unknown action" }, 400);

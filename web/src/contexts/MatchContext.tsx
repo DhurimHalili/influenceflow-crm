@@ -19,7 +19,7 @@ import { useToast } from "./ToastContext";
 // A creator you add with a YouTube channel is read right away (not at the
 // next 3-minute cron), and a toast says what was found.
 
-export type MatchStatus = { stamp?: string; creators: number; read: number; failed?: number; backfilling?: number; videos?: number; paidVideos?: number; transcripts?: number; noCaptions?: number; transcriptWaiting?: number; listened?: number; listenQueue?: number; noYoutube?: number; lastRead?: string | null; everyMin?: number; perRun?: number; rescanDays?: number; brandDays?: number; brands: number; researched: number; youtube: boolean; clef: { configured: boolean; left: number; cap: number; pausedUntil: string | null }; listen: { configured: boolean; secondsLeft: number }; tx?: { services: string[]; left: number }; hunter?: { configured: boolean; left: number } };
+export type MatchStatus = { stamp?: string; creators: number; read: number; failed?: number; backfilling?: number; videos?: number; paidVideos?: number; transcripts?: number; noCaptions?: number; transcriptWaiting?: number; listened?: number; listenQueue?: number; noYoutube?: number; lastRead?: string | null; everyMin?: number; perRun?: number; rescanDays?: number; brandDays?: number; brands: number; researched: number; youtube: boolean; clef: { configured: boolean; left: number; cap: number; pausedUntil: string | null }; listen: { configured: boolean; secondsLeft: number }; tx?: { services: string[]; left: number }; hunter?: { configured: boolean; left: number }; clay?: { configured: boolean; left: number } };
 type Result = { ok: boolean; message: string };
 type Value = {
   ready: boolean;
@@ -40,7 +40,7 @@ type Value = {
   refresh: () => Promise<void>;
   scan: (creatorId: string, opts?: { quiet?: boolean }) => Promise<Result>;
   research: (brandId: string) => Promise<Result>;
-  /** Hunter: the company record ("company") or people with work emails ("people") for one of your brands — one credit. */
+  /** Clay + Hunter: the company record ("company") or the people who work there ("people") for one of your brands, by its website. */
   lookup: (brandId: string, what: "company" | "people") => Promise<Result>;
   looking: Set<string>;
   verdict: (linkId: string, verdict: "" | "yes" | "no", kind?: DealKind | null) => Promise<void>;
@@ -201,8 +201,8 @@ export function MatchProvider({ children }: { children: ReactNode }) {
     const tag = `${what}:${brandId}`;
     setLooking((s) => new Set(s).add(tag));
     try {
-      const r = await matchCall<{ ok: boolean; company?: CompanyFacts; people?: BrandIntel["people"]; found?: boolean; hunter?: { left: number } }>({ action: what === "company" ? "company_lookup" : "people_find", id: brandId });
-      if (r.error || !r.data) { toast(r.error || "Hunter didn't answer — try again in a minute.", "error"); return { ok: false, message: r.error || "" }; }
+      const r = await matchCall<{ ok: boolean; company?: CompanyFacts; people?: BrandIntel["people"]; found?: boolean; hunter?: { configured: boolean; left: number }; clay?: { configured: boolean; left: number } }>({ action: what === "company" ? "company_lookup" : "people_find", id: brandId });
+      if (r.error || !r.data) { toast(r.error || "The lookup didn't answer — try again in a minute.", "error"); return { ok: false, message: r.error || "" }; }
       const d = r.data;
       setIntel((map) => {
         const row = map.get(brandId);
@@ -211,9 +211,9 @@ export function MatchProvider({ children }: { children: ReactNode }) {
         next.set(brandId, { ...row, intel: { ...row.intel, ...(d.company ? { company: d.company } : {}), ...(d.people ? { people: d.people } : {}) } });
         return next;
       });
-      if (d.hunter) setStatus((st) => (st ? { ...st, hunter: { configured: true, left: d.hunter!.left } } : st));
-      if (what === "company") toast(d.found === false ? "Hunter has no record for this website." : d.company?.linkedin ? "Company facts added." : "Company facts added — Hunter has no LinkedIn page for them.", d.found === false ? "info" : "success");
-      else toast(d.people?.list.length ? `${d.people.list.length} ${d.people.list.length === 1 ? "person" : "people"} found.` : "Hunter knows no one at this website yet.", d.people?.list.length ? "success" : "info");
+      if (d.hunter || d.clay) setStatus((st) => (st ? { ...st, ...(d.hunter ? { hunter: d.hunter } : {}), ...(d.clay ? { clay: d.clay } : {}) } : st));
+      if (what === "company") toast(d.found === false ? "No company record for this website yet." : d.company?.linkedin ? "Company facts added." : "Company facts added — no LinkedIn page on record.", d.found === false ? "info" : "success");
+      else toast(d.people?.list.length ? `${d.people.list.length} ${d.people.list.length === 1 ? "person" : "people"} found.` : "No one found at this website yet.", d.people?.list.length ? "success" : "info");
       return { ok: true, message: "" };
     } finally {
       setLooking((s) => { const n = new Set(s); n.delete(tag); return n; });
