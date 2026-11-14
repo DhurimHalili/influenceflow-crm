@@ -52,7 +52,7 @@ export function KeysNoticeLayer() {
 
   const close = useCallback(() => { setOpen(null); setKeysNoticeOpen(false); }, []);
   if (!open) return null;
-  return <KeysNotice preview={open.preview} count={open.count} items={readiness(open.preview && status?.owner ? null : status).items} onClose={close} onKeys={() => { close(); navigate("/app/settings#keys"); }} />;
+  return <KeysNotice preview={open.preview} count={open.count} items={readiness(open.preview && status?.owner ? null : status).items} onClose={close} onKeys={() => { close(); navigate("/app/setup"); }} />;
 }
 
 function KeysNotice({ preview, count, items, onClose, onKeys }: { preview: boolean; count: number; items: ReturnType<typeof readiness>["items"]; onClose: () => void; onKeys: () => void }) {

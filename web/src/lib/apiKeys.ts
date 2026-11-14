@@ -7,7 +7,7 @@ import { supabase } from "./supabase";
 
 export type Service = "youtube" | "gemini" | "groq" | "cloudflare" | "openrouter" | "hunter" | "clay";
 export type SavedKey = { slot: number; hint: string; label: string; status: "" | "ok" | "refused" | "quota" | "not_enabled"; checked_at: string | null; saved_at: string | null };
-export type ServiceRow = { service: Service; max: number; keys: SavedKey[]; workspace: boolean; left: number | null; paused_until: string | null };
+export type ServiceRow = { service: Service; max: number; keys: SavedKey[]; workspace: boolean; left: number | null; paused_until: string | null; usage?: { used: number; capacity: number; background: number } };
 export type KeyStatus = { owner: boolean; rows: ServiceRow[] };
 export type SaveResult = { ok: true; service: Service; slot: number; hint: string; label: string; left: number | null; total: number | null; resets: string | null; checked_at: string };
 

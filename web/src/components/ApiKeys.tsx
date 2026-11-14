@@ -1,5 +1,6 @@
 import { AlertTriangle, Check, CircleAlert, Cloud, Crosshair, ExternalLink, Eye, EyeOff, KeyRound, Layers, LockKeyhole, Plus, RefreshCw, ShieldCheck, Sparkles, Trash2, Waypoints, Youtube, Zap } from "lucide-react";
 import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { Link } from "react-router-dom";
 import { useData } from "../contexts/DataContext";
 import { useMatch } from "../contexts/MatchContext";
 import { useToast } from "../contexts/ToastContext";
@@ -16,7 +17,7 @@ import { openKeysNotice } from "../lib/keysNotice";
 
 type Info = { name: string; icon: typeof Layers; gives: string; free: string; keyUrl: string; where: ReactNode; placeholder: string };
 const INFO: Record<Service, Info> = {
-  youtube: { name: "YouTube", icon: Youtube, gives: "Channel stats, video reading in Match, sponsors found in videos", free: "Free: 10,000 units a day per project — about 130 creators refreshed every 6 hours", keyUrl: "https://console.cloud.google.com/apis/library/youtube.googleapis.com", where: <>Google Cloud → new project → enable <b>YouTube Data API v3</b> → Credentials → <b>Create API key</b></>, placeholder: "AIza…" },
+  youtube: { name: "YouTube", icon: Youtube, gives: "Channel stats, video reading in Match, sponsors found in videos", free: "Free: 10,000 units a day per project — enough for ~500 creators with the smart refresh", keyUrl: "https://console.cloud.google.com/apis/library/youtube.googleapis.com", where: <>Google Cloud → new project → enable <b>YouTube Data API v3</b> → Credentials → <b>Create API key</b></>, placeholder: "AIza…" },
   gemini: { name: "Gemini", icon: Sparkles, gives: "Reads prices, media kits and replies · researches brands", free: "Free tier in Google AI Studio", keyUrl: "https://aistudio.google.com/apikey", where: <>Google AI Studio → <b>Get API key</b> → Create</>, placeholder: "AIza…" },
   groq: { name: "Groq", icon: Zap, gives: "Fast backup reader for emails and images", free: "Free tier", keyUrl: "https://console.groq.com/keys", where: <>GroqCloud → <b>API Keys</b> → Create</>, placeholder: "gsk_…" },
   cloudflare: { name: "Cloudflare", icon: Cloud, gives: "Small decisions (topics, deals) · backup reader", free: "Free: 10,000 neurons a day", keyUrl: "https://dash.cloudflare.com/profile/api-tokens", where: <>My Profile → API Tokens → <b>Create Token</b> with the “Workers AI” template · Account ID is on the Workers AI page</>, placeholder: "Token" },
@@ -49,7 +50,7 @@ export function ApiKeysSettings() {
             <div className={`ak-ready${ready.all ? " all" : ""}`} role="status">
               <div className="ak-ready-count"><b>{ready.done}</b><span>of 4 set up</span></div>
               <ul>{ready.items.map((i) => <li key={i.id} className={i.done ? "done" : ""}>{i.done ? <Check size={12} aria-hidden="true" /> : <i aria-hidden="true" />}<span><b>{i.label}</b><small>{i.what}</small></span></li>)}</ul>
-              {status.owner && <button type="button" className="text-link ak-preview" onClick={() => openKeysNotice(true)}>Preview the members' notice</button>}
+              <span className="ak-links">{!ready.all && <Link to="/app/setup" className="text-link">Step-by-step setup guide →</Link>}{status.owner && <button type="button" className="text-link" onClick={() => openKeysNotice(true)}>Preview the members' notice</button>}</span>
             </div>
             <div className="lk-safe"><LockKeyhole size={15} aria-hidden="true" /><p><b>Your keys stay locked.</b> Each key is checked with the service first, then encrypted on the server. It never comes back to this screen — you only see its last 4 characters — and only your own work uses it. {status.owner ? "The workspace keys set on the server are used for you only; members always use their own." : "Nobody else's work ever uses your keys, and yours never uses theirs."}</p></div>
 
@@ -70,7 +71,7 @@ function Group({ title, note, children }: { title: string; note: string; childre
   return <div className="ak-group"><div className="ak-group-head"><h3>{title}</h3><p>{note}</p></div>{children}</div>;
 }
 
-function ServiceCard({ row, owner, onChanged, wide = false, backup = false }: { row: ServiceRow; owner: boolean; onChanged: () => Promise<void>; wide?: boolean; backup?: boolean }) {
+export function ServiceCard({ row, owner, onChanged, wide = false, backup = false }: { row: ServiceRow; owner: boolean; onChanged: () => Promise<void>; wide?: boolean; backup?: boolean }) {
   const m = useMatch();
   const { toast } = useToast();
   const info = INFO[row.service];
@@ -94,6 +95,7 @@ function ServiceCard({ row, owner, onChanged, wide = false, backup = false }: { 
       <span className={`lk-pill ${state}`}>{state === "ok" ? <Check size={11} aria-hidden="true" /> : state === "refused" || state === "quota" ? <CircleAlert size={11} aria-hidden="true" /> : null}{pill}</span>
     </header>
 
+    {row.usage && (row.keys.length > 0 || row.workspace) && <YoutubeMeter usage={row.usage} />}
     {row.keys.map((k) => <KeyRow key={k.slot} k={k} row={row} multi={row.max > 1} replacing={form?.slot === k.slot} onReplace={() => setForm({ slot: k.slot })} onChanged={after} />)}
     {state === "workspace" && !form && <p className="lk-note">You're using the workspace key set on the server{owner ? " (yours, as the owner)" : ""}{row.left !== null ? ` · ${row.left} ${row.service === "hunter" ? "credits" : "results"} left` : ""}. Add your own key to use your own allowance instead.</p>}
 
@@ -158,7 +160,7 @@ function KeyForm({ service, slot, replacing, extra, canCancel, onCancel, onSaved
   const [error, setError] = useState<{ text: string; field?: string } | null>(null);
   const field = useRef<HTMLInputElement>(null);
   const accountField = useRef<HTMLInputElement>(null);
-  useEffect(() => { requestAnimationFrame(() => (service === "cloudflare" ? accountField : field).current?.focus()); }, [service]);
+  useEffect(() => { requestAnimationFrame(() => (service === "cloudflare" ? accountField : field).current?.focus({ preventScroll: true })); }, [service]);
   const cf = service === "cloudflare";
   const ready = !!value.trim() && (!cf || !!account.trim()) && (!extra || ack);
   const save = async (e: FormEvent) => {
@@ -196,4 +198,16 @@ function KeyForm({ service, slot, replacing, extra, canCancel, onCancel, onSaved
       {canCancel && <Button size="sm" variant="ghost" type="button" onClick={() => { setValue(""); setAccount(""); onCancel(); }} disabled={busy}>Cancel</Button>}
     </div>
   </form>;
+}
+
+/** Today's YouTube units on your key(s): background work stops at the marker so Quick fill always has room. */
+function YoutubeMeter({ usage }: { usage: NonNullable<ServiceRow["usage"]> }) {
+  const pct = (n: number) => `${Math.min(100, Math.round((n / Math.max(1, usage.capacity)) * 1000) / 10)}%`;
+  const fmt = (n: number) => n.toLocaleString("en-US");
+  const hot = usage.used >= usage.background;
+  return <div className={`ak-meter${hot ? " hot" : ""}`} role="img" aria-label={`YouTube units today: ${fmt(usage.used)} of ${fmt(usage.capacity)}`}>
+    <div className="ak-meter-top"><b>{fmt(usage.used)}</b><span>of {fmt(usage.capacity)} units today</span></div>
+    <div className="ak-meter-bar"><i style={{ width: pct(usage.used) }} /><em style={{ left: pct(usage.background) }} title="Background refreshes pause here" /></div>
+    <small>{hot ? "Background refreshes are paused until tomorrow — Quick fill and Refresh still work." : `Refreshes pause at ${fmt(usage.background)} so Quick fill and Refresh always have room. Resets every day.`}</small>
+  </div>;
 }

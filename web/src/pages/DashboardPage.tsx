@@ -3,6 +3,7 @@ import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YA
 import { AlertCircle, ArrowRight, ArrowUpRight, BarChart3, Building2, CalendarDays, CheckCircle2, Clock3, DollarSign, Plus, Sparkles, TrendingUp, Users, Zap } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { useData } from "../contexts/DataContext";
+import { KeysStrip } from "../components/KeysStrip";
 import { Button, EmptyState, Metric, PageHeader } from "../components/ui";
 import { DuplicateAlert } from "../components/Duplicates";
 import { DayStrip } from "../components/DayBrief";
@@ -174,6 +175,7 @@ export default function DashboardPage() {
   return <div className="dashboard-page">
     <PageHeader eyebrow="Private workspace" title={`Good ${new Date().getHours() < 12 ? "morning" : new Date().getHours() < 18 ? "afternoon" : "evening"}, ${data.profile.display_name?.split(" ")[0] || "there"}.`} description={nudgeOfDay()} actions={<Button onClick={() => navigate("/app/campaigns?new=1")}><Plus size={16} /> New campaign</Button>} />
     <DayStrip />
+    <KeysStrip />
     <DuplicateAlert kind="creator" compact />
     <DuplicateAlert kind="brand" compact />
 

@@ -1,6 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
-import { channelIdOf, uploadsPage, videoDetails, youtubeConfigured, YouTubeQuota, type FullVideo } from "../_shared/youtube.ts";
+import { channelIdOf, flushYoutubeMeter, uploadsPage, useYoutubeMeter, videoDetails, youtubeBackgroundOk, youtubeConfigured, youtubeUsage, YouTubeQuota, type FullVideo } from "../_shared/youtube.ts";
 import { brandish, cleanName, combine, dealProof, DIRECTORY, domainFits, nameAsDomain, shortLinkDomain, hostKind, hostOf, knownIndex, linksToFollow, nameKey, namesIn, normalizeDomain, prettyName, readTranscript, readVideo, type Caption, type DealKind, type Known, type Mention, type Segment } from "../_shared/sponsors.ts";
 import { brandTopics, contentProfile, TOPIC, TOPICS, topicLabel, videoTopics, type ContentVideo } from "../_shared/taxonomy.ts";
 import { marketsOf, parseHtml, parseShopify, parseShopifyCollections, parseWoo, priceStats, readProgram, siteIsBrand, siteName, type Product, type SiteFacts } from "../_shared/brandSite.ts";
@@ -995,6 +995,8 @@ async function cron(admin: SupabaseClient) {
   const quotaUsers = new Set<string>();
   const readCreator = async (c: CreatorRow, onError?: (e: unknown) => Promise<void>) => {
     if (quotaUsers.has(c.user_id) || !rings.has(c.user_id)) return false;
+    // Match reading is background work: it stops before the key runs dry (Quick fill keeps its units).
+    if (!(await as(c.user_id, () => youtubeBackgroundOk()))) { quotaUsers.add(c.user_id); log.ytPaused = Number(log.ytPaused || 0) + 1; return false; }
     try { await as(c.user_id, () => scanCreator(admin, c, deadline - 30_000)); return true; }
     catch (e) { if (e instanceof YouTubeQuota) { quotaUsers.add(c.user_id); log.quota = Number(log.quota || 0) + 1; } else if (onError) await onError(e); return false; }
   };
@@ -1181,6 +1183,7 @@ Deno.serve(async (req) => {
   useClefBudget(admin);
   useListenBudget(admin);
   useBrandAskBudget(admin);
+  useYoutubeMeter(admin);
   let input: Record<string, unknown> = {};
   try { input = await req.json(); } catch { return json({ error: "Invalid JSON" }, 400); }
 
@@ -1193,7 +1196,7 @@ Deno.serve(async (req) => {
     if (lease?.paused_until && new Date(lease.paused_until).getTime() > Date.now()) return json({ skipped: "running" });
     await admin.from("ai_budget").upsert({ route: "brand-match-lease", day: "2000-01-01", paused_until: new Date(Date.now() + 140_000).toISOString() });
     try { return json(await cron(admin)); }
-    finally { await admin.from("ai_budget").upsert({ route: "brand-match-lease", day: "2000-01-01", paused_until: null }); }
+    finally { await flushYoutubeMeter(); await admin.from("ai_budget").upsert({ route: "brand-match-lease", day: "2000-01-01", paused_until: null }); }
   }
 
   // Server-only self-test of the key vault (cron secret): seal/open with the real Vault key, the binding to
@@ -1369,7 +1372,9 @@ Deno.serve(async (req) => {
     const keys = await Promise.all(SERVICES.map(async (service) => {
       const mine = saved.filter((r) => r.service === service).map((r) => ({ slot: r.slot, hint: r.hint, label: r.label, status: r.status, checked_at: r.checked_at, saved_at: r.updated_at }));
       const x = await extra(service);
-      return { service, max: SLOTS[service], keys: mine, workspace: owner && ws[service] && !mine.some((k) => k.status !== "refused"), ...x };
+      // YouTube: today's units on this member's own key(s) (or, for the owner, the workspace key).
+      const usage = service === "youtube" && youtubeConfigured() ? await youtubeUsage().catch(() => null) : null;
+      return { service, max: SLOTS[service], keys: mine, workspace: owner && ws[service] && !mine.some((k) => k.status !== "refused"), ...x, ...(usage ? { usage } : {}) };
     }));
     return json({ ok: true, owner, keys });
   }
@@ -1501,7 +1506,7 @@ Deno.serve(async (req) => {
   }
 
   return json({ error: "Unknown action" }, 400);
-  });
+  }).finally(() => flushYoutubeMeter());
 });
 
 void sleep;

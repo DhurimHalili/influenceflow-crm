@@ -1,6 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
-import { channelFacts, youtubeConfigured, YouTubeQuota, type ChannelFacts } from "../_shared/youtube.ts";
+import { channelFacts, flushYoutubeMeter, knownChannelId, useYoutubeMeter, youtubeBackgroundOk, youtubeConfigured, YouTubeQuota, type ChannelFacts } from "../_shared/youtube.ts";
 import { asMember, ringFor, runInRing, type Ring } from "../_shared/keyring.ts";
 
 // YouTube numbers for influencers (see _shared/youtube.ts for how they're read).
@@ -31,6 +31,10 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 // How often a creator's stats are refreshed. Every 6 hours keeps 130+ creators well inside ONE free key
 // (10,000 units a day; a refresh costs ~3): hourly would spend ~10,000 on refreshes alone. YT_REFRESH_HOURS overrides.
 const FRESH_MS = Math.max(1, Math.min(48, Number(Deno.env.get("YT_REFRESH_HOURS")) || 6)) * 3600_000 - 5 * 60_000;
+// The people you're talking to are refreshed most often; parked and closed ones far less (their numbers
+// matter less and every refresh costs ~3 units of the key's 10,000 a day).
+const CADENCE: Record<string, number> = { negotiating: 1, replied: 1, inbound: 1, roster: 1, signed: 1, contacted: 2, new: 2, no_reply: 4, denied: 12 };
+const dueAfter = (status: string) => FRESH_MS * (CADENCE[status] ?? 2);
 
 type Social = { platform: string; url: string; handle: string; followers: number };
 type CreatorRow = { id: string; user_id: string; name: string; country: string | null; contact_email: string | null; niche: string | null; avg_views: number | null; engagement_rate: number | null; socials: Social[] | null; youtube: Record<string, unknown> | null; youtube_synced_at: string | null; stars_engagement?: number | null; stars_consistency?: number | null; stars_demographics?: number | null };
@@ -104,6 +108,7 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
   const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+  useYoutubeMeter(admin);
   let input: Record<string, unknown> = {};
   try { input = await req.json(); } catch { return json({ error: "Invalid JSON" }, 400); }
 
@@ -122,15 +127,24 @@ Deno.serve(async (req) => {
     for (const id of on) { const r = await ringFor(admin, id).catch(() => null); if (r && await runInRing(r, async () => youtubeConfigured())) rings.set(id, r); }
     if (!rings.size) return json({ refreshed: 0, skipped: 0, keyless: on.size });
     const quota = new Set<string>();
-    const { data: rows } = await admin.from("creators").select("id, user_id, name, country, contact_email, niche, avg_views, engagement_rate, socials, youtube, youtube_synced_at, stars_engagement, stars_consistency, stars_demographics").in("user_id", [...rings.keys()]).is("archived_at", null).or(`youtube_synced_at.is.null,youtube_synced_at.lt.${stale}`).order("youtube_synced_at", { ascending: true, nullsFirst: true }).limit(600);
-    let done = 0, skipped = 0;
-    for (const c of (rows || []) as CreatorRow[]) {
+    const { data: rows } = await admin.from("creators").select("id, user_id, name, country, contact_email, niche, avg_views, engagement_rate, socials, youtube, youtube_synced_at, stars_engagement, stars_consistency, stars_demographics, pipeline_status").in("user_id", [...rings.keys()]).is("archived_at", null).or(`youtube_synced_at.is.null,youtube_synced_at.lt.${stale}`).order("youtube_synced_at", { ascending: true, nullsFirst: true }).limit(1000);
+    // Due by their stage's cadence; never-read first, then the hottest stages, then the oldest.
+    const now = Date.now();
+    const due = ((rows || []) as (CreatorRow & { pipeline_status?: string })[])
+      .filter((c) => !c.youtube_synced_at || now - new Date(c.youtube_synced_at).getTime() >= dueAfter(c.pipeline_status || ""))
+      .sort((a, b) => Number(!!a.youtube_synced_at) - Number(!!b.youtube_synced_at) || (CADENCE[a.pipeline_status || ""] ?? 2) - (CADENCE[b.pipeline_status || ""] ?? 2) || String(a.youtube_synced_at).localeCompare(String(b.youtube_synced_at)));
+    let done = 0, skipped = 0, saved = 0;
+    for (const c of due) {
       if (Date.now() > deadline) break;
       if (!rings.has(c.user_id) || quota.has(c.user_id)) continue;
       const ref = youtubeOf(c.socials);
       if (!ref) continue;
+      // Background refreshes stop before the key runs dry: Quick fill and Refresh always have units left.
+      if (!(await runInRing(rings.get(c.user_id)!, () => youtubeBackgroundOk()))) { quota.add(c.user_id); continue; }
+      const knownId = knownChannelId(ref, c.youtube as Record<string, unknown> | null);
+      if (knownId) saved++;
       try {
-        const f = await runInRing(rings.get(c.user_id)!, () => channelFacts(ref, new Date(), { includeRecent: recent.has(c.user_id) }));
+        const f = await runInRing(rings.get(c.user_id)!, () => channelFacts(ref, new Date(), { includeRecent: recent.has(c.user_id), knownId }));
         if (!f) { await admin.from("creators").update({ youtube_synced_at: new Date().toISOString() }).eq("id", c.id).eq("user_id", c.user_id); skipped++; continue; }
         // Only these columns are written; an archived record is left alone.
         const { error } = await admin.from("creators").update(patchFor(c, f)).eq("id", c.id).eq("user_id", c.user_id).is("archived_at", null);
@@ -140,7 +154,8 @@ Deno.serve(async (req) => {
         skipped++;
       }
     }
-    return json({ refreshed: done, skipped });
+    await flushYoutubeMeter();
+    return json({ refreshed: done, skipped, idsReused: saved, paused: quota.size });
   }
 
   const userId = await approvedUser(admin, req.headers.get("Authorization") || "");
@@ -166,12 +181,12 @@ Deno.serve(async (req) => {
     // nothing is read from or written to anyone's records here.
     const items = (Array.isArray(input.items) ? input.items : []).slice(0, 10).map((x) => (x && typeof x === "object" ? x as Record<string, unknown> : {}))
       .filter((x) => typeof x.id === "string" && UUID.test(x.id) && typeof x.link === "string" && x.link.length <= 500)
-      .map((x) => ({ id: x.id as string, link: x.link as string, name: String(x.name || "").slice(0, 300), country: String(x.country || "").slice(0, 80), contact_email: String(x.contact_email || "").slice(0, 254), niche: String(x.niche || "").slice(0, 120), avg_views: Number(x.avg_views) || 0, engagement_rate: Number(x.engagement_rate) || 0, stars_engagement: Number(x.stars_engagement) || 0, stars_consistency: Number(x.stars_consistency) || 0, stars_demographics: Number(x.stars_demographics) || 0, youtube: x.youtube && typeof x.youtube === "object" && !Array.isArray(x.youtube) ? { auto: (x.youtube as Record<string, unknown>).auto } as Record<string, unknown> : null, socials: (Array.isArray(x.socials) ? x.socials : []).slice(0, 30) as Social[] }));
+      .map((x) => ({ id: x.id as string, link: x.link as string, name: String(x.name || "").slice(0, 300), country: String(x.country || "").slice(0, 80), contact_email: String(x.contact_email || "").slice(0, 254), niche: String(x.niche || "").slice(0, 120), avg_views: Number(x.avg_views) || 0, engagement_rate: Number(x.engagement_rate) || 0, stars_engagement: Number(x.stars_engagement) || 0, stars_consistency: Number(x.stars_consistency) || 0, stars_demographics: Number(x.stars_demographics) || 0, youtube: x.youtube && typeof x.youtube === "object" && !Array.isArray(x.youtube) ? (() => { const y = x.youtube as Record<string, unknown>; return { auto: y.auto, channel_id: typeof y.channel_id === "string" && /^UC[\w-]{22}$/.test(y.channel_id) ? y.channel_id : "", handle: typeof y.handle === "string" ? y.handle.slice(0, 100) : "", url: typeof y.url === "string" ? y.url.slice(0, 300) : "" } as Record<string, unknown>; })() : null, socials: (Array.isArray(x.socials) ? x.socials : []).slice(0, 30) as Social[] }));
     if (!items.length) return json({ error: "Pick at least one influencer with a YouTube channel." }, 400);
     const results: { id: string; ok: boolean; patch?: Record<string, unknown>; error?: string }[] = [];
     for (const c of items) {
       try {
-        const f = await channelFacts(c.link, new Date(), { includeRecent: input.recent === true });
+        const f = await channelFacts(c.link, new Date(), { includeRecent: input.recent === true, knownId: knownChannelId(c.link, c.youtube as Record<string, unknown> | null) });
         results.push(f ? { id: c.id, ok: true, patch: patchFor(c, f, { force: input.force === true }) } : { id: c.id, ok: false, error: "Couldn't find that YouTube channel" });
       } catch (e) {
         if (e instanceof YouTubeQuota) return json({ results, error: "YouTube's daily limit is reached — the rest refresh after midnight Pacific time.", quota: true }, 429);
@@ -182,5 +197,5 @@ Deno.serve(async (req) => {
   }
 
   return json({ error: "Unknown action" }, 400);
-  });
+  }).finally(() => flushYoutubeMeter());
 });
