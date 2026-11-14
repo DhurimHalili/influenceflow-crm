@@ -236,3 +236,6 @@
   .reach-people-list li > :nth-child(4) { grid-area: li; justify-self: end; }
   .reach-people-list li > :nth-child(5) { grid-area: add; justify-self: end; }
 }
+.reach-connect { display: flex; align-items: flex-start; gap: 8px; margin: 0; padding: 10px 12px; border: 1px dashed var(--line); border-radius: 12px; color: var(--text-soft); font-size: 12.5px; line-height: 1.5; }
+.reach-connect svg { flex: none; margin-top: 2px; color: var(--accent); }
+.reach-connect a { color: var(--accent); font-weight: 650; }

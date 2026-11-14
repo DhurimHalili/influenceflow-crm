@@ -1,5 +1,6 @@
 import { BadgeCheck, Banknote, Building2, CalendarDays, Check, ExternalLink, Linkedin, Loader2, MapPin, Pencil, Plus, Search, Sparkles, UsersRound } from "lucide-react";
 import { useMemo, useState, type FormEvent } from "react";
+import { Link } from "react-router-dom";
 import { useData } from "../contexts/DataContext";
 import { useMatch } from "../contexts/MatchContext";
 import { useToast } from "../contexts/ToastContext";
@@ -113,7 +114,7 @@ export function BrandReach({ brand, contacts }: { brand: Brand; contacts: BrandC
 
     {facts && co ? <ul className="reach-facts" aria-label="Company facts">
       {(co.size || co.employees) && <li><UsersRound size={13} aria-hidden="true" /><b>{co.size || co.employees?.toLocaleString("en-US")}</b> people</li>}
-      {co.revenue && <li><Banknote size={13} aria-hidden="true" /><b>{co.revenue}</b> a year</li>}
+      {co.revenue && <li><Banknote size={13} aria-hidden="true" /><b>{co.revenue.replace(/^(\d)/, "$$$1").replace(/\s*-\s*/, "–")}</b> a year</li>}
       {co.industry && <li><Building2 size={13} aria-hidden="true" />{co.industry}</li>}
       {co.founded && <li><CalendarDays size={13} aria-hidden="true" />Since {co.founded}</li>}
       {co.country && <li><MapPin size={13} aria-hidden="true" />{countryName(co.country)}</li>}
@@ -125,6 +126,7 @@ export function BrandReach({ brand, contacts }: { brand: Brand; contacts: BrandC
       <div className="reach-chips">{ROLES.map((r) => <a key={r.label} href={search(r.words)} target="_blank" rel="noopener noreferrer">{r.label}<ExternalLink size={11} aria-hidden="true" /></a>)}</div>
     </div>
 
+    {!services.length && domain && m.status ? <p className="reach-connect"><Sparkles size={13} aria-hidden="true" /><span>See who works there — with work emails and LinkedIn — and company facts: <Link to="/app/settings#lookups">connect Clay or Hunter in Settings</Link>.</span></p> : null}
     {services.length && domain ? <div className="reach-people">
       <div className="reach-people-head">
         <span><Sparkles size={13} aria-hidden="true" /> <b>People who work there</b>{people ? <small> · {dateLabel(people.at)}{people.total > people.list.length ? ` · ${people.total} known in all` : ""}</small> : <small> · from {services.join(" + ")}, deal-makers first</small>}</span>

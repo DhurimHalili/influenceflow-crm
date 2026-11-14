@@ -9,7 +9,8 @@ import { listenConfigured, listenLeft, listenTo, useListenBudget } from "../_sha
 import { fetchTranscript, txConfigured, txLeft, txProviders } from "../_shared/transcriptApis.ts";
 import { askBrand, searchSite, useBrandAskBudget } from "../_shared/brandAsk.ts";
 import { companyCountry, duckSite, officialSite } from "../_shared/officialSite.ts";
-import { clayCompany, clayConfigured, clayPeople, hunterCompany, hunterConfigured, hunterPeople, mergePeople, siteLinkedin, wikidataLinkedin, type CompanyFacts, type People, type Person } from "../_shared/companyInfo.ts";
+import { clayCompany, clayPeople, hunterCompany, hunterPeople, mergePeople, siteLinkedin, wikidataLinkedin, type CompanyFacts, type People, type Person } from "../_shared/companyInfo.ts";
+import { checkKey, cleanKey, hintOf, keyFor, openKey, sealKey, SERVICES, vaultKey, type KeyChoice, type Service } from "../_shared/memberKeys.ts";
 
 // Brand ⇄ creator matching and "who works with whom" (see the migration
 // 20261122000000_brand_match.sql for the tables).
@@ -606,50 +607,64 @@ type Intel = {
   people?: People;
 };
 
-// ---- Hunter.io: free plan credits, spent carefully --------------------------------------------
-// HUNTER_MONTHLY (default 50) a calendar month in all; the cron looks up at most HUNTER_AUTO_DAILY (1) brand a
-// day by itself and always leaves HUNTER_KEEP (15) for people searches you ask for. 429 = the plan's limit →
-// paused until the 1st; 401 = bad key → a day.
+// ---- Clay + Hunter: whose key, and its budget -------------------------------------------------------
+// Every lookup runs with ONE member's key (`keyFor`: their own key from Settings, else the workspace key for
+// the owner only) and counts against that key's scope in ai_budget ("hunter@<id>" / "clay@<id>" for a
+// member's own key, "hunter" / "clay" for the workspace key).
+// Hunter: credits left come from Hunter itself (/v2/account, free), capped for the workspace key at
+// HUNTER_MONTHLY (50) a calendar month; the cron looks up at most HUNTER_AUTO_DAILY (1) brand a day per key
+// and leaves HUNTER_KEEP (15) for searches you ask for. 429 = the plan's limit → paused until the 1st;
+// 401 = key refused → a day (and an own key is marked refused). Clay: CLAY_MONTHLY (100) results per rolling
+// 30 days, CLAY_AUTO_DAILY (2), CLAY_KEEP (40); 402 = a limit → a day's pause.
+type Choice = NonNullable<KeyChoice>;
 const envNum = (k: string, d: number) => { const v = Number(Deno.env.get(k)); return Deno.env.get(k) && Number.isFinite(v) && v >= 0 ? v : d; };
 const monthStart = () => new Date().toISOString().slice(0, 8) + "01";
 const nextMonth = () => { const d = new Date(); return Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1, 0, 5); };
-async function hunterState(admin: SupabaseClient): Promise<{ month: number; today: number; paused: number; left: number }> {
-  const { data } = await admin.from("ai_budget").select("day, calls, paused_until").eq("route", "hunter").gte("day", monthStart());
-  const rows = (data || []) as { day: string; calls: number; paused_until: string | null }[];
-  const month = rows.reduce((n, r) => n + (Number(r.calls) || 0), 0);
-  const today = Number(rows.find((r) => r.day === new Date().toISOString().slice(0, 10))?.calls) || 0;
+const utcToday = () => new Date().toISOString().slice(0, 10);
+type Budget = { used: number; today: number; paused: number; left: number };
+async function budgetRows(admin: SupabaseClient, route: string, since: string) {
+  const { data } = await admin.from("ai_budget").select("day, calls, units, paused_until").eq("route", route).gte("day", since);
+  return (data || []) as { day: string; calls: number; units: number; paused_until: string | null }[];
+}
+const hunterLive = new Map<string, Promise<number | null>>();
+async function hunterState(admin: SupabaseClient, ch: KeyChoice): Promise<Budget> {
+  if (!ch) return { used: 0, today: 0, paused: 0, left: 0 };
+  const rows = await budgetRows(admin, ch.scope, monthStart());
+  const used = rows.reduce((n, r) => n + (Number(r.calls) || 0), 0);
+  const today = Number(rows.find((r) => r.day === utcToday())?.calls) || 0;
   const paused = Math.max(0, ...rows.map((r) => (r.paused_until ? new Date(r.paused_until).getTime() : 0)));
-  return { month, today, paused, left: paused > Date.now() || !hunterConfigured() ? 0 : Math.max(0, envNum("HUNTER_MONTHLY", 50) - month) };
+  // What Hunter itself says is left (free call, once per key per run).
+  if (!hunterLive.has(ch.scope)) hunterLive.set(ch.scope, checkKey("hunter", ch.key).then((r) => (r.ok ? r.left : null)).catch(() => null));
+  const live = await hunterLive.get(ch.scope)!;
+  const capped = ch.own ? Infinity : Math.max(0, envNum("HUNTER_MONTHLY", 50) - used);
+  return { used, today, paused, left: paused > Date.now() ? 0 : Math.max(0, Math.min(capped, live ?? (ch.own ? 25 : capped))) };
 }
-const hunterUse = (admin: SupabaseClient) => Promise.resolve(admin.rpc("ai_budget_use", { p_route: "hunter", p_units: 1 })).catch(() => null);
-async function hunterStop(admin: SupabaseClient, why: string) {
-  const until = why === "quota" ? nextMonth() : why === "bad_key" ? Date.now() + DAY : why === "busy" ? Date.now() + 60_000 : 0;
-  if (until) await Promise.resolve(admin.from("ai_budget").upsert({ route: "hunter", day: new Date().toISOString().slice(0, 10), paused_until: new Date(until).toISOString(), note: `hunter ${why}` })).catch(() => null);
-}
-
-// ---- Clay: free plan 100 search results per rolling 30 days -----------------------------------------
-// CLAY_MONTHLY (100) results in 30 days; the cron uses at most CLAY_AUTO_DAILY (2) a day and keeps
-// CLAY_KEEP (40) for searches you ask for. Units = results returned. 402 = a limit → a day's pause.
-async function clayState(admin: SupabaseClient): Promise<{ used: number; today: number; paused: number; left: number }> {
-  const since = new Date(Date.now() - 29 * DAY).toISOString().slice(0, 10);
-  const { data } = await admin.from("ai_budget").select("day, units, paused_until").eq("route", "clay").gte("day", since);
-  const rows = (data || []) as { day: string; units: number; paused_until: string | null }[];
+async function clayState(admin: SupabaseClient, ch: KeyChoice): Promise<Budget> {
+  if (!ch) return { used: 0, today: 0, paused: 0, left: 0 };
+  const rows = await budgetRows(admin, ch.scope, new Date(Date.now() - 29 * DAY).toISOString().slice(0, 10));
   const used = rows.reduce((n, r) => n + (Number(r.units) || 0), 0);
-  const today = Number(rows.find((r) => r.day === new Date().toISOString().slice(0, 10))?.units) || 0;
+  const today = Number(rows.find((r) => r.day === utcToday())?.units) || 0;
   const paused = Math.max(0, ...rows.map((r) => (r.paused_until ? new Date(r.paused_until).getTime() : 0)));
-  return { used, today, paused, left: paused > Date.now() || !clayConfigured() ? 0 : Math.max(0, envNum("CLAY_MONTHLY", 100) - used) };
+  return { used, today, paused, left: paused > Date.now() ? 0 : Math.max(0, envNum("CLAY_MONTHLY", 100) - used) };
 }
-const clayUse = (admin: SupabaseClient, results: number) => Promise.resolve(admin.rpc("ai_budget_use", { p_route: "clay", p_units: Math.max(0, results) })).catch(() => null);
-async function clayStop(admin: SupabaseClient, why: string) {
-  const until = why === "quota" || why === "bad_key" ? Date.now() + DAY : why === "busy" ? Date.now() + 60_000 : 0;
-  if (until) await Promise.resolve(admin.from("ai_budget").upsert({ route: "clay", day: new Date().toISOString().slice(0, 10), paused_until: new Date(until).toISOString(), note: `clay ${why}` })).catch(() => null);
+const spend = (admin: SupabaseClient, ch: Choice, units: number) => Promise.resolve(admin.rpc("ai_budget_use", { p_route: ch.scope, p_units: Math.max(0, units) })).catch(() => null);
+const hunterUse = (admin: SupabaseClient, ch: Choice) => spend(admin, ch, 1);
+const clayUse = (admin: SupabaseClient, ch: Choice, results: number) => spend(admin, ch, results);
+/** A refusal / limit pauses that key's scope; a member's own key that's refused is marked so Settings says so. */
+async function keyStop(admin: SupabaseClient, ch: Choice, service: Service, why: string) {
+  const until = why === "quota" ? (service === "hunter" ? nextMonth() : Date.now() + DAY) : why === "bad_key" ? Date.now() + DAY : why === "busy" ? Date.now() + 60_000 : 0;
+  if (until) await Promise.resolve(admin.from("ai_budget").upsert({ route: ch.scope, day: utcToday(), paused_until: new Date(until).toISOString(), note: `${service} ${why}` })).catch(() => null);
+  if (ch.own && (why === "bad_key" || why === "quota")) {
+    const userId = ch.scope.split("@")[1];
+    if (UUID.test(userId || "")) await Promise.resolve(admin.from("member_keys").update({ status: why === "bad_key" ? "refused" : "quota", checked_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("user_id", userId).eq("service", service)).catch(() => null);
+  }
 }
 
 /** Clay's company record merged in (LinkedIn only if none was found on their own site / Wikidata). */
-async function clayFill(admin: SupabaseClient, co: CompanyFacts): Promise<{ co: CompanyFacts; why?: string }> {
-  const r = await clayCompany(co.domain);
-  if (r.results) await clayUse(admin, r.results);
-  if (!r.ok) { if (r.why !== "none" && r.why !== "no_key") await clayStop(admin, r.why); return { co: r.why === "none" ? { ...co, clay_at: new Date().toISOString() } : co, why: r.why }; }
+async function clayFill(admin: SupabaseClient, ch: Choice, co: CompanyFacts): Promise<{ co: CompanyFacts; why?: string }> {
+  const r = await clayCompany(co.domain, undefined, ch.key);
+  if (r.results) await clayUse(admin, ch, r.results);
+  if (!r.ok) { if (r.why !== "none" && r.why !== "no_key") await keyStop(admin, ch, "clay", r.why); return { co: r.why === "none" ? { ...co, clay_at: new Date().toISOString() } : co, why: r.why }; }
   const v = r.value;
   const facts = Object.fromEntries(Object.entries(v).filter(([k, x]) => k !== "linkedin" && x !== undefined && x !== ""));
   const next: CompanyFacts = { ...co, ...(co.facts_via === "hunter" ? {} : { ...facts, facts_via: "clay" as const }), clay_at: new Date().toISOString() };
@@ -672,10 +687,10 @@ async function companyOf(name: string, domain: string, socials: { platform: stri
 }
 
 /** Hunter's company record merged in (LinkedIn only if none was found on their own site / Wikidata). */
-async function hunterFill(admin: SupabaseClient, co: CompanyFacts): Promise<{ co: CompanyFacts; why?: string }> {
-  const r = await hunterCompany(co.domain);
-  if (!r.ok) { if (r.why !== "none" && r.why !== "no_key") await hunterStop(admin, r.why); if (r.why === "none" || r.why === "error") await hunterUse(admin); return { co: r.why === "none" ? { ...co, hunter_at: new Date().toISOString() } : co, why: r.why }; }
-  await hunterUse(admin);
+async function hunterFill(admin: SupabaseClient, ch: Choice, co: CompanyFacts): Promise<{ co: CompanyFacts; why?: string }> {
+  const r = await hunterCompany(co.domain, undefined, ch.key);
+  if (!r.ok) { if (r.why !== "none" && r.why !== "no_key") await keyStop(admin, ch, "hunter", r.why); if (r.why === "none" || r.why === "error") await hunterUse(admin, ch); return { co: r.why === "none" ? { ...co, hunter_at: new Date().toISOString() } : co, why: r.why }; }
+  await hunterUse(admin, ch);
   const v = r.value;
   const next: CompanyFacts = { ...co, ...Object.fromEntries(Object.entries(v).filter(([k, x]) => k !== "linkedin" && x !== undefined && x !== "")), facts_via: "hunter", hunter_at: new Date().toISOString() };
   if (!co.linkedin && v.linkedin) { next.linkedin = v.linkedin; next.linkedin_via = "hunter"; }
@@ -1068,32 +1083,43 @@ async function cron(admin: SupabaseClient) {
       log.linkedin = Number(log.linkedin || 0) + 1;
     }
   }
-  // 4d. Clay / Hunter (when their keys are set): a few brands a day with no LinkedIn yet — brands you're talking to first.
-  if ((clayConfigured() || hunterConfigured()) && Date.now() < deadline - 40_000) {
+  // 4d. Clay / Hunter, each member with their own key (the owner also with the workspace key): a few brands a
+  //     day with no LinkedIn yet — brands you're talking to first. One member's key never looks up another's brands.
+  if (Date.now() < deadline - 40_000) {
     const STAGE: Record<string, number> = { negotiating: 6, replied: 5, inbound: 5, contacted: 4, no_reply: 3, roster: 3, signed: 3, new: 2, denied: 0 };
-    const nextBrand = async (asked: "clay_at" | "hunter_at") => {
-      const { data: rows } = await admin.from("brand_intel").select("brand_id").in("user_id", ids).not("intel->company", "is", null).is("intel->company->>linkedin", null).is(`intel->company->>${asked}`, null).limit(500);
+    const memo = new Map<string, KeyChoice>();
+    const nextBrand = async (userId: string, asked: "clay_at" | "hunter_at") => {
+      const { data: rows } = await admin.from("brand_intel").select("brand_id").eq("user_id", userId).not("intel->company", "is", null).is("intel->company->>linkedin", null).is(`intel->company->>${asked}`, null).limit(500);
       const bids = ((rows || []) as { brand_id: string }[]).map((r) => r.brand_id);
       if (!bids.length) return null;
-      const { data: bs } = await admin.from("brands").select("id, pipeline_status, updated_at").in("id", bids.slice(0, 300)).is("archived_at", null);
+      const { data: bs } = await admin.from("brands").select("id, pipeline_status, updated_at").eq("user_id", userId).in("id", bids.slice(0, 300)).is("archived_at", null);
       const pick = ((bs || []) as { id: string; pipeline_status: string; updated_at: string }[]).filter((b) => (STAGE[b.pipeline_status] ?? 1) > 0)
         .sort((a, b) => (STAGE[b.pipeline_status] ?? 1) - (STAGE[a.pipeline_status] ?? 1) || b.updated_at.localeCompare(a.updated_at))[0];
       if (!pick) return null;
-      const { data: r } = await admin.from("brand_intel").select("brand_id, user_id, intel").eq("brand_id", pick.id).maybeSingle();
+      const { data: r } = await admin.from("brand_intel").select("brand_id, user_id, intel").eq("brand_id", pick.id).eq("user_id", userId).maybeSingle();
       return (r as { brand_id: string; user_id: string; intel: Intel } | null)?.intel?.company ? r as { brand_id: string; user_id: string; intel: Intel } : null;
     };
-    if (clayConfigured()) {
-      const c = await clayState(admin);
-      if (c.left > envNum("CLAY_KEEP", 40) && c.today < envNum("CLAY_AUTO_DAILY", 2)) {
-        const r = await nextBrand("clay_at");
-        if (r) { const { co } = await clayFill(admin, r.intel.company!); await admin.from("brand_intel").update({ intel: { ...r.intel, company: co } }).eq("brand_id", r.brand_id).eq("user_id", r.user_id); log.clay = 1; }
+    const { data: keyed } = await admin.from("member_keys").select("user_id").in("user_id", ids).neq("status", "refused");
+    const { data: owners } = await admin.from("profiles").select("id").in("id", ids).eq("role", "owner");
+    const who = Array.from(new Set([...((keyed || []) as { user_id: string }[]).map((r) => r.user_id), ...((owners || []) as { id: string }[]).map((r) => r.id)]));
+    for (const userId of who) {
+      if (Date.now() > deadline - 35_000) break;
+      const clay = await keyFor(admin, userId, "clay", memo).catch(() => null);
+      if (clay) {
+        const c = await clayState(admin, clay);
+        if (c.left > envNum("CLAY_KEEP", 40) && c.today < envNum("CLAY_AUTO_DAILY", 2)) {
+          const r = await nextBrand(userId, "clay_at");
+          if (r) { const { co } = await clayFill(admin, clay, r.intel.company!); await admin.from("brand_intel").update({ intel: { ...r.intel, company: co } }).eq("brand_id", r.brand_id).eq("user_id", r.user_id); log.clay = Number(log.clay || 0) + 1; }
+        }
       }
-    }
-    if (hunterConfigured() && Date.now() < deadline - 35_000) {
-      const h = await hunterState(admin);
-      if (h.left > envNum("HUNTER_KEEP", 15) && h.today < envNum("HUNTER_AUTO_DAILY", 1)) {
-        const r = await nextBrand("hunter_at");
-        if (r) { const { co } = await hunterFill(admin, r.intel.company!); await admin.from("brand_intel").update({ intel: { ...r.intel, company: co } }).eq("brand_id", r.brand_id).eq("user_id", r.user_id); log.hunter = 1; }
+      if (Date.now() > deadline - 30_000) break;
+      const hunter = await keyFor(admin, userId, "hunter", memo).catch(() => null);
+      if (hunter) {
+        const h = await hunterState(admin, hunter);
+        if (h.left > envNum("HUNTER_KEEP", 15) && h.today < envNum("HUNTER_AUTO_DAILY", 1)) {
+          const r = await nextBrand(userId, "hunter_at");
+          if (r) { const { co } = await hunterFill(admin, hunter, r.intel.company!); await admin.from("brand_intel").update({ intel: { ...r.intel, company: co } }).eq("brand_id", r.brand_id).eq("user_id", r.user_id); log.hunter = Number(log.hunter || 0) + 1; }
+        }
       }
     }
   }
@@ -1110,6 +1136,14 @@ async function cron(admin: SupabaseClient) {
   if (Date.now() < deadline - 50_000) log.listened = await listenSome(admin, deadline).catch(() => 0);
   log.ms = Date.now() - start;
   return log;
+}
+
+/** For the app: which lookup services this member can use, whose key, and what's left. */
+async function lookupStatus(admin: SupabaseClient, userId: string) {
+  const memo = new Map<string, KeyChoice>();
+  const [h, c] = await Promise.all([keyFor(admin, userId, "hunter", memo).catch(() => null), keyFor(admin, userId, "clay", memo).catch(() => null)]);
+  const [hs, cs] = await Promise.all([hunterState(admin, h).catch(() => null), clayState(admin, c).catch(() => null)]);
+  return { hunter: { configured: !!h, own: !!h?.own, left: hs?.left ?? 0 }, clay: { configured: !!c, own: !!c?.own, left: cs?.left ?? 0 } };
 }
 
 Deno.serve(async (req) => {
@@ -1135,6 +1169,33 @@ Deno.serve(async (req) => {
     await admin.from("ai_budget").upsert({ route: "brand-match-lease", day: "2000-01-01", paused_until: new Date(Date.now() + 140_000).toISOString() });
     try { return json(await cron(admin)); }
     finally { await admin.from("ai_budget").upsert({ route: "brand-match-lease", day: "2000-01-01", paused_until: null }); }
+  }
+
+  // Server-only self-test of the key vault (cron secret): seal/open with the real Vault key, the binding to
+  // member + service, the live key checks, and that the workspace key is the owner's only. Returns booleans,
+  // never a key.
+  if (input.action === "keys_selftest") {
+    const given = req.headers.get("x-cron-secret") || "";
+    const { data: ok } = given.length >= 32 ? await admin.rpc("gmail_cron_secret_ok", { p_secret: given }) : { data: false };
+    if (ok !== true) return json({ error: "Unauthorized" }, 401);
+    const vk = vaultKey(admin);
+    const a = "00000000-0000-4000-8000-00000000000a", b2 = "00000000-0000-4000-8000-00000000000b";
+    const probe = `probe_${crypto.randomUUID()}`;
+    const sealed = await sealKey(vk, a, "clay", probe).catch(() => "");
+    const { data: owner } = await admin.from("profiles").select("id").eq("role", "owner").limit(1).maybeSingle();
+    const { data: member } = await admin.from("profiles").select("id").neq("role", "owner").eq("access", "approved").limit(1).maybeSingle();
+    const ownerHunter = owner?.id ? await keyFor(admin, owner.id, "hunter") : null;
+    const memberHunter = member?.id ? await keyFor(admin, member.id, "hunter") : null;
+    const { data: memberRow } = member?.id ? await admin.from("member_keys").select("service").eq("user_id", member.id).eq("service", "hunter").maybeSingle() : { data: null };
+    const live = Deno.env.get("HUNTER_API_KEY") ? await checkKey("hunter", Deno.env.get("HUNTER_API_KEY")!) : null;
+    const wrong = await checkKey("hunter", "0000000000000000000000000000000000000000");
+    return json({
+      vault: !!sealed, sealedHidesKey: !!sealed && !sealed.includes(probe), roundTrip: (await openKey(vk, a, "clay", sealed)) === probe,
+      otherMemberCant: (await openKey(vk, b2, "clay", sealed)) === "", otherServiceCant: (await openKey(vk, a, "hunter", sealed)) === "",
+      ownerUsesWorkspaceKey: !!ownerHunter && !ownerHunter.own, memberNeverUsesWorkspaceKey: !memberHunter || (memberHunter.own && !!memberRow),
+      hunterLiveCheck: live ? { ok: live.ok, label: live.ok ? live.label : "", left: live.ok ? live.left : null, total: live.ok ? live.total : null } : "no workspace key",
+      hunterWrongKeyRefused: !wrong.ok && wrong.why === "refused",
+    });
   }
 
   const userId = await approvedUser(admin, req.headers.get("Authorization") || "");
@@ -1171,7 +1232,7 @@ Deno.serve(async (req) => {
       vc((q) => q), vc((q) => q.eq("paid", true)), vc((q) => q.eq("transcript_status", "ok")), vc((q) => q.eq("transcript_status", "none")),
       vc((q) => q.eq("transcript_status", "").gt("secs", 60)), vc((q) => q.not("listened_at", "is", null)), vc((q) => q.not("listen", "is", null).is("listened_at", null).neq("transcript_status", "ok")),
     ]);
-    return json({ ok: true, stamp, creators, read, failed, backfilling, videos, paidVideos, transcripts, noCaptions, transcriptWaiting: waiting, listened, listenQueue, noYoutube: (people || []).length - creators, lastRead, everyMin: 3, perRun: 4, rescanDays: RESCAN_DAYS, brandDays: BRAND_DAYS, brands: brands || 0, researched: researched || 0, youtube: youtubeConfigured(), clef, listen: { configured: listenConfigured(), secondsLeft: await listenLeft() }, tx: { services: txProviders().map((p) => p.name), left: await txLeft(admin).catch(() => 0) }, hunter: { configured: hunterConfigured(), left: hunterConfigured() ? (await hunterState(admin).catch(() => null))?.left ?? 0 : 0 }, clay: { configured: clayConfigured(), left: clayConfigured() ? (await clayState(admin).catch(() => null))?.left ?? 0 : 0 } });
+    return json({ ok: true, stamp, creators, read, failed, backfilling, videos, paidVideos, transcripts, noCaptions, transcriptWaiting: waiting, listened, listenQueue, noYoutube: (people || []).length - creators, lastRead, everyMin: 3, perRun: 4, rescanDays: RESCAN_DAYS, brandDays: BRAND_DAYS, brands: brands || 0, researched: researched || 0, youtube: youtubeConfigured(), clef, listen: { configured: listenConfigured(), secondsLeft: await listenLeft() }, tx: { services: txProviders().map((p) => p.name), left: await txLeft(admin).catch(() => 0) }, ...(await lookupStatus(admin, userId)) });
   }
 
   // ---- transcripts from the browser helper (the member's own connection; YouTube blocks servers) ----
@@ -1240,45 +1301,114 @@ Deno.serve(async (req) => {
     catch (e) { return json({ error: e instanceof Error ? e.message : "Couldn't read their site." }, 502); }
   }
 
-  // A brand's company record / people from Clay and Hunter — only when you ask, for your own brand, by its website, within the free allowances.
+  // ---- Your own Clay / Hunter keys ----------------------------------------------------------------
+  // The key is checked with the service (free call) BEFORE anything is stored; only then sealed and saved.
+  // Nothing about a key ever comes back except its last 4 characters, the account label and credits.
+  if (input.action === "keys_status") {
+    const { data: rows } = await admin.from("member_keys").select("service, hint, label, status, checked_at, updated_at").eq("user_id", userId);
+    const { data: me } = await admin.from("profiles").select("role").eq("id", userId).maybeSingle();
+    const memo = new Map<string, KeyChoice>();
+    const out = await Promise.all(SERVICES.map(async (service) => {
+      const row = ((rows || []) as { service: string; hint: string; label: string; status: string; checked_at: string | null; updated_at: string }[]).find((r) => r.service === service);
+      const ch = await keyFor(admin, userId, service, memo).catch(() => null);
+      const st = service === "hunter" ? await hunterState(admin, ch).catch(() => null) : await clayState(admin, ch).catch(() => null);
+      const workspace = !row && !!ch && !ch.own;
+      return { service, saved: !!row, hint: row?.hint || "", label: row?.label || "", status: row?.status || "", checked_at: row?.checked_at || null, saved_at: row?.updated_at || null, workspace, active: !!ch, left: ch ? st?.left ?? null : null, paused_until: st && st.paused > Date.now() ? new Date(st.paused).toISOString() : null };
+    }));
+    return json({ ok: true, keys: out, owner: me?.role === "owner" });
+  }
+
+  if (input.action === "key_save" || input.action === "key_check" || input.action === "key_remove") {
+    const service = SERVICES.find((x) => x === input.service);
+    if (!service) return json({ error: "Pick Clay or Hunter." }, 400);
+    if (input.action === "key_remove") {
+      const { error } = await admin.from("member_keys").delete().eq("user_id", userId).eq("service", service);
+      if (error) return json({ error: "Couldn't remove the key — nothing changed. Try again." }, 500);
+      await admin.from("activities").insert({ user_id: userId, text: `${service === "clay" ? "Clay" : "Hunter"} key removed from Settings`, entity_type: null, entity_id: null }).then(() => null, () => null);
+      return json({ ok: true });
+    }
+    // At most 20 checks / saves a day per member: a key is never brute-forced through us.
+    const tries = `keycheck@${userId}`;
+    const { data: t } = await admin.from("ai_budget").select("calls").eq("route", tries).eq("day", utcToday()).maybeSingle();
+    if ((Number(t?.calls) || 0) >= 20) return json({ error: "Too many key checks today — try again tomorrow." }, 429);
+    await admin.rpc("ai_budget_use", { p_route: tries, p_units: 0 });
+    let plain = "";
+    if (input.action === "key_check") {
+      // Re-check the key you saved (credits, still valid) — the browser never sends or gets the key.
+      const { data: row } = await admin.from("member_keys").select("sealed").eq("user_id", userId).eq("service", service).maybeSingle();
+      plain = row?.sealed ? await openKey(vaultKey(admin), userId, service, row.sealed) : "";
+      if (!plain) return json({ error: "There's no saved key to check — paste it again." }, 404);
+    } else {
+      plain = cleanKey(service, input.key);
+      if (!plain) return json({ error: service === "hunter" ? "That doesn't look like a Hunter API key — copy it from hunter.io → API." : "That doesn't look like a Clay API key — copy it from Clay → API and CLI → API keys.", field: "key" }, 400);
+    }
+    const check = await checkKey(service, plain);
+    const name = service === "clay" ? "Clay" : "Hunter";
+    const now = new Date().toISOString();
+    if (!check.ok) {
+      if (input.action === "key_check") await admin.from("member_keys").update({ status: check.why === "quota" ? "quota" : check.why === "refused" ? "refused" : "ok", checked_at: now, updated_at: now }).eq("user_id", userId).eq("service", service);
+      return json({ error: check.why === "refused" ? `${name} refused this key — check it's copied whole and still active.${input.action === "key_save" ? " Nothing was saved." : ""}` : check.why === "quota" ? `${name} says this account is over its limit right now.${input.action === "key_save" ? " Nothing was saved." : ""}` : `${name} didn't answer — try again in a minute.${input.action === "key_save" ? " Nothing was saved." : ""}`, field: check.why === "refused" ? "key" : undefined, why: check.why }, check.why === "unreachable" ? 502 : 400);
+    }
+    if (input.action === "key_save") {
+      let sealed = "";
+      try { sealed = await sealKey(vaultKey(admin), userId, service, plain); } catch { return json({ error: "The key vault isn't available right now — nothing was saved. Try again in a minute." }, 503); }
+      // Read it back before saying "saved": it must open to the very same key.
+      if ((await openKey(vaultKey(admin), userId, service, sealed)) !== plain) return json({ error: "The key couldn't be sealed safely — nothing was saved." }, 500);
+      const { error } = await admin.from("member_keys").upsert({ user_id: userId, service, sealed, hint: hintOf(plain), label: check.label, status: "ok", checked_at: now, updated_at: now }, { onConflict: "user_id,service" });
+      if (error) return json({ error: "Couldn't save the key — nothing changed. Try again." }, 500);
+      const { data: back } = await admin.from("member_keys").select("sealed").eq("user_id", userId).eq("service", service).maybeSingle();
+      if (back?.sealed !== sealed || (await openKey(vaultKey(admin), userId, service, back.sealed)) !== plain) return json({ error: "The key didn't save completely — try again." }, 500);
+      // A new key starts with a clean slate (no pause left from an old one).
+      await admin.from("ai_budget").update({ paused_until: null }).eq("route", `${service}@${userId}`).gte("day", new Date(Date.now() - 31 * DAY).toISOString().slice(0, 10));
+      await admin.from("activities").insert({ user_id: userId, text: `${name} key saved in Settings (•••• ${hintOf(plain)})`, entity_type: null, entity_id: null }).then(() => null, () => null);
+    } else {
+      await admin.from("member_keys").update({ status: "ok", label: check.label, checked_at: now, updated_at: now }).eq("user_id", userId).eq("service", service);
+    }
+    return json({ ok: true, service, hint: hintOf(plain), label: check.label, left: check.left, total: check.total, resets: check.resets, checked_at: now });
+  }
+
+  // A brand's company record / people from Clay and Hunter — only when you ask, for your own brand, by its
+  // website, with YOUR key (or the workspace key if you're the owner), within that key's allowance.
   if (input.action === "company_lookup" || input.action === "people_find") {
     const id = typeof input.id === "string" && UUID.test(input.id) ? input.id : "";
     const { data: b } = id ? await admin.from("brands").select("id, user_id, name, domain, archived_at").eq("id", id).eq("user_id", userId).maybeSingle() : { data: null };
     if (!b) return json({ error: "That brand isn't in your CRM (or hasn't saved yet) — try again in a moment." }, 404);
     const domain = normalizeDomain((b as BrandRow).domain || "");
     if (!domain) return json({ error: "Add their website first — lookups go by website, never by name." }, 400);
-    if (!hunterConfigured() && !clayConfigured()) return json({ error: "No lookup service is connected — add HUNTER_API_KEY or CLAY_API_KEY in Supabase → Edge Functions → Secrets.", setup: true }, 400);
-    const [h, c] = await Promise.all([hunterState(admin), clayState(admin)]);
-    const left = () => ({ hunter: { configured: hunterConfigured(), left: h.left }, clay: { configured: clayConfigured(), left: c.left } });
-    if (h.left <= 0 && c.left <= 0) return json({ error: "This month's free lookups are used up — Hunter refills on the 1st, Clay a little every day.", quota: true }, 429);
+    const memo = new Map<string, KeyChoice>();
+    const [hk, ck] = await Promise.all([keyFor(admin, userId, "hunter", memo), keyFor(admin, userId, "clay", memo)]);
+    if (!hk && !ck) return json({ error: "Connect Clay or Hunter in Settings → Lookup services first.", setup: true }, 400);
+    const [h, c] = await Promise.all([hunterState(admin, hk), clayState(admin, ck)]);
+    const left = () => ({ hunter: { configured: !!hk, own: !!hk?.own, left: h.left }, clay: { configured: !!ck, own: !!ck?.own, left: c.left } });
+    if (h.left <= 0 && c.left <= 0) return json({ error: "No lookups left right now — Hunter refills on its reset date, Clay a little every day.", quota: true }, 429);
     const { data: row } = await admin.from("brand_intel").select("intel").eq("brand_id", id).eq("user_id", userId).maybeSingle();
     let intel = (row?.intel || null) as Intel | null;
     if (!intel || intel.domain !== domain) intel = await researchBrand(admin, b as BrandRow).catch(() => null);
     if (!intel) return json({ error: "Couldn't read their site yet — try again in a minute." }, 502);
     let company = intel.company && intel.company.domain === domain ? intel.company : await companyOf((b as BrandRow).name, domain, intel.socials, null);
-    const said = (why?: string) => why === "quota" ? "the free allowance is used up" : why === "bad_key" ? "the key was refused" : "it didn't answer";
+    const said = (why?: string) => why === "quota" ? "the allowance is used up" : why === "bad_key" ? "the key was refused" : "it didn't answer";
     if (input.action === "company_lookup") {
       const notes: string[] = [];
       let found = false;
-      if (c.left > 0 && !company.clay_at) { const r = await clayFill(admin, company); company = r.co; if (r.why && r.why !== "none") notes.push(`Clay: ${said(r.why)}`); else if (!r.why) { found = true; c.left = Math.max(0, c.left - 1); } }
-      if (h.left > 0 && !company.hunter_at && (!company.linkedin || !company.size)) { const r = await hunterFill(admin, company); company = r.co; if (r.why && r.why !== "none") notes.push(`Hunter: ${said(r.why)}`); else { h.left = Math.max(0, h.left - 1); if (!r.why) found = true; } }
+      if (ck && c.left > 0 && !company.clay_at) { const r = await clayFill(admin, ck, company); company = r.co; if (r.why && r.why !== "none") notes.push(`Clay: ${said(r.why)}`); else if (!r.why) { found = true; c.left = Math.max(0, c.left - 1); } }
+      if (hk && h.left > 0 && !company.hunter_at && (!company.linkedin || !company.size)) { const r = await hunterFill(admin, hk, company); company = r.co; if (r.why && r.why !== "none") notes.push(`Hunter: ${said(r.why)}`); else { h.left = Math.max(0, h.left - 1); if (!r.why) found = true; } }
       await admin.from("brand_intel").update({ intel: { ...intel, company } }).eq("brand_id", id).eq("user_id", userId);
       if (!found && notes.length) return json({ error: `No company facts — ${notes.join("; ")}.` }, 502);
       return json({ ok: true, company, found, ...left() });
     }
     const notes: string[] = [];
     let fromHunter: Person[] = [], fromClay: Person[] = [], total = 0;
-    if (h.left > 0) {
-      const r = await hunterPeople(domain);
-      if (r.ok) { await hunterUse(admin); h.left = Math.max(0, h.left - 1); fromHunter = r.value.list; total = r.value.total; }
-      else if (r.why !== "none") { await hunterStop(admin, r.why); if (r.why === "error") await hunterUse(admin); notes.push(`Hunter: ${said(r.why)}`); }
-      else { await hunterUse(admin); h.left = Math.max(0, h.left - 1); }
+    if (hk && h.left > 0) {
+      const r = await hunterPeople(domain, undefined, hk.key);
+      if (r.ok) { await hunterUse(admin, hk); h.left = Math.max(0, h.left - 1); fromHunter = r.value.list; total = r.value.total; }
+      else if (r.why !== "none") { await keyStop(admin, hk, "hunter", r.why); if (r.why === "error") await hunterUse(admin, hk); notes.push(`Hunter: ${said(r.why)}`); }
+      else { await hunterUse(admin, hk); h.left = Math.max(0, h.left - 1); }
     }
-    if (c.left > 0) {
-      const r = await clayPeople(domain, Math.min(5, c.left));
-      if (r.results) { await clayUse(admin, r.results); c.left = Math.max(0, c.left - r.results); }
+    if (ck && c.left > 0) {
+      const r = await clayPeople(domain, Math.min(5, c.left), undefined, ck.key);
+      if (r.results) { await clayUse(admin, ck, r.results); c.left = Math.max(0, c.left - r.results); }
       if (r.ok) fromClay = r.value;
-      else if (r.why !== "none") { await clayStop(admin, r.why); notes.push(`Clay: ${said(r.why)}`); }
+      else if (r.why !== "none") { await keyStop(admin, ck, "clay", r.why); notes.push(`Clay: ${said(r.why)}`); }
     }
     if (!fromHunter.length && !fromClay.length && notes.length) return json({ error: `No people found — ${notes.join("; ")}.` }, 502);
     const list = mergePeople(fromHunter, fromClay);
