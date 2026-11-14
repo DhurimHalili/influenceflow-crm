@@ -13,10 +13,11 @@ import { Stars, Textarea } from "../components/ui";
 import type { EmailTemplate, ThemeName, WorkspaceData } from "../types";
 import { columnKeys } from "../lib/exportFormats";
 import { CoachSettings, FollowupRulesSettings, GmailSettings, WeekendSettings } from "../components/SettingsGmail";
+import { LookupKeysSettings } from "../components/LookupKeys";
 import { TeamSettings } from "../components/Team";
 import { WeeklyReportSettings } from "../components/WeeklyReport";
 import { AvatarButton } from "../components/AvatarEditor";
-import { CalendarDays, Mail, Target, Youtube } from "lucide-react";
+import { CalendarDays, KeyRound, Mail, Target, Youtube } from "lucide-react";
 import { APP_BUILT_AT, APP_VERSION, liveVersion, reloadInto } from "../lib/appUpdate";
 import { pwnedCount, pwnedMessage } from "../lib/pwned";
 
@@ -73,6 +74,7 @@ const SECTIONS = [
   { id: "workspace", label: "Workspace", icon: Building },
   { id: "gmail", label: "Gmail", icon: Mail },
   { id: "youtube", label: "YouTube stats", icon: Youtube },
+  { id: "lookups", label: "Lookup services", icon: KeyRound },
   { id: "followups", label: "Follow-up rules", icon: CalendarDays },
   { id: "weekend", label: "Weekends", icon: CalendarDays },
   { id: "coach", label: "Daily goal & coach", icon: Target },
@@ -348,6 +350,7 @@ export function SettingsPage() {
       <WorkspaceSettings />
       <GmailSettings />
       <YouTubeSettings />
+      <LookupKeysSettings />
       <FollowupRulesSettings />
       <WeekendSettings />
       <CoachSettings />

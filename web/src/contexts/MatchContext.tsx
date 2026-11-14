@@ -19,7 +19,7 @@ import { useToast } from "./ToastContext";
 // A creator you add with a YouTube channel is read right away (not at the
 // next 3-minute cron), and a toast says what was found.
 
-export type MatchStatus = { stamp?: string; creators: number; read: number; failed?: number; backfilling?: number; videos?: number; paidVideos?: number; transcripts?: number; noCaptions?: number; transcriptWaiting?: number; listened?: number; listenQueue?: number; noYoutube?: number; lastRead?: string | null; everyMin?: number; perRun?: number; rescanDays?: number; brandDays?: number; brands: number; researched: number; youtube: boolean; clef: { configured: boolean; left: number; cap: number; pausedUntil: string | null }; listen: { configured: boolean; secondsLeft: number }; tx?: { services: string[]; left: number }; hunter?: { configured: boolean; left: number }; clay?: { configured: boolean; left: number } };
+export type MatchStatus = { stamp?: string; creators: number; read: number; failed?: number; backfilling?: number; videos?: number; paidVideos?: number; transcripts?: number; noCaptions?: number; transcriptWaiting?: number; listened?: number; listenQueue?: number; noYoutube?: number; lastRead?: string | null; everyMin?: number; perRun?: number; rescanDays?: number; brandDays?: number; brands: number; researched: number; youtube: boolean; clef: { configured: boolean; left: number; cap: number; pausedUntil: string | null }; listen: { configured: boolean; secondsLeft: number }; tx?: { services: string[]; left: number }; hunter?: { configured: boolean; own?: boolean; left: number }; clay?: { configured: boolean; own?: boolean; left: number } };
 type Result = { ok: boolean; message: string };
 type Value = {
   ready: boolean;
@@ -43,6 +43,8 @@ type Value = {
   /** Clay + Hunter: the company record ("company") or the people who work there ("people") for one of your brands, by its website. */
   lookup: (brandId: string, what: "company" | "people") => Promise<Result>;
   looking: Set<string>;
+  /** Re-reads only the status (lookup services, counts) — e.g. after you save a key in Settings. */
+  refreshStatus: () => Promise<void>;
   verdict: (linkId: string, verdict: "" | "yes" | "no", kind?: DealKind | null) => Promise<void>;
   /** Saves a deal you know about; `retries` waits for a brand created a moment ago to finish saving. */
   addLink: (creatorId: string, brandId: string, kind: DealKind, opts?: { retries?: number }) => Promise<boolean>;
@@ -197,6 +199,10 @@ export function MatchProvider({ children }: { children: ReactNode }) {
   }, [refresh, toast]);
 
   const [looking, setLooking] = useState<Set<string>>(new Set());
+  const refreshStatus = useCallback(async () => {
+    const st = await matchCall<MatchStatus & { ok: boolean }>({ action: "status" });
+    if (st.data) setStatus(st.data);
+  }, []);
   const lookup = useCallback(async (brandId: string, what: "company" | "people"): Promise<Result> => {
     const tag = `${what}:${brandId}`;
     setLooking((s) => new Set(s).add(tag));
@@ -296,8 +302,8 @@ export function MatchProvider({ children }: { children: ReactNode }) {
     intel, content, seen, criteria,
   }), [shown, linksBy, pitches, data.campaigns, data.creators, data.brands, activeBrands, intel, content, seen, criteria]);
 
-  const value = useMemo<Value>(() => ({ ready, loading, error, links: shown, linksBy, intel, content, seen, pitches, status, scanning, researching, world, load, refresh, scan, research, lookup, looking, verdict, addLink, hide, pitch, unpitch }),
-    [ready, loading, error, shown, linksBy, intel, content, seen, pitches, status, scanning, researching, world, load, refresh, scan, research, lookup, looking, verdict, addLink, hide, pitch, unpitch]);
+  const value = useMemo<Value>(() => ({ ready, loading, error, links: shown, linksBy, intel, content, seen, pitches, status, scanning, researching, world, load, refresh, scan, research, lookup, looking, refreshStatus, verdict, addLink, hide, pitch, unpitch }),
+    [ready, loading, error, shown, linksBy, intel, content, seen, pitches, status, scanning, researching, world, load, refresh, scan, research, lookup, looking, refreshStatus, verdict, addLink, hide, pitch, unpitch]);
   return <MatchContext.Provider value={value}>{children}</MatchContext.Provider>;
 }
 
