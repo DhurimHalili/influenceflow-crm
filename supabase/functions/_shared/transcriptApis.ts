@@ -12,6 +12,7 @@
 // service (until UTC midnight, or a week for "no credits"), a bad key pauses it for a day. All out → null,
 // and the video waits for the helper or for Gemini listening.
 
+import { cred } from "./keyring.ts";
 export type Caption = [number, string];
 export type TxResult = { status: "ok"; lang: string; kind: "asr" | "manual" | ""; caps: Caption[]; by: string } | { status: "none"; by: string };
 
@@ -124,7 +125,8 @@ const nextUtcMidnight = () => { const d = new Date(); d.setUTCHours(24, 0, 5, 0)
 const capOf = (p: Provider) => { const v = Number(env(`TX_DAILY_${p.name.toUpperCase()}`)); return Number.isFinite(v) && v >= 0 && env(`TX_DAILY_${p.name.toUpperCase()}`) !== "" ? v : p.perDay; };
 
 /** Services with a key set (in try order). */
-export const txProviders = () => PROVIDERS.filter((p) => !!env(p.env));
+// Transcript services are the owner's (workspace) keys only: a member's work never spends them.
+export const txProviders = () => PROVIDERS.filter((p) => !!cred(p.env));
 export const txConfigured = () => txProviders().length > 0;
 
 async function state(admin: Admin, p: Provider) {
@@ -154,7 +156,7 @@ export async function fetchTranscript(admin: Admin, videoId: string): Promise<Tx
   for (const p of txProviders()) {
     const s = await state(admin, p);
     if (s.paused > Date.now() || s.used >= capOf(p)) continue;
-    const out = await p.get(videoId, env(p.env)).catch((e) => ({ status: "retry", why: String(e).slice(0, 80) }) as Outcome);
+    const out = await p.get(videoId, cred(p.env)).catch((e) => ({ status: "retry", why: String(e).slice(0, 80) }) as Outcome);
     if (out.status === "ok" || out.status === "none") { await count(admin, p); return out; }
     if (out.status === "quota") await pauseFor(admin, p, out.why === "402" ? Date.now() + 7 * 86400_000 : nextUtcMidnight(), `quota ${out.why}`);
     else if (out.status === "bad_key") await pauseFor(admin, p, Date.now() + 86400_000, `key refused ${out.why}`);

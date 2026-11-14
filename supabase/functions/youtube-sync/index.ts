@@ -1,6 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { channelFacts, youtubeConfigured, YouTubeQuota, type ChannelFacts } from "../_shared/youtube.ts";
+import { asMember, ringFor, runInRing, type Ring } from "../_shared/keyring.ts";
 
 // YouTube numbers for influencers (see _shared/youtube.ts for how they're read).
 //
@@ -27,7 +28,9 @@ import { channelFacts, youtubeConfigured, YouTubeQuota, type ChannelFacts } from
 const APP_URL = (Deno.env.get("APP_URL") || "https://dhurimhalili.github.io/influenceflow-crm").replace(/\/$/, "");
 const ALLOWED_ORIGINS = new Set([new URL(APP_URL).origin, "http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:4173"]);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const FRESH_MS = 55 * 60_000;
+// How often a creator's stats are refreshed. Every 6 hours keeps 130+ creators well inside ONE free key
+// (10,000 units a day; a refresh costs ~3): hourly would spend ~10,000 on refreshes alone. YT_REFRESH_HOURS overrides.
+const FRESH_MS = Math.max(1, Math.min(48, Number(Deno.env.get("YT_REFRESH_HOURS")) || 6)) * 3600_000 - 5 * 60_000;
 
 type Social = { platform: string; url: string; handle: string; followers: number };
 type CreatorRow = { id: string; user_id: string; name: string; country: string | null; contact_email: string | null; niche: string | null; avg_views: number | null; engagement_rate: number | null; socials: Social[] | null; youtube: Record<string, unknown> | null; youtube_synced_at: string | null; stars_engagement?: number | null; stars_consistency?: number | null; stars_demographics?: number | null };
@@ -103,7 +106,6 @@ Deno.serve(async (req) => {
   const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
   let input: Record<string, unknown> = {};
   try { input = await req.json(); } catch { return json({ error: "Invalid JSON" }, 400); }
-  if (!youtubeConfigured()) return json({ error: "YouTube isn't set up on the server yet (YOUTUBE_API_KEYS).", code: "not_configured" }, 503);
 
   if (input.action === "cron") {
     const given = req.headers.get("x-cron-secret") || "";
@@ -114,21 +116,27 @@ Deno.serve(async (req) => {
     const on = new Set((members || []).filter((m) => (m.preferences as { youtube_auto?: boolean } | null)?.youtube_auto !== false).map((m) => m.id));
     const recent = new Set((members || []).filter((m) => (m.preferences as { youtube_recent?: boolean } | null)?.youtube_recent === true).map((m) => m.id));
     const stale = new Date(Date.now() - FRESH_MS).toISOString();
-    const { data: rows } = await admin.from("creators").select("id, user_id, name, country, contact_email, niche, avg_views, engagement_rate, socials, youtube, youtube_synced_at, stars_engagement, stars_consistency, stars_demographics").is("archived_at", null).or(`youtube_synced_at.is.null,youtube_synced_at.lt.${stale}`).order("youtube_synced_at", { ascending: true, nullsFirst: true }).limit(600);
+    // Each member's creators are refreshed with THEIR OWN YouTube key (keyring.ts); members without one are
+    // left out (and never crowd out the others), one whose quota ran out is skipped until tomorrow.
+    const rings = new Map<string, Ring>();
+    for (const id of on) { const r = await ringFor(admin, id).catch(() => null); if (r && await runInRing(r, async () => youtubeConfigured())) rings.set(id, r); }
+    if (!rings.size) return json({ refreshed: 0, skipped: 0, keyless: on.size });
+    const quota = new Set<string>();
+    const { data: rows } = await admin.from("creators").select("id, user_id, name, country, contact_email, niche, avg_views, engagement_rate, socials, youtube, youtube_synced_at, stars_engagement, stars_consistency, stars_demographics").in("user_id", [...rings.keys()]).is("archived_at", null).or(`youtube_synced_at.is.null,youtube_synced_at.lt.${stale}`).order("youtube_synced_at", { ascending: true, nullsFirst: true }).limit(600);
     let done = 0, skipped = 0;
     for (const c of (rows || []) as CreatorRow[]) {
       if (Date.now() > deadline) break;
-      if (!on.has(c.user_id)) continue;
+      if (!rings.has(c.user_id) || quota.has(c.user_id)) continue;
       const ref = youtubeOf(c.socials);
       if (!ref) continue;
       try {
-        const f = await channelFacts(ref, new Date(), { includeRecent: recent.has(c.user_id) });
+        const f = await runInRing(rings.get(c.user_id)!, () => channelFacts(ref, new Date(), { includeRecent: recent.has(c.user_id) }));
         if (!f) { await admin.from("creators").update({ youtube_synced_at: new Date().toISOString() }).eq("id", c.id).eq("user_id", c.user_id); skipped++; continue; }
         // Only these columns are written; an archived record is left alone.
         const { error } = await admin.from("creators").update(patchFor(c, f)).eq("id", c.id).eq("user_id", c.user_id).is("archived_at", null);
         if (!error) done++;
       } catch (e) {
-        if (e instanceof YouTubeQuota) break;
+        if (e instanceof YouTubeQuota) { quota.add(c.user_id); continue; }
         skipped++;
       }
     }
@@ -137,6 +145,9 @@ Deno.serve(async (req) => {
 
   const userId = await approvedUser(admin, req.headers.get("Authorization") || "");
   if (!userId) return json({ error: "Unauthorized" }, 401);
+  // On this member's own YouTube key — never another member's or the owner's.
+  return await asMember(admin, userId, async () => {
+  if (!youtubeConfigured()) return json({ error: "Add your YouTube API key first — Settings → Your API keys. It's free from Google Cloud.", code: "no_key" }, 412);
 
   if (input.action === "lookup") {
     const text = typeof input.input === "string" ? input.input.trim().slice(0, 500) : "";
@@ -145,7 +156,7 @@ Deno.serve(async (req) => {
       const f = await channelFacts(text, new Date(), { includeRecent: input.recent === true });
       return f ? json({ ok: true, facts: f }) : json({ error: "Couldn't find that YouTube channel — check the link." }, 404);
     } catch (e) {
-      return json({ error: e instanceof YouTubeQuota ? "YouTube's daily limit is reached — it resets at midnight Pacific time." : e instanceof Error ? e.message : "YouTube didn't answer." }, e instanceof YouTubeQuota ? 429 : 502);
+      return json({ error: e instanceof YouTubeQuota ? "Your YouTube key's daily limit is reached — it resets at midnight Pacific time." : e instanceof Error ? e.message : "YouTube didn't answer." }, e instanceof YouTubeQuota ? 429 : 502);
     }
   }
 
@@ -171,4 +182,5 @@ Deno.serve(async (req) => {
   }
 
   return json({ error: "Unknown action" }, 400);
+  });
 });

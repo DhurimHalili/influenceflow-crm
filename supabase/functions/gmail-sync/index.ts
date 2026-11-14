@@ -3,6 +3,7 @@ import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { isSealed, openToken, sealToken } from "../_shared/googleTokens.ts";
 import { aiChain, aiEnabled, aiKeyCount, aiModel, aiProvider, aiReadyAt, classifyLead, planImport, QuotaExhausted, readReply, testAi, useKeyStore } from "../_shared/ai.ts";
 import { clefStatus, useClefBudget } from "../_shared/clef.ts";
+import { asMember } from "../_shared/keyring.ts";
 import { decodeEntities, isWarmup, precheck, scanForLead, type Lead, type ScanInput } from "../_shared/leadScanner.ts";
 import { classifyIncoming, isReaction, mergeReading, myReplyIntent, notAReply, READER_VERSION, referralOf, stripQuoted, type IncomingKind, type TeamRole } from "../_shared/replyReader.ts";
 import { analyzeStoredFile, bodyOf, drainQueue, gmailAttachment, processCreatorMail, processMyMail, repairAnchors, repairKitLists, sniff, type Fetcher, type FullMessage } from "./intel.ts";
@@ -1685,8 +1686,11 @@ Deno.serve(async (req) => {
         const { data: member } = await admin.from("profiles").select("access").eq("id", row.user_id).maybeSingle();
         if (member?.access && member.access !== "approved") continue;
         // Track within seconds, then read that mailbox's new mail right away (unless it was read < 45 s ago).
-        const run = await syncUser(admin, [row], (all || [row]) as TokenRow[], Date.now() + 25_000, { force: true, read: "soon" }).catch(() => null);
-        if (run) await run.readAll(Date.now() + 100_000).catch(() => []);
+        // On this member's own keys (AI reading uses their keys, never another member's).
+        await asMember(admin, row.user_id, async () => {
+          const run = await syncUser(admin, [row], (all || [row]) as TokenRow[], Date.now() + 25_000, { force: true, read: "soon" }).catch(() => null);
+          if (run) await run.readAll(Date.now() + 100_000).catch(() => []);
+        }).catch(() => null);
       }
     })();
     // deno-lint-ignore no-explicit-any
@@ -1740,7 +1744,7 @@ Deno.serve(async (req) => {
     await Promise.all(Array.from(byUser.values()).map(async (rows) => {
       const due = rows.filter((r) => !r.last_sync_at || Date.now() - new Date(r.last_sync_at).getTime() >= 45_000);
       try {
-        const run = await syncUser(admin, due, rows, trackUntil, { force: true, read: "due" });
+        const run = await asMember(admin, rows[0].user_id, () => syncUser(admin, due, rows, trackUntil, { force: true, read: "due" }));
         tracked += run.results.length;
       } catch {
         // one user's trouble never stops everyone else's sync
@@ -1772,7 +1776,7 @@ Deno.serve(async (req) => {
     const book = await addressBook(admin, row.user_id, own);
     if (!(await lease(admin, row.id, "read_lock_until", READ_LEASE_MS))) return json({ skipped: "busy" });
     try {
-      const out = await readMailbox(admin, row as TokenRow, own, book, Date.now() + 100_000);
+      const out = await asMember(admin, row.user_id, () => readMailbox(admin, row as TokenRow, own, book, Date.now() + 100_000));
       return json({ ok: true, ...out });
     } catch {
       return json({ ok: false });
@@ -1789,6 +1793,8 @@ Deno.serve(async (req) => {
   // Private circle: only approved members use Gmail through the CRM.
   const { data: member } = await admin.from("profiles").select("access").eq("id", userId).maybeSingle();
   if (member && member.access && member.access !== "approved") return json({ error: "Your access is waiting for the owner's approval.", code: "not_approved" }, 403);
+  // Everything below runs on this member's own keys (keyring.ts) — never another member's or the owner's.
+  return await asMember(admin, userId, async () => {
   const { data } = await admin.from("gmail_tokens").select("*").eq("user_id", userId).order("connected_at", { ascending: true, nullsFirst: true }).limit(MAX_MAILBOXES);
   const rows = (data || []) as TokenRow[];
   const first = rows[0];
@@ -1856,7 +1862,7 @@ Deno.serve(async (req) => {
   if (action === "import_assist") {
     // Spreadsheet import: only headers, a few masked sample values and status
     // words come in; the answer is checked against the CRM's own field list.
-    if (!aiEnabled()) return json({ error: "AI isn't set up on the server.", code: "no_ai" }, 503);
+    if (!aiEnabled()) return json({ error: "Add an AI key first — Settings → Your API keys (Gemini is free).", code: "no_ai" }, 503);
     const kind = input.kind === "brand" ? "brand" : "creator";
     const text = (v: unknown, max: number) => String(v ?? "").replace(/[\u0000-\u001f]/g, " ").slice(0, max);
     const headers = (Array.isArray(input.headers) ? input.headers : []).slice(0, 60).map((h) => text(h, 60));
@@ -1936,4 +1942,5 @@ Deno.serve(async (req) => {
   }
 
   return json({ error: "Unknown action" }, 400);
+  });
 });

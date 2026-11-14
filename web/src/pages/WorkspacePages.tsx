@@ -13,7 +13,7 @@ import { Stars, Textarea } from "../components/ui";
 import type { EmailTemplate, ThemeName, WorkspaceData } from "../types";
 import { columnKeys } from "../lib/exportFormats";
 import { CoachSettings, FollowupRulesSettings, GmailSettings, WeekendSettings } from "../components/SettingsGmail";
-import { LookupKeysSettings } from "../components/LookupKeys";
+import { ApiKeysSettings } from "../components/ApiKeys";
 import { TeamSettings } from "../components/Team";
 import { WeeklyReportSettings } from "../components/WeeklyReport";
 import { AvatarButton } from "../components/AvatarEditor";
@@ -74,7 +74,7 @@ const SECTIONS = [
   { id: "workspace", label: "Workspace", icon: Building },
   { id: "gmail", label: "Gmail", icon: Mail },
   { id: "youtube", label: "YouTube stats", icon: Youtube },
-  { id: "lookups", label: "Lookup services", icon: KeyRound },
+  { id: "keys", label: "Your API keys", icon: KeyRound },
   { id: "followups", label: "Follow-up rules", icon: CalendarDays },
   { id: "weekend", label: "Weekends", icon: CalendarDays },
   { id: "coach", label: "Daily goal & coach", icon: Target },
@@ -178,7 +178,7 @@ function YouTubeSettings() {
   const prefs = data.profile.preferences;
   const withChannel = data.creators.filter((c) => !c.archived_at && (c.socials || []).some((x) => x.platform === "YouTube")).length;
   return <section id="youtube" className="settings-section"><div className="settings-heading"><span><Youtube /></span><div><h2>YouTube stats</h2><p>Average views, engagement and subscribers read straight from each influencer's channel.</p></div></div><div className="settings-body">
-    <label className="toggle-row"><span><strong>Keep YouTube stats fresh</strong><small>Pasting a channel in Quick fill fills the form: name, email, country, niche, views, engagement and suggested stars. Saving a profile with a YouTube link reads it, and every hour all {withChannel} influencer{withChannel === 1 ? "" : "s"} with a channel are refreshed. Anything you change yourself stays yours — so do stars you set; stars you never touched are filled from the channel. Average views use the latest 12 long videos without the highest and lowest.</small></span><input type="checkbox" role="switch" checked={prefs.youtube_auto !== false} onChange={(event) => { data.updateProfile({ preferences: { ...prefs, youtube_auto: event.target.checked } }); toast(event.target.checked ? "YouTube stats on — they refresh every hour" : "YouTube stats off — use Refresh on a profile when you want them"); }} /></label>
+    <label className="toggle-row"><span><strong>Keep YouTube stats fresh</strong><small>Pasting a channel in Quick fill fills the form: name, email, country, niche, views, engagement and suggested stars. Saving a profile with a YouTube link reads it, and every 6 hours all {withChannel} influencer{withChannel === 1 ? "" : "s"} with a channel are refreshed. Anything you change yourself stays yours — so do stars you set; stars you never touched are filled from the channel. Average views use the latest 12 long videos without the highest and lowest.</small></span><input type="checkbox" role="switch" checked={prefs.youtube_auto !== false} onChange={(event) => { data.updateProfile({ preferences: { ...prefs, youtube_auto: event.target.checked } }); toast(event.target.checked ? "YouTube stats on — they refresh every hour" : "YouTube stats off — use Refresh on a profile when you want them"); }} /></label>
     <label className="toggle-row"><span><strong>Count brand-new videos in average views</strong><small>Off (recommended): only videos at least 1 day old count — one posted 12 hours ago is still collecting views and would pull the average down. On: the latest videos count whatever their age.</small></span><input type="checkbox" role="switch" checked={prefs.youtube_recent === true} onChange={(event) => { data.updateProfile({ preferences: { ...prefs, youtube_recent: event.target.checked } }); toast(event.target.checked ? "New videos count too — from the next refresh" : "Only videos 1 day+ old count — from the next refresh"); }} /></label>
     <CriteriaSettings />
   </div></section>;
@@ -350,7 +350,7 @@ export function SettingsPage() {
       <WorkspaceSettings />
       <GmailSettings />
       <YouTubeSettings />
-      <LookupKeysSettings />
+      <ApiKeysSettings />
       <FollowupRulesSettings />
       <WeekendSettings />
       <CoachSettings />

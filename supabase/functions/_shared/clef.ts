@@ -1,4 +1,5 @@
 // Cloudflare's Clef decision models (Workers AI): typed answers — yes/no
+import { cred, scoped } from "./keyring.ts";
 // probabilities, a choice among named options, an ordered score — instead of
 // free text. Fast (tens of ms) and cheap: clef-flash ≈ $0.038 per million
 // input tokens, so Cloudflare's free 10,000 neurons/day cover ≈ 2.9M tokens.
@@ -30,38 +31,42 @@ const dailyCap = () => Math.max(0, Number(env("CLEF_DAILY_NEURONS")) || 8000);
 // deno-lint-ignore no-explicit-any
 type Admin = { from: (t: string) => any; rpc: (fn: string, args: Record<string, unknown>) => any };
 let admin: Admin | null = null;
-let today: { day: string; used: number; paused: number } | null = null;
-export function useClefBudget(a: Admin) { admin = a; today = null; }
+// One budget per Cloudflare account owner: "clef" (workspace) / "clef@<member id>".
+const days = new Map<string, { day: string; used: number; paused: number }>();
+export function useClefBudget(a: Admin) { admin = a; days.clear(); }
 
 const utcDay = () => new Date().toISOString().slice(0, 10);
 const nextUtcMidnight = () => { const d = new Date(); d.setUTCHours(24, 2, 0, 0); return d.getTime(); };
 
 async function load() {
   const day = utcDay();
-  if (today && today.day === day) return today;
-  today = { day, used: 0, paused: 0 };
+  const route = scoped("clef");
+  const have = days.get(route);
+  if (have && have.day === day) return have;
+  let today = { day, used: 0, paused: 0 };
   if (admin) {
-    const { data } = await admin.from("ai_budget").select("units, paused_until").eq("route", "clef").eq("day", day).maybeSingle();
+    const { data } = await admin.from("ai_budget").select("units, paused_until").eq("route", route).eq("day", day).maybeSingle();
     if (data) today = { day, used: Number(data.units) || 0, paused: data.paused_until ? new Date(data.paused_until).getTime() : 0 };
   }
+  days.set(route, today);
   return today;
 }
 async function pause(until: number, note: string) {
   const t = await load();
   t.paused = until;
-  if (admin) await Promise.resolve(admin.from("ai_budget").upsert({ route: "clef", day: t.day, units: t.used, paused_until: new Date(until).toISOString(), note: note.slice(0, 200) })).catch(() => null);
+  if (admin) await Promise.resolve(admin.from("ai_budget").upsert({ route: scoped("clef"), day: t.day, units: t.used, paused_until: new Date(until).toISOString(), note: note.slice(0, 200) })).catch(() => null);
 }
 async function spend(neurons: number) {
   const t = await load();
   t.used += neurons;
   if (admin) {
-    const { data } = await admin.rpc("ai_budget_use", { p_route: "clef", p_units: Math.round(neurons * 100) / 100 });
+    const { data } = await admin.rpc("ai_budget_use", { p_route: scoped("clef"), p_units: Math.round(neurons * 100) / 100 });
     if (typeof data === "number" || typeof data === "string") t.used = Number(data);
   }
 }
 
-export const clefConfigured = () => env("CLOUDFLARE_ACCOUNT_ID").replace(/[^a-f0-9]/gi, "").length >= 16 && !!token();
-const token = () => (env("CLOUDFLARE_AI_TOKENS") || env("CLOUDFLARE_AI_TOKEN")).split(/[\s,;]+/).map((k) => k.trim().replace(/^["']+|["']+$/g, "")).find((k) => /^[\w.-]{20,300}$/.test(k)) || "";
+export const clefConfigured = () => cred("CLOUDFLARE_ACCOUNT_ID").replace(/[^a-f0-9]/gi, "").length >= 16 && !!token();
+const token = () => (cred("CLOUDFLARE_AI_TOKENS") || cred("CLOUDFLARE_AI_TOKEN")).split(/[\s,;]+/).map((k) => k.trim().replace(/^["']+|["']+$/g, "")).find((k) => /^[\w.-]{20,300}$/.test(k)) || "";
 
 /** Is Clef usable right now, and how much of today's budget is left (neurons)? */
 export async function clefStatus(): Promise<{ configured: boolean; left: number; cap: number; pausedUntil: string | null }> {
@@ -113,7 +118,7 @@ export async function decide(state: unknown, questions: Record<string, ClefQuest
   const t = await load();
   if (t.paused > Date.now()) return null;
   if (t.used + estTokens * NEURONS_PER_TOKEN[model] > dailyCap()) return null;
-  const account = env("CLOUDFLARE_ACCOUNT_ID").replace(/[^a-f0-9]/gi, "");
+  const account = cred("CLOUDFLARE_ACCOUNT_ID").replace(/[^a-f0-9]/gi, "");
   let res: Response | null = null;
   try {
     res = await fetch(`https://api.cloudflare.com/client/v4/accounts/${account}/ai/run/@cf/cloudflare/${model}`, {

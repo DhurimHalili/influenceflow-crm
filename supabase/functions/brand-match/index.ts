@@ -7,10 +7,11 @@ import { marketsOf, parseHtml, parseShopify, parseShopifyCollections, parseWoo, 
 import { clefStatus, decide, useClefBudget, type ClefQuestion } from "../_shared/clef.ts";
 import { listenConfigured, listenLeft, listenTo, useListenBudget } from "../_shared/listen.ts";
 import { fetchTranscript, txConfigured, txLeft, txProviders } from "../_shared/transcriptApis.ts";
-import { askBrand, searchSite, useBrandAskBudget } from "../_shared/brandAsk.ts";
+import { askBrand, brandAskConfigured, searchSite, useBrandAskBudget } from "../_shared/brandAsk.ts";
+import { asMember, cred, forgetRing, ringFor, runInRing, scoped, type Ring } from "../_shared/keyring.ts";
 import { companyCountry, duckSite, officialSite } from "../_shared/officialSite.ts";
 import { clayCompany, clayPeople, hunterCompany, hunterPeople, mergePeople, siteLinkedin, wikidataLinkedin, type CompanyFacts, type People, type Person } from "../_shared/companyInfo.ts";
-import { checkKey, cleanKey, hintOf, keyFor, openKey, sealKey, SERVICES, vaultKey, type KeyChoice, type Service } from "../_shared/memberKeys.ts";
+import { checkKey, cleanAccount, cleanKey, hintOf, keyFor, openKey, sealKey, SERVICE_NAME, SERVICES, SLOTS, vaultKey, type KeyChoice, type Service } from "../_shared/memberKeys.ts";
 
 // Brand ⇄ creator matching and "who works with whom" (see the migration
 // 20261122000000_brand_match.sql for the tables).
@@ -484,10 +485,10 @@ async function rebuildLinks(admin: SupabaseClient, c: CreatorRow, rows: VideoRow
 
 // ---- listening ----------------------------------------------------------------------------
 
-async function listenSome(admin: SupabaseClient, deadline: number): Promise<number> {
+async function listenSome(admin: SupabaseClient, deadline: number, userId: string): Promise<number> {
   if (!listenConfigured() || (await listenLeft()) <= 0) return 0;
   // A video whose captions were read (helper or a transcript service) already has its spoken words: no need to listen.
-  const { data } = await admin.from("creator_videos").select("*").not("listen", "is", null).is("listened_at", null).neq("transcript_status", "ok").order("paid", { ascending: false }).order("published_at", { ascending: false }).limit(6);
+  const { data } = await admin.from("creator_videos").select("*").eq("user_id", userId).not("listen", "is", null).is("listened_at", null).neq("transcript_status", "ok").order("paid", { ascending: false }).order("published_at", { ascending: false }).limit(6);
   let done = 0;
   const changed = new Map<string, CreatorRow>();
   for (const r of (data || []) as VideoRow[]) {
@@ -572,12 +573,13 @@ async function applyTranscripts(admin: SupabaseClient, userId: string, items: Tx
 /** Priority captions from the transcript services (free allowances): paid-labelled videos with no brand
  *  named in writing first (the listening queue), then other paid videos — so the videos most likely to
  *  hold a deal get read even when nobody has a CRM tab open. Whatever is left waits for the helper. */
-async function txSome(admin: SupabaseClient, deadline: number): Promise<number> {
-  if (!txConfigured()) return 0;
+async function txSome(admin: SupabaseClient, deadline: number, owners: string[]): Promise<number> {
+  // The transcript services run on the workspace keys, so only the owner's videos use them.
+  if (!owners.length || !txConfigured()) return 0;
   const left = Math.min(5, await txLeft(admin));
   if (left <= 0) return 0;
   const since = new Date(Date.now() - 400 * DAY).toISOString();
-  const base = () => admin.from("creator_videos").select("user_id, video_id").eq("transcript_status", "").gt("secs", 60).gte("published_at", since);
+  const base = () => admin.from("creator_videos").select("user_id, video_id").in("user_id", owners).eq("transcript_status", "").gt("secs", 60).gte("published_at", since);
   const { data: a } = await base().not("listen", "is", null).order("paid", { ascending: false }).order("published_at", { ascending: false }).limit(left);
   const { data: b } = (a || []).length < left ? await base().eq("paid", true).is("listen", null).order("published_at", { ascending: false }).limit(left - (a || []).length) : { data: [] };
   let done = 0;
@@ -811,7 +813,7 @@ async function researchBrand(admin: SupabaseClient, b: BrandRow): Promise<Intel 
   const name = (facts && !facts.blocked && siteName(facts, domain, b.name)) || b.name;
   const intel: Intel = {
     // Gemini was needed but couldn't answer (quota, busy): stay on the old version so the cron asks again later.
-    v: (!sells.length || blocked) && !asked ? 1 : INTEL_V, at: now.toISOString(), domain, url: pages[0] || `https://${domain}`, name, summary: (facts?.description || (asked?.isBrand ? asked.summary : "") || "").slice(0, 400), sells, by,
+    v: (!sells.length || blocked) && !asked && brandAskConfigured() ? 1 : INTEL_V, at: now.toISOString(), domain, url: pages[0] || `https://${domain}`, name, summary: (facts?.description || (asked?.isBrand ? asked.summary : "") || "").slice(0, 400), sells, by,
     products: products.length, examples: products.length ? products.slice(0, 10).map((p) => p.title) : asked?.isBrand ? asked.examples : [], price: priceStats(products, facts?.currency || ""), platform: facts?.platform || "",
     programs: programs.slice(0, 5), socials: (facts?.socials || []).slice(0, 8), markets: marketsOf(facts?.locales || []), currency: facts?.currency || "",
     wiki: wiki?.extract || "", works_with_creators: asked?.isBrand ? asked.creators : null, pages: pages.slice(0, 6), verified: facts ? siteIsBrand(b.name, domain, facts) || !!wiki?.verified : !!wiki?.verified,
@@ -980,18 +982,36 @@ async function cron(admin: SupabaseClient) {
   const users = new Set((members || []).map((m: { id: string }) => m.id));
   if (!users.size) return log;
   const ids = [...users];
+  // Every member's work runs on their own keys (keyring.ts). Who has which key decides what is done for whom:
+  // a member without a YouTube key gets no video reads (and never blocks anyone else's), one whose quota ran
+  // out today is skipped for the rest of the run.
+  const rings = new Map<string, Ring>();
+  for (const u of ids) { const r = await ringFor(admin, u).catch(() => null); if (r) rings.set(u, r); }
+  const as = <T>(u: string, fn: () => Promise<T>): Promise<T> => { const r = rings.get(u); if (!r) return Promise.reject(new Error("no key ring")); return runInRing(r, fn); };
+  const test = async (fn: () => boolean) => { const out: string[] = []; for (const [u, r] of rings) if (await runInRing(r, async () => fn())) out.push(u); return out; };
+  const ytUsers = await test(youtubeConfigured);
+  const listenUsers = await test(listenConfigured);
+  const owners = [...rings.values()].filter((r) => r.owner).map((r) => r.userId);
+  const quotaUsers = new Set<string>();
+  const readCreator = async (c: CreatorRow, onError?: (e: unknown) => Promise<void>) => {
+    if (quotaUsers.has(c.user_id) || !rings.has(c.user_id)) return false;
+    try { await as(c.user_id, () => scanCreator(admin, c, deadline - 30_000)); return true; }
+    catch (e) { if (e instanceof YouTubeQuota) { quotaUsers.add(c.user_id); log.quota = Number(log.quota || 0) + 1; } else if (onError) await onError(e); return false; }
+  };
 
   // 1. Creators never read (newest added first — you just added them).
-  if (youtubeConfigured()) {
+  if (ytUsers.length) {
     const { data: done } = await admin.from("creator_content").select("creator_id").in("user_id", ids).limit(20000);
     const seen = new Set((done || []).map((d: { creator_id: string }) => d.creator_id));
-    const { data: list } = await admin.from("creators").select("id, user_id, name, socials, youtube, created_at, archived_at").in("user_id", ids).is("archived_at", null).order("created_at", { ascending: false }).limit(3000);
+    const { data: list } = await admin.from("creators").select("id, user_id, name, socials, youtube, created_at, archived_at").in("user_id", ytUsers).is("archived_at", null).order("created_at", { ascending: false }).limit(3000);
     const todo = ((list || []) as CreatorRow[]).filter((c) => !seen.has(c.id) && youtubeOf(c.socials));
     // A few per run: a first read is the heaviest work (up to 150 videos); the rest wait 3 minutes.
-    for (const c of todo.slice(0, 4)) {
-      if (Date.now() > deadline - 50_000) break;
-      try { await scanCreator(admin, c, deadline - 30_000); log.creators = Number(log.creators) + 1; }
-      catch (e) { if (e instanceof YouTubeQuota) { log.quota = "youtube"; break; } await admin.from("creator_content").upsert({ creator_id: c.id, user_id: c.user_id, status: "error", note: e instanceof Error ? e.message.slice(0, 200) : "error", scanned_at: new Date().toISOString() }); }
+    let n = 0;
+    for (const c of todo) {
+      if (n >= 4 || Date.now() > deadline - 50_000) break;
+      if (quotaUsers.has(c.user_id)) continue;
+      n++;
+      if (await readCreator(c, async (e) => { await admin.from("creator_content").upsert({ creator_id: c.id, user_id: c.user_id, status: "error", note: e instanceof Error ? e.message.slice(0, 200) : "error", scanned_at: new Date().toISOString() }); })) log.creators = Number(log.creators) + 1;
     }
   }
   // 2. Brands never researched.
@@ -1001,7 +1021,7 @@ async function cron(admin: SupabaseClient) {
     const { data: list } = await admin.from("brands").select("id, user_id, name, domain, archived_at").in("user_id", ids).is("archived_at", null).order("created_at", { ascending: false }).limit(3000);
     for (const b of ((list || []) as BrandRow[]).filter((x) => !seen.has(x.id)).slice(0, 6)) {
       if (Date.now() > deadline - 40_000) break;
-      try { await researchBrand(admin, b); log.brands = Number(log.brands) + 1; } catch { await admin.from("brand_intel").upsert({ brand_id: b.id, user_id: b.user_id, status: "error", researched_at: new Date().toISOString() }); }
+      try { await as(b.user_id, () => researchBrand(admin, b)); log.brands = Number(log.brands) + 1; } catch { await admin.from("brand_intel").upsert({ brand_id: b.id, user_id: b.user_id, status: "error", researched_at: new Date().toISOString() }); }
     }
   }
   // 2b. Brands read before Gemini could help whose site blocked us or said nothing: once, a few a run.
@@ -1009,36 +1029,37 @@ async function cron(admin: SupabaseClient) {
     const { data: rows } = await admin.from("brand_intel").select("brand_id, status, intel").in("user_id", ids).in("status", ["blocked", "unreachable", "ok"]).limit(5000);
     const todo = ((rows || []) as { brand_id: string; status: string; intel: Intel | null }[]).filter((r) => (r.intel?.v || 0) < INTEL_V && (r.status !== "ok" || !(r.intel?.sells || []).length)).map((r) => r.brand_id).slice(0, 3);
     const { data: list } = todo.length ? await admin.from("brands").select("id, user_id, name, domain, archived_at").in("id", todo).is("archived_at", null) : { data: [] };
-    for (const b of (list || []) as BrandRow[]) { if (Date.now() > deadline - 45_000) break; await researchBrand(admin, b).catch(() => null); log.brands = Number(log.brands) + 1; }
+    for (const b of (list || []) as BrandRow[]) { if (Date.now() > deadline - 45_000) break; await as(b.user_id, () => researchBrand(admin, b)).catch(() => null); log.brands = Number(log.brands) + 1; }
   }
   // 3. Brands found in videos: check the domain is theirs (then maybe add them).
   {
     const { data: list } = await admin.from("seen_brands").select("user_id, brand_key, name, domain, domain_check, checked_at").in("user_id", ids).eq("hidden", false).or(`checked_at.is.null,and(domain_check.eq.none,domain.neq.,checked_at.lt.${new Date(Date.now() - 2 * DAY).toISOString()})`).limit(24);
     await pool((list || []) as SeenRow[], 6, async (s) => {
       if (Date.now() > deadline - 25_000) return;
-      const checked = await checkSeen(admin, s).catch(() => null);
+      const checked = await as(s.user_id, () => checkSeen(admin, s)).catch(() => null);
       if (checked) { log.seen = Number(log.seen) + 1; await autoAdd(admin, s, checked).catch(() => null); }
     });
   }
-  for (const u of ids) await relink(admin, u).catch(() => null);
+  for (const u of ids) await as(u, () => relink(admin, u)).catch(() => null);
   // 3b. Creators whose full year isn't read yet (the first read stops at 150; the rest follows here).
-  if (youtubeConfigured() && !log.quota && Date.now() < deadline - 50_000) {
-    const { data: open } = await admin.from("creator_content").select("creator_id, backfill, status").in("user_id", ids).in("status", ["ok", "empty"]).limit(5000);
+  const ytLeft = () => ytUsers.filter((u) => !quotaUsers.has(u));
+  if (ytLeft().length && Date.now() < deadline - 50_000) {
+    const { data: open } = await admin.from("creator_content").select("creator_id, backfill, status").in("user_id", ytLeft()).in("status", ["ok", "empty"]).limit(5000);
     const cids = ((open || []) as { creator_id: string; backfill: Backfill | null }[]).filter((r) => r.backfill?.done !== true).map((r) => r.creator_id).slice(0, 3);
     const { data: list } = cids.length ? await admin.from("creators").select("id, user_id, name, socials, youtube, created_at, archived_at").in("id", cids).is("archived_at", null) : { data: [] };
     for (const c of (list || []) as CreatorRow[]) {
       if (Date.now() > deadline - 50_000) break;
-      try { await scanCreator(admin, c, deadline - 30_000); log.backfill = Number(log.backfill || 0) + 1; } catch (e) { if (e instanceof YouTubeQuota) { log.quota = "youtube"; break; } }
+      if (await readCreator(c)) log.backfill = Number(log.backfill || 0) + 1;
     }
   }
   // 4. Creators not read for a week.
-  if (youtubeConfigured() && !log.quota && Date.now() < deadline - 50_000) {
-    const { data: stale } = await admin.from("creator_content").select("creator_id, scanned_at").in("user_id", ids).lt("scanned_at", new Date(Date.now() - RESCAN_DAYS * DAY).toISOString()).order("scanned_at", { ascending: true }).limit(6);
+  if (ytLeft().length && Date.now() < deadline - 50_000) {
+    const { data: stale } = await admin.from("creator_content").select("creator_id, scanned_at").in("user_id", ytLeft()).lt("scanned_at", new Date(Date.now() - RESCAN_DAYS * DAY).toISOString()).order("scanned_at", { ascending: true }).limit(6);
     const cids = (stale || []).map((s: { creator_id: string }) => s.creator_id);
     const { data: list } = cids.length ? await admin.from("creators").select("id, user_id, name, socials, youtube, created_at, archived_at").in("id", cids).is("archived_at", null) : { data: [] };
     for (const c of (list || []) as CreatorRow[]) {
       if (Date.now() > deadline - 50_000) break;
-      try { await scanCreator(admin, c, deadline - 30_000); log.creators = Number(log.creators) + 1; } catch (e) { if (e instanceof YouTubeQuota) { log.quota = "youtube"; break; } }
+      if (await readCreator(c)) log.creators = Number(log.creators) + 1;
     }
   }
   // 4b. Brands read before markets were looked up: where their shop is (free, a few a run).
@@ -1049,7 +1070,7 @@ async function cron(admin: SupabaseClient) {
       const { data: b } = await admin.from("brands").select("id, user_id, name, domain, archived_at").eq("id", r.brand_id).maybeSingle();
       // The brand's website was changed since its site was read (opr.as → opera.com): read it again in full.
       if (b && normalizeDomain(b.domain || "") && normalizeDomain(b.domain || "") !== r.intel.domain) {
-        await researchBrand(admin, b as BrandRow).catch(() => null);
+        await as(b.user_id, () => researchBrand(admin, b as BrandRow)).catch(() => null);
         log.brands = Number(log.brands) + 1;
         continue;
       }
@@ -1128,12 +1149,16 @@ async function cron(admin: SupabaseClient) {
     const { data: stale } = await admin.from("brand_intel").select("brand_id").in("user_id", ids).lt("researched_at", new Date(Date.now() - BRAND_DAYS * DAY).toISOString()).order("researched_at", { ascending: true }).limit(3);
     const bids = (stale || []).map((s: { brand_id: string }) => s.brand_id);
     const { data: list } = bids.length ? await admin.from("brands").select("id, user_id, name, domain, archived_at").in("id", bids).is("archived_at", null) : { data: [] };
-    for (const b of (list || []) as BrandRow[]) { if (Date.now() > deadline - 35_000) break; await researchBrand(admin, b).catch(() => null); log.brands = Number(log.brands) + 1; }
+    for (const b of (list || []) as BrandRow[]) { if (Date.now() > deadline - 35_000) break; await as(b.user_id, () => researchBrand(admin, b)).catch(() => null); log.brands = Number(log.brands) + 1; }
   }
   // 6. Listen to promoted clips nothing written names.
   // Transcript services first (they read the whole video for a credit), Gemini listens to what's left.
-  if (Date.now() < deadline - 50_000) log.transcribed = await txSome(admin, deadline).catch(() => 0);
-  if (Date.now() < deadline - 50_000) log.listened = await listenSome(admin, deadline).catch(() => 0);
+  if (Date.now() < deadline - 50_000) log.transcribed = await txSome(admin, deadline, owners).catch(() => 0);
+  // Gemini listening: each member with their own Gemini key, on their own videos and daily allowance.
+  for (const u of listenUsers) {
+    if (Date.now() > deadline - 50_000) break;
+    log.listened = Number(log.listened) + await as(u, () => listenSome(admin, deadline, u)).catch(() => 0);
+  }
   log.ms = Date.now() - start;
   return log;
 }
@@ -1189,7 +1214,24 @@ Deno.serve(async (req) => {
     const { data: memberRow } = member?.id ? await admin.from("member_keys").select("service").eq("user_id", member.id).eq("service", "hunter").maybeSingle() : { data: null };
     const live = Deno.env.get("HUNTER_API_KEY") ? await checkKey("hunter", Deno.env.get("HUNTER_API_KEY")!) : null;
     const wrong = await checkKey("hunter", "0000000000000000000000000000000000000000");
+    // The key ring travels with the work: two members' work interleaved, each sees only its own keys —
+    // across awaits, timers and database calls; a member with no key gets nothing; outside a ring = workspace.
+    const r1: Ring = { userId: a, owner: false, creds: { GEMINI_API_KEYS: "ring-one" }, services: [] };
+    const r2: Ring = { userId: b2, owner: false, creds: { GEMINI_API_KEYS: "ring-two" }, services: [] };
+    const seenIn = async (r: Ring, wait: number) => runInRing(r, async () => { const before = cred("GEMINI_API_KEYS"); await new Promise((ok) => setTimeout(ok, wait)); await admin.from("profiles").select("id").limit(1); const after = cred("GEMINI_API_KEYS"); return before === after ? after : "mixed"; });
+    const [one, two] = await Promise.all([seenIn(r1, 40), seenIn(r2, 5)]);
+    const bare: Ring = { userId: b2, owner: false, creds: {}, services: [] };
+    const ownerRing: Ring = { userId: a, owner: true, creds: {}, services: [] };
+    const ringOk = {
+      isolated: one === "ring-one" && two === "ring-two",
+      memberWithoutKeyGetsNothing: await runInRing(bare, async () => cred("YOUTUBE_API_KEYS") === "" && cred("GEMINI_API_KEYS") === "" && cred("HUNTER_API_KEY") === "" && cred("YTAI_API_KEY") === "" && !youtubeConfigured()),
+      ownerGetsWorkspace: await runInRing(ownerRing, async () => !!cred("YOUTUBE_API_KEYS") === !!Deno.env.get("YOUTUBE_API_KEYS")),
+      scopedBudgets: await runInRing(bare, async () => scoped("listen") === `listen@${b2}`) && await runInRing(ownerRing, async () => scoped("listen") === "listen"),
+      outsideRingIsWorkspace: cred("YOUTUBE_API_KEYS") === (Deno.env.get("YOUTUBE_API_KEYS") || "").trim(),
+      workspaceYoutubeKeys: (Deno.env.get("YOUTUBE_API_KEYS") || "").split(/[\s,;]+/).filter((k) => k.trim()).length,
+    };
     return json({
+      ring: ringOk,
       vault: !!sealed, sealedHidesKey: !!sealed && !sealed.includes(probe), roundTrip: (await openKey(vk, a, "clay", sealed)) === probe,
       otherMemberCant: (await openKey(vk, b2, "clay", sealed)) === "", otherServiceCant: (await openKey(vk, a, "hunter", sealed)) === "",
       ownerUsesWorkspaceKey: !!ownerHunter && !ownerHunter.own, memberNeverUsesWorkspaceKey: !memberHunter || (memberHunter.own && !!memberRow),
@@ -1200,6 +1242,8 @@ Deno.serve(async (req) => {
 
   const userId = await approvedUser(admin, req.headers.get("Authorization") || "");
   if (!userId) return json({ error: "Unauthorized" }, 401);
+  // Everything below runs on this member's own keys (keyring.ts) — never another member's or the owner's.
+  return await asMember(admin, userId, async () => {
 
   if (input.action === "status") {
     const newest = (table: string, col: string) => admin.from(table).select(col).eq("user_id", userId).order(col, { ascending: false, nullsFirst: false }).limit(1).maybeSingle();
@@ -1276,7 +1320,7 @@ Deno.serve(async (req) => {
   if (input.action === "scan_creator") {
     const id = typeof input.id === "string" && UUID.test(input.id) ? input.id : "";
     if (!id) return json({ error: "Pick an influencer." }, 400);
-    if (!youtubeConfigured()) return json({ error: "YouTube isn't set up on the server yet (YOUTUBE_API_KEYS)." }, 503);
+    if (!youtubeConfigured()) return json({ error: "Add your YouTube API key first — Settings → Your API keys. It's free from Google Cloud.", code: "no_key" }, 412);
     const { data: c } = await admin.from("creators").select("id, user_id, name, socials, youtube, created_at, archived_at").eq("id", id).eq("user_id", userId).maybeSingle();
     if (!c) return json({ error: "That influencer isn't in your CRM (or hasn't saved yet) — try again in a moment." }, 404);
     if (!youtubeOf((c as CreatorRow).socials)) return json({ error: "Add their YouTube channel first." }, 400);
@@ -1305,66 +1349,105 @@ Deno.serve(async (req) => {
   // The key is checked with the service (free call) BEFORE anything is stored; only then sealed and saved.
   // Nothing about a key ever comes back except its last 4 characters, the account label and credits.
   if (input.action === "keys_status") {
-    const { data: rows } = await admin.from("member_keys").select("service, hint, label, status, checked_at, updated_at").eq("user_id", userId);
-    const { data: me } = await admin.from("profiles").select("role").eq("id", userId).maybeSingle();
+    const { data: rows } = await admin.from("member_keys").select("service, slot, hint, label, status, checked_at, updated_at").eq("user_id", userId).order("slot", { ascending: true });
+    const { data: me } = await admin.from("profiles").select("role, access").eq("id", userId).maybeSingle();
+    const owner = me?.role === "owner" && me?.access === "approved";
+    const saved = ((rows || []) as { service: Service; slot: number; hint: string; label: string; status: string; checked_at: string | null; updated_at: string }[]);
+    // What the workspace (owner-only) secrets cover, so the owner sees "Workspace key" instead of "Not connected".
+    const ws: Record<Service, boolean> = {
+      youtube: !!(Deno.env.get("YOUTUBE_API_KEYS") || Deno.env.get("YOUTUBE_API_KEY")), gemini: !!(Deno.env.get("GEMINI_API_KEYS") || Deno.env.get("GEMINI_API_KEY")),
+      groq: !!(Deno.env.get("GROQ_API_KEYS") || Deno.env.get("GROQ_API_KEY")), cloudflare: !!(Deno.env.get("CLOUDFLARE_ACCOUNT_ID") && (Deno.env.get("CLOUDFLARE_AI_TOKENS") || Deno.env.get("CLOUDFLARE_AI_TOKEN"))),
+      openrouter: !!(Deno.env.get("OPENROUTER_API_KEYS") || Deno.env.get("OPENROUTER_API_KEY")), hunter: !!Deno.env.get("HUNTER_API_KEY"), clay: !!Deno.env.get("CLAY_API_KEY"),
+    };
     const memo = new Map<string, KeyChoice>();
-    const out = await Promise.all(SERVICES.map(async (service) => {
-      const row = ((rows || []) as { service: string; hint: string; label: string; status: string; checked_at: string | null; updated_at: string }[]).find((r) => r.service === service);
+    const extra = async (service: Service) => {
+      if (service !== "hunter" && service !== "clay") return { left: null as number | null, paused_until: null as string | null };
       const ch = await keyFor(admin, userId, service, memo).catch(() => null);
       const st = service === "hunter" ? await hunterState(admin, ch).catch(() => null) : await clayState(admin, ch).catch(() => null);
-      const workspace = !row && !!ch && !ch.own;
-      return { service, saved: !!row, hint: row?.hint || "", label: row?.label || "", status: row?.status || "", checked_at: row?.checked_at || null, saved_at: row?.updated_at || null, workspace, active: !!ch, left: ch ? st?.left ?? null : null, paused_until: st && st.paused > Date.now() ? new Date(st.paused).toISOString() : null };
+      return { left: ch ? st?.left ?? null : null, paused_until: st && st.paused > Date.now() ? new Date(st.paused).toISOString() : null };
+    };
+    const keys = await Promise.all(SERVICES.map(async (service) => {
+      const mine = saved.filter((r) => r.service === service).map((r) => ({ slot: r.slot, hint: r.hint, label: r.label, status: r.status, checked_at: r.checked_at, saved_at: r.updated_at }));
+      const x = await extra(service);
+      return { service, max: SLOTS[service], keys: mine, workspace: owner && ws[service] && !mine.some((k) => k.status !== "refused"), ...x };
     }));
-    return json({ ok: true, keys: out, owner: me?.role === "owner" });
+    return json({ ok: true, owner, keys });
   }
 
   if (input.action === "key_save" || input.action === "key_check" || input.action === "key_remove") {
     const service = SERVICES.find((x) => x === input.service);
-    if (!service) return json({ error: "Pick Clay or Hunter." }, 400);
+    if (!service) return json({ error: "Pick a service." }, 400);
+    const name = SERVICE_NAME[service];
+    const slot = Number.isInteger(input.slot) && Number(input.slot) >= 0 && Number(input.slot) < SLOTS[service] ? Number(input.slot) : -1;
+    const { data: rows } = await admin.from("member_keys").select("slot, sealed").eq("user_id", userId).eq("service", service);
+    const taken = ((rows || []) as { slot: number; sealed: string }[]);
     if (input.action === "key_remove") {
-      const { error } = await admin.from("member_keys").delete().eq("user_id", userId).eq("service", service);
+      if (slot < 0) return json({ error: "Which key? Nothing was removed." }, 400);
+      const { error } = await admin.from("member_keys").delete().eq("user_id", userId).eq("service", service).eq("slot", slot);
       if (error) return json({ error: "Couldn't remove the key — nothing changed. Try again." }, 500);
-      await admin.from("activities").insert({ user_id: userId, text: `${service === "clay" ? "Clay" : "Hunter"} key removed from Settings`, entity_type: null, entity_id: null }).then(() => null, () => null);
+      forgetRing(userId);
+      await admin.from("activities").insert({ user_id: userId, text: `${name} key removed from Settings`, entity_type: null, entity_id: null }).then(() => null, () => null);
       return json({ ok: true });
     }
-    // At most 20 checks / saves a day per member: a key is never brute-forced through us.
+    // At most 30 checks / saves a day per member: a key is never brute-forced through us.
     const tries = `keycheck@${userId}`;
     const { data: t } = await admin.from("ai_budget").select("calls").eq("route", tries).eq("day", utcToday()).maybeSingle();
-    if ((Number(t?.calls) || 0) >= 20) return json({ error: "Too many key checks today — try again tomorrow." }, 429);
+    if ((Number(t?.calls) || 0) >= 30) return json({ error: "Too many key checks today — try again tomorrow." }, 429);
     await admin.rpc("ai_budget_use", { p_route: tries, p_units: 0 });
     let plain = "";
+    let target = slot;
     if (input.action === "key_check") {
-      // Re-check the key you saved (credits, still valid) — the browser never sends or gets the key.
-      const { data: row } = await admin.from("member_keys").select("sealed").eq("user_id", userId).eq("service", service).maybeSingle();
-      plain = row?.sealed ? await openKey(vaultKey(admin), userId, service, row.sealed) : "";
+      // Re-check a saved key (credits, still valid) — the browser never sends or gets the key.
+      const row = taken.find((r) => r.slot === slot);
+      plain = row?.sealed ? await openKey(vaultKey(admin), userId, service, row.sealed, slot) : "";
       if (!plain) return json({ error: "There's no saved key to check — paste it again." }, 404);
     } else {
-      plain = cleanKey(service, input.key);
-      if (!plain) return json({ error: service === "hunter" ? "That doesn't look like a Hunter API key — copy it from hunter.io → API." : "That doesn't look like a Clay API key — copy it from Clay → API and CLI → API keys.", field: "key" }, 400);
+      if (service === "cloudflare") {
+        const account = cleanAccount(input.account);
+        const token = cleanKey("cloudflare", input.key);
+        if (!account) return json({ error: "That account ID isn't right — it's 32 letters and numbers (Cloudflare → Workers AI → Account ID).", field: "account" }, 400);
+        if (!token) return json({ error: "That doesn't look like a Cloudflare API token — create one with the “Workers AI” template.", field: "key" }, 400);
+        plain = JSON.stringify({ account, token });
+      } else {
+        plain = cleanKey(service, input.key);
+        if (!plain) return json({ error: `That doesn't look like a ${name} API key — copy the whole key from ${name}.`, field: "key" }, 400);
+      }
+      // The same key twice (e.g. pasted into a second YouTube slot) adds nothing.
+      for (const r of taken) if (r.slot !== slot && (await openKey(vaultKey(admin), userId, service, r.sealed, r.slot)) === plain) return json({ error: "That key is already saved.", field: "key" }, 400);
+      if (target < 0) { target = [...Array(SLOTS[service]).keys()].find((i) => !taken.some((r) => r.slot === i)) ?? -1; }
+      if (target < 0) return json({ error: `You already have ${SLOTS[service]} ${name} keys — replace or remove one first.` }, 400);
+      // A second / third YouTube key is only for a project with its own approved quota (YouTube's rules).
+      if (service === "youtube" && target > 0 && input.ack !== true) return json({ error: "Confirm the extra key follows YouTube's rules first.", field: "ack" }, 400);
     }
     const check = await checkKey(service, plain);
-    const name = service === "clay" ? "Clay" : "Hunter";
     const now = new Date().toISOString();
+    const nothing = input.action === "key_save" ? " Nothing was saved." : "";
     if (!check.ok) {
-      if (input.action === "key_check") await admin.from("member_keys").update({ status: check.why === "quota" ? "quota" : check.why === "refused" ? "refused" : "ok", checked_at: now, updated_at: now }).eq("user_id", userId).eq("service", service);
-      return json({ error: check.why === "refused" ? `${name} refused this key — check it's copied whole and still active.${input.action === "key_save" ? " Nothing was saved." : ""}` : check.why === "quota" ? `${name} says this account is over its limit right now.${input.action === "key_save" ? " Nothing was saved." : ""}` : `${name} didn't answer — try again in a minute.${input.action === "key_save" ? " Nothing was saved." : ""}`, field: check.why === "refused" ? "key" : undefined, why: check.why }, check.why === "unreachable" ? 502 : 400);
+      if (input.action === "key_check") { await admin.from("member_keys").update({ status: check.why === "unreachable" ? "ok" : check.why, checked_at: now, updated_at: now }).eq("user_id", userId).eq("service", service).eq("slot", target); forgetRing(userId); }
+      const why = check.why === "refused" ? `${name} refused this ${service === "cloudflare" ? "token / account ID" : "key"} — check it's copied whole and still active.`
+        : check.why === "not_enabled" ? (service === "youtube" ? "This key works, but “YouTube Data API v3” isn't turned on for its project — enable it in Google Cloud → APIs & Services, then try again." : `This key's project hasn't turned on the ${name} API yet — enable it, then try again.`)
+          : check.why === "quota" ? `${name} says this key is over its limit right now.` : `${name} didn't answer — try again in a minute.`;
+      return json({ error: `${why}${nothing}`, field: check.why === "refused" ? "key" : undefined, why: check.why }, check.why === "unreachable" ? 502 : 400);
     }
     if (input.action === "key_save") {
       let sealed = "";
-      try { sealed = await sealKey(vaultKey(admin), userId, service, plain); } catch { return json({ error: "The key vault isn't available right now — nothing was saved. Try again in a minute." }, 503); }
+      try { sealed = await sealKey(vaultKey(admin), userId, service, plain, target); } catch { return json({ error: "The key vault isn't available right now — nothing was saved. Try again in a minute." }, 503); }
       // Read it back before saying "saved": it must open to the very same key.
-      if ((await openKey(vaultKey(admin), userId, service, sealed)) !== plain) return json({ error: "The key couldn't be sealed safely — nothing was saved." }, 500);
-      const { error } = await admin.from("member_keys").upsert({ user_id: userId, service, sealed, hint: hintOf(plain), label: check.label, status: "ok", checked_at: now, updated_at: now }, { onConflict: "user_id,service" });
+      if ((await openKey(vaultKey(admin), userId, service, sealed, target)) !== plain) return json({ error: "The key couldn't be sealed safely — nothing was saved." }, 500);
+      const hint = service === "cloudflare" ? hintOf(JSON.parse(plain).token) : hintOf(plain);
+      const { error } = await admin.from("member_keys").upsert({ user_id: userId, service, slot: target, sealed, hint, label: check.label, status: "ok", checked_at: now, updated_at: now }, { onConflict: "user_id,service,slot" });
       if (error) return json({ error: "Couldn't save the key — nothing changed. Try again." }, 500);
-      const { data: back } = await admin.from("member_keys").select("sealed").eq("user_id", userId).eq("service", service).maybeSingle();
-      if (back?.sealed !== sealed || (await openKey(vaultKey(admin), userId, service, back.sealed)) !== plain) return json({ error: "The key didn't save completely — try again." }, 500);
+      const { data: back } = await admin.from("member_keys").select("sealed").eq("user_id", userId).eq("service", service).eq("slot", target).maybeSingle();
+      if (back?.sealed !== sealed || (await openKey(vaultKey(admin), userId, service, back.sealed, target)) !== plain) return json({ error: "The key didn't save completely — try again." }, 500);
+      forgetRing(userId);
       // A new key starts with a clean slate (no pause left from an old one).
-      await admin.from("ai_budget").update({ paused_until: null }).eq("route", `${service}@${userId}`).gte("day", new Date(Date.now() - 31 * DAY).toISOString().slice(0, 10));
-      await admin.from("activities").insert({ user_id: userId, text: `${name} key saved in Settings (•••• ${hintOf(plain)})`, entity_type: null, entity_id: null }).then(() => null, () => null);
-    } else {
-      await admin.from("member_keys").update({ status: "ok", label: check.label, checked_at: now, updated_at: now }).eq("user_id", userId).eq("service", service);
+      await admin.from("ai_budget").update({ paused_until: null }).like("route", `%@${userId}`).gte("day", new Date(Date.now() - 31 * DAY).toISOString().slice(0, 10));
+      await admin.from("activities").insert({ user_id: userId, text: `${name} key saved in Settings (•••• ${hint})`, entity_type: null, entity_id: null }).then(() => null, () => null);
+      return json({ ok: true, service, slot: target, hint, label: check.label, left: check.left, total: check.total, resets: check.resets, checked_at: now });
     }
-    return json({ ok: true, service, hint: hintOf(plain), label: check.label, left: check.left, total: check.total, resets: check.resets, checked_at: now });
+    await admin.from("member_keys").update({ status: "ok", label: check.label, checked_at: now, updated_at: now }).eq("user_id", userId).eq("service", service).eq("slot", target);
+    forgetRing(userId);
+    return json({ ok: true, service, slot: target, hint: "", label: check.label, left: check.left, total: check.total, resets: check.resets, checked_at: now });
   }
 
   // A brand's company record / people from Clay and Hunter — only when you ask, for your own brand, by its
@@ -1418,6 +1501,7 @@ Deno.serve(async (req) => {
   }
 
   return json({ error: "Unknown action" }, 400);
+  });
 });
 
 void sleep;
