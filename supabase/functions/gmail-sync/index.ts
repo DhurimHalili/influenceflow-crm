@@ -5,6 +5,7 @@ import { aiChain, aiEnabled, aiKeyCount, aiModel, aiProvider, aiReadyAt, classif
 import { clefStatus, useClefBudget } from "../_shared/clef.ts";
 import { asMember } from "../_shared/keyring.ts";
 import { decodeEntities, isWarmup, precheck, scanForLead, type Lead, type ScanInput } from "../_shared/leadScanner.ts";
+import { draftHtml, pickSendAs, pickTarget, bodyOf as replyBodyOf, quoteBlock, replyRaw, replyRecipients, replySubject, threadUrl, type Msg, type SendAs } from "../_shared/replyDraft.ts";
 import { classifyIncoming, isReaction, mergeReading, myReplyIntent, notAReply, READER_VERSION, referralOf, stripQuoted, type IncomingKind, type TeamRole } from "../_shared/replyReader.ts";
 import { analyzeStoredFile, bodyOf, drainQueue, gmailAttachment, processCreatorMail, processMyMail, repairAnchors, repairKitLists, sniff, type Fetcher, type FullMessage } from "./intel.ts";
 
@@ -20,6 +21,7 @@ import { analyzeStoredFile, bodyOf, drainQueue, gmailAttachment, processCreatorM
 //   download_file — a big attachment kept in Gmail (not in storage), streamed to you
 //   rescan_creator — go through one influencer's emails again for kits and prices
 //   cancel_scheduled — cancel one of your scheduled sends (moves it to Gmail's Trash; needs gmail.modify)
+//   reply_draft — a reply draft in one of your tracked threads, made like Gmail's Reply (needs gmail.modify); returns the link that opens it
 //   cron        — background sync for everyone (x-cron-secret header only)
 //   health      — no auth; only says whether the server is configured
 //
@@ -892,6 +894,53 @@ async function cancelScheduledSend(admin: Admin, userId: string, rows: TokenRow[
   } catch (e) {
     const status = e instanceof GmailError && e.status >= 400 && e.status < 500 ? e.status : 502;
     return { error: e instanceof Error ? e.message : "Couldn't cancel it", status };
+  }
+}
+
+// ----- reply from a profile ---------------------------------------------------------
+
+const THREAD_HEADERS = ["From", "To", "Cc", "Reply-To", "Subject", "Date", "Message-ID", "References", "Auto-Submitted", "X-Autoreply", "X-Autorespond"];
+type DraftResult = { ok: true; url: string; mailbox: string; reused: boolean } | { error: string; status: number; code?: string; url?: string; mailbox?: string };
+
+// "Reply" on a profile: a draft in the real Gmail thread, made the way Gmail's
+// own Reply button makes one (to the newest real message — theirs or your last
+// follow-up — Re: subject, threading headers, your signature, the quote). Only a
+// thread the CRM tracked for YOU, from the mailbox that holds it. A draft you
+// already have there is opened instead of a second one. Drafts are never
+// tracked as sent mail (DRAFT is skipped everywhere), so nothing counts until
+// you press Send in Gmail.
+async function replyDraft(admin: Admin, userId: string, rows: TokenRow[], threadId: string): Promise<DraftResult> {
+  const { data: ev } = await admin.from("email_events").select("mailbox").eq("user_id", userId).eq("thread_id", threadId).neq("mailbox", "").order("at", { ascending: false }).limit(1).maybeSingle();
+  if (!ev?.mailbox) return { error: "That conversation isn't in your CRM.", status: 404 };
+  const row = rows.find((r) => mailboxOf(r) === ev.mailbox);
+  if (!row) return { error: `${ev.mailbox} isn't connected any more — reconnect it in Settings to reply from here.`, status: 409, code: "not_connected", mailbox: ev.mailbox };
+  const box = mailboxOf(row);
+  const url = threadUrl(box, threadId);
+  if (!/gmail\.(modify|compose)/.test(row.scopes || "")) return { error: `Reconnect ${box} and allow “Manage drafts and send” for one-tap replies.`, status: 403, code: "needs_modify", url, mailbox: box };
+  try {
+    const token = await accessToken(admin, row);
+    const thread = await gmail<{ messages?: Msg[] }>(token, `/threads/${threadId}?format=metadata&${THREAD_HEADERS.map((h) => `metadataHeaders=${h}`).join("&")}`)
+      .catch((e) => (e instanceof GmailError && e.status === 404 ? null : Promise.reject(e)));
+    if (!thread?.messages?.length) return { error: "That conversation is no longer in Gmail.", status: 404, code: "gone", mailbox: box };
+    const { draft, latest } = pickTarget(thread.messages);
+    if (draft) return { ok: true, url, mailbox: box, reused: true };
+    if (!latest) return { error: "Nothing left in that conversation to answer.", status: 404, code: "gone", url, mailbox: box };
+    const sendAs = (await gmail<{ sendAs?: SendAs[] }>(token, "/settings/sendAs").catch(() => null))?.sendAs || [];
+    const own = new Set([...rows.map(mailboxOf), ...sendAs.map((s) => (s.sendAsEmail || "").toLowerCase())].filter(Boolean));
+    const sorted = [...thread.messages].sort((a, b) => Number(a.internalDate || 0) - Number(b.internalDate || 0));
+    const to = replyRecipients(latest, own, sorted.filter((m) => !(m.labelIds || []).includes("DRAFT")));
+    if (!to.length) return { error: "Couldn't tell who to answer in that conversation.", status: 422, code: "no_recipient", url, mailbox: box };
+    const from = pickSendAs(latest, own, sendAs, box);
+    const full = await gmail<Msg>(token, `/messages/${latest.id}?format=full`).catch(() => null);
+    const quote = full ? quoteBlock(latest, replyBodyOf(full.payload)) : "";
+    const header = (name: string) => latest.payload?.headers?.find((h) => h.name.toLowerCase() === name.toLowerCase())?.value || "";
+    const raw = replyRaw({ from: from.email, fromName: from.name, to, subject: replySubject(header("Subject")), messageId: header("Message-ID"), references: header("References"), html: draftHtml(from.signature, quote) });
+    await gmail(token, "/drafts", { method: "POST", body: JSON.stringify({ message: { raw: b64url(new TextEncoder().encode(raw)), threadId } }) });
+    return { ok: true, url, mailbox: box, reused: false };
+  } catch (e) {
+    if (e instanceof GmailError && e.status === 403 && e.reconnect) return { error: `Reconnect ${box} and allow “Manage drafts and send” for one-tap replies.`, status: 403, code: "needs_modify", url, mailbox: box };
+    const status = e instanceof GmailError && e.status >= 400 && e.status < 500 ? e.status : 502;
+    return { error: e instanceof Error ? e.message : "Couldn't make the reply", status, url, mailbox: box };
   }
 }
 
@@ -1930,6 +1979,13 @@ Deno.serve(async (req) => {
     if (!gmailId) return json({ error: "Invalid email" }, 400);
     const res = await cancelScheduledSend(admin, userId, rows, gmailId, "manual");
     return "ok" in res ? json({ ok: true }) : json({ error: res.error, ...(res.code ? { code: res.code } : {}) }, res.status);
+  }
+
+  if (action === "reply_draft") {
+    const threadId = typeof input.threadId === "string" && /^[0-9a-f]{6,40}$/i.test(input.threadId) ? input.threadId : "";
+    if (!threadId) return json({ error: "Invalid conversation" }, 400);
+    const res = await replyDraft(admin, userId, rows, threadId);
+    return "ok" in res ? json(res) : json({ error: res.error, ...(res.code ? { code: res.code } : {}), ...(res.url ? { url: res.url } : {}), ...(res.mailbox ? { mailbox: res.mailbox } : {}) }, res.status);
   }
 
   if (action === "send") {

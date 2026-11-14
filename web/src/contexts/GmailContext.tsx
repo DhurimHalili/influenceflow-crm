@@ -11,6 +11,8 @@ import { useData } from "./DataContext";
 // screen, right after you send — and every 10 minutes in the background on
 // the server even when the app is closed.
 
+export type ReplyDraft = { ok: true; url: string; reused: boolean; mailbox: string } | { ok: false; url: string; mailbox: string; code: string; message: string };
+
 export type Mailbox = {
   /** Granted "manage drafts and send": the CRM can cancel a scheduled send. */
   canModify?: boolean;
@@ -72,6 +74,8 @@ type GmailValue = GmailStatus & {
   send: (input: SendInput) => Promise<{ ok: boolean; message?: string; statusChanges?: number; from?: string }>;
   /** Cancels one of your scheduled sends in Gmail (it goes to Trash). */
   cancelScheduled: (gmailId: string) => Promise<{ ok: boolean; message?: string; needsModify?: boolean }>;
+  /** A reply draft in that Gmail thread (like Gmail's Reply). `url` opens the thread — also when the draft couldn't be made. */
+  replyDraft: (threadId: string) => Promise<ReplyDraft>;
   refreshStatus: () => Promise<void>;
   refreshLeads: () => Promise<void>;
   resolveLead: (id: string, patch: Pick<InboundLead, "status"> & Partial<Pick<InboundLead, "entity_type" | "entity_id">>) => Promise<boolean>;
@@ -91,22 +95,24 @@ const FRESH_CHECK_MS = 20 * 1000;
 export type AiProviderName = "claude" | "gemini" | "groq" | "cloudflare" | "openrouter";
 export type AiLink = { provider: AiProviderName; models: string[]; keys: number; readyAt: string | null; can: ("text" | "image" | "pdf")[] };
 
-async function invoke<T>(name: string, body: Record<string, unknown>): Promise<{ data?: T; error?: string; status?: number }> {
+async function invoke<T>(name: string, body: Record<string, unknown>): Promise<{ data?: T; error?: string; status?: number; body?: Record<string, unknown> }> {
   const { data, error } = await supabase.functions.invoke(name, { body });
   if (!error) return { data: data as T };
   const response = (error as { context?: Response }).context;
   let message = error.message || "Request failed";
   let status: number | undefined;
+  let parsedBody: Record<string, unknown> | undefined;
   if (response && typeof response.json === "function") {
     status = response.status;
     try {
       const parsed = (await response.clone().json()) as { error?: string };
       if (parsed?.error) message = parsed.error;
+      parsedBody = parsed as Record<string, unknown>;
     } catch {
       // keep the generic message
     }
   }
-  return { error: message, status };
+  return { error: message, status, body: parsedBody };
 }
 
 const text = (v: unknown) => (typeof v === "string" ? v : "");
@@ -274,6 +280,13 @@ export function GmailProvider({ children }: { children: ReactNode }) {
     return { ok: true };
   }, []);
 
+  const replyDraft = useCallback<GmailValue["replyDraft"]>(async (threadId) => {
+    const res = await invoke<{ ok?: boolean; url?: string; reused?: boolean; mailbox?: string }>("gmail-sync", { action: "reply_draft", threadId });
+    if (res.data?.ok && res.data.url) return { ok: true, url: res.data.url, reused: !!res.data.reused, mailbox: text(res.data.mailbox) };
+    const b = res.body || {};
+    return { ok: false, url: text(b.url), mailbox: text(b.mailbox), code: text(b.code), message: res.error || "The reply couldn't be made." };
+  }, []);
+
   // The app may only record the decision (RLS + column grants enforce it).
   const resolveLead = useCallback<GmailValue["resolveLead"]>(async (id, patch) => {
     const before = leads;
@@ -293,7 +306,7 @@ export function GmailProvider({ children }: { children: ReactNode }) {
     return true;
   }, []);
 
-  const value = useMemo<GmailValue>(() => ({ ...status, syncing, leads, connect, disconnect, syncNow, send, refreshStatus, refreshLeads, resolveLead, claimLead, cancelScheduled }), [status, syncing, leads, connect, disconnect, syncNow, send, refreshStatus, refreshLeads, resolveLead, claimLead, cancelScheduled]);
+  const value = useMemo<GmailValue>(() => ({ ...status, syncing, leads, connect, disconnect, syncNow, send, refreshStatus, refreshLeads, resolveLead, claimLead, cancelScheduled, replyDraft }), [status, syncing, leads, connect, disconnect, syncNow, send, refreshStatus, refreshLeads, resolveLead, claimLead, cancelScheduled, replyDraft]);
   return <GmailContext.Provider value={value}>{children}</GmailContext.Provider>;
 }
 
@@ -302,6 +315,9 @@ export const useGmail = () => {
   if (!value) throw new Error("useGmail must be used inside GmailProvider");
   return value;
 };
+
+/** Open one conversation in Gmail on the web, signed in as the mailbox that holds it (thread ids belong to one mailbox). */
+export const gmailThreadUrl = (mailbox: string, threadId: string) => `https://mail.google.com/mail/?authuser=${encodeURIComponent(mailbox)}#all/${threadId}`;
 
 /** Open Gmail's composer in a specific mailbox (browser Gmail picks the account by authuser). */
 export const gmailComposeUrl = (to: string, mailbox?: string, subject = "", body = "") => {

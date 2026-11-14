@@ -596,15 +596,47 @@ body:has(.kit-page) { background: #fbfaf7; }
 .from-picker select { max-width: 210px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-solid); color: var(--text); font: inherit; font-size: 12.5px; }
 
 /* Profile: write in Gmail */
-.write-email { position: relative; display: inline-flex; align-items: stretch; margin-top: 6px; }
-.write-email > a { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 9px; background: var(--accent-soft); color: var(--accent); font-weight: 700; font-size: 12.5px; text-decoration: none; }
-.write-email > a em { font-style: normal; font-weight: 600; opacity: .75; padding-left: 6px; border-left: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); }
-.write-email:has(.write-more) > a { border-radius: 9px 0 0 9px; }
-.write-more { display: grid; place-items: center; width: 28px; border: 0; border-left: 1px solid color-mix(in srgb, var(--accent) 25%, transparent); border-radius: 0 9px 9px 0; background: var(--accent-soft); color: var(--accent); cursor: pointer; }
-.write-menu { position: absolute; z-index: 30; top: calc(100% + 6px); left: 0; display: grid; min-width: 220px; padding: 5px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-solid); box-shadow: 0 14px 34px rgba(0, 0, 0, .16); }
-.write-menu a { display: flex; justify-content: space-between; gap: 10px; padding: 8px 10px; border-radius: 8px; color: var(--text); text-decoration: none; font-size: 13px; overflow-wrap: anywhere; }
-.write-menu a:hover { background: var(--surface-alt); }
-.write-menu small { color: var(--muted); font-size: 11px; white-space: nowrap; }
+/* Email button on a profile: Write / Reply / Write new email (components/WriteEmail.tsx). */
+.write-email { display: grid; justify-items: start; gap: 6px; margin-top: 8px; min-width: 0; max-width: 100%; }
+.write-email .write-row { position: relative; display: inline-flex; align-items: stretch; max-width: 100%; }
+.write-email .write-go { display: inline-flex; align-items: center; gap: 7px; min-height: 34px; padding: 0 12px; border: 0; border-radius: 10px 0 0 10px; background: var(--accent-soft); color: var(--accent); font: inherit; font-weight: 700; font-size: 13px; text-decoration: none; cursor: pointer; white-space: nowrap; transition: background .15s ease-out, color .15s ease-out, box-shadow .15s ease-out; }
+.write-email .write-go:hover { background: color-mix(in srgb, var(--accent) 18%, var(--accent-soft)); }
+.write-email .write-go:disabled { cursor: progress; }
+.write-email .write-go em { font-style: normal; font-weight: 600; opacity: .8; padding-left: 7px; border-left: 1px solid color-mix(in srgb, currentColor 30%, transparent); max-width: 120px; overflow: hidden; text-overflow: ellipsis; }
+.write-email .write-more { display: grid; place-items: center; width: 32px; border: 0; border-left: 1px solid color-mix(in srgb, var(--accent) 25%, transparent); border-radius: 0 10px 10px 0; background: var(--accent-soft); color: var(--accent); cursor: pointer; transition: background .15s ease-out; }
+.write-email .write-more:hover, .write-email .write-more[aria-expanded="true"] { background: color-mix(in srgb, var(--accent) 18%, var(--accent-soft)); }
+.write-email.is-strong .write-go, .write-email.is-strong .write-more { background: var(--accent); color: #fff; }
+.write-email.is-strong .write-go { box-shadow: 0 5px 14px rgba(var(--accent-rgb), .22); }
+.write-email.is-strong .write-more { border-left-color: rgba(255, 255, 255, .28); }
+.write-email.is-strong .write-go:hover, .write-email.is-strong .write-more:hover { background: var(--accent-dark); }
+.write-email .write-go:focus-visible, .write-email .write-more:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; position: relative; z-index: 1; }
+.write-email .write-status { display: flex; align-items: baseline; gap: 7px; margin: 0; color: var(--muted); font-size: 12.5px; line-height: 1.4; min-width: 0; max-width: 100%; }
+.write-email .write-status > i { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--line-strong, var(--muted)); transform: translateY(-1px); }
+.write-email .write-status > span { display: grid; min-width: 0; }
+.write-email .write-status small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 11.5px; font-weight: 500; }
+.write-email .write-status.tone-theirs { color: var(--text); font-weight: 600; } .write-status.tone-theirs > i { background: var(--success); box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 20%, transparent); }
+.write-email .write-status.tone-due { color: var(--text); font-weight: 600; } .write-status.tone-due > i { background: var(--warning); box-shadow: 0 0 0 3px color-mix(in srgb, var(--warning) 22%, transparent); }
+.write-email .write-status.tone-fresh { color: var(--text); font-weight: 600; } .write-status.tone-fresh > i { background: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent); }
+.write-email .write-status.tone-wait > i { background: color-mix(in srgb, var(--accent) 55%, var(--muted)); }
+.write-email .write-sched { display: flex; align-items: flex-start; gap: 8px; margin: 0; padding: 7px 8px 7px 10px; border: 1px solid color-mix(in srgb, var(--warning) 35%, transparent); border-radius: 10px; background: color-mix(in srgb, var(--warning) 10%, var(--surface-solid)); color: var(--text); font-size: 12.5px; line-height: 1.4; max-width: 100%; }
+.write-email .write-sched > svg { flex: none; margin-top: 2px; color: color-mix(in srgb, var(--warning) 80%, var(--text)); }
+.write-email .write-sched > span { min-width: 0; flex: 1; }
+.write-email .write-sched em { display: block; font-style: normal; font-weight: 600; color: var(--danger); }
+.write-email .write-sched a { flex: none; padding: 1px 8px; border-radius: 7px; color: var(--text); font-weight: 700; text-decoration: none; background: color-mix(in srgb, var(--warning) 18%, transparent); }
+.write-email .write-sched a:hover { background: color-mix(in srgb, var(--warning) 30%, transparent); }
+.write-email .write-sched.crossed { border-color: color-mix(in srgb, var(--danger) 40%, transparent); background: color-mix(in srgb, var(--danger) 8%, var(--surface-solid)); }
+.write-email .write-sched.crossed > svg { color: var(--danger); }
+.write-plain { display: inline-flex; align-items: center; gap: 6px; }
+.write-email .write-menu { position: absolute; z-index: 30; top: calc(100% + 6px); left: 0; display: grid; gap: 2px; width: max-content; min-width: 250px; max-width: min(340px, calc(100vw - 32px)); padding: 6px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-solid); box-shadow: 0 14px 34px rgba(0, 0, 0, .16); animation: write-in .15s ease-out; }
+@keyframes write-in { from { opacity: 0; transform: translateY(-3px); } }
+.write-email .write-menu > a, .write-email .write-menu > button { display: flex; align-items: flex-start; gap: 9px; width: 100%; padding: 8px 10px; border: 0; border-radius: 8px; background: none; color: var(--text); font: inherit; font-size: 13px; font-weight: 600; text-align: left; text-decoration: none; cursor: pointer; overflow-wrap: anywhere; }
+.write-email .write-menu > a > svg, .write-email .write-menu > button > svg { flex: none; margin-top: 2px; color: var(--muted); }
+.write-email .write-menu > a:hover, .write-email .write-menu > button:hover, .write-email .write-menu > a:focus-visible, .write-email .write-menu > button:focus-visible { background: var(--surface-alt); outline: none; }
+.write-email .write-menu small { display: block; color: var(--muted); font-size: 11.5px; font-weight: 500; }
+.write-email .write-menu-head { padding: 8px 10px 2px; color: var(--muted); font-size: 10.5px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+.write-email .write-menu-head:first-child { padding-top: 4px; }
+.write-email small { text-transform: none; letter-spacing: 0; }
+@media (prefers-reduced-motion: reduce) { .write-menu { animation: none; } .write-go, .write-more { transition: none; } }
 
 /* ---------- Inbound leads ---------- */
 .nav-leads { background: var(--accent) !important; color: #fff !important; }
