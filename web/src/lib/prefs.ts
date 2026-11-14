@@ -1,5 +1,6 @@
 import { normalizeCriteria } from "./criteria";
 import { normalizeWeekend } from "./dayMode";
+import { readTemplate } from "./replyTemplate";
 import type { Currency, FollowupRules, PayoutModel, RateCard, WorkspacePreferences } from "../types";
 
 export const CURRENCIES: { value: Currency; label: string }[] = [
@@ -100,6 +101,8 @@ export const normalizePreferences = (value: unknown): WorkspacePreferences => {
     default_creator_percent: Number.isFinite(pct) && pct >= 0 && pct <= 100 ? pct : DEFAULT_PREFERENCES.default_creator_percent,
     default_deal_model: v.default_deal_model === "percent" ? "percent" : ("fixed" as PayoutModel),
     email_signature: typeof v.email_signature === "string" ? v.email_signature : "",
+    // Kept through every load and save (it used to be dropped as an unknown key).
+    ...(v.reply_template !== undefined ? { reply_template: readTemplate(v.reply_template) } : {}),
     action_digest: v.action_digest !== false,
     followup_rules: normalizeFollowupRules(v.followup_rules),
     start_page: v.start_page === "influencers" || v.start_page === "calendar" ? v.start_page : "dashboard",

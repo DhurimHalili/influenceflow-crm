@@ -17,7 +17,8 @@ import { ApiKeysSettings } from "../components/ApiKeys";
 import { TeamSettings } from "../components/Team";
 import { WeeklyReportSettings } from "../components/WeeklyReport";
 import { AvatarButton } from "../components/AvatarEditor";
-import { CalendarDays, KeyRound, Mail, Target, Youtube } from "lucide-react";
+import { CalendarDays, CornerUpLeft, KeyRound, Mail, Target, Youtube } from "lucide-react";
+import { ReplyTemplateSettings } from "../components/ReplyTemplateSettings";
 import { APP_BUILT_AT, APP_VERSION, liveVersion, reloadInto } from "../lib/appUpdate";
 import { pwnedCount, pwnedMessage } from "../lib/pwned";
 
@@ -73,6 +74,7 @@ const SECTIONS = [
   { id: "security", label: "Account & security", icon: LockKeyhole },
   { id: "workspace", label: "Workspace", icon: Building },
   { id: "gmail", label: "Gmail", icon: Mail },
+  { id: "reply", label: "Reply template", icon: CornerUpLeft },
   { id: "youtube", label: "YouTube stats", icon: Youtube },
   { id: "keys", label: "Your API keys", icon: KeyRound },
   { id: "followups", label: "Follow-up rules", icon: CalendarDays },
@@ -349,6 +351,7 @@ export function SettingsPage() {
       <SecuritySettings />
       <WorkspaceSettings />
       <GmailSettings />
+      <ReplyTemplateSettings />
       <YouTubeSettings />
       <ApiKeysSettings />
       <FollowupRulesSettings />
