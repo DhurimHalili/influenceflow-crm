@@ -11,7 +11,7 @@ import { useData } from "./DataContext";
 // screen, right after you send — and every 10 minutes in the background on
 // the server even when the app is closed.
 
-export type ReplyDraft = { ok: true; url: string; reused: boolean; mailbox: string } | { ok: false; url: string; mailbox: string; code: string; message: string };
+export type ReplyDraft = { ok: true; url: string; reused: boolean; mailbox: string; template: boolean } | { ok: false; url: string; mailbox: string; code: string; message: string };
 
 export type Mailbox = {
   /** Granted "manage drafts and send": the CRM can cancel a scheduled send. */
@@ -281,8 +281,8 @@ export function GmailProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const replyDraft = useCallback<GmailValue["replyDraft"]>(async (threadId) => {
-    const res = await invoke<{ ok?: boolean; url?: string; reused?: boolean; mailbox?: string }>("gmail-sync", { action: "reply_draft", threadId });
-    if (res.data?.ok && res.data.url) return { ok: true, url: res.data.url, reused: !!res.data.reused, mailbox: text(res.data.mailbox) };
+    const res = await invoke<{ ok?: boolean; url?: string; reused?: boolean; mailbox?: string; template?: boolean }>("gmail-sync", { action: "reply_draft", threadId });
+    if (res.data?.ok && res.data.url) return { ok: true, url: res.data.url, reused: !!res.data.reused, mailbox: text(res.data.mailbox), template: !!res.data.template };
     const b = res.body || {};
     return { ok: false, url: text(b.url), mailbox: text(b.mailbox), code: text(b.code), message: res.error || "The reply couldn't be made." };
   }, []);

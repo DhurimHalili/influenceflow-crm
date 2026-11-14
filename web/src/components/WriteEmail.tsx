@@ -1,10 +1,12 @@
-import { CalendarClock, ChevronDown, CornerUpLeft, ExternalLink, Loader2, Mail, MailPlus, MessagesSquare } from "lucide-react";
+import { CalendarClock, Check, ChevronDown, CornerUpLeft, ExternalLink, Loader2, Mail, MailPlus, MessagesSquare, PenLine } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useData } from "../contexts/DataContext";
 import { gmailComposeUrl, gmailThreadUrl, useGmail } from "../contexts/GmailContext";
 import { useToast } from "../contexts/ToastContext";
 import { useChase } from "../hooks/useChase";
 import { emailPlan, when, type Upcoming } from "../lib/emailAction";
+import { readTemplate, templateFor } from "../lib/replyTemplate";
 
 // The email button on a profile does what the conversation needs:
 //   nothing sent yet           → Write email (Gmail's composer, in your usual mailbox)
@@ -27,7 +29,12 @@ export function WriteEmail({ to, recordId }: { to: string; recordId: string }) {
   const ref = useRef<HTMLDivElement>(null);
   const boxes = gmail.mailboxes;
   const events = data.emailEvents;
+  const navigate = useNavigate();
   const state = chase.byId.get(recordId)?.state;
+  const type = chase.byId.get(recordId)?.type || (data.brands.some((b) => b.id === recordId) ? "brand" : "creator");
+  const prefs = data.profile.preferences;
+  const tpl = readTemplate(prefs?.reply_template);
+  const usesTpl = !!templateFor(tpl, type);
   const plan = useMemo(() => emailPlan({ events: (events || []).filter((e) => e.entity_id === recordId), state, mailboxes: boxes.map((m) => m.email) }), [events, recordId, state, boxes]);
 
   useEffect(() => {
@@ -59,14 +66,20 @@ export function WriteEmail({ to, recordId }: { to: string; recordId: string }) {
     const url = res.url || gmailThreadUrl(thread.mailbox || box, thread.id);
     if (tab && !tab.closed) { tab.opener = null; tab.location.replace(url); }
     else window.open(url, "_blank", "noopener");
-    if (res.ok) toast(res.reused ? "Your unsent draft in that conversation is open in Gmail" : "Reply ready in Gmail — type and press Send", "success");
+    if (res.ok) toast(res.reused ? "Your unsent draft in that conversation is open in Gmail" : res.template ? "Reply ready in Gmail with your template — add a line and press Send" : "Reply ready in Gmail — type and press Send", "success");
     else toast(`${res.message} ${res.url ? "Opened the conversation — press Reply there." : ""}`.trim(), "error");
   };
 
   const Icon = busy ? Loader2 : plan.mode === "reply" ? CornerUpLeft : plan.mode === "fresh" ? MailPlus : Mail;
   const label = busy ? "Opening reply…" : plan.mode === "reply" ? "Reply" : plan.mode === "fresh" ? "Write new email" : "Write email";
-  const hint = plan.mode === "reply" ? `Opens “${thread?.subject || "the conversation"}” in ${box} with a reply to the newest message ready to type` : plan.mode === "fresh" ? `A new email from ${box} — starts a fresh thread` : `Opens Gmail's composer as ${box}. Sync picks up what you send.`;
+  const hint = plan.mode === "reply" ? `Opens “${thread?.subject || "the conversation"}” in ${box} with a reply to the newest message ${usesTpl ? "that starts with your reply template" : "ready to type"}` : plan.mode === "fresh" ? `A new email from ${box} — starts a fresh thread` : `Opens Gmail's composer as ${box}. Sync picks up what you send.`;
   const strong = plan.status.tone === "theirs" || plan.status.tone === "due" || plan.status.tone === "fresh";
+  // The reply template switch for this kind of record (influencers: on/off · brands: the "brands too" tick).
+  const flipTemplate = () => {
+    const next = type === "brand" ? { ...tpl, brands: !usesTpl } : { ...tpl, on: !usesTpl };
+    data.updateProfile({ preferences: { ...prefs, reply_template: next } });
+    toast(usesTpl ? `Replies to ${type === "brand" ? "brands" : "influencers"} start blank` : `Replies to ${type === "brand" ? "brands" : "influencers"} start with your template`, "success", { label: "Undo", run: () => data.updateProfile({ preferences: { ...prefs, reply_template: tpl } }) });
+  };
   const main = <>
     <Icon size={14} className={busy ? "spin" : undefined} aria-hidden="true" /><span>{label}</span>{many && <em>{short(box)}</em>}
   </>;
@@ -80,6 +93,13 @@ export function WriteEmail({ to, recordId }: { to: string; recordId: string }) {
       {open && <div className="write-menu" role="menu">
         {plan.mode === "fresh" && thread && <button type="button" role="menuitem" onClick={() => void reply()}><CornerUpLeft size={14} aria-hidden="true" /><span>Reply in the old thread<small>“{thread.subject || "No subject"}”</small></span></button>}
         {thread && !plan.offline && <a role="menuitem" href={gmailThreadUrl(thread.mailbox || box, thread.id)} target="_blank" rel="noopener noreferrer" onClick={() => setOpen(false)}><MessagesSquare size={14} aria-hidden="true" /><span>Open the conversation<small>“{thread.subject || "No subject"}” · read it first</small></span></a>}
+        {thread && !plan.offline && <>
+          <span className="write-menu-head">Reply template</span>
+          {tpl.text.trim() && (type === "creator" || tpl.on)
+            ? <button type="button" role="menuitemcheckbox" aria-checked={usesTpl} className={`write-tpl${usesTpl ? " on" : ""}`} onClick={flipTemplate}><span className="write-tick" aria-hidden="true">{usesTpl && <Check size={12} />}</span><span>Start with my template{type === "brand" ? " (brands)" : ""}<small className="write-tpl-text">{tpl.text.trim().split("\n").filter(Boolean).slice(0, 2).join(" ")}</small></span></button>
+            : null}
+          <button type="button" role="menuitem" onClick={() => { setOpen(false); navigate("/app/settings#reply"); }}><PenLine size={14} aria-hidden="true" /><span>{tpl.text.trim() ? "Edit the template" : "Write a reply template"}<small>{!tpl.text.trim() ? "Replies start with your words — off until you turn it on" : type === "brand" && !tpl.on ? "It's off — turn it on in Settings first" : "Settings → Reply template"}</small></span></button>
+        </>}
         <span className="write-menu-head">{thread ? "New email from" : "Write from"}</span>
         {boxes.map((m) => <a role="menuitem" key={m.id} href={gmailComposeUrl(to, m.email)} target="_blank" rel="noopener noreferrer" onClick={() => setOpen(false)}><MailPlus size={14} aria-hidden="true" /><span>{m.email}{m.email === box && <small>{thread ? "where the conversation is" : "last used"}</small>}</span></a>)}
       </div>}

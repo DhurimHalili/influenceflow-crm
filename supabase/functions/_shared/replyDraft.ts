@@ -133,10 +133,16 @@ export function quoteBlock(latest: Msg, body: { html: string; text: string }): s
   return `<div class="gmail_quote"><div dir="ltr" class="gmail_attr">${attr}<br></div><blockquote class="gmail_quote" style="margin:0px 0px 0px 0.8ex;border-left:1px solid rgb(204,204,204);padding-left:1ex">${inner}</blockquote></div>`;
 }
 
-/** The draft's HTML: room to type, your signature (as Gmail places it), then the quote. */
-export function draftHtml(signature: string, quote: string): string {
+/** Your reply template as Gmail writes typed text: one <div> per line, an empty line as <div><br></div>, then a line to carry on typing. */
+export function leadHtml(text: string): string {
+  const lines = text.replace(/\r\n?/g, "\n").split("\n");
+  return `${lines.map((l) => `<div>${l.trim() ? escapeHtml(l) : "<br>"}</div>`).join("")}<div><br></div>`;
+}
+
+/** The draft's HTML: your reply template (or room to type), your signature (as Gmail places it), then the quote. */
+export function draftHtml(signature: string, quote: string, lead = ""): string {
   const sig = signature.trim() ? `<br clear="all"><div><br></div><span class="gmail_signature_prefix">-- </span><br><div dir="ltr" class="gmail_signature" data-smartmail="gmail_signature">${quotable(signature)}</div>` : "";
-  return `<div dir="ltr"><br></div>${sig}<br>${quote}`;
+  return `<div dir="ltr">${lead.trim() ? leadHtml(lead) : "<br>"}</div>${sig}<br>${quote}`;
 }
 
 // ----- the raw message ------------------------------------------------------------------

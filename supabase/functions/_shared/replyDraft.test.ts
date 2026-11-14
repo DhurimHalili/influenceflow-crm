@@ -1,5 +1,6 @@
 // deno run supabase/functions/_shared/replyDraft.test.ts
-import { addressList, bodyOf, draftHtml, msgIds, pickSendAs, pickTarget, quotable, quoteBlock, replyRaw, replyRecipients, replySubject, threadUrl, type Msg } from "./replyDraft.ts";
+import { fillReply, readTemplate, templateFor } from "../../../web/src/lib/replyTemplate.ts";
+import { addressList, bodyOf, draftHtml, leadHtml, msgIds, pickSendAs, pickTarget, quotable, quoteBlock, replyRaw, replyRecipients, replySubject, threadUrl, type Msg } from "./replyDraft.ts";
 
 let failed = 0;
 const eq = (name: string, got: unknown, want: unknown) => {
@@ -62,6 +63,21 @@ eq("attribution like Gmail's", q.includes("On Mon, 9 Nov 2026 10:00, Sam &lt;sam
 eq("nothing to quote → no block", quoteBlock(theirs, { html: "", text: "" }), "");
 eq("signature placed as Gmail does", draftHtml("<b>D</b>", "").includes('class="gmail_signature"'), true);
 eq("no signature → no dashes", draftHtml("", "").includes("--"), false);
+
+// --- the reply template ---
+eq("off and empty by default", readTemplate(undefined), { on: false, text: "", brands: false });
+eq("off → nothing", templateFor({ on: false, text: "Hi" }, "creator"), "");
+eq("on but empty → nothing", templateFor({ on: true, text: "  \n " }, "creator"), "");
+eq("on → influencers", templateFor({ on: true, text: "Hi there," }, "creator"), "Hi there,");
+eq("brands only when ticked", [templateFor({ on: true, text: "Hi" }, "brand"), templateFor({ on: true, text: "Hi", brands: true }, "brand")], ["", "Hi"]);
+eq("garbage stored → off", readTemplate({ on: "yes", text: 5 }), { on: false, text: "", brands: false });
+eq("tokens filled", fillReply("Hi {first_name}, {my_name} from {agency} here", { name: "Sam Lee", my_name: "Granit", agency: "Grannset" }), "Hi Sam, Granit from Grannset here");
+eq("no name → there", fillReply("Hi {first_name},", { name: "" }), "Hi there,");
+const granit = leadHtml(fillReply("Hi there,\n\nWe are following up in case you missed our email.", {}));
+eq("template lines as Gmail writes them", granit, "<div>Hi there,</div><div><br></div><div>We are following up in case you missed our email.</div><div><br></div>");
+eq("template text is escaped", leadHtml("<script>x</script> & co"), "<div>&lt;script&gt;x&lt;/script&gt; &amp; co</div><div><br></div>");
+eq("draft starts with the template, signature after", draftHtml("<b>G</b>", "", "Hi there,").indexOf("Hi there,") < draftHtml("<b>G</b>", "", "Hi there,").indexOf("gmail_signature"), true);
+eq("no template → empty first line", draftHtml("", "").startsWith('<div dir="ltr"><br></div>'), true);
 
 // --- the raw message ---
 const raw = replyRaw({ from: "me@agency.com", fromName: "Dhurim H", to: ["sam@creator.com"], subject: "Re: Collab?\r\nBcc: evil@x.com", messageId: "<m1@mail.gmail.com>", references: "<m0@x> <m1@mail.gmail.com>", html: "<p>Hi ✓</p>" });

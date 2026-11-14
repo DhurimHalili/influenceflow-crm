@@ -52,6 +52,8 @@ export interface WorkspacePreferences {
   /** How new campaigns are priced: a fixed creator fee + your markup, or a % split. */
   default_deal_model: PayoutModel;
   email_signature: string;
+  /** Words a Reply draft starts with (Settings → Reply template). Off and empty by default; brands only when ticked. */
+  reply_template?: { on: boolean; text: string; brands: boolean };
   /** Daily browser summary of due actions. */
   action_digest: boolean;
   /** When to follow up with people who haven't replied. */
