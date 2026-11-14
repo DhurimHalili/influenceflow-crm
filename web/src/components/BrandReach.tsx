@@ -27,6 +27,7 @@ const VIA: Record<string, { label: string; tip: string; sure: boolean }> = {
   site: { label: "Linked from their website", tip: "Their own website links to this page.", sure: true },
   wikidata: { label: "Wikidata, same website", tip: "Wikidata lists this page for the company whose official website is theirs.", sure: true },
   hunter: { label: "Hunter, by website", tip: "Hunter's company record for their website lists this page. Worth a glance before you rely on it.", sure: false },
+  clay: { label: "Clay, by website", tip: "Clay's company record for their website lists this page. Worth a glance before you rely on it.", sure: false },
 };
 
 /** Searches for the people who say yes to creator deals. */
@@ -54,14 +55,18 @@ export function BrandReach({ brand, contacts }: { brand: Brand; contacts: BrandC
   const via = minePage ? "you" : co?.linkedin_via || "";
   const slug = page.replace(/^https:\/\/www\.linkedin\.com\//, "");
   const hunter = m.status?.hunter;
+  const clay = m.status?.clay;
+  const services = [clay?.configured ? "Clay" : "", hunter?.configured ? "Hunter" : ""].filter(Boolean);
+  const credits = (clay?.configured ? clay.left : 0) + (hunter?.configured ? hunter.left : 0);
+  const canFacts = !!domain && ((!!clay?.configured && clay.left > 0 && !co?.clay_at) || (!!hunter?.configured && hunter.left > 0 && !co?.hunter_at));
   const [editing, setEditing] = useState(false);
   const [typed, setTyped] = useState("");
   const typedPage = companyPage(typed);
-  const looked = !!co?.wd_at || !!co?.hunter_at || via === "site";
+  const looked = !!co?.wd_at || !!co?.hunter_at || !!co?.clay_at || via === "site";
   const facts = co && [co.size || (co.employees ? `${co.employees.toLocaleString("en-US")}` : ""), co.revenue, co.industry, co.founded, co.country].some(Boolean);
   const busyCompany = m.looking.has(`company:${brand.id}`);
   const busyPeople = m.looking.has(`people:${brand.id}`);
-  const known = useMemo(() => new Set(contacts.map((c) => c.email.toLowerCase()).filter(Boolean)), [contacts]);
+  const known = useMemo(() => new Set(contacts.flatMap((c) => [c.email.toLowerCase(), `${c.first_name} ${c.last_name}`.trim().toLowerCase()]).filter(Boolean)), [contacts]);
 
   const savePage = (e: FormEvent) => {
     e.preventDefault();
@@ -76,11 +81,11 @@ export function BrandReach({ brand, contacts }: { brand: Brand; contacts: BrandC
     ? `https://www.linkedin.com/${slug}/people/?keywords=${encodeURIComponent(words)}`
     : `https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(`${words} ${brand.name}`)}`;
   const addPerson = (p: HunterPerson) => {
-    const c = data.addContact({ brand_id: brand.id, first_name: p.first || p.email.split("@")[0], last_name: p.last, title: p.title, email: p.email, linkedin_url: p.linkedin, pipeline_status: "new", date_contacted: null, notes: `Found by Hunter (${p.confidence}% sure of the email).` });
+    const c = data.addContact({ brand_id: brand.id, first_name: p.first || p.email.split("@")[0], last_name: p.last, title: p.title, email: p.email, linkedin_url: p.linkedin, pipeline_status: "new", date_contacted: null, notes: p.email ? `Found by Hunter (${p.confidence}% sure of the email).` : "Found by Clay — no email on record yet." });
     toast(`${p.first || p.email} added to ${brand.name}'s people.`, "success", { label: "Undo", run: () => data.deleteContact(c.id) });
   };
   const viaInfo = VIA[via];
-  const hunterLine = !hunter?.configured ? "" : hunter.left > 0 ? `${hunter.left} Hunter credit${hunter.left === 1 ? "" : "s"} left this month` : "Hunter credits used up — more on the 1st";
+  const creditLine = [clay?.configured ? `Clay ${clay.left} left (30 days)` : "", hunter?.configured ? `Hunter ${hunter.left} left this month` : ""].filter(Boolean).join(" · ");
 
   return <div className="reach">
     <div className={`reach-li${page ? " found" : ""}`}>
@@ -102,7 +107,7 @@ export function BrandReach({ brand, contacts }: { brand: Brand; contacts: BrandC
       </div>
       <div className="reach-li-actions">
         {page && !editing && <button type="button" className="mx-icon-btn" onClick={() => { setTyped(minePage || page); setEditing(true); }} aria-label="Change LinkedIn page" title="Change"><Pencil size={13} /></button>}
-        {hunter?.configured && domain && !co?.hunter_at && <Button size="sm" variant="secondary" loading={busyCompany} disabled={hunter.left <= 0} onClick={() => void m.lookup(brand.id, "company")} title="Hunter's record for their website: LinkedIn, size, revenue, industry · 1 credit"><Building2 size={13} /> Company facts</Button>}
+        {canFacts && <Button size="sm" variant="secondary" loading={busyCompany} onClick={() => void m.lookup(brand.id, "company")} title={`${services.join(" + ")} record for their website: LinkedIn, size, revenue, industry`}><Building2 size={13} /> Company facts</Button>}
       </div>
     </div>
 
@@ -112,7 +117,7 @@ export function BrandReach({ brand, contacts }: { brand: Brand; contacts: BrandC
       {co.industry && <li><Building2 size={13} aria-hidden="true" />{co.industry}</li>}
       {co.founded && <li><CalendarDays size={13} aria-hidden="true" />Since {co.founded}</li>}
       {co.country && <li><MapPin size={13} aria-hidden="true" />{countryName(co.country)}</li>}
-      <li className="reach-src">Hunter · {dateLabel(co.hunter_at || co.at)}</li>
+      <li className="reach-src">{co.facts_via === "clay" ? "Clay" : "Hunter"} · {dateLabel((co.facts_via === "clay" ? co.clay_at : co.hunter_at) || co.at)}</li>
     </ul> : null}
 
     <div className="reach-find">
@@ -120,22 +125,22 @@ export function BrandReach({ brand, contacts }: { brand: Brand; contacts: BrandC
       <div className="reach-chips">{ROLES.map((r) => <a key={r.label} href={search(r.words)} target="_blank" rel="noopener noreferrer">{r.label}<ExternalLink size={11} aria-hidden="true" /></a>)}</div>
     </div>
 
-    {hunter?.configured && domain ? <div className="reach-people">
+    {services.length && domain ? <div className="reach-people">
       <div className="reach-people-head">
-        <span><Sparkles size={13} aria-hidden="true" /> <b>People with work emails</b>{people ? <small> · Hunter, {dateLabel(people.at)}{people.total > people.list.length ? ` · ${people.total} known in all` : ""}</small> : <small> · from Hunter, deal-makers first</small>}</span>
-        <Button size="sm" variant={people ? "ghost" : "secondary"} loading={busyPeople} disabled={hunter.left <= 0} onClick={() => void m.lookup(brand.id, "people")} title="Uses 1 Hunter credit">{people ? "Search again" : "Find people"}</Button>
+        <span><Sparkles size={13} aria-hidden="true" /> <b>People who work there</b>{people ? <small> · {dateLabel(people.at)}{people.total > people.list.length ? ` · ${people.total} known in all` : ""}</small> : <small> · from {services.join(" + ")}, deal-makers first</small>}</span>
+        <Button size="sm" variant={people ? "ghost" : "secondary"} loading={busyPeople} disabled={credits <= 0} onClick={() => void m.lookup(brand.id, "people")} title={[hunter?.configured ? "Hunter: 1 credit, work emails" : "", clay?.configured ? "Clay: up to 5 results, LinkedIn" : ""].filter(Boolean).join(" · ")}>{people ? "Search again" : "Find people"}</Button>
       </div>
       {people && (people.list.length ? <ul className="reach-people-list">{people.list.map((p) => {
-        const added = known.has(p.email.toLowerCase());
-        return <li key={p.email} className={DEAL_MAKER.test(p.title) ? "maker" : ""}>
+        const added = known.has(p.email.toLowerCase()) || known.has(`${p.first} ${p.last}`.trim().toLowerCase());
+        return <li key={p.email || `${p.first} ${p.last} ${p.title}`} className={DEAL_MAKER.test(p.title) ? "maker" : ""}>
           <Avatar name={`${p.first} ${p.last}`.trim() || p.email} size="sm" />
           <span className="reach-person"><strong>{`${p.first} ${p.last}`.trim() || p.email}</strong><small>{p.title || "Role not listed"}</small></span>
-          <span className="reach-mail"><a href={`mailto:${p.email}`}>{p.email}</a><small>{p.confidence}% sure</small></span>
-          {p.linkedin ? <a className="mx-icon-btn" href={p.linkedin} target="_blank" rel="noopener noreferrer" aria-label={`${p.first}'s LinkedIn`} title="LinkedIn"><Linkedin size={13} /></a> : <span className="reach-gap" />}
+          {p.email ? <span className="reach-mail"><a href={`mailto:${p.email}`}>{p.email}</a><small>{p.confidence}% sure · Hunter</small></span> : <span className="reach-mail"><em>No email yet</em><small>LinkedIn · Clay</small></span>}
+          {p.linkedin || !p.email ? <a className="mx-icon-btn" href={p.linkedin || `https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(`${p.first} ${p.last} ${brand.name}`)}`} target="_blank" rel="noopener noreferrer" aria-label={`${p.first}'s LinkedIn`} title="LinkedIn"><Linkedin size={13} /></a> : <span className="reach-gap" />}
           {added ? <span className="reach-added"><Check size={12} aria-hidden="true" /> Added</span> : <Button size="sm" variant="secondary" onClick={() => addPerson(p)}><Plus size={12} /> Add</Button>}
         </li>;
-      })}</ul> : <p className="reach-empty">Hunter knows no one at {domain} in marketing, communication, sales or leadership yet.</p>)}
-      {hunterLine && <p className="reach-credits">{busyPeople || busyCompany ? <Loader2 size={11} className="spin" aria-hidden="true" /> : null}{hunterLine}. A search is kept, so the same brand never costs twice.</p>}
+      })}</ul> : <p className="reach-empty">No one at {domain} in partnerships, marketing, communication, sales or leadership is on record yet.</p>)}
+      {creditLine && <p className="reach-credits">{busyPeople || busyCompany ? <Loader2 size={11} className="spin" aria-hidden="true" /> : null}{creditLine}. A search is kept, so the same brand never costs twice.</p>}
     </div> : null}
   </div>;
 }

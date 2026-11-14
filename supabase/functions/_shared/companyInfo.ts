@@ -14,15 +14,19 @@ export type CompanyFacts = {
   domain: string;
   at: string;
   linkedin?: string;
-  linkedin_via?: "site" | "wikidata" | "hunter";
+  linkedin_via?: "site" | "wikidata" | "hunter" | "clay";
   /** Wikidata was asked (so it isn't asked again for this domain). */
   wd_at?: string;
   /** Hunter was asked for the company record. */
   hunter_at?: string;
+  /** Clay was asked for the company record. */
+  clay_at?: string;
+  /** Which service the size / revenue / industry came from. */
+  facts_via?: "hunter" | "clay";
   size?: string; employees?: number; revenue?: string; industry?: string; country?: string; founded?: number; name?: string;
 };
 
-export type Person = { first: string; last: string; title: string; email: string; linkedin: string; confidence: number; department: string; seniority: string };
+export type Person = { first: string; last: string; title: string; email: string; linkedin: string; confidence: number; department: string; seniority: string; via?: "hunter" | "clay" };
 export type People = { at: string; domain: string; list: Person[]; total: number };
 
 type Fetcher = (url: string, headers?: Record<string, string>) => Promise<{ status: number; body: unknown } | null>;
@@ -131,4 +135,101 @@ export async function hunterPeople(domain: string, get: Fetcher = defaultFetch, 
   })).filter((p) => p.email && (p.first || p.last))
     .sort((a, b) => roleRank(b.title) - roleRank(a.title) || b.confidence - a.confidence);
   return { ok: true, value: { list, total: Math.max(list.length, Number(body?.meta?.results) || 0) } };
+}
+
+// ---- Clay (CLAY_API_KEY, free plan: 100 search results per rolling 30 days) ----------------------------
+// Its company search by website gives the LinkedIn page, revenue, size, industry and country; its people
+// search gives who works there by job title (LinkedIn, no email). One result = one of the 100.
+
+const clayKey = () => env("CLAY_API_KEY");
+export const clayConfigured = () => !!clayKey();
+const CLAY = "https://api.clay.com/public/v0";
+type Poster = (url: string, body: unknown, headers: Record<string, string>) => Promise<{ status: number; body: unknown } | null>;
+const defaultPost: Poster = async (url, body, headers) => {
+  const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json", "User-Agent": "InfluenceFlowCRM/1.0", ...headers }, body: JSON.stringify(body), signal: AbortSignal.timeout(20_000) }).catch(() => null);
+  if (!res) return null;
+  return { status: res.status, body: await res.json().catch(() => null) };
+};
+const clayStatus = (status: number): HunterAnswer<never> | null =>
+  status === 401 || status === 403 ? { ok: false, why: "bad_key" }
+    : status === 402 ? { ok: false, why: "quota" } // Clay: a search-result limit was reached
+      : status === 429 ? { ok: false, why: "busy" }
+        : status === 404 ? { ok: false, why: "none" }
+          : status >= 300 ? { ok: false, why: "error" } : null;
+
+/** Runs one Clay search query; tries each query until one is accepted (a 400 = a field name this workspace doesn't have). */
+async function claySearch(queries: string[], limit: number, post: Poster, key: string): Promise<HunterAnswer<Record<string, unknown>[]>> {
+  for (const query of queries) {
+    const made = await post(`${CLAY}/search/query-mode`, { query }, { "clay-api-key": key });
+    if (!made) return { ok: false, why: "error" };
+    if (made.status === 400 || made.status === 422) continue;
+    const bad = clayStatus(made.status); if (bad) return bad;
+    const id = String((made.body as { search_id?: unknown } | null)?.search_id || "");
+    if (!/^[\w-]{4,120}$/.test(id)) return { ok: false, why: "error" };
+    const run = await post(`${CLAY}/search/query-mode/${encodeURIComponent(id)}/run`, { limit }, { "clay-api-key": key });
+    if (!run) return { ok: false, why: "error" };
+    const bad2 = clayStatus(run.status); if (bad2) return bad2;
+    const data = (run.body as { data?: unknown } | null)?.data;
+    return { ok: true, value: Array.isArray(data) ? data.slice(0, limit) as Record<string, unknown>[] : [] };
+  }
+  return { ok: false, why: "error" };
+}
+
+/** "$12,500,000" / 12500000 / "10M-50M" → a short label. */
+function revenueLabel(v: unknown): string {
+  if (typeof v === "number" && Number.isFinite(v) && v > 0) return v >= 1e9 ? `$${(v / 1e9).toFixed(1).replace(/\.0$/, "")}B` : v >= 1e6 ? `$${Math.round(v / 1e6)}M` : `$${Math.round(v / 1e3)}K`;
+  if (v && typeof v === "object") { const o = v as { min?: unknown; max?: unknown }; const a = revenueLabel(o.min), b = revenueLabel(o.max); return a && b ? `${a}–${b}` : a || b; }
+  return clip(v, 30);
+}
+
+/** Clay's company record for exactly this website. */
+export async function clayCompany(domain: string, post: Poster = defaultPost, key = clayKey()): Promise<HunterAnswer<Omit<CompanyFacts, "domain" | "at">> & { results?: number }> {
+  const d = normalizeDomain(domain);
+  if (!key) return { ok: false, why: "no_key" };
+  if (!/^[a-z0-9.-]+\.[a-z]{2,}$/.test(d)) return { ok: false, why: "none" };
+  const r = await claySearch([`select from companies where domain = "${d}"`, `select from companies where website = "${d}"`], 1, post, key);
+  if (!r.ok) return r;
+  const c = r.value.find((x) => normalizeDomain(String(x.domain || x.website || "")) === d);
+  if (!c) return { ok: false, why: "none", results: r.value.length };
+  const out: Omit<CompanyFacts, "domain" | "at"> = { linkedin: linkedinCompany(String(c.linkedin_url || "")), name: clip(c.name, 80) };
+  if (c.size) out.size = clip(c.size, 24);
+  const emp = Number(c.estimated_employee_count ?? c.employee_count);
+  if (Number.isFinite(emp) && emp > 0) out.employees = Math.round(emp);
+  const rev = revenueLabel(c.annual_revenue);
+  if (rev) out.revenue = rev;
+  if (c.industry) out.industry = clip(c.industry, 60);
+  const cc = String(c.country || "");
+  if (/^[A-Z]{2}$/.test(cc)) out.country = cc;
+  return { ok: true, value: out, results: 1 };
+}
+
+const CLAY_TITLES = ["partnerships", "influencer", "creator", "affiliate", "brand manager", "social media", "marketing", "founder"];
+/** People at this website's company whose current job title is about partnerships / influencer / marketing / founding. */
+export async function clayPeople(domain: string, limit = 5, post: Poster = defaultPost, key = clayKey()): Promise<HunterAnswer<Person[]> & { results?: number }> {
+  const d = normalizeDomain(domain);
+  if (!key) return { ok: false, why: "no_key" };
+  if (!/^[a-z0-9.-]+\.[a-z]{2,}$/.test(d)) return { ok: false, why: "none" };
+  const titles = CLAY_TITLES.map((t) => `job_title is_similar_to ("${t}")`).join(" or ");
+  const q = (field: string) => `select from people where experiences.any(is_current = true and company.${field} = "${d}" and (${titles}))`;
+  const r = await claySearch([q("domain"), q("website")], Math.max(1, Math.min(10, limit)), post, key);
+  if (!r.ok) return r;
+  const list: Person[] = r.value.map((p) => {
+    const exp = (Array.isArray(p.matched_experiences) ? p.matched_experiences : [])[0] as { title?: unknown } | undefined;
+    const li = [p.linkedin_url, p.linkedin_profile_url, p.profile_url, p.url].map((x) => String(x || "")).find((x) => /^https?:\/\/([a-z]{2,3}\.|www\.)?linkedin\.com\/in\/[\w%-]+/i.test(x)) || "";
+    const name = clip(p.name, 80);
+    return { first: clip(p.first_name, 40) || name.split(" ")[0] || "", last: clip(p.last_name, 40) || name.split(" ").slice(1).join(" "), title: clip(exp?.title ?? p.job_title ?? p.title, 80), email: "", linkedin: li.split("?")[0].slice(0, 200), confidence: 0, department: "", seniority: "", via: "clay" as const };
+  }).filter((p) => p.first || p.last).sort((a, b) => roleRank(b.title) - roleRank(a.title));
+  return { ok: true, value: list, results: r.value.length };
+}
+
+/** Hunter's people (with emails) and Clay's (LinkedIn) as one list: one row per person, deal-makers first. */
+export function mergePeople(hunter: Person[], clay: Person[]): Person[] {
+  const key = (p: Person) => `${p.first} ${p.last}`.toLowerCase().replace(/[^a-z]+/g, " ").trim();
+  const out: Person[] = hunter.map((p) => ({ ...p, via: p.via || "hunter" }));
+  for (const c of clay) {
+    const twin = out.find((p) => key(p) && key(p) === key(c));
+    if (twin) { if (!twin.linkedin && c.linkedin) twin.linkedin = c.linkedin; if (!twin.title && c.title) twin.title = c.title; }
+    else out.push(c);
+  }
+  return out.sort((a, b) => roleRank(b.title) - roleRank(a.title) || Number(!!b.email) - Number(!!a.email) || b.confidence - a.confidence);
 }

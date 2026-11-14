@@ -1,6 +1,6 @@
 // Run: deno run --allow-read --allow-env supabase/functions/_shared/companyInfo.test.ts
 // Recorded answers — no network.
-import { hunterCompany, hunterPeople, linkedinCompany, roleRank, siteLinkedin, wikidataLinkedin } from "./companyInfo.ts";
+import { clayCompany, clayPeople, hunterCompany, hunterPeople, mergePeople, linkedinCompany, roleRank, siteLinkedin, wikidataLinkedin } from "./companyInfo.ts";
 
 let fail = 0;
 const eq = (name: string, got: unknown, want: unknown) => {
@@ -44,5 +44,30 @@ eq("people: order by role", people.ok ? people.value.list.map((p) => p.first) : 
 eq("people: unsafe LinkedIn dropped", people.ok ? people.value.list.find((p) => p.first === "Kim")?.linkedin : people, "");
 eq("people: total from Hunter", people.ok ? people.value.total : people, 14);
 eq("roles: partnerships beats CEO", roleRank("Partnerships Lead") > roleRank("Founder & CEO"), true);
+
+// Clay: search by website; a 400 (unknown field) tries the next query; a record for another site is refused.
+const clay = (runs: { status: number; body: unknown }[], seen: string[] = []) => {
+  let i = 0;
+  return async (url: string, body: unknown) => {
+    seen.push(url.endsWith("/run") ? "run" : String((body as { query?: string }).query || ""));
+    if (!url.endsWith("/run")) return runs[i]?.status === 400 ? { status: (i++, 400), body: {} } : { status: 200, body: { search_id: "srch_1" } };
+    return runs[i++] || { status: 500, body: {} };
+  };
+};
+const crec = { name: "Bambu Lab", domain: "bambulab.com", linkedin_url: "https://www.linkedin.com/company/bambulab/", annual_revenue: 180000000, size: "1,001-5,000", industry: "Computer Hardware", country: "CN" };
+eq("clay: no key", await clayCompany("bambulab.com", clay([]), ""), { ok: false, why: "no_key" });
+eq("clay: company record", await clayCompany("bambulab.com", clay([{ status: 200, body: { data: [crec] } }]), "k"), { ok: true, value: { linkedin: "https://www.linkedin.com/company/bambulab", name: "Bambu Lab", size: "1,001-5,000", revenue: "$180M", industry: "Computer Hardware", country: "CN" }, results: 1 });
+eq("clay: another site's record is refused", (await clayCompany("bambu.com", clay([{ status: 200, body: { data: [crec] } }]), "k")).ok, false);
+eq("clay: 402 = results used up", await clayCompany("bambulab.com", clay([{ status: 402, body: {} }]), "k"), { ok: false, why: "quota" });
+const tried: string[] = [];
+eq("clay: unknown field → next query", (await clayCompany("bambulab.com", clay([{ status: 400, body: {} }, { status: 200, body: { data: [crec] } }], tried), "k")).ok, true);
+eq("clay: second query used website", tried.some((q) => q.includes('website = "bambulab.com"')), true);
+const cp = await clayPeople("acme.com", 5, clay([{ status: 200, body: { data: [
+  { name: "Lee Chan", first_name: "Lee", last_name: "Chan", linkedin_url: "https://www.linkedin.com/in/leechan?x=1", matched_experiences: [{ company: "Acme", title: "Brand Partnerships Lead" }] },
+  { name: "Ann Lee", matched_experiences: [{ title: "Founder" }], linkedin_url: "https://evil.example/in/x" },
+] } }]), "k");
+eq("clay people: names, titles, safe LinkedIn only", cp.ok ? cp.value.map((p) => [p.first, p.last, p.title, p.linkedin]) : cp, [["Lee", "Chan", "Brand Partnerships Lead", "https://www.linkedin.com/in/leechan"], ["Ann", "Lee", "Founder", ""]]);
+const merged = mergePeople([{ first: "Ann", last: "Lee", title: "Founder", email: "ann@acme.com", linkedin: "", confidence: 98, department: "", seniority: "" }], cp.ok ? cp.value : []);
+eq("merge: one row per person, Hunter's email + Clay's LinkedIn", merged.map((p) => [p.first, p.email, p.via]), [["Lee", "", "clay"], ["Ann", "ann@acme.com", "hunter"]]);
 
 if (fail) { console.log(`\n${fail} failed`); Deno.exit(1); } else console.log("\nall passed");
