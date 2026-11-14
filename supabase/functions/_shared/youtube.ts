@@ -24,7 +24,7 @@
 // +100 for a /c/ name search). The videos behind the average are kept (sample).
 // Pure helpers are exported for tests; nothing here touches the database.
 
-import { cred } from "./keyring.ts";
+import { cred, scoped } from "./keyring.ts";
 const YT = "https://www.googleapis.com/youtube/v3";
 
 export type ChannelRef = { kind: "id" | "handle" | "user" | "custom" | "video"; value: string };
@@ -213,12 +213,58 @@ const keys = () => Array.from(new Set(`${cred("YOUTUBE_API_KEYS")},${cred("YOUTU
 export const youtubeConfigured = () => keys().length > 0;
 const dead = new Set<string>();
 
+// ---- the unit meter: every call is counted against the key owner's day ------------------------
+// YouTube gives each project 10,000 units a day (search = 100, everything we use otherwise = 1). The
+// meter keeps a running count per key owner in ai_budget (route "youtube" / "youtube@<member>") so the
+// background work (hourly refresh, Match reading) stops BEFORE the key runs dry and leaves room for what
+// you ask for yourself (Quick fill, Refresh). Counted in UTC days; YouTube resets at midnight Pacific, so
+// the guard keeps a margin.
+const COST: Record<string, number> = { search: 100 };
+// deno-lint-ignore no-explicit-any
+type MeterAdmin = { rpc: (fn: string, args: Record<string, unknown>) => any; from: (t: string) => any };
+let meterAdmin: MeterAdmin | null = null;
+const pending = new Map<string, number>();
+export function useYoutubeMeter(a: MeterAdmin) { meterAdmin = a; }
+/** Saves the units counted so far (called at the end of every request / run, and every 20 units). */
+export async function flushYoutubeMeter() {
+  if (!meterAdmin || !pending.size) return;
+  const items = [...pending];
+  pending.clear();
+  for (const [route, n] of items) await Promise.resolve(meterAdmin.rpc("ai_budget_use", { p_route: route, p_units: n })).catch(() => null);
+}
+const count = (path: string) => {
+  const route = scoped("youtube");
+  const n = (pending.get(route) || 0) + (COST[path] ?? 1);
+  pending.set(route, n);
+  if (n >= 20) void flushYoutubeMeter();
+};
+const envNum = (k: string, d: number) => { const v = Number(typeof Deno !== "undefined" ? Deno.env.get(k) : ""); return Number.isFinite(v) && v > 0 ? v : d; };
+/** Units the current key owner used today, and what their keys allow (10,000 per project). */
+export async function youtubeUsage(): Promise<{ used: number; capacity: number; background: number }> {
+  const route = scoped("youtube");
+  let used = pending.get(route) || 0;
+  if (meterAdmin) {
+    const { data } = await meterAdmin.from("ai_budget").select("units").eq("route", route).eq("day", new Date().toISOString().slice(0, 10)).maybeSingle();
+    used += Number(data?.units) || 0;
+  }
+  const capacity = Math.max(1, keys().length) * envNum("YT_DAILY_UNITS", 10_000);
+  // Background work stops here; the rest is kept for what you do by hand.
+  const background = Math.max(0, capacity - envNum("YT_KEEP_UNITS", 1_500));
+  return { used, capacity, background };
+}
+/** May background work (refresh, Match reading) spend units now? */
+export async function youtubeBackgroundOk(): Promise<boolean> {
+  const u = await youtubeUsage();
+  return u.used < u.background;
+}
+
 // deno-lint-ignore no-explicit-any
 async function api(path: string, params: Record<string, string>): Promise<any> {
   for (const key of keys()) {
     if (dead.has(key)) continue;
     // The key travels in a header, never in the URL (URLs end up in logs).
     const q = new URLSearchParams(params);
+    count(path);
     const res = await fetch(`${YT}/${path}?${q}`, { headers: { "X-Goog-Api-Key": key }, signal: AbortSignal.timeout(15_000) }).catch(() => null);
     if (!res) throw new Error("YouTube didn't answer — try again in a moment");
     if (res.status === 403 || res.status === 429) {
@@ -248,10 +294,11 @@ async function channelIdFor(ref: ChannelRef): Promise<string | null> {
 }
 
 /** Everything the CRM knows how to use about one channel. Null when it can't be found. */
-export async function channelFacts(input: string, now = new Date(), opts: { includeRecent?: boolean } = {}): Promise<ChannelFacts | null> {
+export async function channelFacts(input: string, now = new Date(), opts: { includeRecent?: boolean; knownId?: string } = {}): Promise<ChannelFacts | null> {
   const ref = parseChannelRef(input);
   if (!ref) return null;
-  const id = await channelIdFor(ref);
+  // A channel id we already know for this very link saves the lookup (1 unit, 100 for a /c/ name search).
+  const id = opts.knownId && /^UC[\w-]{22}$/.test(opts.knownId) ? opts.knownId : await channelIdFor(ref);
   if (!id) return null;
   const ch = (await api("channels", { part: "snippet,statistics,contentDetails,brandingSettings,topicDetails", id })).items?.[0];
   if (!ch) return null;
@@ -304,6 +351,23 @@ export async function channelFacts(input: string, now = new Date(), opts: { incl
 // ---- reading a channel's videos (brand-match) ------------------------------------
 
 export type FullVideo = { id: string; title: string; description: string; tags: string[]; at: string; secs: number; views: number; paid: boolean; live: string; stream: boolean };
+
+/**
+ * The channel id already stored for a creator, when it still belongs to the link on file (the same
+ * @handle, or the id itself) — so a refresh never looks the channel up again. "" when unsure.
+ */
+export function knownChannelId(link: string, stored: { channel_id?: unknown; handle?: unknown; url?: unknown } | null | undefined): string {
+  const id = typeof stored?.channel_id === "string" && /^UC[\w-]{22}$/.test(stored.channel_id) ? stored.channel_id : "";
+  if (!id) return "";
+  const ref = parseChannelRef(link);
+  if (!ref) return "";
+  if (ref.kind === "id") return ref.value === id ? id : "";
+  const handle = String(stored?.handle || "").replace(/^@/, "").toLowerCase();
+  if ((ref.kind === "handle" || ref.kind === "custom") && handle && ref.value.toLowerCase() === handle) return id;
+  // The same URL as last time (a /c/ or /user/ link that resolved to this id before).
+  const norm = (u: unknown) => String(u || "").toLowerCase().replace(/^https?:\/\/(www\.|m\.)?/, "").replace(/\/+$/, "");
+  return norm(stored?.url) && norm(stored?.url) === norm(link) ? id : "";
+}
 
 /** The channel id behind a link / handle / id (1 unit, 0 for a plain id). */
 export async function channelIdOf(input: string): Promise<string | null> {

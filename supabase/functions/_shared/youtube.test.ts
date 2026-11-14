@@ -1,5 +1,5 @@
 // Run: node --experimental-strip-types supabase/functions/_shared/youtube.test.ts
-import { averageOf, emailsIn, middleMean, nicheOf, parseChannelRef, seconds, starsFor, type Video } from "./youtube.ts";
+import { averageOf, emailsIn, knownChannelId, middleMean, nicheOf, parseChannelRef, seconds, starsFor, type Video } from "./youtube.ts";
 
 let fail = 0;
 const eq = (name: string, got: unknown, want: unknown) => {
@@ -46,5 +46,15 @@ eq("uploads list: a past live stream never counts", averageOf([...tab.map((v) =>
 eq("uploads list: Shorts (3 min or less) never count", averageOf([...tab.map((v) => ({ ...v, videosTab: false })), vid("short", 1_000_000, 100, { secs: 45 })], NOW).avgViews, 163_500);
 eq("include brand-new videos when asked", averageOf(tab, NOW, { includeRecent: true }).sample.map((v) => v.id).slice(0, 2), ["new1", "new2"]);
 eq("Shorts-only channel uses any length, still no streams", averageOf([vid("s1", 10, 30, { secs: 30 }), vid("s2", 20, 40, { secs: 30 }), vid("s3", 30, 50, { secs: 30 }), vid("s4", 40, 60, { secs: 30 }), vid("st", 9_999, 70, { stream: true })], NOW).avgViews, 25);
+
+// A stored channel id is reused only for the same link (saves the lookup on every refresh).
+const ID = "UCabcdefghijklmnopqrstuv";
+eq("known id: same @handle", knownChannelId("https://youtube.com/@Ludalx", { channel_id: ID, handle: "ludalx" }), ID);
+eq("known id: handle changed = look it up again", knownChannelId("https://youtube.com/@SomeoneElse", { channel_id: ID, handle: "ludalx" }), "");
+eq("known id: the id link itself", knownChannelId(`https://www.youtube.com/channel/${ID}`, { channel_id: ID }), ID);
+eq("known id: another id", knownChannelId("https://www.youtube.com/channel/UCzzzzzzzzzzzzzzzzzzzzzz", { channel_id: ID }), "");
+eq("known id: same /c/ url as last time", knownChannelId("youtube.com/c/OldName", { channel_id: ID, url: "https://www.youtube.com/c/OldName/" }), ID);
+eq("known id: nothing stored", knownChannelId("https://youtube.com/@Ludalx", null), "");
+eq("known id: junk stored", knownChannelId("https://youtube.com/@Ludalx", { channel_id: "nope", handle: "ludalx" }), "");
 
 if (fail) { console.log(`${fail} failed`); (globalThis as { process?: { exit(n: number): void } }).process?.exit(1); } else console.log("all youtube tests pass");

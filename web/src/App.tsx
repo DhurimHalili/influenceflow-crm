@@ -33,6 +33,7 @@ const BrandsPage = lazy(() => import("./pages/BrandsPage"));
 const BrandDetailPage = lazy(() => import("./pages/BrandsPage").then((module) => ({ default: module.BrandDetailPage })));
 const CampaignsPage = lazy(() => import("./pages/CampaignsPage"));
 const CalendarPage = lazy(() => import("./pages/CalendarPage"));
+const SetupKeysPage = lazy(() => import("./pages/SetupKeysPage"));
 const SettingsPage = lazy(() => import("./pages/WorkspacePages").then((module) => ({ default: module.SettingsPage })));
 const ThemesPage = lazy(() => import("./pages/WorkspacePages").then((module) => ({ default: module.ThemesPage })));
 const DeletedPage = lazy(() => import("./pages/WorkspacePages").then((module) => ({ default: module.DeletedPage })));
@@ -102,6 +103,7 @@ export default function App() {
                   <Route path="pitch" element={<PitchPage />} />
                   <Route path="match" element={<MatchPage />} />
                   <Route path="settings" element={<SettingsPage />} />
+                  <Route path="setup" element={<SetupKeysPage />} />
                   <Route path="members" element={<MembersPage />} />
                   <Route path="themes" element={<ThemesPage />} />
                   <Route path="deleted" element={<DeletedPage />} />

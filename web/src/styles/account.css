@@ -264,7 +264,7 @@
 .ak-ready li b { color: var(--text); }
 .ak-ready li.done b { color: var(--text-soft); }
 .ak-ready li small { color: var(--muted); font-size: 11.5px; }
-.ak-preview { grid-column: 1 / -1; }
+.ak-links { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px 18px; }
 .ak-group { display: grid; gap: 10px; }
 .ak-group-head h3 { margin: 4px 0 0; font: 700 14px "Manrope", sans-serif; color: var(--text); }
 .ak-group-head p { margin: 2px 0 0; color: var(--muted); font-size: 12.5px; line-height: 1.5; }
@@ -333,3 +333,129 @@
   .kn-actions > .kn-go, .kn-actions > .kn-call { flex: 1 1 100%; justify-content: center; }
   .kn-later { margin: 0 auto; }
 }
+.ak-meter { display: grid; gap: 5px; padding: 10px 12px; border-radius: 12px; background: var(--surface-alt); }
+.ak-meter-top { display: flex; align-items: baseline; gap: 6px; font-size: 12.5px; color: var(--muted); }
+.ak-meter-top b { color: var(--text); font: 800 16px "Manrope", sans-serif; font-variant-numeric: tabular-nums; }
+.ak-meter-bar { position: relative; height: 8px; border-radius: 999px; background: var(--bg-soft); overflow: visible; }
+.ak-meter-bar i { position: absolute; inset: 0 auto 0 0; border-radius: inherit; background: var(--accent); transition: width .3s ease-out; }
+.ak-meter.hot .ak-meter-bar i { background: var(--warning); }
+.ak-meter-bar em { position: absolute; top: -3px; bottom: -3px; width: 2px; border-radius: 2px; background: var(--text-soft); }
+.ak-meter small { color: var(--muted); font-size: 11.5px; line-height: 1.45; }
+
+/* ---------- Getting started: plug in your keys (/app/setup) ---------- */
+.setup { display: grid; gap: 18px; max-width: 1080px; margin: 0 auto; padding-bottom: 40px; }
+.setup-hero { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 24px; align-items: center; padding: 28px 30px; overflow: hidden; border-radius: 24px; border: 1px solid var(--line); background: radial-gradient(circle at 92% 10%, color-mix(in srgb, var(--accent) 22%, transparent), transparent 46%), linear-gradient(135deg, color-mix(in srgb, var(--accent) 9%, var(--surface-solid)), var(--surface-solid) 65%); }
+.setup-eyebrow { display: inline-flex; align-items: center; gap: 6px; color: var(--accent); font-size: 12px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.setup-hero h1 { margin: 6px 0 8px; font: 800 clamp(30px, 4.4vw, 44px)/1.05 "Manrope", sans-serif; letter-spacing: -.02em; color: var(--text); }
+.setup-hero p { max-width: 620px; margin: 0; color: var(--text-soft); font-size: 15px; line-height: 1.6; }
+.setup-hero p b { color: var(--text); }
+.setup-ring { --p: 0%; display: grid; justify-items: center; gap: 8px; }
+.setup-ring > div { display: grid; place-items: center; align-content: center; width: 124px; height: 124px; border-radius: 50%; background: radial-gradient(closest-side, var(--surface-solid) 78%, transparent 79% 100%), conic-gradient(var(--accent) var(--p), var(--bg-soft) 0); transition: background .4s ease-out; }
+.setup-ring.full > div { background: radial-gradient(closest-side, var(--surface-solid) 78%, transparent 79% 100%), conic-gradient(var(--success) 100%, var(--bg-soft) 0); }
+.setup-ring b { font: 800 40px/1 "Manrope", sans-serif; color: var(--text); }
+.setup-ring span { color: var(--muted); font-size: 12px; font-weight: 700; }
+.setup-ring small { color: var(--text-soft); font-size: 12.5px; font-weight: 650; }
+.setup-cells { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin: 0; padding: 0; list-style: none; }
+.setup-cell { display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-rows: auto auto; gap: 8px 10px; align-items: center; width: 100%; padding: 12px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface-solid); color: var(--text); font: inherit; text-align: left; cursor: pointer; transition: border-color .15s ease-out, box-shadow .15s ease-out, transform .15s ease-out; }
+.setup-cell:hover { transform: translateY(-1px); border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); }
+.setup-cell:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.setup-cell.on { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 15%, transparent); }
+.setup-cell-ico { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 10px; background: var(--accent-soft); color: var(--accent); }
+.setup-cell.done .setup-cell-ico { background: color-mix(in srgb, var(--success) 15%, transparent); color: var(--success); }
+.setup-cell-txt { display: grid; min-width: 0; }
+.setup-cell-txt small { color: var(--muted); font-size: 11px; font-weight: 700; }
+.setup-cell-txt b { overflow: hidden; font-size: 14px; white-space: nowrap; text-overflow: ellipsis; }
+.setup-cell-bar { grid-column: 1 / -1; height: 6px; border-radius: 999px; background: var(--bg-soft); overflow: hidden; }
+.setup-cell-bar i { display: block; width: 0; height: 100%; border-radius: inherit; background: var(--success); transition: width .45s ease-out; }
+.setup-cell.done .setup-cell-bar i { width: 100%; }
+.setup-station { border: 1px solid var(--line); border-radius: 20px; background: var(--surface-solid); scroll-margin-top: 90px; overflow: hidden; }
+.setup-station.open { box-shadow: var(--shadow-sm, 0 6px 20px rgba(0, 0, 0, .05)); }
+.setup-station.done { border-color: color-mix(in srgb, var(--success) 35%, var(--line)); }
+.setup-station-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 14px; align-items: center; width: 100%; padding: 16px 18px; border: 0; background: transparent; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.setup-station-head:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 20px; }
+.setup-num { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: var(--accent); color: #fff; font: 800 15px "Manrope", sans-serif; }
+.setup-station.done .setup-num { background: var(--success); }
+.setup-station-title { display: grid; gap: 2px; min-width: 0; }
+.setup-station-title h2 { display: flex; align-items: center; gap: 8px; margin: 0; font: 800 18px "Manrope", sans-serif; }
+.setup-station-title h2 svg { color: var(--accent); }
+.setup-station-title small { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); font-size: 12px; font-weight: 650; }
+.setup-station.done .setup-station-title small { color: var(--success); }
+.setup-chev { color: var(--muted); transition: transform .15s ease-out; }
+.setup-station.open .setup-chev { transform: rotate(180deg); }
+.setup-station-body { display: grid; gap: 14px; padding: 0 18px 18px; animation: setup-in .18s ease-out; }
+.setup-unlocks { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.setup-unlocks small { margin-right: 4px; color: var(--muted); font-size: 11px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+.setup-unlocks span { display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-size: 12px; font-weight: 650; }
+.setup-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr); gap: 16px; align-items: start; }
+.setup-steps { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.setup-steps li { display: flex; gap: 10px; align-items: flex-start; font-size: 13.5px; line-height: 1.55; color: var(--text); }
+.setup-step-n { display: grid; place-items: center; flex: none; width: 24px; height: 24px; border-radius: 8px; background: var(--bg-soft); color: var(--text-soft); font-size: 12px; font-weight: 800; }
+.setup-steps a { display: inline-flex; align-items: center; gap: 3px; color: var(--accent); font-weight: 700; text-decoration: none; white-space: nowrap; }
+.setup-steps a:hover { text-decoration: underline; }
+.setup-steps li.setup-rule { padding: 10px 12px; border-radius: 12px; background: color-mix(in srgb, var(--warning) 10%, var(--surface-solid)); color: var(--text-soft); font-size: 12.5px; }
+.setup-steps li.setup-rule svg { flex: none; margin-top: 3px; color: var(--warning); }
+.setup-cards { display: grid; gap: 10px; min-width: 0; }
+.setup-more { display: inline-flex; align-items: center; gap: 6px; justify-self: start; padding: 6px 4px; border: 0; background: transparent; color: var(--accent); font: inherit; font-size: 12.5px; font-weight: 700; cursor: pointer; }
+.setup-more svg.up { transform: rotate(180deg); }
+.setup-next { display: inline-flex; align-items: center; gap: 6px; justify-self: end; min-height: 36px; padding: 0 14px; border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--line)); border-radius: 10px; background: var(--accent-soft); color: var(--accent); font: inherit; font-size: 13px; font-weight: 750; cursor: pointer; }
+.setup-done { display: flex; gap: 12px; align-items: flex-start; padding: 14px 16px; border-radius: 16px; background: color-mix(in srgb, var(--success) 10%, var(--surface-solid)); border: 1px solid color-mix(in srgb, var(--success) 35%, var(--line)); color: var(--text-soft); font-size: 13.5px; line-height: 1.55; }
+.setup-done svg { flex: none; color: var(--success); }
+.setup-done b { color: var(--text); }
+.setup-done a { color: var(--accent); font-weight: 700; }
+.setup-trust { display: grid; gap: 10px; padding: 22px; border-radius: 22px; border: 1px solid var(--line); background: var(--surface-solid); }
+.setup-trust h2 { margin: 0; font: 800 20px "Manrope", sans-serif; color: var(--text); }
+.setup-trust > p { margin: 0; color: var(--text-soft); font-size: 13.5px; }
+.setup-trust-grid { display: grid; grid-template-columns: 1.2fr 1fr; gap: 14px; }
+.setup-works, .setup-waits { display: grid; align-content: start; gap: 10px; padding: 14px; border-radius: 16px; }
+.setup-works { background: color-mix(in srgb, var(--success) 7%, var(--surface-solid)); border: 1px solid color-mix(in srgb, var(--success) 25%, var(--line)); }
+.setup-waits { background: var(--surface-alt); border: 1px dashed var(--line-strong, var(--line)); }
+.setup-works h3, .setup-waits h3 { display: flex; align-items: center; gap: 7px; margin: 0; font: 800 14px "Manrope", sans-serif; color: var(--text); }
+.setup-works h3 svg { color: var(--success); }
+.setup-waits h3 svg { color: var(--muted); }
+.setup-trust ul { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.setup-trust li { display: grid; gap: 1px; font-size: 13px; }
+.setup-trust li b { color: var(--text); }
+.setup-trust li span { color: var(--text-soft); line-height: 1.45; }
+.setup-waits li em { justify-self: start; margin-top: 3px; padding: 1px 8px; border-radius: 999px; background: var(--bg-soft); color: var(--muted); font-size: 11px; font-style: normal; font-weight: 700; }
+.setup-waits > p { margin: 0; color: var(--muted); font-size: 12px; }
+@keyframes setup-in { from { opacity: 0; transform: translateY(-4px); } }
+@media (prefers-reduced-motion: reduce) { .setup-station-body { animation: none; } .setup-cell, .setup-cell-bar i, .setup-ring > div { transition: none; } }
+@media (max-width: 900px) { .setup-grid, .setup-trust-grid { grid-template-columns: minmax(0, 1fr); } .setup-cells { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 560px) {
+  .setup-hero { grid-template-columns: minmax(0, 1fr); padding: 22px 18px; }
+  .setup-ring { grid-template-columns: auto auto; justify-content: start; align-items: center; gap: 14px; }
+  .setup-ring > div { width: 92px; height: 92px; }
+  .setup-ring b { font-size: 30px; }
+  .setup-station-head { padding: 14px; gap: 10px; }
+  .setup-station-body { padding: 0 14px 14px; }
+  .setup-trust { padding: 16px; }
+}
+
+/* Dashboard / Guide strip */
+.keys-strip { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; gap: 12px; align-items: center; margin-bottom: 14px; padding: 12px 14px; border-radius: 16px; border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line)); background: linear-gradient(110deg, var(--accent-soft), var(--surface-solid) 70%); }
+.keys-strip-ico { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 12px; background: var(--accent); color: #fff; }
+.keys-strip-main { display: grid; gap: 3px; min-width: 0; font-size: 13px; }
+.keys-strip-main b { color: var(--text); }
+.keys-strip-main span { color: var(--text-soft); }
+.keys-strip-main ul { display: flex; flex-wrap: wrap; gap: 5px; margin: 3px 0 0; padding: 0; list-style: none; }
+.keys-strip-main li { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 999px; background: var(--surface-solid); border: 1px solid var(--line); color: var(--muted); font-size: 11.5px; font-weight: 650; }
+.keys-strip-main li i { width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid var(--muted); }
+.keys-strip-main li.done { color: var(--success); border-color: color-mix(in srgb, var(--success) 30%, var(--line)); }
+.keys-strip-go { display: inline-flex; align-items: center; gap: 6px; min-height: 38px; padding: 0 14px; border-radius: 11px; background: var(--accent); color: #fff; font-size: 13px; font-weight: 750; text-decoration: none; white-space: nowrap; }
+.keys-strip-go:hover { filter: brightness(1.05); }
+.keys-strip-go:focus-visible, .keys-strip-x:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.keys-strip-x { display: grid; place-items: center; width: 30px; height: 30px; border: 0; border-radius: 8px; background: transparent; color: var(--muted); cursor: pointer; }
+.keys-strip-x:hover { background: var(--bg-soft); color: var(--text); }
+.keys-strip.guide { grid-template-columns: auto minmax(0, 1fr) auto; }
+@media (max-width: 640px) { .keys-strip, .keys-strip.guide { grid-template-columns: auto minmax(0, 1fr) auto; } .keys-strip-go { grid-column: 1 / -1; justify-content: center; } .keys-strip-x { grid-row: 1; grid-column: 3; } }
+
+/* Guide: getting-started card */
+.guide-keys { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 14px; align-items: center; margin-bottom: 18px; padding: 16px 18px; border-radius: 18px; border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line)); background: radial-gradient(circle at 95% 0%, color-mix(in srgb, var(--accent) 18%, transparent), transparent 50%), var(--surface-solid); color: var(--text); text-decoration: none; transition: transform .15s ease-out, box-shadow .15s ease-out; }
+.guide-keys:hover { transform: translateY(-1px); box-shadow: 0 10px 26px color-mix(in srgb, var(--accent) 15%, transparent); }
+.guide-keys:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.guide-keys-ico { display: grid; place-items: center; width: 46px; height: 46px; border-radius: 14px; background: var(--accent); color: #fff; }
+.guide-keys > span:nth-child(2) { display: grid; gap: 2px; min-width: 0; }
+.guide-keys small { color: var(--accent); font-size: 11.5px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+.guide-keys b { font: 800 17px "Manrope", sans-serif; }
+.guide-keys em { color: var(--text-soft); font-size: 13px; font-style: normal; line-height: 1.5; }
+.guide-keys > svg { color: var(--accent); }
