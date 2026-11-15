@@ -1,10 +1,11 @@
 import { ArchiveRestore, Check, ClipboardPaste, ExternalLink, RotateCcw, UserCheck, Wand2 } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useData } from "../contexts/DataContext";
 import { useToast } from "../contexts/ToastContext";
 import { creatorClashes, similarCreators, type ClashReason } from "../lib/duplicates";
-import { asPlatform, extractFromText, parseFollowers, SOCIAL_META, SOCIAL_ORDER, socialsWithChannel } from "../lib/socials";
+import { asPlatform, extractFromText, parseFollowers, resolveSocial, SOCIAL_META, SOCIAL_ORDER, socialsWithChannel } from "../lib/socials";
+import { isAnotherPerson } from "../lib/quickFill";
 import { compact, dateLabel, dueLabel, erContext, OUTREACH_STAGES, overallStars, RATING_DIMS, ratingScore, scoreLabel, today, weightShares } from "../lib/utils";
 import { ENTITY_STATUSES, STATUS_LABELS, type Creator, type EntityStatus, type Platform, type Priority, type SocialLink, type SocialPlatform } from "../types";
 import { SocialBadge } from "./SocialIcon";
@@ -156,10 +157,15 @@ export function CreatorFields({ draft, setDraft, mode }: Props) {
   draftRef.current = draft;
   const [ytBusy, setYtBusy] = useState(false);
   const [ytFacts, setYtFacts] = useState<ChannelFacts | null>(null);
+  // Only the latest lookup may fill the form: pasting the next creator while the
+  // last one is still being read must never pour the old channel into the new form.
+  const lookupSeq = useRef(0);
   const fillFromYouTube = async (link: string) => {
     if (!yt.enabled || !link) return;
+    const seq = ++lookupSeq.current;
     setYtBusy(true);
     const res = await yt.lookup(link);
+    if (seq !== lookupSeq.current) return;
     setYtBusy(false);
     if (!res.facts) { setPasteNote({ ok: false, text: res.error || "Couldn't read that YouTube channel — fill the numbers in by hand." }); return; }
     const f = res.facts;
@@ -199,7 +205,20 @@ export function CreatorFields({ draft, setDraft, mode }: Props) {
     setYtFacts(f);
     setPasteNote({ ok: true, text: `From YouTube: ${filled.join(", ")} — check and change anything you like` });
   };
-  const applyPaste = (text: string) => {
+  // A profile of someone else (another YouTube channel, another Instagram…) starts the
+  // form over for them — in Add only. Where you are in the pipeline stays; everything
+  // about the last person goes. "Add it to X instead" puts it all back and adds the link.
+  const [startedOver, setStartedOver] = useState<{ prev: CreatorDraft; redo: () => void } | null>(null);
+  const resolveRow = (row: { platform: string; text: string }) => resolveSocial(row.text, row.platform as SocialPlatform)?.url || "";
+  const freshFor = (d: CreatorDraft): CreatorDraft => ({ ...emptyDraft, pipeline_status: d.pipeline_status, date_contacted: d.date_contacted });
+  const startOver = (prev: CreatorDraft, redo: () => void) => {
+    lookupSeq.current++; // a lookup still running for the last person is dropped
+    setYtBusy(false);
+    setYtFacts(null);
+    setStartedOver({ prev, redo });
+    return freshFor(prev);
+  };
+  const applyPaste = (text: string, opts: { keep?: CreatorDraft } = {}) => {
     const found = extractFromText(text);
     const bareHandle = !found.socials.length && /^@?[\w.]{2,40}$/.test(text.trim()) ? text.trim().replace(/^@/, "") : found.handles[0] && !found.socials.length ? found.handles[0] : "";
     if (!found.socials.length && !found.email) {
@@ -207,29 +226,44 @@ export function CreatorFields({ draft, setDraft, mode }: Props) {
       setPasteNote({ ok: false, text: "Nothing recognisable — paste a profile link, an @handle or a bio with links." });
       return;
     }
-    const { rows, added: additions } = appendSocials(draft.socials, found.socials);
-    const next: CreatorDraft = { ...draft, socials: rows };
+    const current = opts.keep || draft;
+    const other = !opts.keep && mode === "add" && isAnotherPerson(current, found.socials, resolveRow);
+    const base = other ? startOver(current, () => applyPaste(text, { keep: current })) : current;
+    if (!other) setStartedOver(null);
+    const { rows, added: additions } = appendSocials(base.socials, found.socials);
+    const next: CreatorDraft = { ...base, socials: rows };
     const filled: string[] = additions.map((a) => SOCIAL_META[a.platform].label);
-    if (found.email && !draft.contact_email.trim()) { next.contact_email = found.email; filled.push("email"); }
-    if (found.nameGuess && !draft.name.trim()) { next.name = found.nameGuess; next.guess = { ...draft.guess, name: found.nameGuess }; filled.push("name (check it)"); }
+    if (found.email && !base.contact_email.trim()) { next.contact_email = found.email; filled.push("email"); }
+    if (found.nameGuess && !base.name.trim()) { next.name = found.nameGuess; next.guess = { ...base.guess, name: found.nameGuess }; filled.push("name (check it)"); }
     setDraft(next);
     setPasteText("");
     setHandleChoice("");
-    setPasteNote(filled.length ? { ok: true, text: `Added ${filled.join(", ")}` } : { ok: false, text: "Those profiles are already on this record." });
+    setPasteNote(other ? { ok: true, text: "New influencer — the form started over for them" } : filled.length ? { ok: true, text: `Added ${filled.join(", ")}` } : { ok: false, text: "Those profiles are already on this record." });
+    // Kept on the last person on purpose: the extra channel is added as a link, their facts stay theirs.
     const ytLink = found.socials.find((x) => x.platform === "YouTube");
-    if (ytLink) void fillFromYouTube(ytLink.url);
+    if (ytLink && !opts.keep) void fillFromYouTube(ytLink.url);
+    if (opts.keep) setPasteNote({ ok: true, text: `Added to ${current.name.trim() || "this influencer"} as another profile` });
   };
-  const chooseHandle = (platform: SocialPlatform) => {
-    const row = socialRow(platform, `@${handleChoice}`);
-    const next: CreatorDraft = { ...draft, socials: [...draft.socials.filter((r) => r.text.trim()), row] };
-    let note = `Added ${SOCIAL_META[platform].label}`;
-    if (!draft.name.trim()) { next.name = handleChoice.replace(/[._-]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()); next.guess = { ...draft.guess, name: next.name }; note += ", name (check it)"; }
+  const chooseHandle = (platform: SocialPlatform, opts: { keep?: CreatorDraft; handle?: string } = {}) => {
+    const handle = opts.handle || handleChoice;
+    const row = socialRow(platform, `@${handle}`);
+    const current = opts.keep || draft;
+    const other = !opts.keep && mode === "add" && isAnotherPerson(current, [{ platform, url: resolveRow({ platform, text: `@${handle}` }), handle }], resolveRow);
+    const base = other ? startOver(current, () => chooseHandle(platform, { keep: current, handle })) : current;
+    if (!other) setStartedOver(null);
+    const next: CreatorDraft = { ...base, socials: [...base.socials.filter((r) => r.text.trim()), row] };
+    let note = other ? "New influencer — the form started over for them" : `Added ${SOCIAL_META[platform].label}`;
+    if (!base.name.trim()) { next.name = handle.replace(/[._-]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()); next.guess = { ...base.guess, name: next.name }; if (!other) note += ", name (check it)"; }
     setDraft(next);
     setHandleChoice("");
     setPasteText("");
     setPasteNote({ ok: true, text: note });
-    if (platform === "YouTube") void fillFromYouTube(`@${handleChoice}`);
+    if (platform === "YouTube" && !opts.keep) void fillFromYouTube(`@${handle}`);
   };
+  // The form emptied (saved, cleared): nothing left to offer.
+  const hasProfiles = draft.socials.some((r) => r.text.trim());
+  useEffect(() => { if (!hasProfiles) setStartedOver(null); }, [hasProfiles]);
+  const prevName = startedOver ? startedOver.prev.name.trim() || "the last influencer" : "";
 
   // ----- summaries for folded sections
   const main = draft.socials[0];
@@ -255,7 +289,12 @@ export function CreatorFields({ draft, setDraft, mode }: Props) {
       </label>
       {handleChoice && <div className="cf-handle-choice"><span>Which network is <b>@{handleChoice}</b> on?</span>{SOCIAL_ORDER.filter((p) => p !== "Website" && p !== "WhatsApp").slice(0, 8).map((p) => <button type="button" key={p} onClick={() => chooseHandle(p)} style={{ ["--tone" as string]: SOCIAL_META[p].color }}><SocialBadge platform={p} size={18} /> {SOCIAL_META[p].label}</button>)}</div>}
       {ytBusy && <p className="cf-paste-note busy" role="status"><span className="cf-spin" aria-hidden="true" /> Reading the YouTube channel — last 12 videos, engagement, country…</p>}
-      {!ytBusy && pasteNote && <p className={`cf-paste-note ${pasteNote.ok ? "ok" : "warn"}`}>{pasteNote.ok && <Check size={13} />}{pasteNote.text}</p>}
+      {startedOver && <div className="cf-restart" role="status">
+        <RotateCcw size={14} aria-hidden="true" />
+        <span><b>Fresh form for the new channel.</b> {prevName} isn't in it any more{data.creators.some((c) => !c.archived_at && c.name.trim().toLowerCase() === startedOver.prev.name.trim().toLowerCase()) ? " — already saved in your influencers" : ""}.</span>
+        <button type="button" onClick={() => { const redo = startedOver.redo; setStartedOver(null); setPasteNote(null); redo(); }}>Add it to {prevName.length > 28 ? `${prevName.slice(0, 26)}…` : prevName} instead</button>
+      </div>}
+      {!ytBusy && pasteNote && !(startedOver && pasteNote.text.startsWith("New influencer")) && <p className={`cf-paste-note ${pasteNote.ok ? "ok" : "warn"}`}>{pasteNote.ok && <Check size={13} />}{pasteNote.text}</p>}
       {!ytBusy && ytFacts && ytFacts.businessEmailHidden && !draft.contact_email.trim() && <p className="cf-paste-note warn">No email in the channel description. YouTube may show one behind “View email address” — <a href={`${ytFacts.url}/about`} target="_blank" rel="noreferrer">open their About page <ExternalLink size={11} /></a></p>}
     </div>}
     <DraftVerdict draft={draft} />

@@ -132,3 +132,11 @@
 }
 .contact-block:has(> .contact-socials) { grid-template-columns: 1fr 1fr; }
 @media (max-width: 720px) { .contact-block:has(> .contact-socials) { grid-template-columns: 1fr; } }
+/* Quick fill pasted someone else: the form started over (CreatorForm `startedOver`). */
+.cf-restart { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; padding: 8px 10px; border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent); border-radius: 10px; background: var(--accent-soft); color: var(--text); font-size: 12.5px; line-height: 1.4; animation: cf-in .15s ease-out; }
+.cf-restart > svg { flex: none; color: var(--accent); }
+.cf-restart > span { flex: 1 1 220px; min-width: 0; }
+.cf-restart button { flex: none; padding: 4px 10px; border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent); border-radius: 8px; background: var(--surface-solid); color: var(--accent); font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; }
+.cf-restart button:hover { background: var(--surface-alt); }
+.cf-restart button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { .cf-restart { animation: none; } }
