@@ -1,7 +1,7 @@
 {
   "name": "InfluenceFlow CRM",
   "short_name": "InfluenceFlow",
-  "description": "Influencer CRM for agencies — influencers, brands, campaigns and calendar.",
+  "description": "Private workspace.",
   "id": "/influenceflow-crm/",
   "start_url": "/influenceflow-crm/#/app",
   "scope": "/influenceflow-crm/",

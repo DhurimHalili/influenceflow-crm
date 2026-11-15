@@ -459,3 +459,19 @@
 .guide-keys b { font: 800 17px "Manrope", sans-serif; }
 .guide-keys em { color: var(--text-soft); font-size: 13px; font-style: normal; line-height: 1.5; }
 .guide-keys > svg { color: var(--accent); }
+/* Private front door (PublicPages.tsx): Need help? + the owner's address, revealed on request. */
+.auth-help { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); }
+.auth-help-toggle { display: inline-flex; align-items: center; gap: 7px; padding: 6px 2px; border: 0; background: none; color: var(--muted); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+.auth-help-toggle:hover, .auth-help.open .auth-help-toggle { color: var(--accent); }
+.auth-help-toggle:focus-visible, .auth-help-reveal:focus-visible, .auth-help-mail a:focus-visible, .auth-help-mail button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 8px; }
+.auth-help-panel { display: grid; gap: 10px; margin-top: 8px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-alt); animation: setup-in .15s ease-out; }
+.auth-help-panel p { margin: 0; color: var(--text-soft, var(--text)); font-size: 13px; line-height: 1.5; }
+.auth-help-reveal { justify-self: start; display: inline-flex; align-items: center; gap: 7px; padding: 8px 12px; border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent); border-radius: 10px; background: var(--accent-soft); color: var(--accent); font: inherit; font-size: 13px; font-weight: 700; cursor: pointer; }
+.auth-help-mail { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+.auth-help-mail a { display: inline-flex; align-items: center; gap: 7px; min-width: 0; color: var(--accent); font-weight: 700; font-size: 14px; overflow-wrap: anywhere; text-decoration: none; }
+.auth-help-mail a:hover { text-decoration: underline; }
+.auth-help-mail button { display: inline-flex; align-items: center; gap: 5px; padding: 5px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-solid); color: var(--text); font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; }
+.auth-page.is-private .auth-brand span { display: inline-flex; align-items: center; gap: 6px; }
+/* Bot trap: off-screen for people and screen readers, filled in by form-filling bots. */
+.auth-trap { position: absolute !important; left: -10000px; top: auto; width: 1px; height: 1px; overflow: hidden; }
+@media (prefers-reduced-motion: reduce) { .auth-help-panel { animation: none; } }
