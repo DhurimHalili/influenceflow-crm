@@ -6,10 +6,10 @@
     <link rel="icon" type="image/svg+xml" href="/influenceflow-crm/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="google-site-verification" content="b0eIGuJP3EAx3ksgjH0V5omCNa6CdNkxtS87JRgPPWI" />
-    <meta
-      name="description"
-      content="InfluenceFlow CRM is a private influencer marketing CRM for agencies: creators, brands, campaigns, follow-ups and Gmail tracking in one workspace."
-    />
+    <!-- Private CRM: keep it out of search engines, previews and archives. -->
+    <meta name="robots" content="noindex, nofollow, noarchive, nosnippet, noimageindex, notranslate" />
+    <meta name="googlebot" content="noindex, nofollow, noarchive, nosnippet" />
+    <meta name="referrer" content="strict-origin-when-cross-origin" />
     <meta name="theme-color" content="#24212b" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -21,14 +21,7 @@
     <link rel="apple-touch-icon" href="/influenceflow-crm/apple-touch-icon.png" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="InfluenceFlow" />
-    <title>InfluenceFlow CRM - Private influencer marketing workspace</title>
-    <style>
-      .seo-landing{font-family:system-ui,sans-serif;max-width:880px;margin:0 auto;padding:28px 20px;color:#292219;background:#EAE3D3;line-height:1.5}
-      .seo-landing a{color:#B65C2E}
-      .seo-landing h1{font-size:1.8rem;letter-spacing:-.03em}
-      .seo-landing p,.seo-landing li{color:#8b97a8}
-      html[data-app-boot="1"] #seo-landing{display:none!important}
-    </style>
+    <title>InfluenceFlow · Private</title>
     <script>
       (function () {
         // Anti-clickjacking: Pages can't send X-Frame-Options / frame-ancestors,
@@ -38,42 +31,12 @@
           try { window.top.location.replace(window.self.location.href) } catch (e) {}
           return
         }
-        var h = location.hash || ''
-        if (h.indexOf('/login') !== -1 || h.indexOf('/signup') !== -1 || h.indexOf('/app') !== -1 || h.indexOf('/kit/') !== -1) {
-          document.documentElement.setAttribute('data-app-boot', '1')
-        }
       })()
     </script>
   </head>
   <body>
-    <div id="seo-landing" class="seo-landing">
-      <p><strong>InfluenceFlow CRM</strong> — Free influencer marketing CRM</p>
-      <h1>Run creators, brands, and campaigns in one private workspace.</h1>
-      <p>
-        InfluenceFlow helps agencies and freelancers manage influencers and brands, track negotiations and schedule meetings.
-        Each user gets a private workspace; other users cannot see your data.
-      </p>
-      <h2>Purpose of this application</h2>
-      <p>
-        The app is built for influencer marketing workflows: add creators and brand contacts, organize pipeline status
-        (new, contacted, negotiating, roster, and more), run campaigns with payments and deliverables, keep notes, and use a
-        calendar for meetings.
-      </p>
-      <ul>
-        <li>Creators &amp; brands CRM with notes and statuses</li>
-        <li>Campaigns and interactive calendar</li>
-        <li>Private workspaces, bulk import, search and export</li>
-      </ul>
-      <p>
-        <a href="/influenceflow-crm/#/signup">Sign up free</a> ·
-        <a href="/influenceflow-crm/#/login">Log in</a> ·
-        <a href="/influenceflow-crm/privacy.html">Privacy Policy</a> ·
-        <a href="/influenceflow-crm/terms.html">Terms of Service</a> ·
-        <a href="/influenceflow-crm/home.html">About InfluenceFlow</a>
-      </p>
-      <p>Built by Dhurim Halili · <a href="https://concepts-ew8.pages.dev/">Portfolio</a></p>
-    </div>
     <div id="root"></div>
+    <noscript>Private workspace. JavaScript is needed to sign in.</noscript>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

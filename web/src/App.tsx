@@ -12,12 +12,10 @@ import { HelperProvider } from "./contexts/HelperContext";
 import { AccessProvider, AccessWaiting, useAccess } from "./contexts/AccessContext";
 
 const AppShell = lazy(() => import("./components/AppShell"));
-const LandingPage = lazy(() => import("./pages/PublicPages").then((module) => ({ default: module.LandingPage })));
 const LoginPage = lazy(() => import("./pages/PublicPages").then((module) => ({ default: module.LoginPage })));
 const SignupPage = lazy(() => import("./pages/PublicPages").then((module) => ({ default: module.SignupPage })));
 const ForgotPasswordPage = lazy(() => import("./pages/PublicPages").then((module) => ({ default: module.ForgotPasswordPage })));
 const UpdatePasswordPage = lazy(() => import("./pages/PublicPages").then((module) => ({ default: module.UpdatePasswordPage })));
-const LegalPage = lazy(() => import("./pages/PublicPages").then((module) => ({ default: module.LegalPage })));
 const HelpPage = lazy(() => import("./pages/PublicPages").then((module) => ({ default: module.HelpPage })));
 const DashboardPage = lazy(() => import("./pages/DashboardPage"));
 const MembersPage = lazy(() => import("./pages/MembersPage"));
@@ -63,7 +61,7 @@ function AccessGate({ children }: { children: ReactNode }) {
 }
 
 function NotFound() {
-  return <div className="not-found"><span>404</span><h1>This path is out of flow.</h1><p>The page may have moved or no longer exists.</p><a href="#/">Return home</a></div>;
+  return <div className="not-found"><span>404</span><h1>This path is out of flow.</h1><p>The page may have moved or no longer exists.</p><a href="#/app">Back to the CRM</a></div>;
 }
 
 export default function App() {
@@ -79,16 +77,17 @@ export default function App() {
             <UpdateWatcher />
             <Suspense fallback={<LoadingScreen />}>
               <Routes>
-                <Route path="/" element={<LandingPage />} />
+                {/* A private CRM has no public pages: anything outside the app goes to sign-in. */}
+                <Route path="/" element={<Navigate to="/login" replace />} />
                 <Route path="/login" element={<LoginPage />} />
                 <Route path="/signup" element={<SignupPage />} />
                 <Route path="/forgot-password" element={<ForgotPasswordPage />} />
                 <Route path="/update-password" element={<UpdatePasswordPage />} />
-                <Route path="/privacy" element={<LegalPage type="privacy" />} />
-                <Route path="/terms" element={<LegalPage type="terms" />} />
-                <Route path="/help" element={<HelpPage />} />
+                <Route path="/privacy" element={<Navigate to="/login" replace />} />
+                <Route path="/terms" element={<Navigate to="/login" replace />} />
+                <Route path="/help" element={<Navigate to="/login" replace />} />
                 <Route path="/kit/:slug" element={<MediaKitPage />} />
-                <Route path="/hire" element={<Navigate to="/" replace />} />
+                <Route path="/hire" element={<Navigate to="/login" replace />} />
                 <Route path="/app" element={<RequireAuth><AppShell /></RequireAuth>}>
                   <Route index element={<DashboardPage />} />
                   <Route path="influencers" element={<InfluencersPage />} />
@@ -107,7 +106,7 @@ export default function App() {
                   <Route path="members" element={<MembersPage />} />
                   <Route path="themes" element={<ThemesPage />} />
                   <Route path="deleted" element={<DeletedPage />} />
-                  <Route path="help" element={<HelpPage embedded />} />
+                  <Route path="help" element={<HelpPage />} />
                   <Route path="hire" element={<Navigate to="/app" replace />} />
                 </Route>
                 <Route path="*" element={<NotFound />} />

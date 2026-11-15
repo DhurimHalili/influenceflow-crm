@@ -17,12 +17,6 @@ import './styles/phone.css'
 import { startFaviconAnimation } from './lib/favicon'
 import { bootUpdateCheck } from './lib/appUpdate'
 
-const seo = document.getElementById('seo-landing')
-if (seo) seo.remove()
-
-// Guard: never leave an unstyled SEO shell if the app bootstraps
-document.documentElement.dataset.appBoot = '1'
-
 // Drop the old login-lock store (replaced by .v2 with fair decay).
 try { localStorage.removeItem('influenceflow.login-attempts') } catch { /* ignore */ }
 

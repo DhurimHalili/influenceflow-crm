@@ -1,53 +1,10 @@
 import { HelpGuide } from "./HelpGuide";
-import { motion } from "framer-motion";
-import { ArrowRight, CalendarDays, ChevronRight, Database, Eye, EyeOff, HeartHandshake, KeyRound, LockKeyhole, Menu, ShieldCheck, Sparkles, Users, X } from "lucide-react";
+import { ArrowRight, Check, Copy, Eye, EyeOff, LifeBuoy, LockKeyhole, Mail } from "lucide-react";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { Button, Input, Logo } from "../components/ui";
 import { pwnedCount, pwnedMessage } from "../lib/pwned";
-
-function PublicNav({ dark = false }: { dark?: boolean }) {
-  const [open, setOpen] = useState(false);
-  return <nav className={`public-nav ${dark ? "nav-dark" : ""}`}><Link to="/"><Logo inverse={dark} /></Link><div className={`public-links ${open ? "open" : ""}`}><Link to="/help">Help</Link><Link to="/privacy">Privacy</Link><Link to="/login">Log in</Link><Link className="nav-cta" to="/signup">Request access <ArrowRight size={14} /></Link></div><button className="public-menu" onClick={() => setOpen(!open)}>{open ? <X /> : <Menu />}</button></nav>;
-}
-
-export function LandingPage() {
-  const { user } = useAuth();
-  if (user) return <Navigate to="/app" replace />;
-  return <div className="public-page landing-page">
-    <section className="landing-hero">
-      <PublicNav dark />
-      <div className="hero-image" role="img" aria-label="Abstract violet aurora artwork" />
-      <div className="hero-shade" />
-      <div className="hero-grain" />
-      <motion.div className="hero-copy" initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.7 }}>
-        <span className="open-source"><ShieldCheck size={14} /> Private · invitation only</span>
-        <h1><span>InfluenceFlow</span>Run your influencers, brands, campaigns & calendar in one private workspace.</h1>
-        <p>Stop juggling Notion, Sheets & scattered tools. A calm, complete CRM built for independent agencies and freelancers.</p>
-        <div className="hero-actions"><Link to="/signup" className="hero-primary">Build your workspace <ArrowRight size={17} /></Link><button onClick={() => document.getElementById("system")?.scrollIntoView({ behavior: "smooth" })}>See how it works <ChevronRight size={16} /></button></div>
-      </motion.div>
-      <div className="hero-foot"><span>Private by design</span><span>Your data. Your workflow. Your clients.</span></div>
-    </section>
-
-    <section className="public-section system-section" id="system">
-      <div className="section-kicker">One connected system</div><h2>Move deals forward, without losing the human thread.</h2><p className="section-lead">InfluenceFlow keeps every relationship, conversation, deadline and dollar in context, from first outreach to final payout.</p>
-      <div className="info-grid">
-        <motion.article whileHover={{ y: -5 }}><span>01</span><div className="info-icon"><Users /></div><h3>Know your roster</h3><p>Compare creators by engagement, platform, niche and performance. Move them through a pipeline that stays current.</p><Link to="/signup">Organize influencers <ArrowRight size={15} /></Link></motion.article>
-        <motion.article whileHover={{ y: -5 }}><span>02</span><div className="info-icon"><HeartHandshake /></div><h3>Close with confidence</h3><p>Keep brands, contacts, deliverables, payment math and creator assignments connected to every campaign.</p><Link to="/signup">Manage partnerships <ArrowRight size={15} /></Link></motion.article>
-        <motion.article whileHover={{ y: -5 }}><span>03</span><div className="info-icon"><CalendarDays /></div><h3>Stay ahead</h3><p>See meetings, follow-ups, deadlines and stale deals before they become missed opportunities.</p><Link to="/signup">Own your schedule <ArrowRight size={15} /></Link></motion.article>
-      </div>
-    </section>
-
-    <section className="privacy-band">
-      <div className="privacy-visual"><div className="orbit orbit-one" /><div className="orbit orbit-two" /><span><LockKeyhole /></span></div>
-      <div className="privacy-copy"><span className="section-kicker">A private operating system</span><h2>Your relationships are your advantage. Keep them yours.</h2><p>A closed circle: every member is approved by hand, and each workspace is sealed off from the others by row-level security in the database.</p><ul><li><ShieldCheck /> Per-user access enforced at the database</li><li><Database /> Exportable CSV and versioned JSON backups</li><li><KeyRound /> No shared sheets, ad tracking, or data resale</li></ul><Link to="/privacy">Read the privacy promise <ArrowRight size={15} /></Link></div>
-    </section>
-
-    <section className="public-cta"><Sparkles /><h2>Your next great partnership should not get lost in a spreadsheet.</h2><p>This CRM is private. Ask to join — once you're approved, bring what you have and build a workspace that feels like your agency.</p><Link to="/signup">Request access <ArrowRight size={17} /></Link></section>
-    <PublicFooter />
-  </div>;
-}
 
 const LAST_EMAIL = "if.last-email";
 const readLastEmail = () => { try { return localStorage.getItem(LAST_EMAIL) || ""; } catch { return ""; } };
@@ -80,8 +37,33 @@ function PasswordField({ label, value, onChange, autoComplete, placeholder, mete
   return <label className="field-wrap password-field"><span className="field-label">{label}</span><span className="password-input"><input className="field" type={show ? "text" : "password"} value={value} onChange={(event) => onChange(event.target.value)} onKeyUp={(event) => setCaps(event.getModifierState?.("CapsLock") ?? false)} autoComplete={autoComplete} placeholder={placeholder} autoFocus={autoFocus} required /><button type="button" onClick={() => setShow(!show)} aria-label={show ? "Hide password" : "Show password"} title={show ? "Hide password" : "Show password"}>{show ? <EyeOff size={16} /> : <Eye size={16} />}</button></span>{caps && <span className="field-hint caps-hint">Caps Lock is on</span>}{meter && value && <span className={`pw-meter level-${strength.level}`}><i><b /></i><span>{strength.label}</span></span>}</label>;
 }
 
+// The front door of a private CRM: sign in, ask to join, and a way to reach the
+// owner. No marketing, no public pages — nothing here describes what's inside.
 function AuthShell({ kicker, title, lead, children }: { kicker: string; title: string; lead: string; children: ReactNode }) {
-  return <div className="auth-page"><div className="auth-brand"><Link to="/"><Logo inverse /></Link><div><span>{kicker}</span><h1>{title}</h1><p>{lead}</p></div><small>InfluenceFlow · private, invitation only</small></div><main className="auth-main"><div className="auth-form">{children}<small>By continuing you agree to our <Link to="/terms">Terms</Link> and <Link to="/privacy">Privacy Policy</Link>.</small></div></main></div>;
+  return <div className="auth-page is-private"><div className="auth-brand"><Logo inverse /><div><span><LockKeyhole size={13} aria-hidden="true" /> {kicker}</span><h1>{title}</h1><p>{lead}</p></div><small>Private · members only</small></div><main className="auth-main"><div className="auth-form">{children}<NeedHelp /></div></main></div>;
+}
+
+// The owner's address is never in the page or its code as written text, so
+// scrapers reading the HTML or script files find nothing: it's put together
+// only when a person asks for it.
+const OWNER = [109, 111, 99, 46, 108, 105, 97, 109, 103, 64, 109, 105, 114, 117, 104, 100, 105, 108, 105, 108, 97, 104];
+const ownerAddress = () => String.fromCharCode(...OWNER.slice().reverse());
+
+function NeedHelp() {
+  const [open, setOpen] = useState(false);
+  const [shown, setShown] = useState("");
+  const [copied, setCopied] = useState(false);
+  const reveal = () => setShown(ownerAddress());
+  const copy = async () => { try { await navigator.clipboard.writeText(shown); setCopied(true); window.setTimeout(() => setCopied(false), 1800); } catch { /* the address is on screen to copy by hand */ } };
+  return <div className={`auth-help${open ? " open" : ""}`}>
+    <button type="button" className="auth-help-toggle" aria-expanded={open} onClick={() => setOpen((v) => !v)}><LifeBuoy size={15} aria-hidden="true" /> Need help?</button>
+    {open && <div className="auth-help-panel" role="region" aria-label="Contact the owner">
+      <p>Locked out, waiting for approval, or not sure you're in the right place? Write to Dhurim, who runs this CRM.</p>
+      {shown
+        ? <div className="auth-help-mail"><a href={`mailto:${shown}?subject=${encodeURIComponent("InfluenceFlow access")}`}><Mail size={15} aria-hidden="true" /> {shown}</a><button type="button" onClick={() => void copy()}>{copied ? <><Check size={14} aria-hidden="true" /> Copied</> : <><Copy size={14} aria-hidden="true" /> Copy</>}</button></div>
+        : <button type="button" className="auth-help-reveal" onClick={reveal}><Mail size={15} aria-hidden="true" /> Show email address</button>}
+    </div>}
+  </div>;
 }
 
 function AuthPage({ mode, returnTo }: { mode: "login" | "signup"; returnTo?: string }) {
@@ -93,10 +75,18 @@ function AuthPage({ mode, returnTo }: { mode: "login" | "signup"; returnTo?: str
   const [password, setPassword] = useState("");
   const [error, setError] = useState<{ message: string; code?: string; attemptsLeft?: number } | null>(null);
   const [loading, setLoading] = useState(false);
+  // Bot traps for sign-up: a field people never see (bots fill every field) and a
+  // form sent faster than anyone can type. Either way nothing is sent and the bot
+  // gets the same calm answer a person would, so it learns nothing.
+  const [trap, setTrap] = useState("");
+  const [openedAt] = useState(() => Date.now());
+  const [held, setHeld] = useState(false);
   if (!authLoading && user) return <Navigate to={recovery ? "/update-password" : ((location.state as { from?: { pathname?: string } } | null)?.from?.pathname || "/app")} replace />;
   const suggestion = emailSuggestion(email);
   const submit = async (event: FormEvent) => {
-    event.preventDefault(); setError(null); setLoading(true);
+    event.preventDefault(); setError(null);
+    if (mode === "signup" && (trap.trim() || Date.now() - openedAt < 2500)) { setHeld(true); return; }
+    setLoading(true);
     if (mode === "signup") {
       const leaks = await pwnedCount(password);
       if (leaks) { setLoading(false); setError({ message: pwnedMessage(leaks), code: "pwned" }); return; }
@@ -108,17 +98,19 @@ function AuthPage({ mode, returnTo }: { mode: "login" | "signup"; returnTo?: str
     navigate(returnTo || (location.state as { from?: { pathname?: string } } | null)?.from?.pathname || "/app", { replace: true });
   };
   const resetLink = `/forgot-password?email=${encodeURIComponent(email.trim())}`;
-  return <AuthShell kicker={mode === "login" ? "Welcome back" : "Your agency, in flow"} title={mode === "login" ? "Pick up where the relationship left off." : "Build a calmer way to run partnerships."} lead="Private, focused, and designed around the work that moves creator businesses forward.">
-    <span className="auth-kicker">{mode === "login" ? "Sign in" : "Request access"}</span><h2>{mode === "login" ? "Welcome back" : "Ask to join"}</h2><p>{mode === "login" ? "Enter the email and password you signed up with." : "This CRM is private. Create your login — the owner approves every member by hand, and you'll get an email once you're in."}</p>
-    <form onSubmit={submit} noValidate>
+  return <AuthShell kicker="Private workspace" title={mode === "login" ? "Members only." : "Ask to join."} lead={mode === "login" ? "This CRM is private. Sign in with your account to continue." : "Every account is approved by hand before it can open anything."}>
+    <span className="auth-kicker">{mode === "login" ? "Sign in" : "Request access"}</span><h2>{mode === "login" ? "Welcome back" : "Ask to join"}</h2><p>{mode === "login" ? "Enter the email and password you signed up with." : "Create your login. The owner approves every member by hand, and you'll get an email once you're in."}</p>
+    {held ? <div className="form-note" role="status"><span>Thanks — your request is noted. You'll get an email if it's approved.</span></div> : null}
+    <form onSubmit={submit} noValidate hidden={held}>
+      {mode === "signup" && <label className="auth-trap" aria-hidden="true">Company website<input tabIndex={-1} autoComplete="off" value={trap} onChange={(event) => setTrap(event.target.value)} name="website" /></label>}
       <Input label="Email address" type="email" inputMode="email" autoComplete="email" autoCapitalize="none" spellCheck={false} value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@agency.com" required autoFocus={!email} />
       {suggestion && <button type="button" className="email-suggest" onClick={() => setEmail(suggestion)}>Did you mean <b>{suggestion}</b>?</button>}
       <PasswordField label="Password" value={password} onChange={setPassword} autoComplete={mode === "login" ? "current-password" : "new-password"} placeholder={mode === "login" ? "Your password" : "At least 8 characters"} meter={mode === "signup"} autoFocus={!!email} />
       {mode === "login" && <Link className="forgot-inline" to={resetLink}>Forgot password?</Link>}
       {error && <div className={error.code === "pending" ? "form-note" : "form-error"} role={error.code === "pending" ? "status" : "alert"}><span>{error.message}{error.attemptsLeft !== undefined && error.attemptsLeft <= 3 ? ` ${error.attemptsLeft} attempt${error.attemptsLeft === 1 ? "" : "s"} left before a short lock.` : ""}</span>{(error.code === "invalid_credentials" || error.code === "locked") && <Link to={resetLink}>Reset password for {email.trim() || "this email"} →</Link>}{error.code === "exists" && <Link to={`/login?email=${encodeURIComponent(email.trim())}`}>Sign in instead →</Link>}</div>}
-      <Button type="submit" size="lg" loading={loading} disabled={!email.trim() || !password}>{mode === "login" ? "Open workspace" : "Create private workspace"}<ArrowRight size={17} /></Button>
+      <Button type="submit" size="lg" loading={loading} disabled={!email.trim() || !password}>{mode === "login" ? "Sign in" : "Request access"}<ArrowRight size={17} /></Button>
     </form>
-    <p className="auth-switch">{mode === "login" ? "New to InfluenceFlow?" : "Already have a workspace?"} <Link to={mode === "login" ? "/signup" : "/login"}>{mode === "login" ? "Create one" : "Log in"}</Link></p>
+    <p className="auth-switch">{mode === "login" ? "Not a member yet?" : "Already a member?"} <Link to={mode === "login" ? "/signup" : "/login"}>{mode === "login" ? "Ask to join" : "Sign in"}</Link></p>
   </AuthShell>;
 }
 
@@ -189,35 +181,7 @@ export function UpdatePasswordPage() {
 export const LoginPage = ({ returnTo }: { returnTo?: string } = {}) => <AuthPage mode="login" returnTo={returnTo} />;
 export const SignupPage = () => <AuthPage mode="signup" />;
 
-export function PublicFooter() {
-  return <footer className="public-footer"><div><Logo /><p>A private CRM for influencer partnerships.</p></div><div><span>Product</span><Link to="/help">Help & setup</Link><Link to="/privacy">Privacy</Link><Link to="/terms">Terms</Link></div><div><span>Creator</span><a href="https://dhurimhalili.com" target="_blank" rel="noreferrer">Portfolio</a><a href="https://wa.me/38349878908" target="_blank" rel="noreferrer">WhatsApp</a><a href="https://linkedin.com" target="_blank" rel="noreferrer">LinkedIn</a></div><div className="footer-built">Built by <strong>Dhurim Halili</strong><span>Private · invitation only · 2026</span></div></footer>;
-}
-
-const legalContent: Record<string, { label: string; title: string; intro: string; sections: { title: string; body: string }[] }> = {
-  privacy: { label: "Privacy promise", title: "Your workspace belongs to you.", intro: "InfluenceFlow is designed to collect less, isolate every workspace, and keep your data portable.", sections: [
-    { title: "What we store", body: "Your account email, profile settings, and the CRM records you choose to add. We do not sell personal information or use workspace data for advertising." },
-    { title: "How access works", body: "Hosted data is protected by Supabase authentication and PostgreSQL row-level security. Policies restrict every record to its user_id owner." },
-    { title: "Your control", body: "Export influencers, brands, contacts, and campaigns as CSV, or download a complete versioned JSON backup. Archived records can be restored or permanently removed." },
-    { title: "Gmail (optional)", body: "If you connect Gmail, InfluenceFlow requests read access (gmail.readonly) and send access (gmail.send). It reads message headers — sender, recipients, date, subject — and Gmail's short preview, only to (1) match emails to the influencers and brands in your CRM so their status and follow-up reminders update, and (2) suggest people who emailed you first about a sponsorship, collaboration or management (inbound leads). It stores only that metadata for matching or suggested messages; message bodies, attachments and the rest of your inbox are never stored. Emails are sent only when you press Send. You can connect several mailboxes and disconnect any of them at any time in Settings or in your Google Account, which revokes access immediately; you can also delete the stored email history." },
-    { title: "Google API data: Limited Use", body: "InfluenceFlow's use and transfer of information received from Google APIs adheres to the Google API Services User Data Policy, including the Limited Use requirements. Google user data is used only to provide the features above to you, is never sold, never used for advertising, never used to train AI or machine-learning models, and is never read by people except with your explicit permission, for security reasons, or where required by law. Google access tokens are encrypted at rest (AES-256-GCM) and never sent to your browser." },
-    { title: "A closed circle", body: "Membership is by approval only. The owner can see who has an account (email, sign-up date, last sign-in and how many records it holds) to approve, remove or delete accounts — never the contents of anyone's workspace." },
-  ] },
-  terms: { label: "Plain-language terms", title: "A private CRM for a closed circle.", intro: "InfluenceFlow is run privately by its owner for people they invite. These terms explain how membership works. They are not a substitute for your own client agreements.", sections: [
-    { title: "Membership by approval", body: "Anyone can ask to join, but an account opens only when the owner approves it. The owner may decline a request, remove access at any time, or delete an account and its workspace. Removing access keeps your data until it is deleted; you can ask the owner for an export first." },
-    { title: "Your workspace stays yours", body: "Each member's records are visible only to that member — not to other members and not to the owner. You keep ownership of everything you enter, and you can export it as CSV or a full JSON backup at any time." },
-    { title: "Your responsibilities", body: "Only store contacts and deal information you're allowed to keep. Don't use the CRM to break privacy or anti-spam laws, send abusive outreach, try to reach another member's data, or share your login. Accounts that do can be removed without notice." },
-    { title: "Confidentiality", body: "The CRM, its features and anything you see about how it works are shared with you privately. Please don't copy, resell or publish them." },
-    { title: "The service", body: "InfluenceFlow is provided as-is, without a guarantee of uninterrupted availability or of any result. Keep your own backups of critical records. The owner may change or end the service, and will give reasonable notice where possible so you can export your data." },
-  ] },
-};
-
-export function LegalPage({ type }: { type: "privacy" | "terms" }) {
-  const content = legalContent[type];
-  return <div className="public-page inner-public"><PublicNav /><header className="legal-hero"><span>{content.label}</span><h1>{content.title}</h1><p>{content.intro}</p></header><main className="legal-content">{content.sections.map((section, index) => <section key={section.title}><span>0{index + 1}</span><div><h2>{section.title}</h2><p>{section.body}</p></div></section>)}<p className="legal-date">Last updated November 2026. Questions? <a href="mailto:hello@influenceflow.app">Contact us.</a></p></main><PublicFooter /></div>;
-}
-
-export function HelpPage({ embedded = false }: { embedded?: boolean }) {
-  if (embedded) return <HelpGuide />;
-  return <div className="public-page inner-public"><PublicNav /><div className="guide-public"><HelpGuide /></div><PublicFooter /></div>;
+export function HelpPage() {
+  return <HelpGuide />;
 }
 
