@@ -93,7 +93,14 @@ export const DELIVERABLE_RATES = RATE_FIELDS.filter((f) => f.group !== "addon");
 
 const isCurrency = (value: unknown): value is Currency => CURRENCIES.some((c) => c.value === value);
 
-export const normalizePreferences = (value: unknown): WorkspacePreferences => {
+/** One-off popup counters: short ids → small whole numbers, nothing else kept. */
+const readNotices = (v: object): Record<string, number> => {
+  const out: Record<string, number> = {};
+  for (const [k, n] of Object.entries(v).slice(0, 30)) if (/^[a-z0-9-]{1,40}$/.test(k) && Number.isFinite(Number(n))) out[k] = Math.max(0, Math.min(99, Math.round(Number(n))));
+  return out;
+};
+
+export const normalizePreferences =(value: unknown): WorkspacePreferences => {
   const v = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
   const pct = Number(v.default_creator_percent);
   return {
@@ -106,6 +113,7 @@ export const normalizePreferences = (value: unknown): WorkspacePreferences => {
     ...(v.reply_template !== undefined ? { reply_template: readTemplate(v.reply_template) } : {}),
     ...(v.followup_templates !== undefined ? { followup_templates: readTemplates(v.followup_templates) } : {}),
     ...(v.autopilot !== undefined ? { autopilot: readAutopilot(v.autopilot) } : {}),
+    ...(v.notices && typeof v.notices === "object" ? { notices: readNotices(v.notices) } : {}),
     action_digest: v.action_digest !== false,
     followup_rules: normalizeFollowupRules(v.followup_rules),
     start_page: v.start_page === "influencers" || v.start_page === "calendar" ? v.start_page : "dashboard",
