@@ -43,7 +43,7 @@ export function FillWarnLayer() {
   const waitingToday = auto.today.filter((i) => i.status === "pending" || i.status === "sending").length;
   const left = Math.max(0, stats.target - stats.value - waitingToday);
   const noTemplate = auto.pool.held.filter((h) => h.why === "no-template").length;
-  // Where tonight's follow-ups would land (the same planner the night fill uses, from the start time).
+  // Where {W.whens} follow-ups would land (the same planner the night fill uses, from the start time).
   const tonight = useMemo(() => {
     if (!inWindow || !auto.pool.ready.length) return [] as number[];
     const taken = auto.items.filter((i) => i.status === "pending" || i.status === "sending").map((i) => ({ mailbox: i.mailbox, at: new Date(i.send_at).getTime() }));
@@ -76,6 +76,18 @@ export function FillWarnLayer() {
   />;
 }
 
+type Part = "morning" | "afternoon" | "night";
+const partOf = (start: string): Part => { const m = minutesOf(start); return m < 12 * 60 ? "morning" : m < 17 * 60 ? "afternoon" : "night"; };
+const WORDS: Record<Part, { name: string; when: string; whens: string; shift: string; not: string }> = {
+  morning: { name: "Morning fill", when: "this morning", whens: "this morning's", shift: "morning", not: "Not today" },
+  afternoon: { name: "Afternoon fill", when: "this afternoon", whens: "this afternoon's", shift: "afternoon", not: "Not today" },
+  night: { name: "Night fill", when: "tonight", whens: "tonight's", shift: "night", not: "Not tonight" },
+};
+// Clouds by day: [top %, width px, drift s, delay s, opacity].
+const CLOUDS: Record<"morning" | "afternoon", [number, number, number, number, number][]> = {
+  morning: [[20, 74, 38, -6, .85], [40, 52, 52, -30, .6], [27, 40, 64, -48, .5]],
+  afternoon: [[18, 86, 30, -4, .95], [36, 60, 40, -22, .8], [24, 46, 48, -36, .7], [46, 38, 56, -12, .55]],
+};
 // Stars in the sky: [left %, top %, size px, twinkle s].
 const STARS: [number, number, number, number][] = [[6, 18, 2, 2.6], [14, 42, 1.5, 3.4], [22, 12, 2.5, 2.1], [31, 30, 1.5, 3.9], [39, 8, 2, 2.8], [47, 36, 1.5, 3.1], [56, 16, 2.5, 2.4], [64, 44, 1.5, 3.6], [72, 10, 2, 2.9], [79, 28, 1.5, 3.3], [87, 14, 2.5, 2.2], [94, 38, 1.5, 3.7], [10, 58, 1.5, 3.0], [52, 56, 1.5, 2.7], [83, 52, 2, 3.2]];
 
@@ -116,44 +128,51 @@ function FillWarn(p: {
   const pctDone = Math.min(1, p.goal ? p.value / p.goal : 0);
   const templatesOnly = p.canFill === 0 && p.noTemplate > 0;
   const turnOn = () => { p.onTurnOn(); setLit(true); window.setTimeout(() => primary.current?.focus({ preventScroll: true }), 30); };
+  // The scene and the words follow when the fill starts: before noon = morning, before 17:00 = afternoon, else night.
+  const part = partOf(p.start);
+  const W = WORDS[part];
 
   return <div className="fw-scrim" onMouseDown={(e) => { if (e.target === e.currentTarget) p.onClose("snooze"); }}>
-    <div ref={card} className={`fw${lit ? " lit" : ""}`} role="alertdialog" aria-modal="true" aria-labelledby="fw-title" aria-describedby="fw-lead">
+    <div ref={card} className={`fw fw-${part}${lit ? " lit" : ""}`} role="alertdialog" aria-modal="true" aria-labelledby="fw-title" aria-describedby="fw-lead">
       <div className="fw-sky" aria-hidden="true">
-        {STARS.map(([x, y, s, d], i) => <i key={i} className="fw-star" style={{ left: `${x}%`, top: `${y}%`, width: s, height: s, "--d": `${d}s` } as CSSProperties} />)}
-        <span className="fw-sun" /><span className="fw-moon"><Moon size={30} /></span>
+        {part === "night" && STARS.map(([x, y, s, d], i) => <i key={i} className="fw-star" style={{ left: `${x}%`, top: `${y}%`, width: s, height: s, "--d": `${d}s` } as CSSProperties} />)}
+        <span className="fw-sun"><i className="fw-rays" /></span>
+        {part === "night" && <span className="fw-moon"><Moon size={30} /></span>}
+        {part !== "night" && CLOUDS[part].map(([y, w, d, delay, o], i) => <svg key={i} className="fw-cloud" viewBox="0 0 64 34" style={{ top: `${y}%`, width: w, "--d": `${d}s`, "--delay": `${delay}s`, opacity: o } as CSSProperties}><path fill="#fff" d="M14 32a7 7 0 0 1-2-13.7A11 11 0 0 1 20 9a13 13 0 0 1 24-2 10 10 0 0 1 12 10 7.5 7.5 0 0 1-1 15z" /></svg>)}
+        {part === "morning" && <><i className="fw-mist a" /><i className="fw-mist b" /></>}
+        {part === "afternoon" && [0, 1, 2].map((i) => <i key={i} className={`fw-flare f${i}`} />)}
         <svg className="fw-hills" viewBox="0 0 400 60" preserveAspectRatio="none"><path d="M0 60V38c40-14 70-16 110-4s80 10 120-6 90-18 170 6v26z" /><path className="far" d="M0 60V46c50-10 90-12 140-2s90 6 140-6 80-8 120 2v20z" /></svg>
         {lit && [0, 1, 2].map((i) => <svg key={i} className={`fw-plane p${i}`} viewBox="0 0 24 24"><path d="M2 12 22 3l-6 19-4-8z" /><path d="m12 14 10-11" /></svg>)}
       </div>
       <div className="fw-top">
-        <span className={`fw-state${lit ? " on" : ""}`}><i aria-hidden="true" />{lit ? "Night fill · on" : "Night fill · off"}</span>
+        <span className={`fw-state${lit ? " on" : ""}`}><i aria-hidden="true" />{W.name} · {lit ? "on" : "off"}</span>
         <button type="button" className="fw-x" onClick={() => p.onClose("snooze")} aria-label="Close — remind me in an hour"><X size={17} /></button>
       </div>
       <div className="fw-clock" aria-hidden={lit}>
         {lit ? <><b className="fw-big">On</b><span>{started ? "It starts within a few minutes" : `It starts at ${p.start}`}</span></>
           : started ? <><b className="fw-big">Now</b><span>It's past {p.start} — your fill time</span></>
-            : <><b className="fw-big">{hh}:{String(mm).padStart(2, "0")}<small>:{String(ss).padStart(2, "0")}</small></b><span>until {p.start}, when your night fill would start</span></>}
+            : <><b className="fw-big">{hh}:{String(mm).padStart(2, "0")}<small>:{String(ss).padStart(2, "0")}</small></b><span>until {p.start}, when your {W.name.toLowerCase()} would start</span></>}
       </div>
 
       <div className="fw-body">
         {lit ? <>
-          <h2 id="fw-title"><Sparkles size={20} aria-hidden="true" /> Done. Your goal fills itself tonight.</h2>
+          <h2 id="fw-title"><Sparkles size={20} aria-hidden="true" /> Done. Your goal fills itself {W.when}.</h2>
           <p id="fw-lead" className="fw-lead">From {p.start} the CRM follows up for you until you reach {p.goal}, then it stops. Every email you send yourself before then means one fewer it needs to send. Someone replies? Their follow-up is cancelled.</p>
         </> : templatesOnly ? <>
-          <h2 id="fw-title">The night fill can't help you yet.</h2>
-          <p id="fw-lead" className="fw-lead">You're at <b>{p.value} of {p.goal}</b> and {p.noTemplate} {p.noTemplate === 1 ? "person is" : "people are"} due a follow-up, but you have no follow-up templates for {p.noTemplate === 1 ? "them" : "those rounds"}. Write a few (two minutes), then turn the night fill on.</p>
+          <h2 id="fw-title">The {W.name.toLowerCase()} can't help you yet.</h2>
+          <p id="fw-lead" className="fw-lead">You're at <b>{p.value} of {p.goal}</b> and {p.noTemplate} {p.noTemplate === 1 ? "person is" : "people are"} due a follow-up, but you have no follow-up templates for {p.noTemplate === 1 ? "them" : "those rounds"}. Write a few (two minutes), then turn the {W.name.toLowerCase()} on.</p>
         </> : <>
-          <h2 id="fw-title">{p.left} short of your goal, and nobody's on the night shift.</h2>
-          <p id="fw-lead" className="fw-lead">You're at <b>{p.value} of {p.goal}</b> today{p.waiting > 0 ? `, with ${p.waiting} follow-up${p.waiting === 1 ? "" : "s"} already waiting to go` : ""}. The night fill is <b>off</b>, so at {p.start} nothing happens. Turn it on and the CRM sends up to <b>{p.canFill}</b> follow-up{p.canFill === 1 ? "" : "s"} for you tonight, only to people who never answered, at a good hour in their country.</p>
+          <h2 id="fw-title">{p.left} short of your goal, and nobody's on the {W.shift} shift.</h2>
+          <p id="fw-lead" className="fw-lead">You're at <b>{p.value} of {p.goal}</b> today{p.waiting > 0 ? `, with ${p.waiting} follow-up${p.waiting === 1 ? "" : "s"} already waiting to go` : ""}. The {W.name.toLowerCase()} is <b>off</b>, so {started ? "nothing is going out" : `at ${p.start} nothing happens`}. Turn it on and the CRM sends up to <b>{p.canFill}</b> follow-up{p.canFill === 1 ? "" : "s"} for you {W.when}, only to people who never answered, at a good hour in their country.</p>
         </>}
 
         <div className="fw-goal" aria-label={`${p.value} of ${p.goal} emails today`}>
           <div className="fw-goal-bar"><i style={{ width: `${pctDone * 100}%` }} /><i className="fw-goal-add" style={{ left: `${pctDone * 100}%`, width: `${Math.min(1 - pctDone, p.goal ? p.canFill / p.goal : 0) * 100}%` }} /></div>
-          <div className="fw-goal-legend"><span><b>{p.value}</b> sent today</span>{p.canFill > 0 && <span className="add"><b>+{p.canFill}</b> the night fill can add</span>}<span>goal <b>{p.goal}</b></span></div>
+          <div className="fw-goal-legend"><span><b>{p.value}</b> sent today</span>{p.canFill > 0 && <span className="add"><b>+{p.canFill}</b> the fill can add</span>}<span>goal <b>{p.goal}</b></span></div>
         </div>
 
         {p.times.length > 0 && <div className="fw-night">
-          <span className="fw-night-head">Where tonight's follow-ups would land</span>
+          <span className="fw-night-head">Where {W.whens} follow-ups would land</span>
           <div className="fw-line" role="img" aria-label={`${p.times.length} follow-ups between ${hm(p.times[0])} and ${hm(p.times[p.times.length - 1])}`}>
             {p.times.map((t, i) => <i key={i} className="fw-dot" style={{ left: `${pct(t)}%`, "--i": i } as CSSProperties} />)}
           </div>
@@ -163,11 +182,11 @@ function FillWarn(p: {
         <div className="fw-actions">
           {lit ? <button ref={primary} type="button" className="fw-go" onClick={() => p.onClose("off")}><Check size={16} aria-hidden="true" /> Done</button>
             : templatesOnly ? <button ref={primary} type="button" className="fw-go" onClick={p.onWrite}><PenLine size={16} aria-hidden="true" /> Write my templates</button>
-              : <button ref={primary} type="button" className="fw-go" onClick={turnOn}><span className="fw-switch" aria-hidden="true"><i /></span> Turn on the night fill</button>}
-          {!lit && <button type="button" className="fw-later" onClick={() => p.onClose("off")}>Not tonight</button>}
+              : <button ref={primary} type="button" className="fw-go" onClick={turnOn}><span className="fw-switch" aria-hidden="true"><i /></span> Turn on the {W.name.toLowerCase()}</button>}
+          {!lit && <button type="button" className="fw-later" onClick={() => p.onClose("off")}>{W.not}</button>}
           <button type="button" className="fw-link" onClick={p.onSettings}>{lit ? "See Autopilot" : `Change the ${p.start} start`} <ArrowRight size={14} aria-hidden="true" /></button>
         </div>
-        {!lit && <p className="fw-foot">Close it and it's back in an hour. “Not tonight” lets you be till tomorrow.</p>}
+        {!lit && <p className="fw-foot">Close it and it's back in an hour. “{W.not}” lets you be till tomorrow.</p>}
       </div>
     </div>
   </div>;

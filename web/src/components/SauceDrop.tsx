@@ -90,7 +90,8 @@ function SauceDrop({ n, max, preview, name, sent, onClose, onAutopilot }: { n: n
   useEffect(() => {
     primary.current?.focus({ preventScroll: true });
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") { e.preventDefault(); onClose(); return; }
+      // Only the buttons close it: no Escape, no click outside.
+      if (e.key === "Escape") { e.preventDefault(); return; }
       if (e.key !== "Tab" || !card.current) return;
       const f = Array.from(card.current.querySelectorAll<HTMLElement>("a[href], button:not([disabled])"));
       if (!f.length) return;
@@ -113,7 +114,7 @@ function SauceDrop({ n, max, preview, name, sent, onClose, onAutopilot }: { n: n
   const level = HEAT[Math.min(HEAT.length - 1, Math.floor(Math.min(sent, TARGET) / 10))];
   const pace = done ? "" : every >= 20 ? `That's one every ${every} minutes. Light work.` : every >= 6 ? `That's one every ${every} minutes. Pick up the pace, chef.` : every >= 1 ? `That's one every ${every} minutes. Full send. No breaks.` : "The clock is basically on fire.";
 
-  return <div className="sx-scrim" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+  return <div className="sx-scrim">
     <svg className="sx-defs" aria-hidden="true" focusable="false">
       <defs>
         <linearGradient id="sx-chilli-body" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#ff4d2e" /><stop offset=".55" stopColor="#e3121b" /><stop offset="1" stopColor="#8f0610" /></linearGradient>

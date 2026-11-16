@@ -118,8 +118,8 @@
 .fw-scrim { position: fixed; inset: 0; z-index: 510; display: grid; place-items: center; padding: 16px; overflow-y: auto; overscroll-behavior: contain; background: rgba(8, 10, 30, .62); backdrop-filter: blur(8px); animation: sx-fade .2s ease-out; }
 .fw { position: relative; width: min(560px, 100%); margin: auto; overflow: hidden; border-radius: 26px; background: var(--surface-solid); color: var(--text); box-shadow: 0 40px 110px rgba(5, 8, 40, .55), 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent); animation: fw-pop .4s cubic-bezier(.2, 1.1, .35, 1) both; }
 .fw-sky { position: absolute; inset: 0 0 auto; height: 232px; overflow: hidden; background: linear-gradient(180deg, #0b1236 0%, #1c1f5c 38%, #5b2a77 66%, #d4596a 86%, #f7a65a 100%); background-size: 100% 160%; background-position: 0 100%; animation: fw-dusk 2.4s ease-out both; }
-.fw.lit .fw-sky { animation: fw-night 1.4s ease-out both; }
-.fw.lit .fw-sun { opacity: 0; transition: opacity .9s ease-out; }
+.fw-night.lit .fw-sky { animation: fw-night 1.4s ease-out both; }
+.fw-night.lit .fw-sun { opacity: 0; transition: opacity .9s ease-out; }
 .fw-star { position: absolute; border-radius: 50%; background: #fff; box-shadow: 0 0 6px rgba(255, 255, 255, .8); animation: fw-twinkle var(--d) ease-in-out infinite; }
 .fw-sun { position: absolute; left: 18%; bottom: 8px; width: 74px; height: 74px; border-radius: 50%; background: radial-gradient(circle, #ffe08a, #ff9d47 60%, #ff7a3a); box-shadow: 0 0 50px 12px rgba(255, 150, 70, .55); animation: fw-set 2.6s cubic-bezier(.4, 0, .3, 1) .3s both; }
 .fw-moon { position: absolute; right: 13%; top: 30px; display: grid; place-items: center; width: 62px; height: 62px; border-radius: 50%; color: #fff6d6; background: radial-gradient(circle at 35% 35%, rgba(255, 246, 214, .3), rgba(255, 246, 214, .06)); box-shadow: 0 0 40px 6px rgba(255, 240, 190, .25); animation: fw-moon 2.6s cubic-bezier(.3, .7, .3, 1) .5s both; }
@@ -175,6 +175,53 @@
 .fw-go:focus-visible, .fw-later:focus-visible, .fw-link:focus-visible, .fw-x:focus-visible { outline: 3px solid color-mix(in srgb, var(--accent) 60%, #fff); outline-offset: 2px; }
 .fw-foot { margin: 0; font-size: 12px; color: var(--muted); text-align: center; }
 
+/* Scenes: the sun carries its own rays; morning + afternoon swap the night sky for day. */
+.fw-sky { isolation: isolate; }
+.fw-rays { position: absolute; z-index: -1; left: 50%; top: 50%; width: 260%; height: 260%; border-radius: 50%; transform: translate(-50%, -50%); background: repeating-conic-gradient(from 0deg, rgba(255, 244, 200, .38) 0deg 5deg, transparent 5deg 15deg); -webkit-mask: radial-gradient(circle, #000 18%, transparent 68%); mask: radial-gradient(circle, #000 18%, transparent 68%); animation: fw-spin 40s linear infinite; opacity: 0; }
+.fw-morning .fw-rays, .fw-afternoon .fw-rays { opacity: 1; }
+.fw-cloud { position: absolute; left: 0; fill: #fff; filter: drop-shadow(0 4px 8px rgba(40, 60, 120, .15)); animation: fw-drift var(--d) linear var(--delay) infinite; }
+.fw-mist { position: absolute; bottom: 30px; height: 40px; border-radius: 50%; background: rgba(255, 255, 255, .7); filter: blur(14px); }
+.fw-mist.a { left: -10%; width: 70%; animation: fw-mist 9s ease-in-out infinite alternate; }
+.fw-mist.b { right: -12%; width: 60%; bottom: 18px; animation: fw-mist 11s ease-in-out -5s infinite alternate-reverse; }
+.fw-flare { position: absolute; border-radius: 50%; background: radial-gradient(circle, rgba(255, 255, 255, .55), rgba(255, 255, 255, 0) 70%); animation: fw-flare 4s ease-in-out infinite; }
+.fw-flare.f0 { right: 34%; top: 70px; width: 26px; height: 26px; }
+.fw-flare.f1 { right: 46%; top: 104px; width: 14px; height: 14px; animation-delay: .5s; }
+.fw-flare.f2 { right: 58%; top: 140px; width: 40px; height: 40px; animation-delay: 1s; opacity: .7; }
+
+.fw-morning .fw-sky { background: linear-gradient(180deg, #7fb8f5 0%, #b9d9f7 34%, #ffd8c2 68%, #ffb98a 100%); animation: fw-fade-sky 1.6s ease-out both; }
+.fw-morning .fw-sun { left: 20%; bottom: 14px; background: radial-gradient(circle, #fff6c9, #ffd166 55%, #ffb347); box-shadow: 0 0 60px 18px rgba(255, 200, 90, .55); animation: fw-rise 2.6s cubic-bezier(.25, .8, .3, 1) .2s both; }
+.fw-morning.lit .fw-sun { transform: translateY(-46px); transition: transform 1.2s cubic-bezier(.3, .8, .3, 1); animation: none; }
+.fw-morning.lit .fw-rays { animation-duration: 10s; }
+.fw-morning .fw-hills path.far { fill: color-mix(in srgb, var(--surface-solid) 45%, #ffb98a); }
+.fw-morning .fw-hills path:first-child { fill: color-mix(in srgb, var(--surface-solid) 75%, #ffb98a); }
+
+.fw-afternoon .fw-sky { background: linear-gradient(180deg, #1556c9 0%, #2f7ae6 40%, #6fb3ff 75%, #bfe2ff 100%); animation: fw-fade-sky 1.2s ease-out both; }
+.fw-afternoon .fw-sun { left: auto; right: 15%; bottom: auto; top: 26px; width: 66px; height: 66px; background: radial-gradient(circle, #ffffff, #fff4b8 45%, #ffd84d); box-shadow: 0 0 70px 24px rgba(255, 236, 150, .6); animation: fw-glow 3.2s ease-in-out infinite; }
+.fw-afternoon.lit .fw-sun { animation: fw-flash .9s ease-out, fw-glow 3.2s ease-in-out .9s infinite; }
+.fw-afternoon.lit .fw-rays { animation-duration: 12s; }
+.fw-afternoon .fw-hills path.far { fill: color-mix(in srgb, var(--surface-solid) 50%, #2f7ae6); }
+.fw-afternoon .fw-hills path:first-child { fill: color-mix(in srgb, var(--surface-solid) 78%, #2f7ae6); }
+
+.fw-clock span { padding: 4px 11px; border-radius: 999px; background: rgba(8, 14, 44, .34); backdrop-filter: blur(4px); }
+.fw-morning .fw-clock { color: #172a55; text-shadow: 0 1px 14px rgba(255, 255, 255, .7); }
+.fw-morning .fw-clock span { background: rgba(255, 255, 255, .62); text-shadow: none; }
+.fw-morning .fw-night { background: linear-gradient(180deg, #f2855c, #d9604e); color: #fff4ec; }
+.fw-morning .fw-night-head, .fw-morning .fw-line-ends { color: #ffe3d2; }
+.fw-morning .fw-line::before { border-top-color: rgba(255, 236, 220, .6); }
+.fw-afternoon .fw-night { background: linear-gradient(180deg, #1556c9, #2a6fdc); color: #eaf3ff; }
+.fw-afternoon .fw-night-head, .fw-afternoon .fw-line-ends { color: #cfe3ff; }
+.fw-afternoon .fw-line::before { border-top-color: rgba(207, 227, 255, .55); }
+.fw-morning .fw-plane { fill: #fff; stroke: #7fa6e0; }
+
+@keyframes fw-spin { to { transform: translate(-50%, -50%) rotate(360deg); } }
+@keyframes fw-drift { from { transform: translateX(-120px); } to { transform: translateX(min(640px, 110vw)); } }
+@keyframes fw-mist { to { transform: translateX(12%); } }
+@keyframes fw-flare { 0%, 100% { opacity: .2; transform: scale(.8); } 50% { opacity: .9; transform: scale(1.1); } }
+@keyframes fw-fade-sky { from { filter: brightness(.7) saturate(.7); } }
+@keyframes fw-rise { from { transform: translateY(70px); } to { transform: translateY(-8px); } }
+@keyframes fw-glow { 0%, 100% { box-shadow: 0 0 60px 20px rgba(255, 236, 150, .55); } 50% { box-shadow: 0 0 90px 34px rgba(255, 236, 150, .75); } }
+@keyframes fw-flash { 0% { transform: scale(1); } 40% { transform: scale(1.35); filter: brightness(1.3); } 100% { transform: scale(1); } }
+
 @keyframes fw-pop { from { opacity: 0; transform: translateY(26px) scale(.94); } }
 @keyframes fw-dusk { from { background-position: 0 100%; } to { background-position: 0 55%; } }
 @keyframes fw-night { from { background-position: 0 55%; } to { background-position: 0 0; } }
@@ -201,7 +248,9 @@
 @media (prefers-reduced-motion: reduce) {
   .fw, .fw-scrim, .fw-sky, .fw-sun, .fw-moon, .fw-plane, .fw-dot, .fw-goal-bar i { animation: none !important; }
   .fw-sky { background-position: 0 55%; }
-  .fw-sun { transform: translateY(40px); }
+  .fw-night .fw-sun { transform: translateY(40px); }
   .fw-star, .fw-state i, .fw-switch i, .fw-goal-add { animation-play-state: paused !important; }
   .fw-plane { display: none; }
+  .fw-cloud, .fw-rays, .fw-mist, .fw-flare { animation-play-state: paused !important; }
+  .fw-morning .fw-sun, .fw-afternoon .fw-sun { animation: none !important; }
 }
