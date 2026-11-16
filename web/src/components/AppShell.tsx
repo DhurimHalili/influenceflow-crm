@@ -27,6 +27,7 @@ import { DayBriefLayer } from "./DayBrief";
 import { KeysNoticeLayer } from "./KeysNotice";
 import { SauceDropLayer } from "./SauceDrop";
 import { FillWarnLayer } from "./FillWarn";
+import { GoalRampLayer } from "./GoalRamp";
 import { YouTubeProgress } from "./YouTubeStats";
 import { isPastDay, isTodayDay, LOSS_REASONS } from "../lib/utils";
 import type { SearchResult, ThemeName } from "../types";
@@ -444,6 +445,7 @@ function Shell() {
     <DayBriefLayer />
     <KeysNoticeLayer />
     <SauceDropLayer />
+    <GoalRampLayer />
     <FillWarnLayer />
     <YouTubeProgress />
     </div>
