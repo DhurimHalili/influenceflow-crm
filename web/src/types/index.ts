@@ -60,6 +60,10 @@ export interface WorkspacePreferences {
   autopilot?: import("../lib/autopilot").AutopilotPrefs;
   /** How many times a one-off popup was shown to this account (across devices), by popup id. */
   notices?: Record<string, number>;
+  /** Each mailbox's first week of the 10-a-day ramp (its Monday) — lib/goalRamp. */
+  mailbox_ramp?: Record<string, string>;
+  /** "Keep my goal" for this week's ramp number (asked again next week or when the number changes). */
+  goal_skip?: { week: string; total: number };
   /** Daily browser summary of due actions. */
   action_digest: boolean;
   /** When to follow up with people who haven't replied. */
@@ -513,6 +517,8 @@ export interface EmailEvent {
   gone?: "" | "trash" | "deleted";
   /** When the CRM first saw it gone. */
   gone_at?: string | null;
+  /** When the CRM first recorded it (not the email's own date). */
+  created_at?: string;
 }
 
 /** Someone outside the CRM who wrote to one of your mailboxes and looks like a real enquiry. */

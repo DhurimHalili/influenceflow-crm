@@ -186,6 +186,7 @@ const normalizeEmailEvent = (row: Record<string, unknown>): EmailEvent => ({
   in_reply_to: text(row.in_reply_to),
   gone: row.gone === "trash" || row.gone === "deleted" ? row.gone : "",
   gone_at: typeof row.gone_at === "string" ? row.gone_at : null,
+  ...(typeof row.created_at === "string" && row.created_at ? { created_at: row.created_at } : {}),
 });
 
 const normalizeBrand = (row: Record<string, unknown>, userId: string): Brand => ({

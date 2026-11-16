@@ -2,6 +2,7 @@ import { normalizeCriteria } from "./criteria";
 import { normalizeWeekend } from "./dayMode";
 import { readTemplate } from "./replyTemplate";
 import { readAutopilot, readTemplates } from "./autopilot";
+import { isDayKey, readRamp } from "./goalRamp";
 import type { Currency, FollowupRules, PayoutModel, RateCard, WorkspacePreferences } from "../types";
 
 export const CURRENCIES: { value: Currency; label: string }[] = [
@@ -93,6 +94,11 @@ export const DELIVERABLE_RATES = RATE_FIELDS.filter((f) => f.group !== "addon");
 
 const isCurrency = (value: unknown): value is Currency => CURRENCIES.some((c) => c.value === value);
 
+const readSkip = (v: unknown): { week: string; total: number } | null => {
+  const o = v && typeof v === "object" ? (v as Record<string, unknown>) : null;
+  return o && isDayKey(o.week) && Number.isFinite(Number(o.total)) ? { week: o.week, total: Math.round(Number(o.total)) } : null;
+};
+
 /** One-off popup counters: short ids → small whole numbers, nothing else kept. */
 const readNotices = (v: object): Record<string, number> => {
   const out: Record<string, number> = {};
@@ -114,6 +120,8 @@ export const normalizePreferences =(value: unknown): WorkspacePreferences => {
     ...(v.followup_templates !== undefined ? { followup_templates: readTemplates(v.followup_templates) } : {}),
     ...(v.autopilot !== undefined ? { autopilot: readAutopilot(v.autopilot) } : {}),
     ...(v.notices && typeof v.notices === "object" ? { notices: readNotices(v.notices) } : {}),
+    ...(v.mailbox_ramp && typeof v.mailbox_ramp === "object" ? { mailbox_ramp: readRamp(v.mailbox_ramp) } : {}),
+    ...(readSkip(v.goal_skip) ? { goal_skip: readSkip(v.goal_skip)! } : {}),
     action_digest: v.action_digest !== false,
     followup_rules: normalizeFollowupRules(v.followup_rules),
     start_page: v.start_page === "influencers" || v.start_page === "calendar" ? v.start_page : "dashboard",
