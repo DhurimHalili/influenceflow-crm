@@ -54,6 +54,10 @@ export interface WorkspacePreferences {
   email_signature: string;
   /** Words a Reply draft starts with (Settings → Reply template). Off and empty by default; brands only when ticked. */
   reply_template?: { on: boolean; text: string; brands: boolean };
+  /** Your follow-ups by number (1st–4th), several each — what Autopilot sends to influencers who never answered (lib/autopilot). */
+  followup_templates?: import("../lib/autopilot").TemplateBook;
+  /** Autopilot: the night fill (on/off, start time) and the most follow-ups the CRM sends a day (0 = what the goal needs). */
+  autopilot?: import("../lib/autopilot").AutopilotPrefs;
   /** Daily browser summary of due actions. */
   action_digest: boolean;
   /** When to follow up with people who haven't replied. */

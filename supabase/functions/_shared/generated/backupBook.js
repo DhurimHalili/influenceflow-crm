@@ -87,6 +87,56 @@ var creatorScore = (creator, weights) => ratedCount(creator) > 0 ? ratingScore(c
 new Intl.DateTimeFormat("en-US", { weekday: "long" });
 new Intl.DateTimeFormat("en-US", { weekday: "short" });
 //#endregion
+//#region src/lib/countries.ts
+var RAW = "AF:Afghanistan|AL:Albania|DZ:Algeria|AD:Andorra|AO:Angola|AG:Antigua and Barbuda|AR:Argentina|AM:Armenia|AU:Australia|AT:Austria|AZ:Azerbaijan|BS:Bahamas|BH:Bahrain|BD:Bangladesh|BB:Barbados|BY:Belarus|BE:Belgium|BZ:Belize|BJ:Benin|BT:Bhutan|BO:Bolivia|BA:Bosnia and Herzegovina|BW:Botswana|BR:Brazil|BN:Brunei|BG:Bulgaria|BF:Burkina Faso|BI:Burundi|CV:Cape Verde|KH:Cambodia|CM:Cameroon|CA:Canada|CF:Central African Republic|TD:Chad|CL:Chile|CN:China|CO:Colombia|KM:Comoros|CG:Congo|CD:DR Congo|CR:Costa Rica|CI:Côte d'Ivoire|HR:Croatia|CU:Cuba|CY:Cyprus|CZ:Czechia|DK:Denmark|DJ:Djibouti|DM:Dominica|DO:Dominican Republic|EC:Ecuador|EG:Egypt|SV:El Salvador|GQ:Equatorial Guinea|ER:Eritrea|EE:Estonia|SZ:Eswatini|ET:Ethiopia|FJ:Fiji|FI:Finland|FR:France|GA:Gabon|GM:Gambia|GE:Georgia|DE:Germany|GH:Ghana|GR:Greece|GD:Grenada|GT:Guatemala|GN:Guinea|GW:Guinea-Bissau|GY:Guyana|HT:Haiti|HN:Honduras|HK:Hong Kong|HU:Hungary|IS:Iceland|IN:India|ID:Indonesia|IR:Iran|IQ:Iraq|IE:Ireland|IL:Israel|IT:Italy|JM:Jamaica|JP:Japan|JO:Jordan|KZ:Kazakhstan|KE:Kenya|KI:Kiribati|XK:Kosovo|KW:Kuwait|KG:Kyrgyzstan|LA:Laos|LV:Latvia|LB:Lebanon|LS:Lesotho|LR:Liberia|LY:Libya|LI:Liechtenstein|LT:Lithuania|LU:Luxembourg|MO:Macau|MG:Madagascar|MW:Malawi|MY:Malaysia|MV:Maldives|ML:Mali|MT:Malta|MH:Marshall Islands|MR:Mauritania|MU:Mauritius|MX:Mexico|FM:Micronesia|MD:Moldova|MC:Monaco|MN:Mongolia|ME:Montenegro|MA:Morocco|MZ:Mozambique|MM:Myanmar|NA:Namibia|NR:Nauru|NP:Nepal|NL:Netherlands|NZ:New Zealand|NI:Nicaragua|NE:Niger|NG:Nigeria|KP:North Korea|MK:North Macedonia|NO:Norway|OM:Oman|PK:Pakistan|PW:Palau|PS:Palestine|PA:Panama|PG:Papua New Guinea|PY:Paraguay|PE:Peru|PH:Philippines|PL:Poland|PT:Portugal|PR:Puerto Rico|QA:Qatar|RO:Romania|RU:Russia|RW:Rwanda|KN:Saint Kitts and Nevis|LC:Saint Lucia|VC:Saint Vincent and the Grenadines|WS:Samoa|SM:San Marino|ST:São Tomé and Príncipe|SA:Saudi Arabia|SN:Senegal|RS:Serbia|SC:Seychelles|SL:Sierra Leone|SG:Singapore|SK:Slovakia|SI:Slovenia|SB:Solomon Islands|SO:Somalia|ZA:South Africa|KR:South Korea|SS:South Sudan|ES:Spain|LK:Sri Lanka|SD:Sudan|SR:Suriname|SE:Sweden|CH:Switzerland|SY:Syria|TW:Taiwan|TJ:Tajikistan|TZ:Tanzania|TH:Thailand|TL:Timor-Leste|TG:Togo|TO:Tonga|TT:Trinidad and Tobago|TN:Tunisia|TR:Turkey|TM:Turkmenistan|TV:Tuvalu|UG:Uganda|UA:Ukraine|AE:United Arab Emirates|GB:United Kingdom|US:United States|UY:Uruguay|UZ:Uzbekistan|VU:Vanuatu|VA:Vatican City|VE:Venezuela|VN:Vietnam|YE:Yemen|ZM:Zambia|ZW:Zimbabwe";
+var ALIASES = {
+	US: [
+		"usa",
+		"america",
+		"united states of america"
+	],
+	GB: [
+		"uk",
+		"england",
+		"great britain",
+		"britain",
+		"scotland",
+		"wales"
+	],
+	AE: [
+		"uae",
+		"dubai",
+		"emirates"
+	],
+	CZ: ["czech republic"],
+	KR: ["korea"],
+	NL: ["holland"],
+	TR: ["turkiye", "türkiye"],
+	CI: ["ivory coast", "cote d'ivoire"],
+	CD: ["democratic republic of the congo"],
+	MK: ["macedonia"],
+	SZ: ["swaziland"],
+	MM: ["burma"],
+	CV: ["cabo verde"],
+	DE: ["deutschland"],
+	ES: ["espana", "españa"],
+	XK: ["kosova"],
+	AL: ["shqiperia", "shqipëria"]
+};
+RAW.split("|").map((entry) => {
+	const [code, name] = entry.split(":");
+	return {
+		code,
+		name,
+		aliases: ALIASES[code] || []
+	};
+});
+new Map("AD:Europe/Andorra|AE:Asia/Dubai|AF:Asia/Kabul|AG:America/Antigua|AL:Europe/Tirane|AM:Asia/Yerevan|AO:Africa/Luanda|AR:America/Argentina/Buenos_Aires|AT:Europe/Vienna|AU:Australia/Sydney,Australia/Perth|AZ:Asia/Baku|BA:Europe/Sarajevo|BB:America/Barbados|BD:Asia/Dhaka|BE:Europe/Brussels|BF:Africa/Ouagadougou|BG:Europe/Sofia|BH:Asia/Bahrain|BI:Africa/Bujumbura|BJ:Africa/Porto-Novo|BN:Asia/Brunei|BO:America/La_Paz|BR:America/Sao_Paulo|BS:America/Nassau|BT:Asia/Thimphu|BW:Africa/Gaborone|BY:Europe/Minsk|BZ:America/Belize|CA:America/Toronto,America/Vancouver|CD:Africa/Kinshasa|CF:Africa/Bangui|CG:Africa/Brazzaville|CH:Europe/Zurich|CI:Africa/Abidjan|CL:America/Santiago|CM:Africa/Douala|CN:Asia/Shanghai|CO:America/Bogota|CR:America/Costa_Rica|CU:America/Havana|CV:Atlantic/Cape_Verde|CY:Asia/Nicosia|CZ:Europe/Prague|DE:Europe/Berlin|DJ:Africa/Djibouti|DK:Europe/Copenhagen|DM:America/Dominica|DO:America/Santo_Domingo|DZ:Africa/Algiers|EC:America/Guayaquil|EE:Europe/Tallinn|EG:Africa/Cairo|ER:Africa/Asmara|ES:Europe/Madrid|ET:Africa/Addis_Ababa|FI:Europe/Helsinki|FJ:Pacific/Fiji|FR:Europe/Paris|GA:Africa/Libreville|GB:Europe/London|GD:America/Grenada|GE:Asia/Tbilisi|GH:Africa/Accra|GM:Africa/Banjul|GN:Africa/Conakry|GQ:Africa/Malabo|GR:Europe/Athens|GT:America/Guatemala|GW:Africa/Bissau|GY:America/Guyana|HK:Asia/Hong_Kong|HN:America/Tegucigalpa|HR:Europe/Zagreb|HT:America/Port-au-Prince|HU:Europe/Budapest|ID:Asia/Jakarta|IE:Europe/Dublin|IL:Asia/Jerusalem|IN:Asia/Kolkata|IQ:Asia/Baghdad|IR:Asia/Tehran|IS:Atlantic/Reykjavik|IT:Europe/Rome|JM:America/Jamaica|JO:Asia/Amman|JP:Asia/Tokyo|KE:Africa/Nairobi|KG:Asia/Bishkek|KH:Asia/Phnom_Penh|KN:America/St_Kitts|KR:Asia/Seoul|KW:Asia/Kuwait|KZ:Asia/Almaty|LA:Asia/Vientiane|LB:Asia/Beirut|LC:America/St_Lucia|LI:Europe/Vaduz|LK:Asia/Colombo|LR:Africa/Monrovia|LS:Africa/Maseru|LT:Europe/Vilnius|LU:Europe/Luxembourg|LV:Europe/Riga|LY:Africa/Tripoli|MA:Africa/Casablanca|MC:Europe/Monaco|MD:Europe/Chisinau|ME:Europe/Podgorica|MG:Indian/Antananarivo|MK:Europe/Skopje|ML:Africa/Bamako|MM:Asia/Yangon|MN:Asia/Ulaanbaatar|MO:Asia/Macau|MR:Africa/Nouakchott|MT:Europe/Malta|MU:Indian/Mauritius|MV:Indian/Maldives|MW:Africa/Blantyre|MX:America/Mexico_City|MY:Asia/Kuala_Lumpur|MZ:Africa/Maputo|NA:Africa/Windhoek|NE:Africa/Niamey|NG:Africa/Lagos|NI:America/Managua|NL:Europe/Amsterdam|NO:Europe/Oslo|NP:Asia/Kathmandu|NZ:Pacific/Auckland|OM:Asia/Muscat|PA:America/Panama|PE:America/Lima|PG:Pacific/Port_Moresby|PH:Asia/Manila|PK:Asia/Karachi|PL:Europe/Warsaw|PR:America/Puerto_Rico|PS:Asia/Gaza|PT:Europe/Lisbon|PY:America/Asuncion|QA:Asia/Qatar|RO:Europe/Bucharest|RS:Europe/Belgrade|RU:Europe/Moscow|RW:Africa/Kigali|SA:Asia/Riyadh|SC:Indian/Mahe|SD:Africa/Khartoum|SE:Europe/Stockholm|SG:Asia/Singapore|SI:Europe/Ljubljana|SK:Europe/Bratislava|SL:Africa/Freetown|SM:Europe/San_Marino|SN:Africa/Dakar|SO:Africa/Mogadishu|SR:America/Paramaribo|SS:Africa/Juba|SV:America/El_Salvador|SY:Asia/Damascus|SZ:Africa/Mbabane|TD:Africa/Ndjamena|TG:Africa/Lome|TH:Asia/Bangkok|TJ:Asia/Dushanbe|TM:Asia/Ashgabat|TN:Africa/Tunis|TR:Europe/Istanbul|TT:America/Port_of_Spain|TW:Asia/Taipei|TZ:Africa/Dar_es_Salaam|UA:Europe/Kyiv|UG:Africa/Kampala|US:America/New_York,America/Los_Angeles|UY:America/Montevideo|UZ:Asia/Tashkent|VA:Europe/Vatican|VE:America/Caracas|VN:Asia/Ho_Chi_Minh|XK:Europe/Belgrade|YE:Asia/Aden|ZA:Africa/Johannesburg|ZM:Africa/Lusaka|ZW:Africa/Harare".split("|").map((e) => {
+	const [code, list] = e.split(":");
+	return [code, list.split(",")];
+}));
+new Set("a an the and or but so to of in on for with at by from this that these those it its is are was were be been am i you we they he she my your our their me us them just still any some do does did would could should will can may might there here what which who how about if then than as".split(" "));
+//#endregion
 //#region src/lib/prefs.ts
 var RATE_FIELDS = [
 	{

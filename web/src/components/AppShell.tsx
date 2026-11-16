@@ -4,8 +4,12 @@ import {
   Archive, BarChart3, Building2, CalendarDays, Check, ChevronRight, CircleDollarSign, Clock3, Cloud, CloudOff, Command, HelpCircle, Inbox, LoaderCircle,
   Keyboard, LayoutDashboard, Compass, LogOut, UserCheck, Menu, MessageCircle, MonitorX, Moon, Palette, Plus, Search, SearchX, Settings, ShieldCheck, Sun,
   Sparkles, TrendingUp, UserX, Users, Wallet, X,
-  Receipt, Handshake,
+  Receipt, Handshake, PlaneTakeoff,
 } from "lucide-react";
+import { AutopilotProvider, useAutopilot, useAutopilotPrefs } from "../contexts/AutopilotContext";
+import { FillAsk } from "./FillAsk";
+import { dayStartIn } from "../lib/zones";
+import { minutesOf } from "../lib/autopilot";
 import { useInvoicesToChase } from "./Money";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
@@ -38,6 +42,7 @@ const navSections = [
   { label: "Overview", items: [{ to: "/app", label: "Dashboard", icon: LayoutDashboard, end: true }, { to: "/app/reports", label: "Reports", icon: TrendingUp }] },
   { label: "Manage", items: [
     { to: "/app/influencers", label: "Influencers", icon: Users },
+    { to: "/app/autopilot", label: "Autopilot", icon: PlaneTakeoff },
     { to: "/app/brands", label: "Brands", icon: Building2 },
     { to: "/app/match", label: "Match", icon: Handshake },
     { to: "/app/leads", label: "Inbound leads", icon: Inbox },
@@ -62,6 +67,27 @@ const LockIcon = () => <ShieldCheck size={15} />;
 const ShieldIcon = () => <ShieldCheck size={17} />;
 
 export default function AppShell() {
+  return <AutopilotProvider><Shell /></AutopilotProvider>;
+}
+
+/** "Fill the last N too?" on every page while it matters (night fill on, past its start, held back by your ceiling). */
+function FillBanner() {
+  const auto = useAutopilot();
+  const ap = useAutopilotPrefs();
+  const d = auto.day;
+  if (!ap.fill || !d || d.short <= 0 || d.declined || d.extra_ok || d.day !== auto.todayKey) return null;
+  if (Date.now() < dayStartIn(auto.zone, Date.now()) + minutesOf(ap.start) * 60_000) return null;
+  return <FillAsk short={d.short} banner />;
+}
+
+/** The Autopilot nav item's count: follow-ups waiting to go today. */
+function AutopilotCount() {
+  const auto = useAutopilot();
+  const n = auto.today.filter((i) => i.status === "pending" || i.status === "sending").length;
+  return n > 0 ? <b className="nav-due nav-auto" title={`${n} follow-up${n === 1 ? "" : "s"} waiting to go today`}>{n}</b> : null;
+}
+
+function Shell() {
   const { user, signOut } = useAuth();
   const data = useData();
   const chase = useChase();
@@ -306,7 +332,7 @@ export default function AppShell() {
       <div className="sidebar-top"><Logo /><button className="mobile-close" onClick={() => setMobileOpen(false)}><X size={19} /></button></div>
       <nav className="side-nav">
         {navSections.map((section) => (
-          <div className="nav-section" key={section.label}><span className="nav-label">{section.label}</span>{section.items.filter((item) => !("owner" in item) || isOwner).map((item) => <NavLink key={item.to} to={item.to} end={"end" in item ? item.end : false} className={({ isActive }) => isActive ? "active" : ""}><item.icon size={17} strokeWidth={1.8} /><span>{item.label}</span>{item.label === "Calendar" && dueToday > 0 && <b className="nav-due" title={`${dueToday} due today or overdue`}>{dueToday}</b>}{(item.label === "Influencers" || item.label === "Brands") && (() => { const kind = item.label === "Influencers" ? "creator" : "brand"; const n = chase.due.filter((c) => c.type === kind).length + chase.reply.filter((c) => c.type === kind).length; return n > 0 ? <b className="nav-due nav-follow" title={`${n} need a follow-up or a reply`}>{n}</b> : null; })()}{item.label === "Invoices" && invoicesDue > 0 && <b className="nav-due" title={`${invoicesDue} invoice${invoicesDue === 1 ? "" : "s"} to chase today`}>{invoicesDue}</b>}{item.label === "Inbound leads" && newLeads > 0 && <b className="nav-due nav-leads" title={`${newLeads} new inbound lead${newLeads === 1 ? "" : "s"} to review`}>{newLeads}</b>}{item.label === "Members" && waitingMembers > 0 && <b className="nav-due nav-leads" title={`${waitingMembers} ${waitingMembers === 1 ? "person is" : "people are"} waiting for your approval`}>{waitingMembers}</b>}{item.label === "Archive" && <b>{data.creators.filter((x) => x.archived_at).length + data.brands.filter((x) => x.archived_at).length + data.campaigns.filter((x) => x.archived_at).length || ""}</b>}</NavLink>)}</div>
+          <div className="nav-section" key={section.label}><span className="nav-label">{section.label}</span>{section.items.filter((item) => !("owner" in item) || isOwner).map((item) => <NavLink key={item.to} to={item.to} end={"end" in item ? item.end : false} className={({ isActive }) => isActive ? "active" : ""}><item.icon size={17} strokeWidth={1.8} /><span>{item.label}</span>{item.label === "Autopilot" && <AutopilotCount />}{item.label === "Calendar" && dueToday > 0 && <b className="nav-due" title={`${dueToday} due today or overdue`}>{dueToday}</b>}{(item.label === "Influencers" || item.label === "Brands") && (() => { const kind = item.label === "Influencers" ? "creator" : "brand"; const n = chase.due.filter((c) => c.type === kind).length + chase.reply.filter((c) => c.type === kind).length; return n > 0 ? <b className="nav-due nav-follow" title={`${n} need a follow-up or a reply`}>{n}</b> : null; })()}{item.label === "Invoices" && invoicesDue > 0 && <b className="nav-due" title={`${invoicesDue} invoice${invoicesDue === 1 ? "" : "s"} to chase today`}>{invoicesDue}</b>}{item.label === "Inbound leads" && newLeads > 0 && <b className="nav-due nav-leads" title={`${newLeads} new inbound lead${newLeads === 1 ? "" : "s"} to review`}>{newLeads}</b>}{item.label === "Members" && waitingMembers > 0 && <b className="nav-due nav-leads" title={`${waitingMembers} ${waitingMembers === 1 ? "person is" : "people are"} waiting for your approval`}>{waitingMembers}</b>}{item.label === "Archive" && <b>{data.creators.filter((x) => x.archived_at).length + data.brands.filter((x) => x.archived_at).length + data.campaigns.filter((x) => x.archived_at).length || ""}</b>}</NavLink>)}</div>
         ))}
       </nav>
       <div className="user-footer">
@@ -356,7 +382,7 @@ export default function AppShell() {
         {setupKnown && !setupDone && bannerVisible && (
           <div className="onboarding-banner"><div><Sparkles size={16} /><span><strong>Your workspace is almost ready.</strong> Take the 30-second setup and start with your real workspace.</span></div><div><Button size="sm" onClick={() => { setOnboardingStep(0); setOnboardingOpen(true); }}>Finish setup</Button><button onClick={() => setBannerVisible(false)} aria-label="Dismiss"><X size={16} /></button></div></div>
         )}
-        <main className="app-main"><motion.div key={location.pathname} initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.22 }}><Outlet /></motion.div></main>
+        <main className="app-main"><FillBanner /><motion.div key={location.pathname} initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.22 }}><Outlet /></motion.div></main>
       </div>
 
       <AnimatePresence>

@@ -95,7 +95,7 @@ const FRESH_CHECK_MS = 20 * 1000;
 export type AiProviderName = "claude" | "gemini" | "groq" | "cloudflare" | "openrouter";
 export type AiLink = { provider: AiProviderName; models: string[]; keys: number; readyAt: string | null; can: ("text" | "image" | "pdf")[] };
 
-async function invoke<T>(name: string, body: Record<string, unknown>): Promise<{ data?: T; error?: string; status?: number; body?: Record<string, unknown> }> {
+export async function invoke<T>(name: string, body: Record<string, unknown>): Promise<{ data?: T; error?: string; status?: number; body?: Record<string, unknown> }> {
   const { data, error } = await supabase.functions.invoke(name, { body });
   if (!error) return { data: data as T };
   const response = (error as { context?: Response }).context;
