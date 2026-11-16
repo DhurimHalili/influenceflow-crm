@@ -36,6 +36,7 @@ const HELD: Record<HoldWhy, { title: string; fix?: { to: string; label: string }
   "other-channel": { title: "On another channel, or email reminders off" },
   "no-thread": { title: "No email thread to reply in" },
   paused: { title: "A no-follow-up day (Settings → Weekends)", fix: { to: "/app/settings#weekend", label: "Weekends" } },
+  bounced: { title: "Their email bounced — fix the address first" },
 };
 
 function Ring({ value, goal }: { value: number; goal: number }) {

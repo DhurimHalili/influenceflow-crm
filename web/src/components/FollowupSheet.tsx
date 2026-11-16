@@ -25,6 +25,7 @@ const WHY: Record<string, string> = {
   mailbox: "The mailbox that emailed them isn't connected (or can't send) — reconnect it in Settings → Gmail.",
   paused: "Today is a no-follow-up day (Settings → Weekends).",
   not_due: "Their follow-up isn't due today.",
+  bounced: "Your last email to them bounced — fix their address on the profile first.",
 };
 
 /** "Send now" waits a few seconds for an Undo, then goes (the minute cron sends it anyway if this tab closes). */

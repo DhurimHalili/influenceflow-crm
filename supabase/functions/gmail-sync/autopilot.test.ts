@@ -55,7 +55,7 @@ const world = (events: World["events"], extra: Partial<World> = {}): World => ({
   userId: "u1", name: "Dhurim", prefs: { timezone: tz }, tz, goal: 20, rules: { gaps: [1, 1, 1], then: 2, stop_after: 0, workdays: [1, 2, 3, 4, 5], holidays: [], reach_back_days: 30, thread_cap: 4, new_thread_gap: 1 } as World["rules"],
   templates: { 1: [{ id: "t1aa", name: "Missed it?", text: "Hi {first_name},\n\nWould you be interested?" }], 2: [], 3: [], 4: [] }, auto: { fill: false, start: "21:00", cap: 0 },
   creators: [{ id: "c1", name: "Sam Rivera", country: "United States", pipeline_status: "contacted", archived_at: null, contact_channel: "email", email_followups: true } as World["creators"][number]],
-  events, followups: [], ...extra,
+  events, followups: [], bounced: new Set(), ...extra,
 });
 const out = (gmailId: string, at: number, extra = {}) => ({ id: gmailId, gmail_id: gmailId, thread_id: "t1", direction: "out" as const, entity_type: "creator" as const, entity_id: "c1", counterpart: "sam@creator.com", subject: "Collab", snippet: "", at: new Date(at).toISOString(), mailbox: "me@agency.com", scheduled: false, reply_kind: "" as const, ...extra });
 const q: QueueRow = { id: "q1", user_id: "u1", creator_id: "c1", mailbox: "me@agency.com", thread_id: "t1", round: 1, template_id: "t1aa", template_name: "Missed it?", body: "Hi Sam,\n\nWould you be interested?", send_at: new Date(NOW - 60_000).toISOString(), day: dayKeyIn(tz, NOW), origin: "batch", batch_id: null, status: "sending", reason: "", attempts: 0, gmail_id: "", their_zone: "America/New_York,America/Los_Angeles", created_at: new Date(NOW - 3600_000).toISOString(), updated_at: new Date(NOW).toISOString() };
@@ -125,6 +125,25 @@ const firstAt = NOW - 7 * 86400_000;
   eq("server: Monday 00:30 in Kosovo counts as Monday (due)", s?.kind, "due");
   const pool = poolOf(w, rows, new Set(), at);
   eq("…and the pool offers them", pool.ready.map((r) => r.id), ["c1"]);
+}
+
+// 10. Two mailboxes: every follow-up goes from the mailbox that holds ITS thread — never mixed.
+{
+  const at = Date.UTC(2026, 10, 15, 23, 30);
+  const two = [...rows, { id: "r2", user_id: "u1", email: "second@agency.com", scopes: rows[0].scopes }];
+  const creators = [world([]).creators[0], { ...world([]).creators[0], id: "c2", name: "Kim Lee" }];
+  const w = world([out("g1", Date.UTC(2026, 10, 12, 9)), out("h1", Date.UTC(2026, 10, 12, 10), { entity_id: "c2", thread_id: "t2", mailbox: "second@agency.com", gmail_id: "h1", id: "h1" })], { creators });
+  const pool = poolOf(w, two, new Set(), at);
+  eq("each one keeps the mailbox of its own thread", pool.ready.map((r) => [r.id, r.mailbox, r.threadId]).sort(), [["c1", "me@agency.com", "t1"], ["c2", "second@agency.com", "t2"]]);
+  const used: string[] = [];
+  const kit = kitWith([mine("h1", firstAt)], []);
+  const tracked: Kit = { ...kit, token: (row) => { used.push((row as { email: string }).email); return Promise.resolve("tok"); } };
+  await sendOne(db(), tracked, { ...q, creator_id: "c2", mailbox: "second@agency.com", thread_id: "t2" }, two, w, NOW);
+  eq("…and is sent with that mailbox's own login", used, ["second@agency.com"]);
+  const gone = await sendOne(db(), tracked, { ...q, creator_id: "c2", mailbox: "second@agency.com", thread_id: "t2" }, rows, w, NOW);
+  eq("its mailbox disconnected → not sent from another one", [gone.status, gone.reason], ["failed", "mailbox"]);
+  const wb = world([out("g1", Date.UTC(2026, 10, 12, 9))], { bounced: new Set(["c1"]) });
+  eq("a bounced address is never followed up", poolOf(wb, rows, new Set(), at).held.map((h) => h.why), ["bounced"]);
 }
 
 if (failed) { console.error(`\n${failed} failed`); Deno.exit(1); }

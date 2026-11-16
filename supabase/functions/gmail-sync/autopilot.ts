@@ -17,6 +17,7 @@
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { assignTemplates, autopilotPool, dayCap, fillNeed, fillTemplate, minutesOf, readAutopilot, readTemplates, ruleFit, shiftToZone, type Fit, type Ready, type Round, type TemplateBook } from "../../../web/src/lib/autopilot.ts";
 import { followupState, type FollowupState } from "../../../web/src/lib/followupEngine.ts";
+import { openBounces } from "../../../web/src/lib/bounces.ts";
 import { followupsPaused, modeOn, normalizeWeekend } from "../../../web/src/lib/dayMode.ts";
 import { awakeAt, hash, planTimes, type PlanItem } from "../../../web/src/lib/smartTime.ts";
 import { dayEndIn, dayKeyIn, dayStartIn, localMinute, offsetMin, validZone } from "../../../web/src/lib/zones.ts";
@@ -52,9 +53,11 @@ type Prefs = { timezone?: string; daily_email_goal?: number; followup_rules?: Re
 export type World = {
   userId: string; name: string; prefs: Prefs; tz: string; goal: number; rules: FollowupRules; templates: TemplateBook; auto: ReturnType<typeof readAutopilot>;
   creators: Creator[]; events: EmailEvent[]; followups: Followup[];
+  /** Creators whose address bounced and wasn't fixed ("Wrong email") — never written to. */
+  bounced: Set<string>;
 };
 
-const CREATOR_COLS = "id, name, country, youtube, pipeline_status, archived_at, contact_channel, email_followups, followup_snooze_until, primary_thread, primary_thread_at, new_thread_gap, date_contacted, status_source, status_updated_at, lost_at, lost_reason, created_at";
+const CREATOR_COLS = "id, name, country, youtube, pipeline_status, archived_at, contact_channel, email_followups, followup_snooze_until, primary_thread, primary_thread_at, new_thread_gap, date_contacted, status_source, status_updated_at, lost_at, lost_reason, created_at, contact_email, team";
 const EVENT_COLS = "gmail_id, thread_id, direction, entity_type, entity_id, at, mailbox, scheduled, reply_kind, message_key, in_reply_to, subject, counterpart, gone";
 
 export function rulesOf(prefs: Prefs): FollowupRules {
@@ -81,9 +84,12 @@ export async function loadWorld(admin: Admin, userId: string, only?: string[]): 
   const ids = creators.map((c) => c.id);
   const events: EmailEvent[] = [];
   const followups: Followup[] = [];
+  const bounces: EmailEvent[] = [];
   for (const part of chunk(ids, 120)) {
+    const { data: bs } = await admin.from("email_events").select("gmail_id, entity_id, counterpart, at, bounced_at, bounce_to, bounce_reason, subject, mailbox, direction").eq("user_id", userId).in("entity_id", part).not("bounced_at", "is", null).limit(2000);
+    for (const b of (bs || []) as Record<string, unknown>[]) bounces.push({ id: text(b.gmail_id), gmail_id: text(b.gmail_id), thread_id: "", direction: "out", entity_type: "creator", entity_id: text(b.entity_id), counterpart: text(b.counterpart).toLowerCase(), subject: text(b.subject), snippet: "", at: text(b.at), mailbox: text(b.mailbox), bounced_at: text(b.bounced_at), bounce_to: text(b.bounce_to).toLowerCase(), bounce_reason: text(b.bounce_reason) });
     const [{ data: ev }, { data: fu }] = await Promise.all([
-      admin.from("email_events").select(EVENT_COLS).eq("user_id", userId).in("entity_id", part).order("at").limit(8000),
+      admin.from("email_events").select(EVENT_COLS).eq("user_id", userId).in("entity_id", part).is("bounced_at", null).order("at").limit(8000),
       admin.from("followups").select("id, creator_id, brand_id, kind, channel, at").eq("user_id", userId).in("creator_id", part).limit(5000),
     ]);
     for (const e of (ev || []) as Record<string, unknown>[]) events.push({ id: text(e.gmail_id), gmail_id: text(e.gmail_id), thread_id: text(e.thread_id), direction: e.direction === "in" ? "in" : "out", entity_type: e.entity_type === "brand" ? "brand" : "creator", entity_id: text(e.entity_id), counterpart: text(e.counterpart), subject: text(e.subject), snippet: "", at: text(e.at), mailbox: text(e.mailbox).toLowerCase(), scheduled: e.scheduled === true, reply_kind: (text(e.reply_kind) || "") as EmailEvent["reply_kind"], message_key: text(e.message_key), in_reply_to: text(e.in_reply_to), gone: (text(e.gone) || "") as EmailEvent["gone"] });
@@ -91,7 +97,9 @@ export async function loadWorld(admin: Admin, userId: string, only?: string[]): 
   }
   events.sort((a, b) => a.at.localeCompare(b.at));
   followups.sort((a, b) => b.at.localeCompare(a.at));
-  return { userId, name: text(profile?.display_name), prefs, tz, goal, rules: rulesOf(prefs), templates: readTemplates(prefs.followup_templates), auto: readAutopilot(prefs.autopilot), creators, events, followups };
+  const addressesOf = (c: Creator) => [c.contact_email || "", ...((Array.isArray(c.team) ? c.team : []) as { email?: string; removed?: boolean }[]).filter((m) => !m.removed).map((m) => m.email || "")];
+  const bounced = new Set(openBounces(creators.map((c) => ({ id: c.id, kind: "creator" as const, addresses: addressesOf(c) })), bounces, events).keys());
+  return { userId, name: text(profile?.display_name), prefs, tz, goal, rules: rulesOf(prefs), templates: readTemplates(prefs.followup_templates), auto: readAutopilot(prefs.autopilot), creators, events, followups, bounced };
 }
 
 /** The follow-up engine read on YOUR calendar (the server runs in UTC). */
@@ -134,7 +142,7 @@ export async function doneWithToday(admin: Admin, userId: string, day: string): 
 export function poolOf(w: World, rows: Row[], queued: Set<string>, now: number, anyWords = false) {
   const placeholder = { id: "yours", name: "", text: "x" };
   const templates = anyWords ? ({ 1: [placeholder], 2: [placeholder], 3: [placeholder], 4: [placeholder] } as TemplateBook) : w.templates;
-  return autopilotPool({ creators: w.creators, followups: w.followups, events: w.events, states: statesOf(w, now), mailboxes: rows.filter(canSend).map(mailboxOf), templates, queued, paused: pausedToday(w, now) });
+  return autopilotPool({ creators: w.creators, followups: w.followups, events: w.events, states: statesOf(w, now), mailboxes: rows.filter(canSend).map(mailboxOf), templates, queued, paused: pausedToday(w, now), bounced: w.bounced });
 }
 
 // ----- which words fit ------------------------------------------------------------------------------
@@ -278,7 +286,7 @@ export async function insertQueue(admin: Admin, userId: string, tz: string, rows
  */
 export async function doneToday(admin: Admin, userId: string, tz: string, now: number) {
   const start = dayStartIn(tz, now), end = dayEndIn(tz, now);
-  const { data: out } = await admin.from("email_events").select("gmail_id, entity_id, at, scheduled").eq("user_id", userId).eq("direction", "out").gte("at", iso(start)).lt("at", iso(end)).limit(5000);
+  const { data: out } = await admin.from("email_events").select("gmail_id, entity_id, at, scheduled").eq("user_id", userId).eq("direction", "out").is("bounced_at", null).gte("at", iso(start)).lt("at", iso(end)).limit(5000);
   const sent = new Set<string>(), later = new Set<string>();
   const mailAt = new Map<string, number[]>();
   for (const e of (out || []) as { gmail_id: string; entity_id: string; at: string; scheduled: boolean }[]) {

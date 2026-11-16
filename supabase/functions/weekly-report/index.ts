@@ -72,7 +72,7 @@ async function reportFor(admin: SupabaseClient, userId: string, which: "last" | 
     campaigns: campaigns as never[],
     activities: activities.map((a) => ({ ...a, text: text(a.text) })) as never[],
     followups: followups.map(followup) as never[],
-    events: events.map(event) as never[],
+    events: events.filter((e) => !e.bounced_at).map(event) as never[],
     leads: leads.map((l) => ({ ...l, my_replies: Array.isArray(l.my_replies) ? l.my_replies : [] })) as never[],
     goal,
     rules: {

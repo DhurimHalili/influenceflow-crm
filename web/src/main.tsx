@@ -15,14 +15,17 @@ import './styles/match.css'
 import './styles/bulkbar.css'
 import './styles/autopilot.css'
 import './styles/popups.css'
+import './styles/sauce.css'
 import './styles/phone.css'
 import { startFaviconAnimation } from './lib/favicon'
+import { installSauceFx } from './lib/sauceFx'
 import { bootUpdateCheck } from './lib/appUpdate'
 
 // Drop the old login-lock store (replaced by .v2 with fair decay).
 try { localStorage.removeItem('influenceflow.login-attempts') } catch { /* ignore */ }
 
 startFaviconAnimation()
+installSauceFx()
 bootUpdateCheck()
 
 // Drop the ?v=<build> cache-buster an update reload adds, keeping URLs clean.

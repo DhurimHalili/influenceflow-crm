@@ -28,6 +28,8 @@ import { KeysNoticeLayer } from "./KeysNotice";
 import { SauceDropLayer } from "./SauceDrop";
 import { FillWarnLayer } from "./FillWarn";
 import { GoalRampLayer } from "./GoalRamp";
+import { BounceLayer } from "./Bounces";
+import { SauceTicker } from "./SauceTicker";
 import { YouTubeProgress } from "./YouTubeStats";
 import { isPastDay, isTodayDay, LOSS_REASONS } from "../lib/utils";
 import type { SearchResult, ThemeName } from "../types";
@@ -63,7 +65,7 @@ const navSections = [
 ];
 
 const themeOptions: { value: ThemeName; label: string }[] = [
-  { value: "agency", label: "Agency" }, { value: "light", label: "Light" }, { value: "dark", label: "Dark" }, { value: "honey", label: "Honey" }, { value: "ocean", label: "Ocean" },
+  { value: "agency", label: "Agency" }, { value: "light", label: "Light" }, { value: "dark", label: "Dark" }, { value: "honey", label: "Honey" }, { value: "ocean", label: "Ocean" }, { value: "sauce", label: "Sauce" },
 ];
 
 const LockIcon = () => <ShieldCheck size={15} />;
@@ -338,6 +340,7 @@ function Shell() {
           <div className="nav-section" key={section.label}><span className="nav-label">{section.label}</span>{section.items.filter((item) => !("owner" in item) || isOwner).map((item) => <NavLink key={item.to} to={item.to} end={"end" in item ? item.end : false} className={({ isActive }) => isActive ? "active" : ""}><item.icon size={17} strokeWidth={1.8} /><span>{item.label}</span>{item.label === "Autopilot" && <AutopilotCount />}{item.label === "Calendar" && dueToday > 0 && <b className="nav-due" title={`${dueToday} due today or overdue`}>{dueToday}</b>}{(item.label === "Influencers" || item.label === "Brands") && (() => { const kind = item.label === "Influencers" ? "creator" : "brand"; const n = chase.due.filter((c) => c.type === kind).length + chase.reply.filter((c) => c.type === kind).length; return n > 0 ? <b className="nav-due nav-follow" title={`${n} need a follow-up or a reply`}>{n}</b> : null; })()}{item.label === "Invoices" && invoicesDue > 0 && <b className="nav-due" title={`${invoicesDue} invoice${invoicesDue === 1 ? "" : "s"} to chase today`}>{invoicesDue}</b>}{item.label === "Inbound leads" && newLeads > 0 && <b className="nav-due nav-leads" title={`${newLeads} new inbound lead${newLeads === 1 ? "" : "s"} to review`}>{newLeads}</b>}{item.label === "Members" && waitingMembers > 0 && <b className="nav-due nav-leads" title={`${waitingMembers} ${waitingMembers === 1 ? "person is" : "people are"} waiting for your approval`}>{waitingMembers}</b>}{item.label === "Archive" && <b>{data.creators.filter((x) => x.archived_at).length + data.brands.filter((x) => x.archived_at).length + data.campaigns.filter((x) => x.archived_at).length || ""}</b>}</NavLink>)}</div>
         ))}
       </nav>
+      <SauceTicker />
       <div className="user-footer">
         <Avatar name={data.profile.display_name || user?.email || "IF"} path={data.profile.avatar_path} size="sm" />
         <div><strong>{accountName}</strong><span><i /> {agencyName || "Private workspace"}</span></div>
@@ -446,6 +449,7 @@ function Shell() {
     <KeysNoticeLayer />
     <SauceDropLayer />
     <GoalRampLayer />
+    <BounceLayer />
     <FillWarnLayer />
     <YouTubeProgress />
     </div>
