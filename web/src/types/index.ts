@@ -58,6 +58,8 @@ export interface WorkspacePreferences {
   followup_templates?: import("../lib/autopilot").TemplateBook;
   /** Autopilot: the night fill (on/off, start time) and the most follow-ups the CRM sends a day (0 = what the goal needs). */
   autopilot?: import("../lib/autopilot").AutopilotPrefs;
+  /** How many times a one-off popup was shown to this account (across devices), by popup id. */
+  notices?: Record<string, number>;
   /** Daily browser summary of due actions. */
   action_digest: boolean;
   /** When to follow up with people who haven't replied. */

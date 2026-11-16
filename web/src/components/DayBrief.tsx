@@ -1,6 +1,7 @@
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { ArrowRight, CalendarClock, CirclePause, MailX, Radar, Reply, Send, Shuffle, X } from "lucide-react";
 import { isKeysNoticeOpen, KEYS_NOTICE_CLOSED } from "../lib/keysNotice";
+import { stageBusy, STAGE_FREE } from "../lib/popupStage";
 import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useData } from "../contexts/DataContext";
@@ -39,11 +40,12 @@ export function DayBriefLayer() {
     if (!special || !weekend.reminders || !data.ready || !pathname.startsWith("/app")) return;
     if (store.get(seenKey())) return;
     // Never on top of the keys notice: wait until it's closed.
-    const go = () => { if (isKeysNoticeOpen() || store.get(seenKey())) return; store.set(seenKey()); setSeed(Math.random()); setOpen(true); };
+    const go = () => { if (isKeysNoticeOpen() || stageBusy() || store.get(seenKey())) return; store.set(seenKey()); setSeed(Math.random()); setOpen(true); };
     const t = window.setTimeout(go, 1600);
     const after = () => window.setTimeout(go, 500);
     window.addEventListener(KEYS_NOTICE_CLOSED, after);
-    return () => { window.clearTimeout(t); window.removeEventListener(KEYS_NOTICE_CLOSED, after); };
+    window.addEventListener(STAGE_FREE, after);
+    return () => { window.clearTimeout(t); window.removeEventListener(KEYS_NOTICE_CLOSED, after); window.removeEventListener(STAGE_FREE, after); };
   }, [special, weekend.reminders, data.ready, pathname]);
   useEffect(() => {
     const show = () => { setSeed(Math.random()); setOpen(true); };
