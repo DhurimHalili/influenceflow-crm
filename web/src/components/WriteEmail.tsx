@@ -1,4 +1,4 @@
-import { CalendarClock, Check, ChevronDown, CornerUpLeft, ExternalLink, Loader2, Mail, MailPlus, MessagesSquare, PenLine } from "lucide-react";
+import { CalendarClock, Check, ChevronDown, CornerUpLeft, ExternalLink, Loader2, Mail, MailPlus, MessagesSquare, PenLine, PlaneTakeoff, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useData } from "../contexts/DataContext";
@@ -7,6 +7,11 @@ import { useToast } from "../contexts/ToastContext";
 import { useChase } from "../hooks/useChase";
 import { emailPlan, when, type Upcoming } from "../lib/emailAction";
 import { readTemplate, templateFor } from "../lib/replyTemplate";
+import { useAutopilot } from "../contexts/AutopilotContext";
+import { ordinal } from "../lib/followupEngine";
+import { timeIn, placeOf } from "../lib/zones";
+import { dateFmt } from "../lib/days";
+import { FollowupSheet } from "./FollowupSheet";
 
 // The email button on a profile does what the conversation needs:
 //   nothing sent yet           → Write email (Gmail's composer, in your usual mailbox)
@@ -35,6 +40,15 @@ export function WriteEmail({ to, recordId }: { to: string; recordId: string }) {
   const prefs = data.profile.preferences;
   const tpl = readTemplate(prefs?.reply_template);
   const usesTpl = !!templateFor(tpl, type);
+  const auto = useAutopilot();
+  const [sheet, setSheet] = useState(false);
+  // Autopilot: the CRM can send this follow-up (they never answered), one is already waiting, or it's yours to write.
+  const autoWaiting = type === "creator" ? auto.pendingByCreator.get(recordId) : undefined;
+  // Ready, or only missing a template (you write it in the sheet), or one you cancelled today (sending it yourself is still fine).
+  const dueState = chase.byId.get(recordId)?.state;
+  const cancelledToday = type === "creator" && !autoWaiting && auto.pool.queued.includes(recordId) && dueState?.kind === "due" && !auto.today.some((i) => i.creator_id === recordId && i.status === "sent");
+  const autoReady = type === "creator" ? auto.pool.ready.find((r) => r.id === recordId) || auto.pool.held.find((h) => h.id === recordId && h.why === "no-template") || (cancelledToday && dueState?.kind === "due" ? { round: dueState.sent ?? dueState.round } : undefined) : undefined;
+  const autoByHand = type === "creator" ? auto.pool.byHand.find((h) => h.id === recordId) : undefined;
   const plan = useMemo(() => emailPlan({ events: (events || []).filter((e) => e.entity_id === recordId), state, mailboxes: boxes.map((m) => m.email) }), [events, recordId, state, boxes]);
 
   useEffect(() => {
@@ -85,7 +99,7 @@ export function WriteEmail({ to, recordId }: { to: string; recordId: string }) {
   </>;
 
   return <div className={`write-email mode-${plan.mode}${strong ? " is-strong" : ""}`} ref={ref}>
-    <div className="write-row">
+    <div className="write-line"><div className="write-row">
       {plan.mode === "reply"
         ? <button type="button" className="write-go" onClick={() => void reply()} disabled={busy} title={hint} aria-busy={busy}>{main}</button>
         : <a className="write-go" href={gmailComposeUrl(to, box)} target="_blank" rel="noopener noreferrer" title={hint}>{main}</a>}
@@ -102,8 +116,17 @@ export function WriteEmail({ to, recordId }: { to: string; recordId: string }) {
         </>}
         <span className="write-menu-head">{thread ? "New email from" : "Write from"}</span>
         {boxes.map((m) => <a role="menuitem" key={m.id} href={gmailComposeUrl(to, m.email)} target="_blank" rel="noopener noreferrer" onClick={() => setOpen(false)}><MailPlus size={14} aria-hidden="true" /><span>{m.email}{m.email === box && <small>{thread ? "where the conversation is" : "last used"}</small>}</span></a>)}
+        {autoByHand && <p className="write-menu-note"><PlaneTakeoff size={13} aria-hidden="true" />Autopilot skips them — they answered before, so this follow-up is yours to write.</p>}
       </div>}
     </div>
+      {autoReady && !autoWaiting && <button type="button" className="write-auto" onClick={() => setSheet(true)} title="Send it from the CRM with one of your follow-up templates — now or at a smart time"><PlaneTakeoff size={14} aria-hidden="true" /><span>Send {ordinal(autoReady.round)} follow-up</span></button>}
+    </div>
+    {autoWaiting && <p className="write-auto-line">
+      <PlaneTakeoff size={14} aria-hidden="true" />
+      <span><b>{autoWaiting.status === "sending" ? "Sending now" : `Autopilot · ${dateFmt({ hour: "numeric", minute: "2-digit" }).format(new Date(autoWaiting.send_at))}`}</b> your {ordinal(autoWaiting.round)} follow-up{autoWaiting.template_name ? ` (“${autoWaiting.template_name}”)` : ""}{autoWaiting.their_zone ? ` · ${timeIn(autoWaiting.their_zone.split(",")[0], new Date(autoWaiting.send_at).getTime())} in ${placeOf(autoWaiting.their_zone.split(",")[0])}` : ""}<em>Cancelled by itself if they reply first</em></span>
+      {autoWaiting.status === "pending" && <button type="button" onClick={() => void auto.cancel({ id: autoWaiting.id }).then((r) => toast(r.ok ? "Cancelled — it won't be sent" : r.message, r.ok ? "success" : "error"))} aria-label="Cancel this follow-up"><X size={14} /> Cancel</button>}
+    </p>}
+    {sheet && <FollowupSheet creatorId={recordId} name={data.creators.find((c) => c.id === recordId)?.name || "them"} open={sheet} onClose={() => setSheet(false)} />}
     {(!plan.upcoming.length || strong) && <p className={`write-status tone-${plan.status.tone}`}><i aria-hidden="true" /><span>{plan.status.text}{plan.mode !== "write" && thread?.subject && <small title={thread.subject}>in “{thread.subject}”</small>}</span></p>}
     {plan.upcoming.map((u) => <p key={u.gmailId} className={`write-sched${u.crossed ? " crossed" : ""}`}>
       <CalendarClock size={14} aria-hidden="true" />

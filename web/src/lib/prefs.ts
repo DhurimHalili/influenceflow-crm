@@ -1,6 +1,7 @@
 import { normalizeCriteria } from "./criteria";
 import { normalizeWeekend } from "./dayMode";
 import { readTemplate } from "./replyTemplate";
+import { readAutopilot, readTemplates } from "./autopilot";
 import type { Currency, FollowupRules, PayoutModel, RateCard, WorkspacePreferences } from "../types";
 
 export const CURRENCIES: { value: Currency; label: string }[] = [
@@ -103,6 +104,8 @@ export const normalizePreferences = (value: unknown): WorkspacePreferences => {
     email_signature: typeof v.email_signature === "string" ? v.email_signature : "",
     // Kept through every load and save (it used to be dropped as an unknown key).
     ...(v.reply_template !== undefined ? { reply_template: readTemplate(v.reply_template) } : {}),
+    ...(v.followup_templates !== undefined ? { followup_templates: readTemplates(v.followup_templates) } : {}),
+    ...(v.autopilot !== undefined ? { autopilot: readAutopilot(v.autopilot) } : {}),
     action_digest: v.action_digest !== false,
     followup_rules: normalizeFollowupRules(v.followup_rules),
     start_page: v.start_page === "influencers" || v.start_page === "calendar" ? v.start_page : "dashboard",

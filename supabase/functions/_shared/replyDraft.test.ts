@@ -1,6 +1,6 @@
 // deno run supabase/functions/_shared/replyDraft.test.ts
 import { fillReply, readTemplate, templateFor } from "../../../web/src/lib/replyTemplate.ts";
-import { addressList, bodyOf, draftHtml, leadHtml, msgIds, pickSendAs, pickTarget, quotable, quoteBlock, replyRaw, replyRecipients, replySubject, threadUrl, type Msg } from "./replyDraft.ts";
+import { addressList, bodyOf, draftHtml, htmlToText, leadHtml, msgIds, pickSendAs, pickTarget, quotable, quoteBlock, replyRaw, replyRecipients, replySubject, sentHtml, sentText, threadUrl, type Msg } from "./replyDraft.ts";
 
 let failed = 0;
 const eq = (name: string, got: unknown, want: unknown) => {
@@ -90,6 +90,15 @@ eq("no message id → no threading headers (Gmail still threads by id)", replyRa
 const bodyB64 = raw.split("\r\n\r\n")[1].replace(/\r\n/g, "");
 eq("body is utf-8 base64", new TextDecoder().decode(Uint8Array.from(atob(bodyB64), (c) => c.charCodeAt(0))), "<p>Hi ✓</p>");
 eq("thread link opens that mailbox", threadUrl("me@agency.com", "18c2f0a1b2c3d4e5"), "https://mail.google.com/mail/?authuser=me%40agency.com#all/18c2f0a1b2c3d4e5");
+
+// --- sent follow-ups (autopilot) ---
+const multi = replyRaw({ from: "me@agency.com", fromName: "", to: ["sam@creator.com"], subject: "Re: Collab?", messageId: "<m1@x>", references: "", html: "<div>Hi</div>", text: "Hi", boundary: "bnd1" });
+eq("with text: multipart/alternative", multi.split("\r\n\r\n")[0].includes('multipart/alternative; boundary="bnd1"'), true);
+eq("…text part first, html second, closed", [multi.indexOf("text/plain") < multi.indexOf("text/html"), multi.trimEnd().endsWith("--bnd1--")], [true, true]);
+eq("sent html: your lines as divs, escaped", sentHtml("Hi <Sam>,\n\nStill keen?", "", ""), '<div dir="ltr"><div>Hi &lt;Sam&gt;,</div><div><br></div><div>Still keen?</div></div>');
+eq("sent html: signature + quote", sentHtml("Hi", "<b>D</b>", "<div class=\"gmail_quote\">q</div>").includes("gmail_signature") , true);
+eq("sent text: quote as > lines", sentText("Hi", "", { attr: "On Mon, Me wrote:", text: "Are you interested?" }), "Hi\n\nOn Mon, Me wrote:\n> Are you interested?\n");
+eq("html → text", htmlToText("<div>Hi Sam,</div><div><br></div><div>Are you&nbsp;interested?</div><script>x</script>"), "Hi Sam,\n\nAre you interested?");
 
 if (failed) { console.error(`\n${failed} failed`); if (typeof Deno !== "undefined") Deno.exit(1); }
 else console.log("\nall passed");

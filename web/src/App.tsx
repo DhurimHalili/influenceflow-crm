@@ -24,6 +24,7 @@ const LeadsPage = lazy(() => import("./pages/LeadsPage"));
 const InvoicesPage = lazy(() => import("./components/Money").then((m) => ({ default: m.InvoicesPage })));
 const PitchPage = lazy(() => import("./pages/PitchPage"));
 const MatchPage = lazy(() => import("./pages/MatchPage"));
+const AutopilotPage = lazy(() => import("./pages/AutopilotPage"));
 const MediaKitPage = lazy(() => import("./pages/MediaKitPage"));
 const InfluencersPage = lazy(() => import("./pages/InfluencersPage"));
 const InfluencerDetailPage = lazy(() => import("./pages/InfluencersPage").then((module) => ({ default: module.InfluencerDetailPage })));
@@ -101,6 +102,7 @@ export default function App() {
                   <Route path="invoices" element={<InvoicesPage />} />
                   <Route path="pitch" element={<PitchPage />} />
                   <Route path="match" element={<MatchPage />} />
+                  <Route path="autopilot" element={<AutopilotPage />} />
                   <Route path="settings" element={<SettingsPage />} />
                   <Route path="setup" element={<SetupKeysPage />} />
                   <Route path="members" element={<MembersPage />} />

@@ -8,6 +8,10 @@ import { decodeEntities, isWarmup, precheck, scanForLead, type Lead, type ScanIn
 import { fillReply, templateFor } from "../../../web/src/lib/replyTemplate.ts";
 import { draftHtml, pickSendAs, pickTarget, bodyOf as replyBodyOf, quoteBlock, replyRaw, replyRecipients, replySubject, threadUrl, type Msg, type SendAs } from "../_shared/replyDraft.ts";
 import { classifyIncoming, isReaction, mergeReading, myReplyIntent, notAReply, READER_VERSION, referralOf, stripQuoted, type IncomingKind, type TeamRole } from "../_shared/replyReader.ts";
+import { cancelOnReply, doneWithToday, fillFor, flushOne, insertQueue, loadWorld, planFor, poolOf, prepareOne, rowsOf, tick, type Kit, type PlanRow, type Row as AutoRow } from "./autopilot.ts";
+import { awakeAt, planTimes } from "../../../web/src/lib/smartTime.ts";
+import { dayEndIn, dayKeyIn, validZone } from "../../../web/src/lib/zones.ts";
+import { fillTemplate, readAutopilot } from "../../../web/src/lib/autopilot.ts";
 import { analyzeStoredFile, bodyOf, drainQueue, gmailAttachment, processCreatorMail, processMyMail, repairAnchors, repairKitLists, sniff, type Fetcher, type FullMessage } from "./intel.ts";
 
 // Gmail ⇄ CRM sync, for every mailbox a user connected (an agency often runs
@@ -23,6 +27,8 @@ import { analyzeStoredFile, bodyOf, drainQueue, gmailAttachment, processCreatorM
 //   rescan_creator — go through one influencer's emails again for kits and prices
 //   cancel_scheduled — cancel one of your scheduled sends (moves it to Gmail's Trash; needs gmail.modify)
 //   reply_draft — a reply draft in one of your tracked threads, made like Gmail's Reply (needs gmail.modify); returns the link that opens it
+//   autopilot_* — follow-ups the CRM sends for you (autopilot.ts): plan / start a batch, prepare / queue / flush one,
+//                 cancel, fill_more / fill_skip; autopilot_tick (cron secret) sends what's due every minute
 //   cron        — background sync for everyone (x-cron-secret header only)
 //   health      — no auth; only says whether the server is configured
 //
@@ -1556,6 +1562,8 @@ async function syncUser(admin: Admin, rows: TokenRow[], allRows: TokenRow[], dea
   if (deadline - Date.now() > 5_000) await rehomeTeamMail(admin, allRows[0].user_id, book, own).catch(() => 0);
   // Their reply just landed before a scheduled bump of yours went out: cancel it now.
   if (deadline - Date.now() > 5_000) await autoCancelCrossed(admin, allRows[0].user_id, allRows).catch(() => 0);
+  // A follow-up the CRM was about to send, to someone who just answered: cancelled now (the send checks again too).
+  await cancelOnReply(admin, allRows[0].user_id).catch(() => 0);
   if (deadline - Date.now() > 5_000) await rereadReplies(admin, allRows[0].user_id).catch(() => 0);
   const readAll = async (until: number) => {
     const due = [...rows].filter((r) => opts.read === "now" || !r.read_at || Date.now() - new Date(r.read_at).getTime() >= (opts.read === "soon" ? READ_SOON_MS : READ_EVERY_MS)).sort((a, b) => (a.read_at || "").localeCompare(b.read_at || ""));
@@ -1649,6 +1657,25 @@ async function send(admin: Admin, rows: TokenRow[], input: Record<string, unknow
   const changed = await applyStatuses(admin, row.user_id, events.map((r) => r.entity_id));
   return { id: sent.id, threadId: sent.threadId, from: row.email, events: events.length, statusChanges: changed };
 }
+
+/** A message the CRM just sent, tracked at once (like send() does) so counts and statuses update without waiting for a sync. */
+async function recordSent(admin: Admin, row: TokenRow, rows: TokenRow[], gmailId: string) {
+  const own = new Set(rows.map(mailboxOf).filter(Boolean));
+  const book = await addressBook(admin, row.user_id, own);
+  const token = await accessToken(admin, row);
+  const meta = await gmail<Meta>(token, META_PATH(gmailId)).catch(() => null);
+  const events = meta ? await matchAll(admin, row.user_id, [{ ...meta, labelIds: Array.from(new Set([...(meta.labelIds || []), "SENT"])) }], book, own, mailboxOf(row)) : [];
+  if (events.length) await storeEvents(admin, events).catch(() => undefined);
+  await applyStatuses(admin, row.user_id, events.map((r) => r.entity_id)).catch(() => undefined);
+}
+
+const kitFor = (admin: Admin): Kit => ({
+  token: (row) => accessToken(admin, row as TokenRow),
+  call: (token, path, init) => gmail(token, path, init),
+  record: (row, rows, gmailId) => recordSent(admin, row as TokenRow, rows as TokenRow[], gmailId),
+  gmailError: (e) => (e instanceof GmailError ? { status: e.status, reconnect: e.reconnect, retryable: e.retryable } : null),
+  b64url,
+});
 
 // ----- entry -----------------------------------------------------------------------
 
@@ -1825,6 +1852,13 @@ Deno.serve(async (req) => {
     return json({ users: byUser.size, tracked, reading: toRead.length, ms: Date.now() - started });
   }
 
+  // Autopilot, every minute (only called when something is due or someone has the night fill on).
+  if (action === "autopilot_tick") {
+    if (!(await cronAllowed())) return json({ error: "Unauthorized" }, 401);
+    if (!configured) return json({ skipped: "not configured" });
+    return json(await tick(admin, kitFor(admin), Date.now() + 100_000));
+  }
+
   // One mailbox's read phase in its own worker (started by the cron above).
   if (action === "read_box") {
     if (!(await cronAllowed())) return json({ error: "Unauthorized" }, 401);
@@ -1965,6 +1999,32 @@ Deno.serve(async (req) => {
     return json({ connected: remaining > 0, removed: targets.map((r) => r.email) });
   }
 
+  // ----- autopilot: cancelling and "not today" work even with no mailbox connected -----
+  const uuid = (v: unknown): v is string => typeof v === "string" && /^[0-9a-f-]{36}$/i.test(v);
+  const todayOf = async () => {
+    const { data: prof } = await admin.from("profiles").select("preferences").eq("id", userId).maybeSingle();
+    const prefs = (prof?.preferences || {}) as { timezone?: string };
+    const tz = validZone(prefs.timezone) ? prefs.timezone! : "UTC";
+    return { tz, day: dayKeyIn(tz, Date.now()), prefs };
+  };
+  if (action === "autopilot_cancel") {
+    // One waiting follow-up, every one still waiting today, or only the night fill's.
+    let q = admin.from("autosend_queue").update({ status: "cancelled", reason: "by_you", updated_at: new Date().toISOString() }).eq("user_id", userId).eq("status", "pending");
+    if (uuid(input.id)) q = q.eq("id", input.id);
+    else if (input.all === true) q = q.gte("day", (await todayOf()).day);
+    else if (input.origin === "fill") q = q.eq("origin", "fill");
+    else if (uuid(input.batch)) q = q.eq("batch_id", input.batch);
+    else return json({ error: "Pick what to cancel." }, 400);
+    const { data: gone } = await q.select("id");
+    return json({ ok: true, cancelled: (gone || []).length });
+  }
+  if (action === "autopilot_fill_skip") {
+    const { day } = await todayOf();
+    const { data: row } = await admin.from("autosend_days").select("extra_ok").eq("user_id", userId).eq("day", day).maybeSingle();
+    await admin.from("autosend_days").upsert({ user_id: userId, day, declined: true, extra_ok: row?.extra_ok === true });
+    return json({ ok: true });
+  }
+
   if (!configured) return json({ error: "Gmail isn't set up on the server yet.", code: "not_configured" }, 503);
   if (!first) return json({ error: "Connect Gmail first.", code: "not_connected" }, 409);
 
@@ -2000,6 +2060,124 @@ Deno.serve(async (req) => {
     if (!threadId) return json({ error: "Invalid conversation" }, 400);
     const res = await replyDraft(admin, userId, rows, threadId);
     return "ok" in res ? json(res) : json({ error: res.error, ...(res.code ? { code: res.code } : {}), ...(res.url ? { url: res.url } : {}), ...(res.mailbox ? { mailbox: res.mailbox } : {}) }, res.status);
+  }
+
+  // ----- autopilot (autopilot.ts): only influencers who never answered, your own templates, today only -----
+  if (action.startsWith("autopilot_")) {
+    const kit = kitFor(admin);
+    const autoRows = rows as unknown as AutoRow[];
+    const now = Date.now();
+    const pendingNow = async () => {
+      const { data } = await admin.from("autosend_queue").select("id, creator_id, mailbox, send_at, day, origin, status").eq("user_id", userId).in("status", ["pending", "sending"]).limit(2000);
+      return (data || []) as { id: string; creator_id: string; mailbox: string; send_at: string; day: string; origin: string; status: string }[];
+    };
+    const todayCount = async (tz: string) => {
+      const { count } = await admin.from("autosend_queue").select("id", { count: "exact", head: true }).eq("user_id", userId).eq("day", dayKeyIn(tz, now)).in("status", ["pending", "sending", "sent"]);
+      return count || 0;
+    };
+
+    if (action === "autopilot_plan") {
+      // A preview: nothing is queued until you press Start.
+      const count = Math.max(0, Math.min(300, Math.round(Number(input.count) || 0)));
+      const exclude = new Set((Array.isArray(input.exclude) ? input.exclude : []).filter(uuid));
+      const w = await loadWorld(admin, userId);
+      const pending = await pendingNow();
+      const pool = poolOf(w, autoRows, new Set([...pending.map((p) => p.creator_id), ...(await doneWithToday(admin, userId, dayKeyIn(w.tz, now)))]), now);
+      const ready = pool.ready.filter((r) => !exclude.has(r.id));
+      const plan = await planFor(admin, kit, w, autoRows, ready, { now, count: count || ready.length, taken: pending.map((p) => ({ mailbox: p.mailbox, at: new Date(p.send_at).getTime() })) });
+      return json({ ok: true, ready: pool.ready.length, byHand: pool.byHand.length, held: pool.held.length, ...plan, tz: w.tz, left: Math.max(0, 300 - (await todayCount(w.tz))) });
+    }
+
+    if (action === "autopilot_start") {
+      // Your previewed plan, checked again item by item: still ready, a template of the right follow-up,
+      // a time today inside their day and apart from your other sends. The words are filled here, never taken from the request.
+      const items = (Array.isArray(input.items) ? input.items : []).slice(0, 300).map((x) => (x && typeof x === "object" ? x as Record<string, unknown> : {})).filter((x) => uuid(x.creatorId) && typeof x.templateId === "string" && Number.isFinite(Number(x.at)));
+      if (!items.length) return json({ error: "Nothing to start." }, 400);
+      const w = await loadWorld(admin, userId, items.map((x) => String(x.creatorId)));
+      const pending = await pendingNow();
+      const pool = poolOf(w, autoRows, new Set([...pending.map((p) => p.creator_id), ...(await doneWithToday(admin, userId, dayKeyIn(w.tz, now)))]), now);
+      const ready = new Map(pool.ready.map((r) => [r.id, r]));
+      const end = dayEndIn(w.tz, now) - 60_000;
+      const room = Math.max(0, 300 - (await todayCount(w.tz)));
+      const taken = pending.map((p) => ({ mailbox: p.mailbox, at: new Date(p.send_at).getTime() }));
+      const ok: PlanRow[] = [];
+      const rejected: { creatorId: string; why: string }[] = [];
+      for (const x of items) {
+        const r = ready.get(String(x.creatorId));
+        const at = Math.round(Number(x.at));
+        const t = r ? w.templates[r.round].find((tp) => tp.id === x.templateId) : undefined;
+        const why = !r ? "not_ready" : !t ? "template" : at < now + 15_000 || at > end ? "time" : r.zones.length && !awakeAt(r.zones, at) ? "their_night" : taken.some((o) => o.mailbox === r.mailbox && Math.abs(o.at - at) < 30_000) ? "too_close" : ok.length >= room ? "day_max" : "";
+        if (why) { rejected.push({ creatorId: String(x.creatorId), why }); continue; }
+        const name = w.creators.find((c) => c.id === r!.id)?.name || r!.name;
+        ok.push({ creatorId: r!.id, name, round: r!.round, mailbox: r!.mailbox, threadId: r!.threadId, templateId: t!.id, templateName: t!.name, text: fillTemplate(t!.text, { name, my_name: w.name, agency: w.prefs.agency_name }), at, theirClock: "", zone: r!.zones[0] || "", zones: r!.zones, offBy: 0, fit: null, asked: "" });
+        taken.push({ mailbox: r!.mailbox, at });
+      }
+      const batch = crypto.randomUUID();
+      const { made, skipped } = await insertQueue(admin, userId, w.tz, ok, "batch", batch);
+      return json({ ok: true, batch, queued: made, rejected: [...rejected, ...skipped.map((id) => ({ creatorId: id, why: "queued" }))] });
+    }
+
+    if (action === "autopilot_prepare") {
+      if (!uuid(input.creatorId)) return json({ error: "Invalid influencer" }, 400);
+      return json(await prepareOne(admin, kit, userId, input.creatorId, autoRows));
+    }
+
+    if (action === "autopilot_queue") {
+      // One follow-up from a profile: now (a few seconds to undo), at the smart time, or at a time you pick today.
+      if (!uuid(input.creatorId)) return json({ error: "Invalid influencer" }, 400);
+      const body = String(input.text ?? "").replace(/\r\n?/g, "\n").replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, "").trimEnd().slice(0, 2000);
+      if (!body.trim()) return json({ error: "Write the follow-up first." }, 400);
+      const w = await loadWorld(admin, userId, [input.creatorId]);
+      const pending = await pendingNow();
+      if (pending.some((p) => p.creator_id === input.creatorId)) return json({ error: "A follow-up to them is already waiting — cancel it first.", code: "queued" }, 409);
+      const pool = poolOf(w, autoRows, new Set(), now, true);
+      const r = pool.ready.find((x) => x.id === input.creatorId);
+      if (!r) {
+        const hand = pool.byHand.some((x) => x.id === input.creatorId);
+        return json({ error: hand ? "They've answered before — this one is yours to write in Gmail." : "Their follow-up isn't due, or can't go from the CRM.", code: hand ? "replied" : "not_ready" }, 409);
+      }
+      const t = w.templates[r.round].find((x) => x.id === input.templateId);
+      const end = dayEndIn(w.tz, now) - 60_000;
+      let at = now + 10_000;
+      let warn = "";
+      if (input.when === "smart") {
+        const smart = planTimes([{ id: r.id, mailbox: r.mailbox, zones: r.zones, firstAt: r.firstAt, lastAt: r.lastAt }], { now, userZone: w.tz, taken: pending.map((p) => ({ mailbox: p.mailbox, at: new Date(p.send_at).getTime() })), seed: Number(input.seed) || 0 }).placed[0];
+        if (!smart) return json({ error: "There's no good time left today in their day — send it now or tomorrow.", code: "asleep" }, 409);
+        at = smart.at;
+      } else if (input.when !== "now") {
+        at = Math.round(Number(input.when));
+        if (!Number.isFinite(at) || at < now + 30_000 || at > end) return json({ error: "Pick a time later today — the CRM never sends on another day.", code: "time" }, 400);
+      }
+      if (r.zones.length && !awakeAt(r.zones, at)) warn = "their_night";
+      if ((await todayCount(w.tz)) >= 300) return json({ error: "That's 300 follow-ups from the CRM today — the rest wait for tomorrow.", code: "day_max" }, 429);
+      const row: PlanRow = { creatorId: r.id, name: r.name, round: r.round, mailbox: r.mailbox, threadId: r.threadId, templateId: t?.id || "", templateName: t?.name || "Written by you", text: body, at, theirClock: "", zone: r.zones[0] || "", zones: r.zones, offBy: 0, fit: null, asked: "" };
+      const { made } = await insertQueue(admin, userId, w.tz, [row], "manual", null);
+      if (!made) return json({ error: "A follow-up to them is already waiting.", code: "queued" }, 409);
+      const { data: q } = await admin.from("autosend_queue").select("id, send_at").eq("user_id", userId).eq("creator_id", r.id).eq("status", "pending").maybeSingle();
+      return json({ ok: true, id: q?.id, sendAt: q?.send_at, warn });
+    }
+
+    if (action === "autopilot_flush") {
+      // "Send now" after its undo seconds: the same checks as the cron, right away.
+      if (!uuid(input.id)) return json({ error: "Invalid follow-up" }, 400);
+      const out = await flushOne(admin, kit, userId, input.id, autoRows);
+      return json({ ok: out.status === "sent", ...out });
+    }
+
+    if (action === "autopilot_fill_more") {
+      // "Fill the last N too": today's ceiling lifted, the fill runs right now.
+      const { day, prefs } = await todayOf();
+      if (!readAutopilot((prefs as { autopilot?: unknown }).autopilot).fill) return json({ error: "Turn the night fill on first." }, 409);
+      await admin.from("autosend_days").upsert({ user_id: userId, day, extra_ok: true, declined: false });
+      const made = await fillFor(admin, kit, userId, prefs as never, true);
+      return json({ ok: true, queued: made });
+    }
+
+    if (action === "autopilot_rows") {
+      // The mailboxes the CRM can send from (the queue itself is read straight from the database).
+      return json({ ok: true, mailboxes: (await rowsOf(admin, userId)).map((r) => ({ email: r.email, canSend: /gmail\.(send|modify|compose)/.test(r.scopes || "") })) });
+    }
+    return json({ error: "Unknown action" }, 400);
   }
 
   if (action === "send") {

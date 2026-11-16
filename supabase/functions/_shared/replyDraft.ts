@@ -159,7 +159,8 @@ const one = (s: string, max = 2000) => s.replace(/[\r\n]+/g, " ").trim().slice(0
 /** Message-IDs only: <...> tokens, nothing else from the header survives. */
 export const msgIds = (s: string) => (s.match(/<[^<>\s]{3,250}>/g) || []).slice(-30);
 
-export function replyRaw(o: { from: string; fromName: string; to: string[]; subject: string; messageId: string; references: string; html: string }): string {
+/** A reply as Gmail would send it. With `text`, a plain-text copy rides along (multipart/alternative), as real mail apps send. */
+export function replyRaw(o: { from: string; fromName: string; to: string[]; subject: string; messageId: string; references: string; html: string; text?: string; boundary?: string }): string {
   const name = one(o.fromName, 120).replace(/"/g, "'");
   const ids = msgIds(o.messageId);
   const refs = Array.from(new Set([...msgIds(o.references), ...ids]));
@@ -169,11 +170,43 @@ export function replyRaw(o: { from: string; fromName: string; to: string[]; subj
     `Subject: =?UTF-8?B?${utf8b64(one(o.subject, 500))}?=`,
     ...(ids.length ? [`In-Reply-To: ${ids[ids.length - 1]}`, `References: ${refs.join(" ")}`] : []),
     "MIME-Version: 1.0",
-    'Content-Type: text/html; charset="UTF-8"',
-    "Content-Transfer-Encoding: base64",
   ];
-  return `${headers.join("\r\n")}\r\n\r\n${utf8b64(o.html).replace(/(.{76})/g, "$1\r\n")}`;
+  const b64lines = (s: string) => utf8b64(s).replace(/(.{76})/g, "$1\r\n");
+  if (o.text === undefined) return `${[...headers, 'Content-Type: text/html; charset="UTF-8"', "Content-Transfer-Encoding: base64"].join("\r\n")}\r\n\r\n${b64lines(o.html)}`;
+  const b = (o.boundary || `b${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`).replace(/[^\w]/g, "");
+  return `${[...headers, `Content-Type: multipart/alternative; boundary="${b}"`].join("\r\n")}\r\n\r\n`
+    + `--${b}\r\nContent-Type: text/plain; charset="UTF-8"\r\nContent-Transfer-Encoding: base64\r\n\r\n${b64lines(o.text)}\r\n`
+    + `--${b}\r\nContent-Type: text/html; charset="UTF-8"\r\nContent-Transfer-Encoding: base64\r\n\r\n${b64lines(o.html)}\r\n`
+    + `--${b}--`;
 }
+
+/** Your follow-up as sent mail: your words, your Gmail signature, then the quoted email it follows. */
+export function sentHtml(text: string, signature: string, quote: string): string {
+  const lines = text.replace(/\r\n?/g, "\n").split("\n");
+  const body = lines.map((l) => `<div>${l.trim() ? escapeHtml(l) : "<br>"}</div>`).join("");
+  const sig = signature.trim() ? `<br clear="all"><div><br></div><span class="gmail_signature_prefix">-- </span><br><div dir="ltr" class="gmail_signature" data-smartmail="gmail_signature">${quotable(signature)}</div>` : "";
+  return `<div dir="ltr">${body}</div>${sig}${quote ? `<br>${quote}` : ""}`;
+}
+
+/** The plain-text copy: your words, the signature as text, and the quote as "> " lines. */
+export function sentText(text: string, signature: string, quoted: { attr: string; text: string } | null): string {
+  const sig = htmlToText(signature);
+  const q = quoted && quoted.text.trim() ? `\n\n${quoted.attr}\n${quoted.text.trim().split("\n").map((l) => `> ${l}`).join("\n")}` : "";
+  return `${text.trimEnd()}${sig ? `\n\n-- \n${sig}` : ""}${q}\n`;
+}
+
+/** Text out of an email's HTML (for quoting and for reading what you wrote). */
+export function htmlToText(html: string): string {
+  return quotable(html)
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(div|p|li|tr|h[1-6]|blockquote)>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, "\"").replace(/&#39;/g, "'")
+    .replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+/** The attribution line Gmail puts over a quote. */
+export const quoteAttr = (latest: Msg) => `On ${(headerOf(latest, "Date").trim() || "an earlier day").replace(/[\r\n]+/g, " ")}, ${(headerOf(latest, "From").trim() || "they").replace(/[\r\n]+/g, " ")} wrote:`;
 
 /** Opens that thread in Gmail on the web, signed in as that mailbox (a draft in it shows open at the bottom). */
 export const threadUrl = (mailbox: string, threadId: string) => `https://mail.google.com/mail/?authuser=${encodeURIComponent(mailbox)}#all/${threadId}`;

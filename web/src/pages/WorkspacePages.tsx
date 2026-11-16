@@ -17,7 +17,9 @@ import { ApiKeysSettings } from "../components/ApiKeys";
 import { TeamSettings } from "../components/Team";
 import { WeeklyReportSettings } from "../components/WeeklyReport";
 import { AvatarButton } from "../components/AvatarEditor";
-import { CalendarDays, CornerUpLeft, KeyRound, Mail, Target, Youtube } from "lucide-react";
+import { CalendarDays, CornerUpLeft, KeyRound, Layers, Mail, Target, Youtube } from "lucide-react";
+import { FollowupTemplates } from "../components/FollowupTemplates";
+import { useAutopilot } from "../contexts/AutopilotContext";
 import { ReplyTemplateSettings } from "../components/ReplyTemplateSettings";
 import { APP_BUILT_AT, APP_VERSION, liveVersion, reloadInto } from "../lib/appUpdate";
 import { pwnedCount, pwnedMessage } from "../lib/pwned";
@@ -75,6 +77,7 @@ const SECTIONS = [
   { id: "workspace", label: "Workspace", icon: Building },
   { id: "gmail", label: "Gmail", icon: Mail },
   { id: "reply", label: "Reply template", icon: CornerUpLeft },
+  { id: "follow-templates", label: "Follow-up templates", icon: Layers },
   { id: "youtube", label: "YouTube stats", icon: Youtube },
   { id: "keys", label: "Your API keys", icon: KeyRound },
   { id: "followups", label: "Follow-up rules", icon: CalendarDays },
@@ -87,6 +90,15 @@ const SECTIONS = [
   { id: "data", label: "Data & backup", icon: Database },
   { id: "danger", label: "Danger zone", icon: AlertTriangle },
 ];
+
+/** Follow-up templates, with how many of each follow-up are due today (so you know how far your words stretch). */
+function FollowupTemplatesSection() {
+  const auto = useAutopilot();
+  const due: Record<number, number> = {};
+  for (const r of auto.pool.ready) due[r.round] = (due[r.round] || 0) + 1;
+  for (const h of auto.pool.held) if (h.why === "no-template") due[h.round] = (due[h.round] || 0) + 1;
+  return <FollowupTemplates readyByRound={due} />;
+}
 
 // Sticky section nav that highlights the section currently on screen.
 function SettingsNav() {
@@ -352,6 +364,7 @@ export function SettingsPage() {
       <WorkspaceSettings />
       <GmailSettings />
       <ReplyTemplateSettings />
+      <FollowupTemplatesSection />
       <YouTubeSettings />
       <ApiKeysSettings />
       <FollowupRulesSettings />
