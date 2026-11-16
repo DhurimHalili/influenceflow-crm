@@ -1,3 +1,4 @@
+import { preferencesPatch } from "../lib/prefsPatch";
 import { normalizeContract } from "../lib/money";
 import { supabase } from "../lib/supabase";
 import { blankWorkspace } from "../lib/seed";
@@ -187,6 +188,7 @@ const normalizeEmailEvent = (row: Record<string, unknown>): EmailEvent => ({
   gone: row.gone === "trash" || row.gone === "deleted" ? row.gone : "",
   gone_at: typeof row.gone_at === "string" ? row.gone_at : null,
   ...(typeof row.created_at === "string" && row.created_at ? { created_at: row.created_at } : {}),
+  ...(typeof row.bounced_at === "string" && row.bounced_at ? { bounced_at: row.bounced_at, bounce_reason: text(row.bounce_reason), bounce_to: text(row.bounce_to).toLowerCase() } : {}),
 });
 
 const normalizeBrand = (row: Record<string, unknown>, userId: string): Brand => ({
@@ -360,7 +362,7 @@ export function changedParts(before: WorkspaceStamps, now: WorkspaceStamps): Set
 }
 
 // Only what the app shows of a Gmail row — never the server's bookkeeping columns.
-const EVENT_COLS = "id,user_id,gmail_id,thread_id,direction,entity_type,entity_id,counterpart,subject,snippet,at,created_at,mailbox,message_key,scheduled,reply_kind,in_reply_to,gone,gone_at";
+const EVENT_COLS = "id,user_id,gmail_id,thread_id,direction,entity_type,entity_id,counterpart,subject,snippet,at,created_at,mailbox,message_key,scheduled,reply_kind,in_reply_to,gone,gone_at,bounced_at,bounce_reason,bounce_to";
 
 const skip: PagedResult = { data: null, error: null };
 
@@ -441,17 +443,20 @@ export async function loadCloudWorkspace(userId: string, opts?: { only?: Set<Wor
     meetings: need("meetings") ? full.meetings : prev.meetings,
     activities: need("activities") ? full.activities : prev.activities,
     emailEvents: need("events") ? full.emailEvents : prev.emailEvents,
+    bounces: need("events") ? full.bounces : prev.bounces,
   };
 
   function buildWorkspace(): WorkspaceData {
   return {
-    emailEvents: eventRows.map(normalizeEmailEvent),
+    // A bounced email never arrived: it counts nowhere (sent, follow-ups, statuses) — it's kept apart for the "Wrong email" flag.
+    emailEvents: eventRows.map(normalizeEmailEvent).filter((e) => !e.bounced_at),
+    bounces: eventRows.map(normalizeEmailEvent).filter((e) => !!e.bounced_at),
     profile: storedProfile
       ? {
           id: userId,
           display_name: text(storedProfile.display_name),
           avatar_path: text(storedProfile.avatar_path),
-          theme: (["agency", "light", "dark", "honey", "ocean"] as const).includes(storedProfile.theme as Profile["theme"])
+          theme: (["agency", "light", "dark", "honey", "ocean", "sauce"] as const).includes(storedProfile.theme as Profile["theme"])
             ? (storedProfile.theme as Profile["theme"])
             : "agency",
           reminder_prefs: (["browser", "email", "both", "off"] as const).includes(
@@ -530,6 +535,25 @@ async function upsertResilient(table: string, rows: Record<string, unknown>[], o
   }
 }
 
+/**
+ * The profile row, without ever replacing settings another tab or device saved:
+ * plain columns are written as before, but preferences go through
+ * `merge_preferences` with ONLY the keys changed here (and the ones removed here).
+ * A tab holding an older copy can no longer wipe templates saved elsewhere.
+ */
+async function saveProfile(full: WorkspaceData, base: WorkspaceData | null, userId: string) {
+  const { preferences, ...columns } = full.profile as unknown as Record<string, unknown> & { preferences?: Record<string, unknown> };
+  if (!base) { await upsertResilient("profiles", [{ ...full.profile, id: userId } as unknown as Record<string, unknown>]); return; }
+  const before = base.profile as unknown as Record<string, unknown> & { preferences?: Record<string, unknown> };
+  const { preferences: _p, ...beforeColumns } = before;
+  if (!sameRecord(columns as never, beforeColumns as never)) await upsertResilient("profiles", [{ ...columns, id: userId }]);
+  const { patch, drop } = preferencesPatch(preferences, before.preferences);
+  if (!Object.keys(patch).length && !drop.length) return;
+  const { error } = await supabase.rpc("merge_preferences", { patch, drop_keys: drop });
+  // A database without the function yet: the old whole-row write.
+  if (error) await upsertResilient("profiles", [{ ...full.profile, id: userId } as unknown as Record<string, unknown>]);
+}
+
 // Only records changed on this device since `base` (the last copy it knows
 // the cloud had) are written, and only records deleted here are deleted.
 // A device holding old data therefore can't roll back or wipe work done on
@@ -552,9 +576,7 @@ export async function persistCloudWorkspace(
     meetings: changedRows(full.meetings, base?.meetings ?? null),
     followups: changedRows(full.followups, base?.followups ?? null),
   };
-  if (!base || !sameRecord(full.profile, base.profile)) {
-    await upsertResilient("profiles", [{ ...workspace.profile, id: userId } as unknown as Record<string, unknown>]);
-  }
+  if (!base || !sameRecord(full.profile, base.profile)) await saveProfile(full, base, userId);
 
   // Records from older backups or caches may lack socials; the column is
   // NOT NULL, so always send a list.

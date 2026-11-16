@@ -108,7 +108,7 @@ export function fillNeed(o: { goal: number; doneToday: number; pendingToday: num
 
 // ----- who ------------------------------------------------------------------------------
 
-export type HoldWhy = "new-thread" | "past-4" | "other-channel" | "no-thread" | "mailbox" | "no-template" | "paused";
+export type HoldWhy = "new-thread" | "past-4" | "other-channel" | "no-thread" | "mailbox" | "no-template" | "paused" | "bounced";
 export type Ready = {
   id: string; name: string; round: Round; threadId: string; mailbox: string; subject: string;
   /** Your email in that thread they'd be answering: the latest one (theirs never exists). */
@@ -138,6 +138,8 @@ type PoolInput = {
   queued?: Set<string>;
   /** Follow-ups are parked today (a light / scout weekend day). */
   paused?: boolean;
+  /** Their address bounced ("Wrong email") — nothing goes out until it's fixed. */
+  bounced?: Set<string>;
 };
 
 /** Everyone due a follow-up today, split into: the CRM can send it / you write it / why neither. */
@@ -167,6 +169,7 @@ export function autopilotPool(input: PoolInput): Pool {
     const thread = s.thread?.active || s.last.threadId || "";
     const mail = (byId.get(c.id) || []).filter((e) => e.direction === "out" && e.thread_id === thread && !e.scheduled && e.mailbox).sort((a, b) => a.at.localeCompare(b.at));
     if (!thread || !mail.length) { hold("no-thread"); continue; }
+    if (input.bounced?.has(c.id)) { hold("bounced"); continue; }
     const last = mail[mail.length - 1];
     const mailbox = (last.mailbox || "").toLowerCase();
     if (!boxes.has(mailbox)) { hold("mailbox", mailbox); continue; }

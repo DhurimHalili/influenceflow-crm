@@ -7,6 +7,7 @@ import { autopilotPool, readAutopilot, readTemplates, type Pool, type Round } fr
 import { planTimes, type Plan } from "../lib/smartTime";
 import { dayKeyIn, validZone } from "../lib/zones";
 import { useChase } from "../hooks/useChase";
+import { useWrongEmails } from "../components/Bounces";
 
 // Autopilot in the app: today's queue (read straight from the database, your
 // rows only), the night fill's day state, and the actions (all on the server,
@@ -117,7 +118,9 @@ export function AutopilotProvider({ children }: { children: ReactNode }) {
   const sendBoxes = useMemo(() => gmail.mailboxes.filter((m) => m.canSend || m.canModify).map((m) => m.email), [gmail.mailboxes]);
   // Left alone today: waiting already, or one Autopilot sent / you cancelled / couldn't go (same rule as the server's doneWithToday).
   const skip = useMemo(() => new Set([...pendingByCreator.keys(), ...today.filter((i) => i.status === "sent" || i.status === "failed" || (i.status === "cancelled" && !["goal_met", "fill_off", "day_over"].includes(i.reason))).map((i) => i.creator_id)]), [pendingByCreator, today]);
-  const pool = useMemo(() => autopilotPool({ creators: data.creators, followups: data.followups, events: data.emailEvents || [], states, mailboxes: sendBoxes, templates, queued: skip, paused: chase.today.followupsPaused }), [data.creators, data.followups, data.emailEvents, states, sendBoxes, templates, skip, chase.today.followupsPaused]);
+  const wrong = useWrongEmails();
+  const bounced = useMemo(() => new Set(wrong.keys()), [wrong]);
+  const pool = useMemo(() => autopilotPool({ creators: data.creators, followups: data.followups, events: data.emailEvents || [], states, mailboxes: sendBoxes, templates, queued: skip, paused: chase.today.followupsPaused, bounced }), [data.creators, data.followups, data.emailEvents, states, sendBoxes, templates, skip, chase.today.followupsPaused, bounced]);
   const fits = useMemo(() => {
     const taken = items.filter((i) => i.status === "pending" || i.status === "sending").map((i) => ({ mailbox: i.mailbox, at: new Date(i.send_at).getTime() }));
     return planTimes(pool.ready.map((r) => ({ id: r.id, mailbox: r.mailbox, zones: r.zones, firstAt: r.firstAt, lastAt: r.lastAt, weight: r.overdueDays })), { now: clock, userZone: zone, taken, seed: 7 });

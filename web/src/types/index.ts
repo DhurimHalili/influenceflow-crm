@@ -14,7 +14,7 @@ export type EntityStatus =
   | "no_reply";
 
 export type CampaignStatus = "negotiating" | "active" | "completed" | "cancelled";
-export type ThemeName = "agency" | "light" | "dark" | "honey" | "ocean";
+export type ThemeName = "agency" | "light" | "dark" | "honey" | "ocean" | "sauce";
 export type Platform = "YouTube" | "Instagram" | "TikTok" | "Twitch" | "LinkedIn" | "X" | "Facebook" | "Kick" | "Snapchat" | "Pinterest" | "Threads" | "Other";
 /** A profile on one network; "Website" covers link-in-bio pages, blogs, shops. */
 export type SocialPlatform = Exclude<Platform, "Other"> | "Website" | "WhatsApp";
@@ -519,6 +519,10 @@ export interface EmailEvent {
   gone_at?: string | null;
   /** When the CRM first recorded it (not the email's own date). */
   created_at?: string;
+  /** It came back undelivered ("Message not delivered"): when, why in plain words, and the address that failed. */
+  bounced_at?: string;
+  bounce_reason?: string;
+  bounce_to?: string;
 }
 
 /** Someone outside the CRM who wrote to one of your mailboxes and looks like a real enquiry. */
@@ -559,6 +563,8 @@ export interface WorkspaceData {
   followups: Followup[];
   /** Gmail activity (empty until Gmail is connected). */
   emailEvents?: EmailEvent[];
+  /** Emails that bounced — never counted anywhere; they drive the "Wrong email" flag. */
+  bounces?: EmailEvent[];
   meetings: Meeting[];
   activities: Activity[];
   demoSeeded: boolean;

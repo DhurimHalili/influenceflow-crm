@@ -1,17 +1,19 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { isSealed, openToken, sealToken } from "../_shared/googleTokens.ts";
-import { aiChain, aiEnabled, aiKeyCount, aiModel, aiProvider, aiReadyAt, classifyLead, planImport, QuotaExhausted, readReply, testAi, useKeyStore } from "../_shared/ai.ts";
+import { aiChain, aiEnabled, aiKeyCount, aiModel, aiProvider, aiReadyAt, classifyLead, planImport, QuotaExhausted, readReply, suggestFollowups, testAi, useKeyStore } from "../_shared/ai.ts";
 import { clefStatus, useClefBudget } from "../_shared/clef.ts";
 import { asMember } from "../_shared/keyring.ts";
 import { decodeEntities, isWarmup, precheck, scanForLead, type Lead, type ScanInput } from "../_shared/leadScanner.ts";
+import { bounceOf } from "../_shared/bounce.ts";
 import { fillReply, templateFor } from "../../../web/src/lib/replyTemplate.ts";
 import { draftHtml, pickSendAs, pickTarget, bodyOf as replyBodyOf, quoteBlock, replyRaw, replyRecipients, replySubject, threadUrl, type Msg, type SendAs } from "../_shared/replyDraft.ts";
 import { classifyIncoming, isReaction, mergeReading, myReplyIntent, notAReply, READER_VERSION, referralOf, stripQuoted, type IncomingKind, type TeamRole } from "../_shared/replyReader.ts";
 import { cancelOnReply, doneWithToday, fillFor, flushOne, insertQueue, loadWorld, planFor, poolOf, prepareOne, rowsOf, tick, type Kit, type PlanRow, type Row as AutoRow } from "./autopilot.ts";
 import { awakeAt, planTimes } from "../../../web/src/lib/smartTime.ts";
 import { dayEndIn, dayKeyIn, validZone } from "../../../web/src/lib/zones.ts";
-import { fillTemplate, readAutopilot } from "../../../web/src/lib/autopilot.ts";
+import { fillTemplate, readAutopilot, readTemplates, ROUNDS, type Round } from "../../../web/src/lib/autopilot.ts";
+import { applyStyle, bodyOf as templateBody, claimProblem, styleOf, suggestTemplates, tooSimilar } from "../../../web/src/lib/templateSuggest.ts";
 import { analyzeStoredFile, bodyOf, drainQueue, gmailAttachment, processCreatorMail, processMyMail, repairAnchors, repairKitLists, sniff, type Fetcher, type FullMessage } from "./intel.ts";
 
 // Gmail ⇄ CRM sync, for every mailbox a user connected (an agency often runs
@@ -380,7 +382,7 @@ async function listIds(token: string, q: string, maxPages: number) {
   return ids;
 }
 
-const META_HEADERS = ["From", "To", "Cc", "Subject", "Date", "Message-ID", "Reply-To", "List-Unsubscribe", "List-Id", "Precedence", "Auto-Submitted", "X-Autoreply", "X-Autorespond", "In-Reply-To", "References"];
+const META_HEADERS = ["From", "To", "Cc", "Subject", "Date", "Message-ID", "Reply-To", "List-Unsubscribe", "List-Id", "Precedence", "Auto-Submitted", "X-Autoreply", "X-Autorespond", "In-Reply-To", "References", "X-Failed-Recipients"];
 const META_PATH = (id: string) => `/messages/${id}?format=metadata&${META_HEADERS.map((h) => `metadataHeaders=${h}`).join("&")}`;
 
 async function fetchMetas(token: string, ids: string[], deadline: number, tried?: Set<string>) {
@@ -507,7 +509,7 @@ async function applyStatuses(admin: Admin, userId: string, entityIds: string[], 
   for (const ids of chunk(entityIds, 100)) {
     const since = new Date(Date.now() - BACKFILL_DAYS * 86400000).toISOString();
     const [{ data: events }, { data: creators }, { data: brands }] = await Promise.all([
-      admin.from("email_events").select("*").eq("user_id", userId).in("entity_id", ids).gte("at", since).order("at", { ascending: true }),
+      admin.from("email_events").select("*").eq("user_id", userId).in("entity_id", ids).gte("at", since).is("bounced_at", null).order("at", { ascending: true }),
       admin.from("creators").select("id, name, pipeline_status, status_updated_at, status_source, date_contacted, archived_at, lost_reason").eq("user_id", userId).in("id", ids),
       admin.from("brands").select("id, name, pipeline_status, status_updated_at, status_source, date_contacted, archived_at, lost_reason").eq("user_id", userId).in("id", ids),
     ]);
@@ -758,19 +760,63 @@ type Gone = "" | "trash" | "deleted";
 const GONE_RECHECK_DAYS = 7;
 const GONE_SWEEP_DAYS = 120;
 
+/**
+ * Bounces ("Message not delivered", "Address not found"): Gmail files the notice in the thread of the email
+ * that failed. That email is kept but marked bounced (never counted as sent or as a follow-up), a status only
+ * it moved goes back, and the record shows "Wrong email" until the address is fixed.
+ */
+async function markBounces(admin: Admin, userId: string, mailbox: string, metas: Meta[], own: Set<string>) {
+  let marked = 0;
+  for (const m of metas) {
+    const b = bounceOf({ from: header(m, "From"), subject: header(m, "Subject"), snippet: decodeEntities(m.snippet || ""), failed: header(m, "X-Failed-Recipients") });
+    if (!b) continue;
+    const failed = b.to.filter((e) => !own.has(e));
+    const at = sentAt(m);
+    let q = admin.from("email_events").select("id, gmail_id, entity_id, entity_type, subject, counterpart, at").eq("user_id", userId).eq("mailbox", mailbox).eq("direction", "out").eq("scheduled", false).is("bounced_at", null).lte("at", new Date(new Date(at).getTime() + 60_000).toISOString()).order("at", { ascending: false }).limit(20);
+    q = m.threadId ? q.eq("thread_id", m.threadId) : q.gte("at", new Date(new Date(at).getTime() - 3 * 86400000).toISOString());
+    const { data } = await q;
+    let hits = (data || []).filter((r) => !failed.length || failed.includes(String(r.counterpart || "").toLowerCase()));
+    if (!hits.length && failed.length) {
+      // Not threaded: the latest email to that address in the last 3 days.
+      const { data: loose } = await admin.from("email_events").select("id, gmail_id, entity_id, entity_type, subject, counterpart, at").eq("user_id", userId).eq("mailbox", mailbox).eq("direction", "out").eq("scheduled", false).is("bounced_at", null).in("counterpart", failed).gte("at", new Date(new Date(at).getTime() - 3 * 86400000).toISOString()).order("at", { ascending: false }).limit(10);
+      hits = loose || [];
+    }
+    if (!hits.length) continue;
+    const gmailId = hits[0].gmail_id;
+    const rowsOf = hits.filter((r) => r.gmail_id === gmailId);
+    const { error } = await admin.from("email_events").update({ bounced_at: at, bounce_reason: b.reason, bounce_to: (failed[0] || rowsOf[0].counterpart || "").slice(0, 200) }).eq("user_id", userId).eq("gmail_id", gmailId).eq("direction", "out");
+    if (error) continue;
+    marked++;
+    for (const r of rowsOf) {
+      const type = r.entity_type === "brand" ? "brand" : "creator";
+      await admin.from("activities").insert({ user_id: userId, text: `Gmail: your email “${String(r.subject || "(no subject)").slice(0, 80)}” to ${r.counterpart} bounced — ${b.reason}. It never arrived, so it doesn't count as sent. Fix the address and write again.`.slice(0, 500), at: new Date().toISOString(), entity_type: type, entity_id: r.entity_id });
+      await undoGmailStatus(admin, userId, type, r.entity_id, "bounced");
+    }
+  }
+  return marked;
+}
+
 async function markGone(admin: Admin, userId: string, mailbox: string, changes: Map<string, Gone>, checked: string[] = []) {
   const ids = Array.from(new Set([...changes.keys(), ...checked]));
   if (!ids.length) return 0;
   const nowIso = new Date().toISOString();
   let moved = 0;
   for (const part of chunk(ids, 200)) {
-    const { data, error } = await admin.from("email_events").select("id, gmail_id, entity_id, entity_type, direction, subject, gone, gone_at, scheduled").eq("user_id", userId).eq("mailbox", mailbox).in("gmail_id", part);
+    const { data, error } = await admin.from("email_events").select("id, gmail_id, entity_id, entity_type, direction, subject, gone, gone_at, scheduled, at").eq("user_id", userId).eq("mailbox", mailbox).in("gmail_id", part);
     if (error) return moved; // columns not there yet: nothing to mark
     const news: { entityId: string; type: "creator" | "brand"; text: string }[] = [];
+    const unsent = new Map<string, "creator" | "brand">();
     for (const r of data || []) {
       if (r.scheduled || !changes.has(r.gmail_id)) continue; // scheduled sends are rechecked on their own
       const next = changes.get(r.gmail_id)!;
       if ((r.gone || "") === next) continue;
+      // Gmail's "Undo send": the sent copy disappears for good within seconds and comes back as a draft.
+      // It never reached them — so it was never sent: forget it (and put back a status only it moved).
+      if (isUndoSend(r.direction, next, r.at, r.gone_at)) {
+        const { error: del } = await admin.from("email_events").delete().eq("id", r.id).eq("user_id", userId);
+        if (!del) { unsent.set(r.entity_id, r.entity_type === "brand" ? "brand" : "creator"); moved++; }
+        continue;
+      }
       const { error: upd } = await admin.from("email_events").update({ gone: next, gone_at: next ? r.gone_at || nowIso : null, gone_checked_at: nowIso }).eq("id", r.id).eq("user_id", userId);
       if (upd) continue;
       moved++;
@@ -782,6 +828,7 @@ async function markGone(admin: Admin, userId: string, mailbox: string, changes: 
       if (!news.some((x) => x.entityId === r.entity_id && x.text === text)) news.push({ entityId: r.entity_id, type: r.entity_type === "brand" ? "brand" : "creator", text });
     }
     if (news.length) await admin.from("activities").insert(news.slice(0, 50).map((x) => ({ user_id: userId, text: x.text.slice(0, 500), at: nowIso, entity_type: x.type, entity_id: x.entityId })));
+    for (const [id, type] of unsent) await undoGmailStatus(admin, userId, type, id, "unsent");
   }
   if (checked.length) for (const part of chunk(checked, 200)) await admin.from("email_events").update({ gone_checked_at: nowIso }).eq("user_id", userId).eq("mailbox", mailbox).in("gmail_id", part);
   return moved;
@@ -847,13 +894,18 @@ async function recheckScheduled(admin: Admin, userId: string, token: string, mai
   if (!gone.length) return { sent, cancelled: 0, waiting };
   await admin.from("email_events").delete().eq("user_id", userId).in("gmail_id", gone);
   const records = Array.from(new Map(data.filter((r) => gone.includes(r.gmail_id) && r.direction === "out").map((r) => [r.entity_id as string, r.entity_type as "creator" | "brand"])).entries());
-  for (const [id, type] of records) await undoScheduledStatus(admin, userId, type, id);
+  for (const [id, type] of records) await undoGmailStatus(admin, userId, type, id, "scheduled");
   return { sent, cancelled: gone.length, waiting };
 }
 
 // Gmail moved New → Contacted (or Inbound → Replied) because of an email that
 // never went out: put it back, but only while nothing else you sent counts.
-async function undoScheduledStatus(admin: Admin, userId: string, type: "creator" | "brand", id: string) {
+/** Sent and gone for good within this long = Gmail's "Undo send" (its window is 30 s at most). */
+const UNDO_SEND_MS = 15 * 60_000;
+export const isUndoSend = (direction: string, next: string, at: string, goneAt?: string | null) =>
+  direction === "out" && next === "deleted" && (goneAt ? new Date(goneAt).getTime() : Date.now()) - new Date(at).getTime() < UNDO_SEND_MS;
+
+async function undoGmailStatus(admin: Admin, userId: string, type: "creator" | "brand", id: string, why: "scheduled" | "unsent" | "bounced") {
   const table = type === "creator" ? "creators" : "brands";
   const { data: record } = await admin.from(table).select("id, name, pipeline_status, status_source, archived_at").eq("id", id).eq("user_id", userId).maybeSingle();
   if (!record || record.archived_at || record.status_source !== "gmail") return;
@@ -861,7 +913,7 @@ async function undoScheduledStatus(admin: Admin, userId: string, type: "creator"
     admin.from("email_events").select("*").eq("user_id", userId).eq("entity_id", id).limit(200),
     admin.from("followups").select("kind").eq("user_id", userId).eq(type === "creator" ? "creator_id" : "brand_id", id).limit(200),
   ]);
-  const outs = (mail || []).filter((m) => m.direction === "out").length + (logged || []).filter((f) => f.kind !== "reply").length;
+  const outs = (mail || []).filter((m) => m.direction === "out" && !m.bounced_at).length + (logged || []).filter((f) => f.kind !== "reply").length;
   const ins = (mail || []).filter((m) => m.direction === "in" && !notAReply(m.reply_kind) && m.reply_kind !== "managed_no").length + (logged || []).filter((f) => f.kind === "reply").length;
   if (outs > 0) return;
   const back = record.pipeline_status === "contacted" && ins === 0 ? "new" : record.pipeline_status === "replied" && ins > 0 ? "inbound" : "";
@@ -870,7 +922,8 @@ async function undoScheduledStatus(admin: Admin, userId: string, type: "creator"
   if (back === "new") patch.date_contacted = null;
   const { error } = await admin.from(table).update(patch).eq("id", id).eq("user_id", userId).eq("pipeline_status", record.pipeline_status);
   if (error) return;
-  await admin.from("activities").insert({ user_id: userId, text: `Gmail: the scheduled email to ${record.name} was cancelled — moved back to ${back === "new" ? "New" : "Inbound"}`.slice(0, 500), at: new Date().toISOString(), entity_type: type, entity_id: id });
+  const what = why === "scheduled" ? `the scheduled email to ${record.name} was cancelled` : why === "unsent" ? `your email to ${record.name} was unsent (Undo send) — it never went out` : `your email to ${record.name} bounced — it never arrived`;
+  await admin.from("activities").insert({ user_id: userId, text: `Gmail: ${what} — moved back to ${back === "new" ? "New" : "Inbound"}`.slice(0, 500), at: new Date().toISOString(), entity_type: type, entity_id: id });
 }
 
 // ----- cancelling scheduled sends ----------------------------------------------
@@ -894,7 +947,7 @@ async function cancelScheduledSend(admin: Admin, userId: string, rows: TokenRow[
     if (meta && !(isFuture(meta) || (labels.includes("SCHEDULED") && !labels.includes("SENT")))) return { error: "That email has already gone out.", status: 409 };
     if (meta) await gmail(token, `/messages/${gmailId}/trash`, { method: "POST" });
     await admin.from("email_events").delete().eq("user_id", userId).eq("gmail_id", gmailId);
-    await undoScheduledStatus(admin, userId, ev.entity_type, ev.entity_id);
+    await undoGmailStatus(admin, userId, ev.entity_type, ev.entity_id, "scheduled");
     const text = why === "replied" ? "Gmail: they replied before your scheduled follow-up went out, so it was cancelled (it's in Gmail's Trash for 30 days)" : "Cancelled a scheduled email (it's in Gmail's Trash for 30 days)";
     await admin.from("activities").insert({ user_id: userId, text, at: new Date().toISOString(), entity_type: ev.entity_type, entity_id: ev.entity_id });
     return { ok: true };
@@ -1384,10 +1437,13 @@ async function trackMailbox(admin: Admin, row: TokenRow, own: Set<string>, book:
   if (tried.size < todo.length) complete = false;
   const matched = await matchAll(admin, row.user_id, metas, book, own, mailbox);
   const matchedIds = new Set(matched.map((r) => r.gmail_id));
-  const candidates = metas.filter((m) => !matchedIds.has(m.id) && !isOutgoing(m, own) && precheck(scanInput(m, own)).ok).map((m) => m.id);
+  const bounceMetas = metas.filter((m) => !isOutgoing(m, own) && !!bounceOf({ from: header(m, "From"), subject: header(m, "Subject"), snippet: decodeEntities(m.snippet || ""), failed: header(m, "X-Failed-Recipients") }));
+  const candidates = metas.filter((m) => !matchedIds.has(m.id) && !isOutgoing(m, own) && !bounceMetas.includes(m) && precheck(scanInput(m, own)).ok).map((m) => m.id);
   const { rows, leadReplies, linked, changed } = await oneAtATime(row.user_id, async () => {
     const rows = await dropCrossMailboxDuplicates(admin, row.user_id, matched);
     await storeEvents(admin, rows);
+    // "Message not delivered": the email it answers never arrived — it stops counting as sent.
+    if (bounceMetas.length) await markBounces(admin, row.user_id, mailbox, bounceMetas, own).catch(() => 0);
     // 5. Your answers to people who emailed you first; their enquiries wait for the read phase.
     const leadReplies = await trackLeadReplies(admin, row.user_id, token, metas.filter((m) => !matchedIds.has(m.id)), own, mailbox, true, deadline).catch(() => ({ updated: 0, backfilled: false }));
     // 6. Managers and teams the mail revealed, then statuses.
@@ -1400,7 +1456,7 @@ async function trackMailbox(admin: Admin, row: TokenRow, own: Set<string>, book:
   const seen = (id: string) => known.has(id) || tried.has(id);
   const finished = later.filter((g) => g.ids.every(seen)).flatMap((g) => g.marker);
   const now = new Date().toISOString();
-  const patch: Record<string, unknown> = { last_sync_at: now, updated_at: now, sync_error: "", backfilled: Array.from(new Set([...done, ...finished])).slice(-5000) };
+  const patch: Record<string, unknown> = { last_sync_at: now, updated_at: now, sync_error: "", backfilled: Array.from(new Set([...done, ...finished, ...bounceMetas.map((m) => `bounce:${m.id}`)])).slice(-5000) };
   if (candidates.length) patch.lead_queue = Array.from(new Set([...(row.lead_queue || []), ...candidates])).slice(-LEAD_QUEUE_MAX);
   if (sweep) {
     const coverage = await measureCoverage(admin, row.user_id, sweep, metas, prevCoverage, own, book).catch(() => null);
@@ -1452,6 +1508,17 @@ async function readMailbox(admin: Admin, row: TokenRow, own: Set<string>, book: 
     queue = queue.slice(take.length);
   }
   patch.lead_queue = queue;
+
+  // b2. Delivery failures the track phase may have skipped (or that came before this existed): the last 2 days, each read once.
+  if (Date.now() < deadline - 15_000) {
+    const ids = ((await listIds(token, "from:(mailer-daemon OR postmaster) newer_than:2d", 1).catch(() => [])) as string[]).filter((id) => !done.has(`bounce:${id}`.toLowerCase())).slice(0, 20);
+    if (ids.length) {
+      const metas = await fetchMetas(token, ids, deadline).catch(() => [] as Meta[]);
+      const bounces = metas.filter((m) => !isOutgoing(m, own) && !!bounceOf({ from: header(m, "From"), subject: header(m, "Subject"), snippet: decodeEntities(m.snippet || ""), failed: header(m, "X-Failed-Recipients") }));
+      if (bounces.length) await oneAtATime(row.user_id, () => markBounces(admin, row.user_id, mailbox, bounces, own)).catch(() => 0);
+      markers.push(...metas.map((m) => `bounce:${m.id}`));
+    }
+  }
 
   // c. Once per mailbox: your older answers to leads, and replies from other addresses in your threads.
   if (!done.has(LEAD_REPLIES_DONE) && Date.now() < deadline - 20_000) {
@@ -1954,6 +2021,28 @@ Deno.serve(async (req) => {
     if (!first) return json({ configured, connected: false, mailboxes, ...ai });
     // Top-level fields describe the first mailbox (older app versions read them).
     return json({ configured, connected: true, ...publicMailbox(first), mailboxes, maxMailboxes: MAX_MAILBOXES, ...ai });
+  }
+
+  if (action === "template_suggest") {
+    // Settings → Follow-up templates: new ones in YOUR words. Only your own template texts are read (sent by
+    // the editor, so unsaved edits count too); every suggestion is checked by the same rules the app uses.
+    const round = Number(input.round);
+    if (![1, 2, 3, 4].includes(round)) return json({ error: "Pick a follow-up 1–4." }, 400);
+    const book = readTemplates(input.book);
+    const style = styleOf(book);
+    const rules = suggestTemplates(round as Round, book, 4);
+    const rounds = Object.fromEntries(ROUNDS.map((r) => [r, book[r].map((t) => templateBody(t.text)).filter(Boolean)]));
+    let fromAi: { text: string; answers: string }[] | null = null;
+    if (aiEnabled()) { try { fromAi = await suggestFollowups({ round, count: 5, rounds }); } catch (e) { if (!(e instanceof QuotaExhausted)) console.error("template_suggest ai failed"); } }
+    const out: { text: string; why: string; by: "ai" | "rules" }[] = [];
+    for (const x of fromAi || []) {
+      const text = applyStyle(templateBody(x.text), style);
+      if (text.length > 900 || claimProblem(text, book) || book[round as Round].some((t) => tooSimilar(t.text, text)) || out.some((o) => o.text === text || tooSimilar(o.text, text, 0.9))) continue;
+      out.push({ text, why: round === 4 && x.answers ? `Answers your 3rd: “${x.answers.length > 48 ? `${x.answers.slice(0, 46)}…` : x.answers}”` : "Written in your style", by: "ai" });
+      if (out.length >= 4) break;
+    }
+    for (const r of rules) if (out.length < 4 && !out.some((o) => o.text === r.text || tooSimilar(o.text, r.text, 0.9))) out.push(r);
+    return json({ suggestions: out, ai: out.some((o) => o.by === "ai") });
   }
 
   if (action === "import_assist") {

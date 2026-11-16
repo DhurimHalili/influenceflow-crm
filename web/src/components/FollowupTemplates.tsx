@@ -1,4 +1,4 @@
-import { Copy, Layers, Plus, RotateCcw, Save, Trash2, Wand2 } from "lucide-react";
+import { Copy, Layers, Loader2, Plus, RotateCcw, Save, Sparkles, Trash2, Wand2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useData } from "../contexts/DataContext";
@@ -7,6 +7,8 @@ import { useSessionState } from "../hooks/useSessionState";
 import { fillTemplate, newTemplateId, readTemplates, ROUNDS, TEMPLATE_MAX, TEMPLATES_PER_ROUND, NAME_MAX, type Round, type TemplateBook } from "../lib/autopilot";
 import { ordinal } from "../lib/followupEngine";
 import { REPLY_TOKENS } from "../lib/replyTemplate";
+import { suggestTemplates, type Suggestion } from "../lib/templateSuggest";
+import { invoke } from "../contexts/GmailContext";
 import { Button } from "./ui";
 
 // Settings → Follow-up templates: your own words for the 1st–4th follow-up,
@@ -75,6 +77,29 @@ export function FollowupTemplates({ readyByRound }: { readyByRound?: Record<numb
   };
   useEffect(() => { if (focus) requestAnimationFrame(() => { boxes.current.get(focus)?.focus(); setFocus(""); }); }, [focus]);
 
+  // Suggestions in your own style: the rules instantly, the AI on request (checked by the same rules on the server).
+  const ruleIdeas = useMemo(() => suggestTemplates(round, book, 3), [round, book]);
+  const [aiIdeas, setAiIdeas] = useState<{ round: Round; list: Suggestion[] } | null>(null);
+  const [asking, setAsking] = useState(false);
+  const ideas = (aiIdeas && aiIdeas.round === round ? aiIdeas.list : ruleIdeas).filter((x) => !book[round].some((t) => t.text.trim() === x.text.trim()));
+  const [ideasOpen, setIdeasOpen] = useState(false);
+  const showIdeas = list.length < TEMPLATES_PER_ROUND && (ideasOpen || list.length < 3);
+  const askAi = async () => {
+    setAsking(true);
+    const res = await invoke<{ suggestions?: Suggestion[]; ai?: boolean }>("gmail-sync", { action: "template_suggest", round, book: readTemplates(book) });
+    setAsking(false);
+    const got = res.data?.suggestions;
+    if (!got?.length) { toast(res.error || "No new ideas this time — try again in a moment", "info"); return; }
+    setAiIdeas({ round, list: got });
+    if (!res.data?.ai) toast("The AI is busy right now — these are from your own style", "info");
+  };
+  const addIdea = (x: Suggestion) => {
+    if (list.length >= TEMPLATES_PER_ROUND) { toast(`${TEMPLATES_PER_ROUND} is the most per follow-up`, "info"); return; }
+    const id = newTemplateId();
+    edit({ ...book, [round]: [...book[round], { id, name: `${ordinal(round)} · ${letter(book[round].length)}`, text: x.text }] });
+    toast("Added — reword it if you like, then save", "success");
+  };
+
   const due = readyByRound?.[round] || 0;
   const spread = list.filter((t) => t.text.trim()).length;
   return <section id="follow-templates" className="settings-section" onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "s" && dirty) { e.preventDefault(); save(); } }}>
@@ -112,10 +137,24 @@ export function FollowupTemplates({ readyByRound }: { readyByRound?: Record<numb
         {!list.length && <div className="ft-empty">
           <b>No {ordinal(round)} follow-ups yet</b>
           <p>Autopilot skips anyone whose {ordinal(round)} follow-up is due until there's one here.</p>
-          <Button size="sm" onClick={() => add(TIPS[round].example)}><Plus size={14} /> Start from an example</Button>
+          <Button size="sm" onClick={() => add(ideas[0]?.text || TIPS[round].example)}><Plus size={14} /> Start from an example</Button>
         </div>}
         {list.length > 0 && list.length < TEMPLATES_PER_ROUND && <button type="button" className="ft-add" onClick={() => add()}><Plus size={15} /> Add another way to say it</button>}
       </div>
+      {list.length < TEMPLATES_PER_ROUND && (showIdeas ? <div className="ft-ideas">
+        <div className="ft-ideas-head">
+          <span><Sparkles size={15} aria-hidden="true" /><b>Ideas for your {ordinal(round)} follow-up</b><small>{round === 4 ? "Each one answers one of your 3rd follow-ups." : "In your words — no greetings or sign-offs you don't use."} Nothing that isn't true: no deadlines, numbers or “brands ready”.</small></span>
+          <span className="ft-ideas-actions">
+            <Button size="sm" variant="secondary" onClick={() => void askAi()} loading={asking} disabled={asking}>{asking ? <Loader2 size={14} className="spin" /> : <Wand2 size={14} />} {aiIdeas?.round === round ? "More ideas" : "Ask AI for more"}</Button>
+            {list.length >= 3 && <button type="button" className="ft-ideas-hide" onClick={() => setIdeasOpen(false)}>Hide</button>}
+          </span>
+        </div>
+        {ideas.length ? <ul className="ft-ideas-list">{ideas.map((x, i) => <li key={`${round}-${i}-${x.text.slice(0, 20)}`}>
+          <p>{x.text}</p>
+          <span className="ft-idea-why">{x.by === "ai" && <em>AI</em>}{x.why}</span>
+          <button type="button" className="ft-idea-add" onClick={() => addIdea(x)} aria-label={`Add this idea: ${x.text.slice(0, 60)}`}><Plus size={14} /> Add</button>
+        </li>)}</ul> : <p className="ft-ideas-empty">No new ideas that differ enough from yours — ask the AI for fresh ones.</p>}
+      </div> : <button type="button" className="ft-ideas-open" onClick={() => setIdeasOpen(true)}><Sparkles size={14} /> Ideas for more {ordinal(round)} follow-ups</button>)}
       <div className={`ft-save${dirty ? " dirty" : ""}`}>
         <Button size="sm" disabled={!dirty} onClick={save}><Save size={14} /> Save templates</Button>
         {dirty && <Button size="sm" variant="ghost" onClick={() => setDraft(null)}><RotateCcw size={14} /> Discard</Button>}

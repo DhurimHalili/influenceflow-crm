@@ -170,7 +170,8 @@ const upgradeWorkspace = (value: WorkspaceData, userId: string): WorkspaceData =
     }),
   ),
   followups: (value.followups || []).map((f) => ({ ...f, creator_id: f.creator_id || null, brand_id: f.brand_id || null, kind: f.kind === "reply" ? "reply" : "followup", channel: f.channel || "" })),
-  emailEvents: (value.emailEvents || []).slice(0, 6000),
+  emailEvents: (value.emailEvents || []).filter((e) => !e.bounced_at).slice(0, 6000),
+  bounces: [...(value.bounces || []), ...(value.emailEvents || []).filter((e) => !!e.bounced_at)].slice(-500),
   meetings: (value.meetings || []).map((m) => ({ ...m, kind: m.kind || "meeting", done: m.done === true })),
   activities: value.activities || [],
 });
