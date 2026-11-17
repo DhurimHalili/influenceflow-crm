@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useMemo, useRef, useState, type
 import { hasSupabase, supabase } from "../lib/supabase";
 import type { Creator, SocialLink } from "../types";
 import { useData } from "./DataContext";
+import type { DiscoveryAnswer } from "../lib/channels";
 
 // YouTube numbers for influencers, from the youtube-sync function.
 //   lookup(link)   — quick fill: the channel's facts and suggested stars, nothing saved
@@ -30,6 +31,8 @@ type Value = {
   lookup: (input: string) => Promise<{ facts?: ChannelFacts; error?: string }>;
   refresh: (ids: string[], opts?: { quiet?: boolean; force?: boolean }) => Promise<{ done: number; failed: number; message: string }>;
   cancel: () => void;
+  /** youtube-sync "channels": their other channels + fresh numbers for the extra ones (nothing saved). */
+  channels: (body: Record<string, unknown>) => Promise<{ data?: DiscoveryAnswer; error?: string; status?: number }>;
   /** The YouTube link or @handle on a record, or "". */
   channelOf: (socials: SocialLink[] | undefined) => string;
 };
@@ -108,7 +111,8 @@ export function YouTubeProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const cancel = useCallback(() => { stop.current = true; }, []);
-  const value = useMemo(() => ({ enabled, progress, lookup, refresh, cancel, channelOf }), [enabled, progress, lookup, refresh, cancel]);
+  const channels = useCallback((body: Record<string, unknown>) => call<DiscoveryAnswer>({ action: "channels", ...body }), []);
+  const value = useMemo(() => ({ enabled, progress, lookup, refresh, cancel, channels, channelOf }), [enabled, progress, lookup, refresh, cancel, channels]);
   return <YouTubeContext.Provider value={value}>{children}</YouTubeContext.Provider>;
 }
 

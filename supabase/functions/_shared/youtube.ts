@@ -397,3 +397,45 @@ export async function videoDetails(ids: string[]): Promise<FullVideo[]> {
   }
   return out;
 }
+
+// ---- a creator's other channels (youtube-sync "channels") --------------------------
+
+export type LightChannel = {
+  id: string; title: string; handle: string; description: string; thumbnail: string; country: string;
+  subscribers: number; hiddenSubscribers: boolean; videoCount: number; totalViews: number; publishedAt: string;
+};
+// deno-lint-ignore no-explicit-any
+const lightOf = (ch: any): LightChannel => {
+  const handle = String(ch.snippet?.customUrl || "").replace(/^@/, "");
+  return {
+    id: String(ch.id || ""), title: String(ch.snippet?.title || "").slice(0, 200), handle, description: String(ch.snippet?.description || "").slice(0, 5000),
+    thumbnail: String(ch.snippet?.thumbnails?.medium?.url || ch.snippet?.thumbnails?.default?.url || ""),
+    country: String(ch.snippet?.country || "").toUpperCase().slice(0, 2),
+    subscribers: ch.statistics?.hiddenSubscriberCount ? 0 : Number(ch.statistics?.subscriberCount || 0), hiddenSubscribers: !!ch.statistics?.hiddenSubscriberCount,
+    videoCount: Number(ch.statistics?.videoCount || 0), totalViews: Number(ch.statistics?.viewCount || 0), publishedAt: String(ch.snippet?.publishedAt || ""),
+  };
+};
+
+/** Title, description, numbers of up to 50 channels in ONE unit. */
+export async function channelsLight(ids: string[]): Promise<LightChannel[]> {
+  const ok = [...new Set(ids.filter((id) => /^UC[\w-]{22}$/.test(id)))].slice(0, 50);
+  if (!ok.length) return [];
+  const got = await api("channels", { part: "snippet,statistics", id: ok.join(","), maxResults: "50" });
+  return (got.items || []).map(lightOf);
+}
+
+/** The channels a channel features on its home page (1 unit). Featured ≠ theirs — friends get featured too. */
+export async function featuredChannels(id: string): Promise<string[]> {
+  if (!/^UC[\w-]{22}$/.test(id)) return [];
+  const got = await api("channelSections", { part: "contentDetails,snippet", channelId: id });
+  const out: string[] = [];
+  for (const s of got.items || []) if (/multiple_?channels/i.test(String(s.snippet?.type || ""))) for (const c of s.contentDetails?.channels || []) if (/^UC[\w-]{22}$/.test(String(c))) out.push(String(c));
+  return [...new Set(out)].slice(0, 40);
+}
+
+/** Newest upload's date and how many of the last 50 uploads are from the last 90 days (1 unit). */
+export async function uploadPulse(id: string, now = new Date()): Promise<{ lastUploadAt: string; uploads90d: number }> {
+  const page = await uploadsPage(id).catch(() => ({ items: [] as { id: string; at: string }[], next: "" }));
+  const dates = page.items.map((i) => i.at).filter(Boolean).sort().reverse();
+  return { lastUploadAt: dates[0] || "", uploads90d: dates.filter((d) => new Date(d).getTime() > now.getTime() - 90 * 86400000).length };
+}
