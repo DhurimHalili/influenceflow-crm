@@ -23,7 +23,10 @@ import { FillAsk } from "../components/FillAsk";
 // midnight. One screen: today's number and what's ready, "send N for me" with
 // a plan you see before anything is queued, today's queue, and the night fill.
 
-const hm = (ms: number) => dateFmt({ hour: "numeric", minute: "2-digit" }).format(ms);
+// Clock times in YOUR time zone (Settings), like "today" and "left today" — never the browser's: a laptop whose
+// Windows time zone was wrong showed 3:12 PM for a send due in 9 minutes. Set by the page on every render.
+let shownZone: string | undefined;
+const hm = (ms: number) => dateFmt({ hour: "numeric", minute: "2-digit", ...(shownZone ? { timeZone: shownZone } : {}) }).format(ms);
 const left = (ms: number) => { const m = Math.max(0, Math.round(ms / 60_000)); return m >= 60 ? `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, "0")} min` : `${m} min`; };
 const inWords = (ms: number) => { const m = Math.round(ms / 60_000); return m <= 0 ? "now" : m < 60 ? `in ${m} min` : `in ${Math.floor(m / 60)} h ${m % 60} min`; };
 const ORIGIN: Record<QueueItem["origin"], string> = { batch: "You started it", fill: "Night fill", manual: "From their profile" };
@@ -69,6 +72,7 @@ function BoxLimits({ boxes, perBox, max, onChange }: { boxes: { mailbox: string;
 
 export default function AutopilotPage() {
   const auto = useAutopilot();
+  shownZone = auto.zone;
   const data = useData();
   const gmail = useGmail();
   const { toast } = useToast();
