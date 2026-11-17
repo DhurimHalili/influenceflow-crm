@@ -4,10 +4,13 @@ import { useAutopilotRows, waitingRow } from "../lib/autopilotStore";
 import { useAutopilot } from "../contexts/AutopilotContext";
 import { useData } from "../contexts/DataContext";
 import { useToast } from "../contexts/ToastContext";
+import { dateFmt } from "../lib/days";
+import { dayKeyIn } from "../lib/zones";
 
 const ORD = ["", "1st", "2nd", "3rd", "4th"];
-const time = (iso: string) => new Date(iso).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
-const sameDay = (iso: string) => new Date(iso).toDateString() === new Date().toDateString();
+// In your time zone (Settings), the same clock as the Autopilot page — not the browser's.
+const time = (iso: string, zone: string) => dateFmt({ hour: "numeric", minute: "2-digit", timeZone: zone }).format(new Date(iso));
+const sameDay = (iso: string, zone: string) => dayKeyIn(zone, new Date(iso).getTime()) === dayKeyIn(zone, Date.now());
 
 /** Who Autopilot has an email waiting for, by influencer id (the earliest one). */
 export function useAutopilotWaiting() {
@@ -25,8 +28,9 @@ export function useAutopilotWaiting() {
  */
 export function AutopilotTag({ id }: { id: string }) {
   const r = useAutopilotWaiting().get(id);
+  const { zone } = useAutopilot();
   if (!r) return null;
-  const when = `${sameDay(r.send_at) ? "" : `${new Date(r.send_at).toLocaleDateString("en-US", { weekday: "short" })} `}${time(r.send_at)}`;
+  const when = `${sameDay(r.send_at, zone) ? "" : `${dateFmt({ weekday: "short", timeZone: zone }).format(new Date(r.send_at))} `}${time(r.send_at, zone)}`;
   return <span className={`ap-tag${r.status === "sending" ? " is-sending" : ""}`} title={`Autopilot sends your ${ORD[r.round] || ""} follow-up ${r.status === "sending" ? "right now" : `at ${when}`}${r.mailbox ? ` from ${r.mailbox}` : ""}. Leave them to it — writing by hand would send twice. Cancel it on the Autopilot page.`}>
     <PlaneTakeoff size={12} aria-hidden="true" /><span>Autopilot</span><b>{r.status === "sending" ? "sending" : when}</b>
   </span>;
