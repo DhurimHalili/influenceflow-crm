@@ -367,6 +367,22 @@ const EVENT_COLS = "id,user_id,gmail_id,thread_id,direction,entity_type,entity_i
 
 const skip: PagedResult = { data: null, error: null };
 
+/** A part of the workspace that must load: one quick retry, then throw (the caller keeps the saved copy and retries). */
+export async function mustLoad(read: () => Promise<PagedResult>, wait = 600): Promise<Record<string, unknown>[]> {
+  let last: unknown = null;
+  for (let n = 0; n < 2; n++) {
+    if (n) await new Promise((r) => setTimeout(r, wait));
+    try {
+      const res = await read();
+      if (!res.error) return res.data || [];
+      last = res.error;
+    } catch (error) {
+      last = error;
+    }
+  }
+  throw last instanceof Error ? last : new Error(String((last as { message?: string })?.message || "load failed"));
+}
+
 /**
  * The member's workspace. With `only` + `prev`, just the changed parts are downloaded and the rest
  * is taken from `prev` (the last full copy) — a tab left open used to re-download every table every
@@ -387,13 +403,12 @@ export async function loadCloudWorkspace(userId: string, opts?: { only?: Set<Wor
     need("meetings") ? fetchAll("meetings", userId) : skip,
     need("activities") ? fetchAll("activities", userId, { order: "at", max: 3000 }) : skip,
   ]);
-  // Core CRM tables must load; anything else degrades to empty instead of
-  // blanking the whole workspace (no silent data loss on partial failure).
-  const critical = [creators.error, brands.error, contacts.error, campaigns.error, meetings.error].find(Boolean);
+  // Every part must load. A part that quietly came back empty (emails, follow-ups, settings) used to be
+  // taken as the truth — and since its fingerprint was then "known", it stayed empty until something in
+  // it changed: follow-ups, filters and Autopilot numbers showed up minutes or hours late. A failed read
+  // now fails the load: the saved copy stays on screen and the whole load is tried again.
+  const critical = [creators.error, brands.error, contacts.error, campaigns.error, meetings.error, profile.error, activities.error].find(Boolean);
   if (critical) throw critical;
-  if (profile.error || activities.error) {
-    // Non-critical: keep going with defaults for these two.
-  }
   const base = blankWorkspace(userId);
   const campaignRows = ((campaigns.data || []) as Record<string, unknown>[]);
   let links: JoinRow[] = [];
@@ -408,28 +423,9 @@ export async function loadCloudWorkspace(userId: string, opts?: { only?: Set<Wor
     }
   }
   const storedProfile = (profile.data as Record<string, unknown> | null) || null;
-  // Follow-up history is auxiliary: a missing table (pre-migration deploy)
-  // degrades to empty instead of failing the whole workspace load.
-  let followupRows: Record<string, unknown>[] = [];
-  if (need("followups")) {
-    try {
-      const res = await fetchAll("followups", userId, { order: "at", max: 5000 });
-      if (!res.error) followupRows = res.data || [];
-    } catch {
-      followupRows = [];
-    }
-  }
-  // Gmail activity (read-only, written by the gmail-sync function). A
-  // database without the table yet simply has none.
-  let eventRows: Record<string, unknown>[] = [];
-  if (need("events")) {
-    try {
-      const res = await fetchAll("email_events", userId, { order: "at", max: 6000, select: EVENT_COLS });
-      if (!res.error) eventRows = res.data || [];
-    } catch {
-      eventRows = [];
-    }
-  }
+  // Follow-up history and Gmail activity: read twice before giving up, then the load fails (never "none").
+  const followupRows = need("followups") ? await mustLoad(() => fetchAll("followups", userId, { order: "at", max: 5000 })) : [];
+  const eventRows = need("events") ? await mustLoad(() => fetchAll("email_events", userId, { order: "at", max: 6000, select: EVENT_COLS })) : [];
   const full = buildWorkspace();
   if (!prev) return full;
   // Unchanged parts: exactly what the last download had.
