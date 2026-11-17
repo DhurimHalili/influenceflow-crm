@@ -1,7 +1,8 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
-import { channelFacts, flushYoutubeMeter, knownChannelId, useYoutubeMeter, youtubeBackgroundOk, youtubeConfigured, YouTubeQuota, type ChannelFacts } from "../_shared/youtube.ts";
+import { channelFacts, channelIdOf, channelsLight, featuredChannels, uploadPulse, flushYoutubeMeter, knownChannelId, useYoutubeMeter, youtubeBackgroundOk, youtubeConfigured, YouTubeQuota, type ChannelFacts } from "../_shared/youtube.ts";
 import { asMember, ringFor, runInRing, type Ring } from "../_shared/keyring.ts";
+import { otherLinksIn, roleOf, siblingVerdict, youtubeLinksIn } from "../_shared/channels.ts";
 
 // YouTube numbers for influencers (see _shared/youtube.ts for how they're read).
 //
@@ -11,6 +12,11 @@ import { asMember, ringFor, runInRing, type Ring } from "../_shared/keyring.ts";
 //   refresh {ids}     — up to 10 of YOUR influencers: their fresh numbers come
 //                       back as patches the app saves like your own edit, so a
 //                       refresh never overwrites a change you're making.
+//   channels {main, main_id?, discover?, extras?, skip?}
+//                     — a creator's other channels: what their own channel links / features that is
+//                       really theirs (shared/channels.ts decides; friends are left out), fresh numbers
+//                       for the extra channels you linked, and the other links in their description.
+//                       Public YouTube data only; nothing is read from or written to the database.
 //   cron              — hourly, server only (x-cron-secret): every member who
 //                       has "Keep YouTube stats fresh" on gets their influencers
 //                       refreshed, oldest first, straight into the database.
@@ -34,6 +40,9 @@ const FRESH_MS = Math.max(1, Math.min(48, Number(Deno.env.get("YT_REFRESH_HOURS"
 // The people you're talking to are refreshed most often; parked and closed ones far less (their numbers
 // matter less and every refresh costs ~3 units of the key's 10,000 a day).
 const CADENCE: Record<string, number> = { negotiating: 1, replied: 1, inbound: 1, roster: 1, signed: 1, contacted: 2, new: 2, no_reply: 4, denied: 12 };
+// Other channels: searched again every 14 days per creator, at most 8 creators an hour (~3–15 units each).
+const CHANNELS_DAYS = 14;
+const CHANNELS_PER_RUN = 8;
 const dueAfter = (status: string) => FRESH_MS * (CADENCE[status] ?? 2);
 
 type Social = { platform: string; url: string; handle: string; followers: number };
@@ -101,6 +110,53 @@ const approvedUser = async (admin: SupabaseClient, auth: string) => {
   return me && me.access && me.access !== "approved" ? null : data.user.id;
 };
 
+const isChannelId = (x: unknown): x is string => typeof x === "string" && /^UC[\w-]{22}$/.test(x);
+
+/**
+ * A creator's other channels from their main channel (public YouTube data only): channels it links in its
+ * description or features that are really theirs (shared/channels.ts), fresh numbers for extra channels you
+ * linked, and the other links in its description. ~3–15 units. Null when the main channel can't be found.
+ */
+async function discoverChannels(mainLink: string, knownId: string, opts: { discover: boolean; skip: string[]; extras: { link: string; id: string }[] }) {
+  const now = new Date();
+  const skip = new Set(opts.skip);
+  const mainId = knownId || await channelIdOf(mainLink);
+  if (!mainId) return null;
+  const [main] = await channelsLight([mainId]);
+  if (!main) return null;
+  const found: Record<string, unknown>[] = [];
+  if (opts.discover) {
+    const featured = new Set(await featuredChannels(mainId).catch(() => [] as string[]));
+    // Channels linked in their description (a handle costs 1 unit to resolve — at most 6).
+    const lines = new Map<string, string>();
+    let resolved = 0;
+    for (const l of youtubeLinksIn(main.description)) {
+      let id: string | null = isChannelId(l.ref) ? l.ref : null;
+      if (!id && resolved < 6) { resolved++; id = await channelIdOf(l.ref).catch((e) => { if (e instanceof YouTubeQuota) throw e; return null; }); }
+      if (id && !lines.has(id)) lines.set(id, l.line);
+    }
+    const ids = [...new Set([...lines.keys(), ...featured])].filter((id) => id !== mainId && !skip.has(id) && !opts.extras.some((e) => e.id === id)).slice(0, 50);
+    for (const c of await channelsLight(ids)) {
+      const line = lines.get(c.id) || "";
+      const v = siblingVerdict({ id: mainId, title: main.title, handle: main.handle, description: main.description }, { id: c.id, title: c.title, handle: c.handle, description: c.description, featured: featured.has(c.id), line });
+      if (!v) continue;
+      const r = roleOf({ title: c.title, handle: c.handle, line }, main);
+      found.push({ id: c.id, url: c.handle ? `https://www.youtube.com/@${c.handle}` : `https://www.youtube.com/channel/${c.id}`, title: c.title, handle: c.handle, thumbnail: c.thumbnail, subscribers: c.subscribers, hidden_subscribers: c.hiddenSubscribers, video_count: c.videoCount, total_views: c.totalViews, role: r.role, language: r.language || "", level: v.level, why: v.why });
+    }
+    found.sort((a, b) => Number(b.level === "sure") - Number(a.level === "sure") || Number(b.subscribers) - Number(a.subscribers));
+    found.splice(8);
+    for (const f of found) Object.assign(f, await uploadPulse(String(f.id), now).then((p) => ({ last_upload_at: p.lastUploadAt, uploads_90d: p.uploads90d })).catch(() => ({})));
+  }
+  const extras: Record<string, unknown>[] = [];
+  for (const e of opts.extras) {
+    const f = await channelFacts(e.link, now, { knownId: e.id || undefined }).catch((err) => { if (err instanceof YouTubeQuota) throw err; return null; });
+    if (!f) { extras.push({ link: e.link, ok: false }); continue; }
+    const r = roleOf({ title: f.title, handle: f.handle }, main);
+    extras.push({ link: e.link, ok: true, facts: { channel_id: f.channelId, title: f.title, handle: f.handle, url: f.url, thumbnail: f.thumbnail, country: f.country, subscribers: f.subscribers, hidden_subscribers: f.hiddenSubscribers, video_count: f.videoCount, total_views: f.totalViews, avg_views: f.avgViews, engagement_rate: f.engagementRate, sampled: f.sampled, uploads_90d: f.uploads90d, last_upload_at: f.lastUploadAt, niche: f.niche, sub_niche: f.subNiche, role: r.role, language: r.language || "", at: f.at } });
+  }
+  return { main: { id: mainId, title: main.title, handle: main.handle, thumbnail: main.thumbnail }, found, extras, links: otherLinksIn(main.description) };
+}
+
 Deno.serve(async (req) => {
   const origin = req.headers.get("Origin") || "";
   const cors = { "Access-Control-Allow-Origin": ALLOWED_ORIGINS.has(origin) ? origin : new URL(APP_URL).origin, "X-Content-Type-Options": "nosniff", "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type", "Access-Control-Allow-Methods": "POST, OPTIONS", Vary: "Origin" };
@@ -154,8 +210,40 @@ Deno.serve(async (req) => {
         skipped++;
       }
     }
+    // Their other channels, every 14 days per creator (a profile you open searches by itself too). The row's
+    // channels are re-read right before the write so anything you changed meanwhile (a yes / no) is kept.
+    let searched = 0;
+    if (Date.now() < deadline - 20_000) {
+      const since = new Date(Date.now() - CHANNELS_DAYS * 86_400_000).toISOString();
+      const { data: rows2 } = await admin.from("creators").select("id, user_id, socials, youtube, channels, pipeline_status").in("user_id", [...rings.keys()]).is("archived_at", null)
+        .or(`channels->>at.is.null,channels->>at.lt.${since}`).limit(1000);
+      const due2 = ((rows2 || []) as { id: string; user_id: string; socials: Social[] | null; youtube: Record<string, unknown> | null; channels: Record<string, unknown> | null; pipeline_status: string | null }[])
+        .filter((c) => youtubeOf(c.socials))
+        .sort((a, b) => Number(!!a.channels?.at) - Number(!!b.channels?.at) || (CADENCE[a.pipeline_status || ""] ?? 2) - (CADENCE[b.pipeline_status || ""] ?? 2))
+        .slice(0, CHANNELS_PER_RUN);
+      for (const c of due2) {
+        if (Date.now() > deadline - 10_000) break;
+        const ring = rings.get(c.user_id);
+        if (!ring || quota.has(c.user_id)) continue;
+        if (!(await runInRing(ring, () => youtubeBackgroundOk()))) { quota.add(c.user_id); continue; }
+        const prev = (c.channels || {}) as { dismissed?: unknown[]; stats?: Record<string, { channel_id?: unknown }>; main?: { id?: unknown } };
+        const skip = [...(prev.dismissed || []), ...Object.values(prev.stats || {}).map((x) => x?.channel_id)].filter(isChannelId);
+        const known = isChannelId(c.youtube?.channel_id) ? c.youtube.channel_id as string : isChannelId(prev.main?.id) ? prev.main.id as string : "";
+        try {
+          const out = await runInRing(ring, () => discoverChannels(youtubeOf(c.socials), known, { discover: true, skip, extras: [] }));
+          const { data: fresh } = await admin.from("creators").select("channels").eq("id", c.id).eq("user_id", c.user_id).maybeSingle();
+          const cur = (fresh?.channels && typeof fresh.channels === "object" && !Array.isArray(fresh.channels) ? fresh.channels : {}) as Record<string, unknown>;
+          const at = new Date().toISOString();
+          const next = out ? { ...cur, at, main: { id: out.main.id, title: out.main.title, thumbnail: out.main.thumbnail }, found: out.found.map((f) => ({ ...f, platform: "YouTube" })), links: out.links.slice(0, 30) } : { ...cur, at };
+          const { error } = await admin.from("creators").update({ channels: next }).eq("id", c.id).eq("user_id", c.user_id).is("archived_at", null);
+          if (!error) searched++;
+        } catch (e) {
+          if (e instanceof YouTubeQuota) quota.add(c.user_id);
+        }
+      }
+    }
     await flushYoutubeMeter();
-    return json({ refreshed: done, skipped, idsReused: saved, paused: quota.size });
+    return json({ refreshed: done, skipped, idsReused: saved, paused: quota.size, channelsSearched: searched });
   }
 
   const userId = await approvedUser(admin, req.headers.get("Authorization") || "");
@@ -194,6 +282,20 @@ Deno.serve(async (req) => {
       }
     }
     return json({ ok: true, results });
+  }
+
+  if (input.action === "channels") {
+    const mainLink = typeof input.main === "string" ? input.main.trim().slice(0, 500) : "";
+    if (!mainLink) return json({ error: "Add their main YouTube channel first." }, 400);
+    const skip = (Array.isArray(input.skip) ? input.skip : []).filter(isChannelId).slice(0, 200);
+    const extras = (Array.isArray(input.extras) ? input.extras : []).slice(0, 8).map((x) => (x && typeof x === "object" ? x as Record<string, unknown> : {}))
+      .filter((x) => typeof x.link === "string" && x.link.length <= 500).map((x) => ({ link: String(x.link), id: isChannelId(x.id) ? x.id : "" }));
+    try {
+      const out = await discoverChannels(mainLink, isChannelId(input.main_id) ? input.main_id : "", { discover: input.discover !== false, skip, extras });
+      return out ? json({ ok: true, ...out }) : json({ error: "Couldn't find their main YouTube channel — check the link." }, 404);
+    } catch (e) {
+      return json({ error: e instanceof YouTubeQuota ? "Your YouTube key's daily limit is reached — it resets at midnight Pacific time." : e instanceof Error ? e.message : "YouTube didn't answer." }, e instanceof YouTubeQuota ? 429 : 502);
+    }
   }
 
   return json({ error: "Unknown action" }, 400);

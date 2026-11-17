@@ -254,7 +254,39 @@ export interface TeamMember {
   removed?: boolean;
 }
 
+/** Numbers YouTube gave for one of an influencer's extra channels (youtube-sync "channels"). */
+export interface ChannelStats {
+  channel_id?: string; title?: string; handle?: string; url?: string; thumbnail?: string; country?: string;
+  subscribers?: number; hidden_subscribers?: boolean; video_count?: number; total_views?: number;
+  avg_views?: number; engagement_rate?: number; sampled?: number; uploads_90d?: number; last_upload_at?: string;
+  niche?: string; sub_niche?: string; role?: string; language?: string; at?: string;
+}
+/** A channel found on their own YouTube that may be theirs — waiting for your yes / no. */
+export interface FoundChannel extends ChannelStats {
+  id: string; url: string; title: string; level: "sure" | "likely"; why: string[];
+  /** "youtube" = a channel; otherwise a network found in their description. */
+  platform?: SocialPlatform;
+}
+/** Everything about an influencer's channels beyond the plain socials list (keyed by socialKey(url)). */
+export interface CreatorChannels {
+  /** When their YouTube was last searched for other channels. */
+  at?: string;
+  /** Numbers for extra YouTube channels you linked. */
+  stats?: Record<string, ChannelStats>;
+  /** What kind of channel each is, when you changed it ("second", "clips"…). */
+  roles?: Record<string, string>;
+  found?: FoundChannel[];
+  /** Channel ids / keys you said aren't theirs (never offered again). */
+  dismissed?: string[];
+  /** Links in their main channel's description with the line each sits on (other networks are offered from these). */
+  links?: { url: string; line: string }[];
+  /** The main channel's id + picture from the last search. */
+  main?: { id?: string; title?: string; thumbnail?: string };
+}
+
 export interface Creator {
+  /** Every channel of theirs beyond the socials list: numbers, kinds, found ones. */
+  channels?: CreatorChannels;
   /** Their manager / agent / team addresses. */
   team?: TeamMember[];
   /** Channel facts from YouTube and when they were read (empty until the first refresh). */
