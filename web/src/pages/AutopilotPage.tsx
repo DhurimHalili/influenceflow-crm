@@ -11,6 +11,7 @@ import { templateCount, readTemplates, ROUNDS, type HoldWhy } from "../lib/autop
 import { ordinal } from "../lib/followupEngine";
 import { timeIn, dayEndIn, dayStartIn, placeOf } from "../lib/zones";
 import { useOutreach } from "../hooks/useOutreach";
+import { useSessionState } from "../hooks/useSessionState";
 import { useChase } from "../hooks/useChase";
 import { useAutopilotWaiting } from "../components/AutopilotTag";
 import { minutesOf } from "../lib/autopilot";
@@ -122,9 +123,14 @@ export default function AutopilotPage() {
     while (left > 0 && open.some((b) => next[b.mailbox] < boxMax(b.mailbox))) for (const b of open) if (left > 0 && next[b.mailbox] < boxMax(b.mailbox)) { next[b.mailbox]++; left--; }
     setPerBox(next);
   };
-  const [plan, setPlan] = useState<PlanAnswer | null>(null);
+  // A plan is only a preview until Start — kept for this tab (open a profile, come back, even reload) for the day it
+  // was made. Leaving the page used to throw it away, so it looked like it had vanished (nothing was ever queued).
+  const [saved, setSaved] = useSessionState<{ day: string; plan: PlanAnswer; dropped: string[] } | null>("autopilot.plan", null);
+  const plan = saved && saved.day === auto.todayKey ? saved.plan : null;
+  const setPlan = (p: PlanAnswer | null) => setSaved(p ? { day: auto.todayKey, plan: p, dropped: [] } : null);
   const [planning, setPlanning] = useState(false);
-  const [dropped, setDropped] = useState<Set<string>>(new Set());
+  const dropped = useMemo(() => new Set(saved?.dropped || []), [saved?.dropped]);
+  const setDropped = (next: Set<string> | ((d: Set<string>) => Set<string>)) => setSaved((cur) => (cur ? { ...cur, dropped: [...(typeof next === "function" ? next(new Set(cur.dropped)) : next)] } : cur));
   const [starting, setStarting] = useState(false);
   const [stopAll, setStopAll] = useState(false);
   const end = dayEndIn(auto.zone, now);
@@ -167,6 +173,7 @@ export default function AutopilotPage() {
   const heldGroups = new Map<HoldWhy, string[]>();
   for (const h of auto.pool.held) heldGroups.set(h.why, [...(heldGroups.get(h.why) || []), h.name]);
   const keep = plan ? plan.rows.filter((r) => !dropped.has(r.creatorId)) : [];
+  const passed = keep.filter((r) => r.at < now + 15_000).length;
   const many = gmail.mailboxes.length > 1;
 
   return <div className="ap">
@@ -222,6 +229,7 @@ export default function AutopilotPage() {
       <header>
         <div>
           <h2>{keep.length} follow-up{keep.length === 1 ? "" : "s"}{keep.length ? ` · ${hm(keep[0].at)} – ${hm(keep[keep.length - 1].at)}` : ""}</h2>
+          <p className="ap-plan-unsent"><Clock3 size={13} /> Not started — nothing is queued until you press Start{passed ? ` · ${passed} time${passed === 1 ? " has" : "s have"} passed, tap New times` : ""}</p>
           <p>{plan.ai ? <><Sparkles size={13} /> Words checked by AI against each email</> : <><ShieldCheck size={13} /> Words picked by the rules (no AI answered)</>} · spread evenly, never one text to everyone</p>
         </div>
         <button type="button" className="ap-x" onClick={() => setPlan(null)} aria-label="Close the plan"><X size={17} /></button>

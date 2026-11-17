@@ -394,3 +394,4 @@
 .ap-marked span { color: var(--text-soft); }
 .ap-marked ul { list-style: none; margin: 2px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 10px; }
 .ap-marked a { color: var(--accent); font-weight: 700; text-decoration: none; }
+.ap-plan-unsent { display: inline-flex; align-items: center; gap: 6px; margin: 0 0 6px !important; padding: 4px 10px; border-radius: 999px; font-size: 12px !important; font-weight: 700; color: var(--text) !important; background: color-mix(in srgb, var(--warning) 16%, var(--surface-solid)); border: 1px solid color-mix(in srgb, var(--warning) 45%, var(--line)); }
