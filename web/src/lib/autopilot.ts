@@ -114,7 +114,8 @@ export type Ready = {
   /** Your email in that thread they'd be answering: the latest one (theirs never exists). */
   lastGmailId: string; firstAt: number; lastAt: number; overdueDays: number; zones: string[]; country: string;
 };
-export type ByHand = { id: string; name: string; round: number; why: "replied" | "conversation" };
+/** replied = they answered (email or logged); conversation = the deal moved on; marked = you set "Replied" but no reply is on file anywhere. */
+export type ByHand = { id: string; name: string; round: number; why: "replied" | "conversation" | "marked" };
 export type Held = { id: string; name: string; round: number; why: HoldWhy; mailbox?: string };
 export type Pool = { ready: Ready[]; byHand: ByHand[]; held: Held[]; queued: string[] };
 
@@ -158,7 +159,9 @@ export function autopilotPool(input: PoolInput): Pool {
     const round = s.sent ?? s.round;
     // Anyone who ever answered — or whose conversation went past outreach — is yours to write.
     if (answered.has(c.id)) { out.byHand.push({ id: c.id, name: c.name, round, why: "replied" }); continue; }
-    if (!LIVE.has(c.pipeline_status)) { out.byHand.push({ id: c.id, name: c.name, round, why: "conversation" }); continue; }
+    // Status "Replied" with no reply anywhere (no email from their side, nothing logged): probably a click by mistake.
+    // Still yours (never guess), but the app says why and offers one tap back to Contacted.
+    if (!LIVE.has(c.pipeline_status)) { out.byHand.push({ id: c.id, name: c.name, round, why: c.pipeline_status === "replied" ? "marked" : "conversation" }); continue; }
     if (input.queued?.has(c.id)) { out.queued.push(c.id); continue; }
     const hold = (why: HoldWhy, mailbox?: string) => out.held.push({ id: c.id, name: c.name, round, why, ...(mailbox ? { mailbox } : {}) });
     if (input.paused) { hold("paused"); continue; }

@@ -318,7 +318,7 @@ export async function doneToday(admin: Admin, userId: string, tz: string, now: n
       stamps += part.filter((id) => !touched.has(id)).length;
     }
   }
-  return { done: sent.size + manual + answers + stamps, later: later.size };
+  return { done: sent.size + manual + answers + stamps, later: later.size, ids: new Set([...sent, ...later]) };
 }
 
 /**
@@ -548,9 +548,11 @@ export async function fillFor(admin: Admin, kit: Kit, userId: string, prefs: Pre
   if (!rows.length) { await save({ note: "no_mailbox", need: 0, short: 0, available: 0 }); return 0; }
   const w = await loadWorld(admin, userId);
   if (pausedToday(w, now)) { await save({ note: "weekend", need: 0, short: 0, available: 0 }); return 0; }
-  const { done, later } = await doneToday(admin, userId, tz, now);
-  const { data: today } = await admin.from("autosend_queue").select("creator_id, mailbox, send_at, status, origin").eq("user_id", userId).eq("day", day).limit(2000);
-  const list = (today || []) as { creator_id: string; mailbox: string; send_at: string; status: string; origin: string }[];
+  const { done, later, ids } = await doneToday(admin, userId, tz, now);
+  const { data: today } = await admin.from("autosend_queue").select("creator_id, mailbox, send_at, status, origin, gmail_id").eq("user_id", userId).eq("day", day).limit(2000);
+  const list = (today || []) as { creator_id: string; mailbox: string; send_at: string; status: string; origin: string; gmail_id: string }[];
+  // Sent by Autopilot a moment ago, before the sync brought the email in: it counts already (never fill twice).
+  const unsynced = list.filter((x) => x.status === "sent" && !!x.gmail_id && !ids.has(x.gmail_id)).length;
   const pending = list.filter((x) => x.status === "pending" || x.status === "sending");
   const autoToday = list.filter((x) => ["pending", "sending", "sent"].includes(x.status)).length;
   const batchToday = list.filter((x) => x.origin === "batch").length;
@@ -559,11 +561,14 @@ export async function fillFor(admin: Admin, kit: Kit, userId: string, prefs: Pre
   const pool = poolOf(w, rows, queued, now);
   const taken = pending.map((p) => ({ mailbox: p.mailbox, at: new Date(p.send_at).getTime() }));
   const from = Math.max(now, startMs);
-  const can = planTimes(pool.ready.map((r) => ({ id: r.id, mailbox: r.mailbox, zones: r.zones, firstAt: r.firstAt, lastAt: r.lastAt })), { now, userZone: tz, from, taken }).placed.length;
-  const n = fillNeed({ goal: w.goal, doneToday: done + later, pendingToday: pending.length, autoToday, cap, available: can });
+  // Who fits tonight AND inside each mailbox's room for today — so "short" never asks for more than the limits allow.
+  const room = roomMap(await mailboxDays(admin, w, rows, now));
+  const placed = new Set(planTimes(pool.ready.map((r) => ({ id: r.id, mailbox: r.mailbox, zones: r.zones, firstAt: r.firstAt, lastAt: r.lastAt })), { now, userZone: tz, from, taken }).placed.map((p) => p.id));
+  const can = pickWithin(pool.ready.filter((r) => placed.has(r.id)), DAY_MAX, room).length;
+  const n = fillNeed({ goal: w.goal, doneToday: done + later + unsynced, pendingToday: pending.length, autoToday, cap, available: can });
   let made = 0;
   if (n.allowed > 0) {
-    const plan = await planFor(admin, kit, w, rows, pool.ready, { now, count: n.allowed, from, taken, room: roomMap(await mailboxDays(admin, w, rows, now)) });
+    const plan = await planFor(admin, kit, w, rows, pool.ready, { now, count: n.allowed, from, taken, room });
     made = (await insertQueue(admin, userId, tz, plan.rows, "fill", null)).made;
   }
   await save({ need: n.need, short: n.short, available: can, note: "" });

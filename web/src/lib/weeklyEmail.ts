@@ -19,7 +19,7 @@ const DAYC: Record<DayLine["status"], { c: string; word: string }> = {
   hit: { c: "#16a34a", word: "Goal ✓" },
   close: { c: "#65a30d", word: "So close" },
   low: { c: "#f59e0b", word: "Warm-up day" },
-  zero: { c: "#dc2626", word: "Ghost mode 👻" },
+  zero: { c: "#dc2626", word: "Quiet day 💤" },
   off: { c: "#cbd5e1", word: "Day off" },
   bonus: { c: "#8b5cf6", word: "Bonus round ✨" },
   future: { c: "#e2e8f0", word: "Still to come" },
