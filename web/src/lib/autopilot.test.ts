@@ -1,5 +1,5 @@
 // Run (from web/): node --experimental-strip-types --import ./scripts/ts-hooks.mjs src/lib/autopilot.test.ts
-import { assignTemplates, autopilotPool, ctaOf, dayCap, everReplied, fillNeed, fillTemplate, hungarian, readAutopilot, readTemplates, ruleFit, shiftToZone, type TemplateBook } from "./autopilot";
+import { assignTemplates, autopilotPool, ctaOf, dayCap, everReplied, fillNeed, fillTemplate, hungarian, pickWithin, readAutopilot, readTemplates, ruleFit, shiftToZone, type TemplateBook } from "./autopilot";
 import { planTimes } from "./smartTime";
 import { countryCode, dayEndIn, dayKeyIn, dayStartIn, localMinute, offsetMin, zonesOf } from "./zones";
 import { followupState, type FollowupState } from "./followupEngine";
@@ -139,4 +139,23 @@ const shifted = new Date(sh.shift(Date.UTC(2026, 10, 16, 23, 30)));
 check("shift: 23:30Z on the 16th reads as 00:30 on the 17th (Kosovo wall clock)", [shifted.getDate(), shifted.getHours(), shifted.getMinutes()], [17, 0, 30]);
 
 if (fail) { console.log(`\n${fail} failed`); process.exit(1); }
+// Each mailbox stays within its limit: 18/20 and 16/20 used → 2 and 4 at most, never 6 from one.
+{
+  const list = [...Array.from({ length: 8 }, (_, i) => ({ id: `a${i}`, mailbox: "dhurim@x.com" })), ...Array.from({ length: 8 }, (_, i) => ({ id: `b${i}`, mailbox: "dhurimi@x.com" }))];
+  const room = new Map([["dhurim@x.com", 2], ["dhurimi@x.com", 4]]);
+  const got = pickWithin(list, 16, room, null, 7);
+  const per = (m: string) => got.filter((g) => g.mailbox === m).length;
+  check("limits: 2 from the one at 18/20, 4 from the one at 16/20", [got.length, per("dhurim@x.com"), per("dhurimi@x.com")], [6, 2, 4]);
+  const few = pickWithin(list, 3, new Map([["dhurim@x.com", 10], ["dhurimi@x.com", 10]]), null, 3);
+  check("limits: a smaller ask stays within and uses what's there", few.length, 3);
+  const both = new Set(Array.from({ length: 20 }, (_, s) => pickWithin(list, 1, new Map([["dhurim@x.com", 10], ["dhurimi@x.com", 10]]), null, s + 1)[0].mailbox));
+  check("limits: by default either mailbox can be picked (random mix)", both.size, 2);
+  const exact = pickWithin(list, 99, room, { "dhurimi@x.com": 3 }, 5);
+  check("limits: an exact number from one mailbox", [exact.length, exact.every((g) => g.mailbox === "dhurimi@x.com")], [3, true]);
+  const over = pickWithin(list, 99, room, { "dhurim@x.com": 5 }, 5);
+  check("limits: asking for more than the room still stops at the limit", over.length, 2);
+  check("limits: a mailbox missing from the room map sends nothing", pickWithin(list, 5, new Map([["dhurimi@x.com", 1]]), null, 1).map((g) => g.mailbox), ["dhurimi@x.com"]);
+  check("limits: priority order kept inside a mailbox", pickWithin(list, 2, new Map([["dhurim@x.com", 2]]), null, 1).map((g) => g.id), ["a0", "a1"]);
+}
+
 console.log("\nall autopilot tests passed");

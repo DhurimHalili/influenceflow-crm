@@ -8,6 +8,10 @@ import { planTimes, type Plan } from "../lib/smartTime";
 import { dayKeyIn, validZone } from "../lib/zones";
 import { useChase } from "../hooks/useChase";
 import { useWrongEmails } from "../components/Bounces";
+import { publishAutopilot, waitingRow } from "../lib/autopilotStore";
+import { useOutreach } from "../hooks/useOutreach";
+import { rampPlan, readRamp } from "../lib/goalRamp";
+import type { BoxDay } from "../lib/autopilot";
 
 // Autopilot in the app: today's queue (read straight from the database, your
 // rows only), the night fill's day state, and the actions (all on the server,
@@ -39,11 +43,15 @@ type Value = {
   pool: Pool;
   /** Smart times for everyone ready (who still fits today, who's asleep). */
   fits: Plan;
+  /** Each sending mailbox today: its limit (weekly ramp), what it used (sent + scheduled + Autopilot) and the room left. */
+  boxes: (BoxDay & { ready: number })[];
+  /** How many can go today without any mailbox passing its limit. */
+  canWithin: number;
   zone: string;
   todayKey: string;
   refresh: () => Promise<void>;
   watch: () => () => void;
-  plan: (count: number, exclude?: string[]) => Promise<Result<PlanAnswer>>;
+  plan: (count: number, exclude?: string[], perBox?: Record<string, number> | null) => Promise<Result<PlanAnswer>>;
   start: (rows: PlanRow[]) => Promise<Result<{ batch: string; queued: number; rejected: { creatorId: string; why: string }[] }>>;
   prepare: (creatorId: string) => Promise<Result<Prepared>>;
   queue: (input: { creatorId: string; templateId: string; text: string; when: "now" | "smart" | number }) => Promise<Result<{ id: string; sendAt: string; warn: string }>>;
@@ -110,6 +118,8 @@ export function AutopilotProvider({ children }: { children: ReactNode }) {
   // The minute matters for "in 4 min" and for who still fits today.
   useEffect(() => { const t = window.setInterval(() => setClock(Date.now()), 60_000); return () => window.clearInterval(t); }, []);
 
+  // Everything that counts emails (dashboard, reports, goal ring) sees what Autopilot will send and has sent.
+  useEffect(() => { publishAutopilot(user ? items.filter((i) => waitingRow(i) || i.status === "sent") : []); }, [items, user]);
   const watch = useCallback(() => { setWatchers((n) => n + 1); return () => setWatchers((n) => Math.max(0, n - 1)); }, []);
   const today = useMemo(() => items.filter((i) => i.day === todayKey), [items, todayKey]);
   const pendingByCreator = useMemo(() => new Map(items.filter((i) => i.status === "pending" || i.status === "sending").map((i) => [i.creator_id, i])), [items]);
@@ -126,10 +136,26 @@ export function AutopilotProvider({ children }: { children: ReactNode }) {
     return planTimes(pool.ready.map((r) => ({ id: r.id, mailbox: r.mailbox, zones: r.zones, firstAt: r.firstAt, lastAt: r.lastAt, weight: r.overdueDays })), { now: clock, userZone: zone, taken, seed: 7 });
   }, [pool.ready, items, clock, zone]);
 
+  // Each mailbox's room today — the same numbers the server checks (mailboxDays): ramp limit minus everything that
+  // mailbox sent or has waiting today (Gmail Scheduled + Autopilot). Autopilot never plans past it.
+  const log = useOutreach();
+  const boxes = useMemo(() => {
+    const used = new Map<string, number>();
+    for (const x of log) {
+      if (x.channel !== "email" || !x.mailbox || dayKeyIn(zone, new Date(x.at).getTime()) !== todayKey) continue;
+      used.set(x.mailbox.toLowerCase(), (used.get(x.mailbox.toLowerCase()) || 0) + 1);
+    }
+    const placed = new Set(fits.placed.map((p) => p.id));
+    return rampPlan(readRamp(prefs?.mailbox_ramp), sendBoxes, todayKey).boxes.map((b) => {
+      const u = used.get(b.mailbox) || 0;
+      return { mailbox: b.mailbox, limit: b.perDay, used: u, room: Math.max(0, b.perDay - u), ready: pool.ready.filter((r) => placed.has(r.id) && r.mailbox.toLowerCase() === b.mailbox).length };
+    });
+  }, [log, zone, todayKey, prefs?.mailbox_ramp, sendBoxes, fits.placed, pool.ready]);
+  const canWithin = useMemo(() => boxes.reduce((s, b) => s + Math.min(b.room, b.ready), 0), [boxes]);
   const after = useCallback(async <T,>(p: Promise<Result<T>>) => { const r = await p; void refresh(); return r; }, [refresh]);
   const value = useMemo<Value>(() => ({
-    enabled, loaded, items, today, pendingByCreator, day, pool, fits, zone, todayKey, refresh, watch,
-    plan: (count, exclude = []) => call<PlanAnswer>("autopilot_plan", { count, exclude }),
+    enabled, loaded, items, today, pendingByCreator, day, pool, fits, boxes, canWithin, zone, todayKey, refresh, watch,
+    plan: (count, exclude = [], perBox = null) => call<PlanAnswer>("autopilot_plan", { count, exclude, ...(perBox ? { perBox } : {}) }),
     start: (rows) => after(call("autopilot_start", { items: rows.map((r) => ({ creatorId: r.creatorId, templateId: r.templateId, at: r.at })) })),
     prepare: (creatorId) => call<Prepared>("autopilot_prepare", { creatorId }),
     queue: (input) => after(call("autopilot_queue", input)),
@@ -137,7 +163,7 @@ export function AutopilotProvider({ children }: { children: ReactNode }) {
     cancel: (target) => after(call("autopilot_cancel", target)),
     fillMore: () => after(call("autopilot_fill_more")),
     fillSkip: () => after(call("autopilot_fill_skip")),
-  }), [enabled, loaded, items, today, pendingByCreator, day, pool, fits, zone, todayKey, refresh, watch, after]);
+  }), [enabled, loaded, items, today, pendingByCreator, day, pool, fits, boxes, canWithin, zone, todayKey, refresh, watch, after]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 

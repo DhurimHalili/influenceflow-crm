@@ -13,13 +13,23 @@ export type NoEntry = { verdict: NoVerdict | null; group: NoLevel | "denied"; ty
 const dayListeners = new Set<() => void>();
 let currentDay = new Date().toDateString();
 let dayTimer = 0;
+const checkDay = () => {
+  const now = new Date().toDateString();
+  if (now !== currentDay) { currentDay = now; for (const l of dayListeners) l(); }
+};
+// A laptop that slept past midnight, or a tab the browser paused: check again the moment you're back.
+const onBack = () => { if (document.visibilityState !== "hidden") checkDay(); };
 const subscribeDay = (fn: () => void) => {
   dayListeners.add(fn);
-  if (!dayTimer) dayTimer = window.setInterval(() => {
-    const now = new Date().toDateString();
-    if (now !== currentDay) { currentDay = now; for (const l of dayListeners) l(); }
-  }, 60_000);
-  return () => { dayListeners.delete(fn); if (!dayListeners.size) { window.clearInterval(dayTimer); dayTimer = 0; } };
+  if (!dayTimer) {
+    dayTimer = window.setInterval(checkDay, 30_000);
+    document.addEventListener("visibilitychange", onBack);
+    window.addEventListener("focus", onBack);
+  }
+  return () => {
+    dayListeners.delete(fn);
+    if (!dayListeners.size) { window.clearInterval(dayTimer); dayTimer = 0; document.removeEventListener("visibilitychange", onBack); window.removeEventListener("focus", onBack); }
+  };
 };
 export function useToday() {
   return useSyncExternalStore(subscribeDay, () => currentDay, () => currentDay);

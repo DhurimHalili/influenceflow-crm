@@ -59,7 +59,7 @@ const recall = <T extends string>(key: string, allowed: readonly T[], fallback: 
 
 type Open = { metric: MetricKey; view: View; start: number; end: number; horizon?: number; title: string } | null;
 
-const METRIC_WORD: Record<MetricKey, string> = { emails: "Emails sent", followups: "Follow-ups", first: "New conversations", newthreads: "New threads", answers: "Answers", replies: "Replies received", negotiations: "Negotiations started", wins: "Wins", lost: "Lost", added: "Added", e_first: "New conversations", e_followups: "Follow-ups by email", e_answers: "Answers", e_newthreads: "New threads", e_scheduled: "Scheduled emails" };
+const METRIC_WORD: Record<MetricKey, string> = { emails: "Emails sent", followups: "Follow-ups", first: "New conversations", newthreads: "New threads", answers: "Answers", replies: "Replies received", negotiations: "Negotiations started", wins: "Wins", lost: "Lost", added: "Added", e_first: "New conversations", e_followups: "Follow-ups by email", e_answers: "Answers", e_newthreads: "New threads", e_autopilot: "Scheduled by Autopilot", e_scheduled: "Scheduled emails" };
 
 export function OutreachBoard() {
   const data = useData();
@@ -143,6 +143,7 @@ export function OutreachBoard() {
     { key: "e_answers", n: mix.answers, label: "Answers", hint: "Replying, negotiating, lead answers", tone: "answers" },
     { key: "e_newthreads", n: mix.newthreads, label: "New threads", hint: "Fresh thread after the follow-up cap", tone: "newthreads" },
     { key: "e_scheduled", n: mix.scheduled, label: "Scheduled", hint: "Waiting in Gmail — counted by send time; cancel it and it's gone", tone: "scheduled" },
+    { key: "e_autopilot", n: mix.autopilot, label: "By Autopilot", hint: "Waiting in Autopilot's queue — goes out at its time unless they reply first", tone: "autopilot" },
   ];
   const parts = PARTS.filter((p) => p.n > 0 || p.key === "e_first" || p.key === "e_followups");
 
@@ -196,7 +197,7 @@ export function OutreachBoard() {
     <div className="ob-hero">
       <div className={`ob-total${open?.metric === "emails" && open.view === view ? " on" : ""}`}>
         <button type="button" className="ob-total-main" onClick={() => setOpen((cur) => (cur && cur.metric === "emails" && cur.view === view && cur.start === range.start ? null : { metric: "emails", view, start: range.start, end: range.end, horizon: range.horizon, title: `Emails sent${view === "creator" ? " · influencers" : view === "brand" ? " · brands" : ""}` }))} aria-label={`Emails sent: ${mix.total}. Show every email`}>
-          <span className="ob-total-label"><span className="ob-ico"><Mail size={15} /></span><span><small>Emails sent</small><em>Every email · {box ? box : mailboxes.length > 1 ? `${mailboxes.length} mailboxes` : "all mailboxes"}{mix.scheduled ? " · scheduled included" : ""}</em></span></span>
+          <span className="ob-total-label"><span className="ob-ico"><Mail size={15} /></span><span><small>Emails sent</small><em>Every email · {box ? box : mailboxes.length > 1 ? `${mailboxes.length} mailboxes` : "all mailboxes"}{mix.scheduled || mix.autopilot ? ` · ${mix.scheduled && mix.autopilot ? "scheduled + Autopilot" : mix.autopilot ? "Autopilot's queue" : "scheduled"} included` : ""}</em></span></span>
           <span className="ob-total-row"><strong>{mix.total.toLocaleString("en-US")}</strong>{emailsDelta !== null && <em className={emailsDelta === 0 ? "delta-flat" : emailsDelta > 0 ? "delta-up" : "delta-down"}>{emailsDelta === 0 ? `— ${range.prevLabel}` : `${emailsDelta > 0 ? "+" : ""}${emailsDelta} ${range.prevLabel}`}</em>}</span>
         </button>
         <div className="ob-mix-bar" role="img" aria-label={parts.map((p) => `${p.n} ${p.label.toLowerCase()}`).join(", ")}>{mix.total ? PARTS.filter((p) => p.n > 0).map((p) => <i key={p.key} className={`mix-${p.tone}`} style={{ flexGrow: p.n }} />) : <i className="mix-empty" />}</div>

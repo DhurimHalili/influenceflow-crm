@@ -348,3 +348,42 @@ export function assignTemplates(rows: ToAssign[], book: TemplateBook, recent: Re
 
 /** Pick a fresh id for a new template. */
 export const newTemplateId = () => `t${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
+
+// ----- each mailbox's limit ------------------------------------------------------------------------------
+
+/**
+ * Who goes, within each mailbox's room for today (its daily limit minus what it already sent or has waiting).
+ * `list` comes in priority order. A follow-up always goes from its own thread's mailbox, so the room decides how
+ * many people of each mailbox can go. Default: mailboxes take turns at random, weighted by the room they have left,
+ * so both fill up evenly and none goes over. `perBox` (optional) asks for an exact number from a mailbox.
+ */
+export function pickWithin<T extends { mailbox: string }>(list: T[], count: number, room: Map<string, number> | null, perBox: Record<string, number> | null = null, seed = 1): T[] {
+  const queues = new Map<string, T[]>();
+  for (const r of list) { const m = r.mailbox.toLowerCase(); queues.set(m, [...(queues.get(m) || []), r]); }
+  const left = new Map<string, number>();
+  for (const m of queues.keys()) {
+    let cap = room ? Math.max(0, room.get(m) ?? 0) : Number.POSITIVE_INFINITY;
+    if (perBox) cap = Math.min(cap, Math.max(0, Math.round(perBox[m] ?? 0)));
+    left.set(m, cap);
+  }
+  let state = ((Math.imul(Math.abs(Math.round(seed)) + 1, 2654435761) >>> 0) % 2147483646) + 1;
+  const rand = () => (state = (state * 48271) % 2147483647) / 2147483647;
+  rand(); rand();
+  const out: T[] = [];
+  const want = perBox ? Math.min(count, Object.values(perBox).reduce((s, n) => s + Math.max(0, Math.round(n) || 0), 0)) : count;
+  while (out.length < want) {
+    const open = [...queues.keys()].filter((m) => queues.get(m)!.length && left.get(m)! > 0);
+    if (!open.length) break;
+    const weight = (m: string) => Math.min(left.get(m)!, queues.get(m)!.length);
+    let r = rand() * open.reduce((s, m) => s + (Number.isFinite(weight(m)) ? weight(m) : queues.get(m)!.length), 0);
+    let pick = open[open.length - 1];
+    for (const m of open) { r -= Number.isFinite(weight(m)) ? weight(m) : queues.get(m)!.length; if (r <= 0) { pick = m; break; } }
+    out.push(queues.get(pick)!.shift()!);
+    left.set(pick, left.get(pick)! - 1);
+  }
+  return out;
+}
+
+/** A mailbox's day: its limit (the weekly ramp), what it used (sent + Gmail-scheduled + Autopilot waiting) and the room left. */
+export type BoxDay = { mailbox: string; limit: number; used: number; room: number };
+export const roomMap = (days: BoxDay[]) => new Map(days.map((d) => [d.mailbox.toLowerCase(), d.room]));

@@ -45,6 +45,8 @@ export type Sent = {
   channel: string;
   /** The Gmail thread, when it was an email. */
   threadId?: string;
+  /** Sent or waiting in Autopilot's queue (not Gmail's Scheduled folder). */
+  autopilot?: boolean;
 };
 
 /** A message from their side: an email reply or one you logged ("They replied"). */
@@ -158,3 +160,23 @@ export const emailsIn = (log: Sent[], start: number, end: number) => log.filter(
 
 /** Waiting in Gmail's Scheduled folder right now, soonest first. */
 export const scheduledNow = (log: Sent[], kind?: Sent["kind"]) => log.filter((s) => s.scheduled && (!kind || s.kind === kind));
+
+/** A row of Autopilot's queue (autosend_queue), as the app reads it. */
+export type QueuedSend = { id: string; creator_id: string; mailbox: string; thread_id: string; send_at: string; status: string; gmail_id: string; sent_at: string | null };
+
+/**
+ * Autopilot's emails in the same log: one waiting in its queue counts like an email in Gmail's Scheduled folder
+ * (by its send time, "Scheduled by Autopilot"); one it sent counts as sent until the sync brings in the real
+ * email — then only the real one counts. Never twice.
+ */
+export function withAutopilot(sent: Sent[], rows: QueuedSend[], events: EmailEvent[]): Sent[] {
+  if (!rows.length) return sent;
+  const tracked = new Set(events.map((e) => e.gmail_id).filter(Boolean));
+  const extra: Sent[] = [];
+  for (const r of rows) {
+    const waiting = r.status === "pending" || r.status === "sending";
+    if (!waiting && (r.status !== "sent" || !r.gmail_id || tracked.has(r.gmail_id))) continue;
+    extra.push({ key: `autopilot:${r.id}`, at: waiting ? r.send_at : r.sent_at || r.send_at, kind: "followup", role: "followup", scheduled: waiting, autopilot: true, entityId: r.creator_id, entityType: "creator", segment: "creator", recordId: r.creator_id, mailbox: (r.mailbox || "").toLowerCase(), channel: "email", threadId: r.thread_id || undefined });
+  }
+  return extra.length ? [...sent, ...extra].sort((a, b) => a.at.localeCompare(b.at)) : sent;
+}

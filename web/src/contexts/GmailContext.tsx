@@ -139,10 +139,28 @@ function summarize(mailboxes: Mailbox[]) {
   };
 }
 
+function readCachedStatus(key: string): GmailStatus | null {
+  if (!key) return null;
+  try {
+    const raw = JSON.parse(localStorage.getItem(key) || "null") as GmailStatus | null;
+    if (!raw || !Array.isArray(raw.mailboxes)) return null;
+    const mailboxes = raw.mailboxes.map((m) => toMailbox(m as unknown as Record<string, unknown>));
+    return { ...empty, ...raw, loaded: true, mailboxes, ...summarize(mailboxes) };
+  } catch {
+    return null;
+  }
+}
+
 export function GmailProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const data = useData();
-  const [status, setStatus] = useState<GmailStatus>(empty);
+  // The last good answer for this account, so a reload shows your mailboxes at once (never a "Connect Gmail"
+  // screen while the server answers), and a failed check keeps them instead of looking disconnected.
+  const cacheKey = user ? `if.gmail.status.${user.id}` : "";
+  const [status, setStatus] = useState<GmailStatus>(() => readCachedStatus(cacheKey) || empty);
+  const shownFor = useRef(cacheKey);
+  if (shownFor.current !== cacheKey) { shownFor.current = cacheKey; setStatus(readCachedStatus(cacheKey) || empty); }
+  const retryTimer = useRef<number | undefined>(undefined);
   const [leads, setLeads] = useState<InboundLead[]>([]);
   const [syncing, setSyncing] = useState(false);
   const busy = useRef(false);
@@ -153,11 +171,20 @@ export function GmailProvider({ children }: { children: ReactNode }) {
   const refreshStatus = useCallback(async () => {
     if (!hasSupabase || !user) return setStatus(empty);
     const res = await invoke<{ configured?: boolean; mailboxes?: Record<string, unknown>[]; maxMailboxes?: number; ai?: boolean; aiProvider?: AiProviderName | null; aiModel?: string; aiKeys?: number; aiReadyAt?: string | null; aiChain?: AiLink[] }>("gmail-sync", { action: "status" });
+    window.clearTimeout(retryTimer.current);
     if (res.data) {
       const mailboxes = (res.data.mailboxes || []).map(toMailbox);
-      setStatus({ ...empty, loaded: true, configured: !!res.data.configured, mailboxes, maxMailboxes: res.data.maxMailboxes || 5, ai: !!res.data.ai, aiProvider: res.data.aiProvider ?? null, aiModel: res.data.aiModel || "", aiKeys: Number(res.data.aiKeys) || 0, aiReadyAt: res.data.aiReadyAt || null, aiChain: Array.isArray(res.data.aiChain) ? res.data.aiChain : [], ...summarize(mailboxes) });
-    } else setStatus({ ...empty, loaded: true, error: res.status === 404 ? "" : res.error || "" });
+      const next: GmailStatus = { ...empty, loaded: true, configured: !!res.data.configured, mailboxes, maxMailboxes: res.data.maxMailboxes || 5, ai: !!res.data.ai, aiProvider: res.data.aiProvider ?? null, aiModel: res.data.aiModel || "", aiKeys: Number(res.data.aiKeys) || 0, aiReadyAt: res.data.aiReadyAt || null, aiChain: Array.isArray(res.data.aiChain) ? res.data.aiChain : [], ...summarize(mailboxes) };
+      setStatus(next);
+      try { localStorage.setItem(`if.gmail.status.${user.id}`, JSON.stringify(next)); } catch { /* storage full or blocked */ }
+    } else {
+      // A hiccup (token refreshing, network) never makes connected mailboxes look gone: keep them and ask again.
+      setStatus((prev) => (prev.mailboxes.length ? { ...prev, loaded: true } : { ...empty, loaded: true, error: res.status === 404 ? "" : res.error || "" }));
+      if (res.status !== 404) retryTimer.current = window.setTimeout(() => { void refreshStatusRef.current(); }, 8_000);
+    }
   }, [user]);
+  const refreshStatusRef = useRef(refreshStatus);
+  refreshStatusRef.current = refreshStatus;
 
   const refreshLeads = useCallback(async () => {
     if (!hasSupabase || !user) return setLeads([]);

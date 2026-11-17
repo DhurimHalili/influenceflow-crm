@@ -2,7 +2,7 @@
 import type { EmailEvent, Followup } from "../types";
 import { DEFAULT_FOLLOWUP_RULES } from "./prefs";
 import { flagFor, followupState } from "./followupEngine";
-import { outreachLog, emailsIn, sentIn } from "./outreach";
+import { outreachLog, emailsIn, sentIn, withAutopilot } from "./outreach";
 
 let fail = 0;
 const check = (name: string, got: unknown, want: unknown) => {
@@ -195,6 +195,29 @@ const record = (extra: Record<string, unknown> = {}) => ({ type: "creator" as co
   check("gone mail doesn't change the follow-up state", [s.kind, flagFor(s)?.short], [kept.kind, flagFor(kept)?.short]);
   check("…and each touch says where it went", s.touches.map((t) => t.gone), ["deleted", "trash"]);
   check("gone mail still counts as sent", outreachLog({ creators: [{ id: "c1", name: "techless", pipeline_status: "contacted", date_contacted: null, archived_at: null } as never], brands: [], followups: [], events: mail }).length, 2);
+}
+
+// Business days count by the calendar, never by the clock: an email at 23:59 is due on the right DAY at 00:00.
+{
+  const r1 = { ...rules, gaps: [1, 1, 1, 1], then: 1 };
+  const late = ev("out", "2026-11-17T23:59:00");
+  check("23:59 Tue, 1-day wait: not due on Wed", followupState(record(), [], [late], r1, new Date("2026-11-18T23:00:00")).kind, "waiting");
+  check("…due the moment Thursday starts", followupState(record(), [], [late], r1, new Date("2026-11-19T00:01:00")).kind, "due");
+  const early = ev("out", "2026-11-17T00:01:00");
+  check("00:01 Tue is due on Thu too (same day = same due day)", followupState(record(), [], [early], r1, new Date("2026-11-19T00:01:00")).kind, "due");
+  const fri = ev("out", "2026-11-13T22:00:00");
+  check("Fri night, 1-day wait: Monday is the wait, Tuesday 00:01 due", [followupState(record(), [], [fri], r1, new Date("2026-11-16T23:59:00")).kind, followupState(record(), [], [fri], r1, new Date("2026-11-17T00:01:00")).kind], ["waiting", "due"]);
+}
+
+// Autopilot's emails count once: waiting = scheduled (by Autopilot), sent = sent until the sync brings the real one.
+{
+  const q = (id: string, status: string, gmail_id = "") => ({ id, creator_id: "c1", mailbox: "Me@X.com", thread_id: "t1", send_at: "2026-11-17T21:00:00Z", status, gmail_id, sent_at: status === "sent" ? "2026-11-17T21:00:05Z" : null });
+  const real = [ev("out", "2026-11-17T21:00:05Z", { gmail_id: "gm1" })];
+  const out = withAutopilot([], [q("a", "pending"), q("b", "sent", "gm1"), q("c", "sent", "gm2"), q("d", "cancelled")], real);
+  check("autopilot: waiting counts as scheduled by Autopilot", out.filter((x) => x.scheduled && x.autopilot).length, 1);
+  check("autopilot: sent and already tracked → not twice", out.some((x) => x.key === "autopilot:b"), false);
+  check("autopilot: sent, not tracked yet → counts as sent", out.find((x) => x.key === "autopilot:c")?.scheduled, false);
+  check("autopilot: cancelled never counts", out.some((x) => x.key === "autopilot:d"), false);
 }
 
 console.log(fail ? `${fail} failed` : "all passed");

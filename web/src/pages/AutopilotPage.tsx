@@ -10,6 +10,7 @@ import { useToast } from "../contexts/ToastContext";
 import { templateCount, readTemplates, ROUNDS, type HoldWhy } from "../lib/autopilot";
 import { ordinal } from "../lib/followupEngine";
 import { timeIn, dayEndIn, dayStartIn, placeOf } from "../lib/zones";
+import { useOutreach } from "../hooks/useOutreach";
 import { minutesOf } from "../lib/autopilot";
 import { dateFmt } from "../lib/days";
 import { FillAsk } from "../components/FillAsk";
@@ -44,6 +45,25 @@ function Ring({ value, goal }: { value: number; goal: number }) {
   return <svg className="ap-ring" width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-hidden="true"><circle cx={46} cy={46} r={r} className="track" /><circle cx={46} cy={46} r={r} className={`fill${p >= 1 ? " done" : ""}`} strokeDasharray={c} strokeDashoffset={c * (1 - p)} /></svg>;
 }
 
+/** Each mailbox's day: used / limit, the room left, and (when you choose per mailbox) how many go from it. */
+function BoxLimits({ boxes, perBox, max, onChange }: { boxes: { mailbox: string; limit: number; used: number; room: number; ready: number }[]; perBox: Record<string, number> | null; max: (m: string) => number; onChange: (m: string, n: number) => void }) {
+  return <ul className="ap-boxes" aria-label="Each mailbox today">{boxes.map((b) => {
+    const pct = Math.min(100, b.limit ? (b.used / b.limit) * 100 : 100);
+    const n = perBox?.[b.mailbox] ?? 0;
+    const top = max(b.mailbox);
+    return <li key={b.mailbox} className={b.room ? "" : "is-full"}>
+      <span className="ap-box-name" title={b.mailbox}>{b.mailbox.split("@")[0]}</span>
+      <span className="ap-box-bar" aria-hidden="true"><i style={{ width: `${pct}%` }} /></span>
+      <span className="ap-box-num">{b.used}/{b.limit}</span>
+      {perBox ? <span className="ap-box-step">
+        <button type="button" onClick={() => onChange(b.mailbox, Math.max(0, n - 1))} disabled={n <= 0} aria-label={`One fewer from ${b.mailbox}`}>−</button>
+        <b aria-live="polite">{n}</b>
+        <button type="button" onClick={() => onChange(b.mailbox, Math.min(top, n + 1))} disabled={n >= top} aria-label={`One more from ${b.mailbox}`}>+</button>
+      </span> : <small>{b.room ? `${b.room} left${b.ready < b.room ? ` · ${b.ready} ready` : ""}` : "at its limit"}</small>}
+    </li>;
+  })}</ul>;
+}
+
 export default function AutopilotPage() {
   const auto = useAutopilot();
   const data = useData();
@@ -59,13 +79,39 @@ export default function AutopilotPage() {
   useEffect(() => watch(), [watch]);
   useEffect(() => { const t = window.setInterval(() => setNow(Date.now()), 30_000); return () => window.clearInterval(t); }, []);
 
-  const can = auto.fits.placed.length;
+  // Who can go today without any mailbox passing its daily limit (sent + scheduled + Autopilot count toward it).
+  const can = Math.min(auto.fits.placed.length, auto.canWithin);
+  const fitToday = auto.fits.placed.length;
   const asleep = auto.fits.unplaced.filter((u) => u.why === "asleep");
   const pendingToday = auto.today.filter((i) => i.status === "pending" || i.status === "sending");
   const goal = stats.goal;
-  const gap = Math.max(0, goal - stats.sentToday - pendingToday.length);
+  // stats.sentToday already holds everything for today: sent, waiting in Gmail's Scheduled folder, waiting in Autopilot.
+  const gap = Math.max(0, goal - stats.sentToday);
+  const log = useOutreach();
+  const parts = useMemo(() => {
+    const p = { sent: 0, scheduled: 0, autopilot: 0 };
+    // The same day as the goal ring (lib/coach): this device's calendar day.
+    const today = new Date().toDateString();
+    for (const x of log) {
+      if (new Date(x.at).toDateString() !== today) continue;
+      if (!x.scheduled) p.sent++; else if (x.autopilot) p.autopilot++; else p.scheduled++;
+    }
+    return p;
+  }, [log, auto.todayKey]);
   const [count, setCount] = useState(0);
+  const [perBox, setPerBox] = useState<Record<string, number> | null>(null);
   useEffect(() => { setCount((c) => (c ? Math.min(c, can) : Math.min(can, gap || can))); }, [can, gap]);
+  const boxMax = (m: string) => { const b = auto.boxes.find((x) => x.mailbox === m); return b ? Math.min(b.room, b.ready) : 0; };
+  const pickedTotal = perBox ? Object.values(perBox).reduce((a, b) => a + b, 0) : count;
+  const choosePerBox = () => {
+    // Start from an even split of the current number, inside each mailbox's room.
+    const next: Record<string, number> = {};
+    let left = count;
+    const open = auto.boxes.filter((b) => boxMax(b.mailbox) > 0);
+    for (const b of open) next[b.mailbox] = 0;
+    while (left > 0 && open.some((b) => next[b.mailbox] < boxMax(b.mailbox))) for (const b of open) if (left > 0 && next[b.mailbox] < boxMax(b.mailbox)) { next[b.mailbox]++; left--; }
+    setPerBox(next);
+  };
   const [plan, setPlan] = useState<PlanAnswer | null>(null);
   const [planning, setPlanning] = useState(false);
   const [dropped, setDropped] = useState<Set<string>>(new Set());
@@ -75,10 +121,10 @@ export default function AutopilotPage() {
   const byRound = useMemo(() => { const m: Record<number, number> = {}; for (const r of auto.pool.ready) if (auto.fits.placed.some((p) => p.id === r.id)) m[r.round] = (m[r.round] || 0) + 1; return m; }, [auto.pool.ready, auto.fits.placed]);
   const nameOf = (id: string) => data.creators.find((c) => c.id === id)?.name || "Influencer";
 
-  const makePlan = async (n = count, exclude: string[] = []) => {
+  const makePlan = async (n = pickedTotal, exclude: string[] = []) => {
     if (!n || planning) return;
     setPlanning(true);
-    const r = await auto.plan(n, exclude);
+    const r = await auto.plan(n, exclude, perBox);
     setPlanning(false);
     if (!r.ok) { toast(r.message, "error"); return; }
     if (!r.data.rows.length) { toast("Nobody fits in what's left of today — try earlier tomorrow", "info"); return; }
@@ -124,31 +170,36 @@ export default function AutopilotPage() {
     <section className="ap-hero" aria-label="Today">
       <div className="ap-goal">
         <Ring value={stats.sentToday} goal={goal} />
-        <div><b>{stats.sentToday}<small>/{goal}</small></b><span>sent today</span><em>{gap > 0 ? `${gap} to go` : "Goal reached"} · {left(end - now)} left today</em></div>
+        <div><b>{stats.sentToday}<small>/{goal}</small></b><span>today</span>
+          <span className="ap-goal-parts">{parts.sent} sent{parts.scheduled ? ` · ${parts.scheduled} scheduled` : ""}{parts.autopilot ? <> · <i className="ap-part-ap">{parts.autopilot} by Autopilot</i></> : null}</span>
+          <em>{gap > 0 ? `${gap} to go` : "Goal reached"} · {left(end - now)} left today</em></div>
       </div>
       <div className="ap-ready">
         <span className="ap-kicker"><PlaneTakeoff size={13} /> Ready to send</span>
-        <b>{can}</b>
+        <b>{fitToday}</b>
         <div className="ap-rounds">{ROUNDS.map((r) => byRound[r] ? <span key={r} className={`ap-round r${r}`}>{ordinal(r)} ×{byRound[r]}</span> : null)}</div>
         <p>{[asleep.length ? `${asleep.length} asleep till after your midnight` : "", auto.pool.byHand.length ? `${auto.pool.byHand.length} yours to write` : "", pendingToday.length ? `${pendingToday.length} already waiting` : ""].filter(Boolean).join(" · ") || "Only people who never answered."}</p>
       </div>
       <div className="ap-launch">
         {can > 0 ? <>
           <label className="ap-count-label" htmlFor="ap-count">Send for me</label>
-          <div className="ap-count">
+          {!perBox && <div className="ap-count">
             <button type="button" onClick={() => setCount((c) => Math.max(1, c - 1))} aria-label="One fewer" disabled={count <= 1}>−</button>
             <input id="ap-count" type="number" min={1} max={can} value={count || ""} onChange={(e) => setCount(Math.max(1, Math.min(can, Math.round(Number(e.target.value) || 1))))} />
             <button type="button" onClick={() => setCount((c) => Math.min(can, c + 1))} aria-label="One more" disabled={count >= can}>+</button>
             <span>follow-up{count === 1 ? "" : "s"}</span>
-          </div>
-          <div className="ap-quick">
+          </div>}
+          {!perBox && <div className="ap-quick">
             {gap > 0 && gap < can && <button type="button" className={count === gap ? "on" : ""} onClick={() => setCount(gap)}>Close the gap · {gap}</button>}
             <button type="button" className={count === can ? "on" : ""} onClick={() => setCount(can)}>All {can}</button>
-          </div>
-          <Button onClick={() => void makePlan()} loading={planning} disabled={!count}>{planning ? "Planning…" : <>Plan {count} <ArrowRight size={15} /></>}</Button>
-          <small>You see who, which words and when before anything is queued.</small>
+          </div>}
+          {auto.boxes.length > 0 && <BoxLimits boxes={auto.boxes} perBox={perBox} max={boxMax} onChange={(m, n) => setPerBox((p) => ({ ...(p || {}), [m]: n }))} />}
+          {auto.boxes.length > 1 && <button type="button" className="ap-perbox-toggle" onClick={() => (perBox ? setPerBox(null) : choosePerBox())}>{perBox ? "Mix mailboxes for me" : "Choose per mailbox"}</button>}
+          <Button onClick={() => void makePlan()} loading={planning} disabled={!pickedTotal}>{planning ? "Planning…" : <>Plan {pickedTotal} <ArrowRight size={15} /></>}</Button>
+          <small>{perBox ? "Exactly these numbers, each from its own mailbox." : auto.boxes.length > 1 ? "Mailboxes mixed at random — none goes past its limit." : "You see who, which words and when before anything is queued."}</small>
         </> : <div className="ap-none">
-          {auto.pool.held.some((h) => h.why === "paused") ? <><Moon size={18} /><p><b>No follow-ups today</b>It's a light day in your weekend settings — they wait for your next working day.</p></>
+          {fitToday > 0 && auto.canWithin === 0 ? <><Check size={18} /><p><b>Every mailbox is at its limit</b>{auto.boxes.map((b) => `${b.mailbox.split("@")[0]} ${b.used}/${b.limit}`).join(" · ")} today — the rest go tomorrow, so no mailbox sends more than it should.</p></>
+            : auto.pool.held.some((h) => h.why === "paused") ? <><Moon size={18} /><p><b>No follow-ups today</b>It's a light day in your weekend settings — they wait for your next working day.</p></>
             : asleep.length ? <><BedDouble size={18} /><p><b>Everyone due is asleep</b>Their 8:00 comes after your midnight — plan them tomorrow.</p></>
             : auto.pool.held.length ? <><AlertTriangle size={18} /><p><b>Nothing can go yet</b>See why on the right — usually a missing template.</p></>
             : <><Check size={18} /><p><b>Nothing due right now</b>Follow-ups come back as their days arrive.</p></>}
