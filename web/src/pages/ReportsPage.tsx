@@ -1,5 +1,5 @@
 import { BestTimeCard } from "../components/Insights";
-import { BarChart3, Clock3, Ghost, HandCoins, Inbox, Mail, MailPlus, Reply, Send, Smile, Target, ThumbsDown, TrendingDown, Trophy, Users } from "lucide-react";
+import { BarChart3, BellOff, Clock3, HandCoins, Inbox, Mail, MailPlus, Reply, Send, Smile, Target, ThumbsDown, TrendingDown, Trophy, Users } from "lucide-react";
 import { useMemo } from "react";
 import { Link } from "react-router-dom";
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
@@ -283,7 +283,7 @@ export default function ReportsPage() {
           <div className="q-tile q-yes"><Smile size={15} /><strong>{report.quality.interested}</strong><small>Interested</small><em>{pct(report.quality.interested, report.contacted)}% of reached</em></div>
           <div className="q-tile q-no"><ThumbsDown size={15} /><strong>{report.quality.declined}</strong><small>Not interested</small><em>said no themselves</em></div>
           <div className="q-tile q-managed"><Users size={15} /><strong>{report.quality.managed}</strong><small>Management / auto no</small><em>reach them on socials</em></div>
-          <div className="q-tile q-ghost"><Ghost size={15} /><strong>{report.quality.ghosted}</strong><small>Ghosted</small><em>no answer for 7+ days</em></div>
+          <div className="q-tile q-quiet"><BellOff size={15} /><strong>{report.quality.ghosted}</strong><small>Went quiet</small><em>no answer for 7+ days</em></div>
           <div className="q-tile"><Clock3 size={15} /><strong>{report.quality.waiting}</strong><small>Still waiting</small><em>last email under 7 days ago</em></div>
           <div className="q-tile"><MailPlus size={15} /><strong>{report.quality.newThreads}</strong><small>Got a new thread</small><em>{report.quality.newThreadReplies} answered the new · {report.quality.oldThreadReplies} the old</em></div>
         </div>
