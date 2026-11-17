@@ -15,7 +15,8 @@
 // (`cancelOnReply`). Nothing here logs email text, addresses or names.
 
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
-import { assignTemplates, autopilotPool, dayCap, fillNeed, fillTemplate, minutesOf, readAutopilot, readTemplates, ruleFit, shiftToZone, type Fit, type Ready, type Round, type TemplateBook } from "../../../web/src/lib/autopilot.ts";
+import { assignTemplates, autopilotPool, dayCap, fillNeed, fillTemplate, minutesOf, pickWithin, readAutopilot, readTemplates, roomMap, ruleFit, shiftToZone, type BoxDay, type Fit, type Ready, type Round, type TemplateBook } from "../../../web/src/lib/autopilot.ts";
+import { rampPlan, readRamp } from "../../../web/src/lib/goalRamp.ts";
 import { followupState, type FollowupState } from "../../../web/src/lib/followupEngine.ts";
 import { openBounces } from "../../../web/src/lib/bounces.ts";
 import { followupsPaused, modeOn, normalizeWeekend } from "../../../web/src/lib/dayMode.ts";
@@ -224,13 +225,14 @@ const priority = (a: Ready, b: Ready) => b.overdueDays - a.overdueDays || a.roun
  * A plan for some of the ready people: times (smart, today only), then the
  * template for each (even spread × best fit), with your words filled for them.
  */
-export async function planFor(admin: Admin, kit: Kit, w: World, rows: Row[], ready: Ready[], o: { now: number; count: number; from?: number; seed?: number; taken: { mailbox: string; at: number }[] }): Promise<PlanOut> {
+export async function planFor(admin: Admin, kit: Kit, w: World, rows: Row[], ready: Ready[], o: { now: number; count: number; from?: number; seed?: number; taken: { mailbox: string; at: number }[]; room?: Map<string, number> | null; perBox?: Record<string, number> | null }): Promise<PlanOut> {
   const seed = o.seed ?? (hash(`${w.userId}|${o.now}`) % 100000);
   const items = (list: Ready[]): PlanItem[] => list.map((r) => ({ id: r.id, mailbox: r.mailbox, zones: r.zones, firstAt: r.firstAt, lastAt: r.lastAt, weight: r.overdueDays }));
   // Who can go at all today (their day overlaps the rest of yours) — the count is capped at that.
   const all = planTimes(items(ready), { now: o.now, userZone: w.tz, from: o.from, taken: o.taken, seed });
   const fits = new Set(all.placed.map((p) => p.id));
-  const chosen = ready.filter((r) => fits.has(r.id)).sort(priority).slice(0, Math.max(0, Math.min(o.count, DAY_MAX)));
+  // Each mailbox only up to its room for today (its daily limit minus what it sent or has waiting), mixed at random.
+  const chosen = pickWithin(ready.filter((r) => fits.has(r.id)).sort(priority), Math.max(0, Math.min(o.count, DAY_MAX)), o.room ?? null, o.perBox ?? null, seed);
   const plan = planTimes(items(chosen), { now: o.now, userZone: w.tz, from: o.from, taken: o.taken, seed });
   const placed = new Map(plan.placed.map((p) => [p.id, p]));
   const going = chosen.filter((r) => placed.has(r.id));
@@ -317,6 +319,35 @@ export async function doneToday(admin: Admin, userId: string, tz: string, now: n
     }
   }
   return { done: sent.size + manual + answers + stamps, later: later.size };
+}
+
+/**
+ * Each mailbox's day: its daily limit (the weekly ramp — 10 a day in its first week, +10 a week up to 50; Settings →
+ * Daily goal), what it already used today (emails sent + waiting in Gmail's Scheduled folder for today + Autopilot's
+ * waiting or sent ones the sync hasn't brought in yet) and the room left. Autopilot never plans past the room.
+ */
+export async function mailboxDays(admin: Admin, w: World, rows: Row[], now: number): Promise<BoxDay[]> {
+  const boxes = rows.map((r) => String(r.email || "").toLowerCase()).filter(Boolean);
+  if (!boxes.length) return [];
+  const today = dayKeyIn(w.tz, now);
+  const plan = rampPlan(readRamp((w.prefs as { mailbox_ramp?: unknown }).mailbox_ramp), boxes, today);
+  const start = dayStartIn(w.tz, now), end = dayEndIn(w.tz, now);
+  const { data: out } = await admin.from("email_events").select("gmail_id, mailbox").eq("user_id", w.userId).eq("direction", "out").is("bounced_at", null).gte("at", iso(start)).lt("at", iso(end)).limit(5000);
+  const used = new Map<string, number>();
+  const seen = new Set<string>();
+  for (const e of (out || []) as { gmail_id: string; mailbox: string }[]) {
+    if (seen.has(e.gmail_id)) continue;
+    seen.add(e.gmail_id);
+    const m = String(e.mailbox || "").toLowerCase();
+    used.set(m, (used.get(m) || 0) + 1);
+  }
+  const { data: q } = await admin.from("autosend_queue").select("mailbox, status, gmail_id").eq("user_id", w.userId).eq("day", today).in("status", ["pending", "sending", "sent"]).limit(2000);
+  for (const r of (q || []) as { mailbox: string; status: string; gmail_id: string }[]) {
+    if (r.status === "sent" && r.gmail_id && seen.has(r.gmail_id)) continue;
+    const m = String(r.mailbox || "").toLowerCase();
+    used.set(m, (used.get(m) || 0) + 1);
+  }
+  return plan.boxes.map((b) => ({ mailbox: b.mailbox, limit: b.perDay, used: used.get(b.mailbox) || 0, room: Math.max(0, b.perDay - (used.get(b.mailbox) || 0)) }));
 }
 
 // ----- sending --------------------------------------------------------------------------------------------
@@ -532,7 +563,7 @@ export async function fillFor(admin: Admin, kit: Kit, userId: string, prefs: Pre
   const n = fillNeed({ goal: w.goal, doneToday: done + later, pendingToday: pending.length, autoToday, cap, available: can });
   let made = 0;
   if (n.allowed > 0) {
-    const plan = await planFor(admin, kit, w, rows, pool.ready, { now, count: n.allowed, from, taken });
+    const plan = await planFor(admin, kit, w, rows, pool.ready, { now, count: n.allowed, from, taken, room: roomMap(await mailboxDays(admin, w, rows, now)) });
     made = (await insertQueue(admin, userId, tz, plan.rows, "fill", null)).made;
   }
   await save({ need: n.need, short: n.short, available: can, note: "" });

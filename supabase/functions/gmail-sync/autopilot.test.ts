@@ -1,7 +1,8 @@
 // deno run --allow-env --allow-read supabase/functions/gmail-sync/autopilot.test.ts
 // The send path's safety checks against a fake Gmail and a fake database: nothing goes to someone who
 // answered (even a reply the sync hasn't seen), nothing after you followed up yourself, nothing on another day.
-import { sendOne, statesOf, poolOf, type Kit, type QueueRow, type World } from "./autopilot.ts";
+import { mailboxDays, sendOne, statesOf, poolOf, type Kit, type QueueRow, type World } from "./autopilot.ts";
+import { pickWithin, roomMap } from "../../../web/src/lib/autopilot.ts";
 import { dayKeyIn } from "../../../web/src/lib/zones.ts";
 import type { Msg } from "../_shared/replyDraft.ts";
 
@@ -144,6 +145,19 @@ const firstAt = NOW - 7 * 86400_000;
   eq("its mailbox disconnected → not sent from another one", [gone.status, gone.reason], ["failed", "mailbox"]);
   const wb = world([out("g1", Date.UTC(2026, 10, 12, 9))], { bounced: new Set(["c1"]) });
   eq("a bounced address is never followed up", poolOf(wb, rows, new Set(), at).held.map((h) => h.why), ["bounced"]);
+}
+
+// 11. Each mailbox's limit for today: 18 of 20 used → 2 left; 16 sent + 1 waiting of 20 → 3 left. Never more.
+{
+  const two = [...rows, { id: "r2", user_id: "u1", email: "second@agency.com", scopes: rows[0].scopes }];
+  const events = [...Array.from({ length: 18 }, (_, i) => ({ gmail_id: `m${i}`, mailbox: "me@agency.com" })), ...Array.from({ length: 16 }, (_, i) => ({ gmail_id: `s${i}`, mailbox: "second@agency.com" }))];
+  const queue = [{ mailbox: "second@agency.com", status: "pending", gmail_id: "" }, { mailbox: "me@agency.com", status: "sent", gmail_id: "m3" }];
+  const w = world([], { prefs: { timezone: tz, mailbox_ramp: { "me@agency.com": "2026-11-09", "second@agency.com": "2026-11-09" } } as World["prefs"] });
+  const days = await mailboxDays(fakeDb({ email_events: events, autosend_queue: queue }), w, two, NOW);
+  eq("room per mailbox (a sent Autopilot email the sync already has counts once)", days.map((d) => [d.mailbox, d.limit, d.used, d.room]), [["me@agency.com", 20, 18, 2], ["second@agency.com", 20, 17, 3]]);
+  const ready = [...Array.from({ length: 6 }, (_, i) => ({ id: `a${i}`, mailbox: "me@agency.com" })), ...Array.from({ length: 6 }, (_, i) => ({ id: `b${i}`, mailbox: "second@agency.com" }))];
+  const picked = pickWithin(ready, 6, roomMap(days), null, 11);
+  eq("planning 6 stays inside both limits (2 + 3 = 5 at most)", [picked.length, picked.filter((p) => p.mailbox === "me@agency.com").length], [5, 2]);
 }
 
 if (failed) { console.error(`\n${failed} failed`); Deno.exit(1); }

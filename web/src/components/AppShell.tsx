@@ -72,7 +72,25 @@ const LockIcon = () => <ShieldCheck size={15} />;
 const ShieldIcon = () => <ShieldCheck size={17} />;
 
 export default function AppShell() {
-  return <AutopilotProvider><Shell /></AutopilotProvider>;
+  return <WorkspaceGate><AutopilotProvider><Shell /></AutopilotProvider></WorkspaceGate>;
+}
+
+/**
+ * First open on a browser with no saved copy: wait for the cloud instead of showing an empty CRM ("Connect Gmail",
+ * "Add your first influencer") for a few seconds. A saved copy shows at once; after 12 s (offline) the app opens anyway.
+ */
+function WorkspaceGate({ children }: { children: React.ReactNode }) {
+  const data = useData();
+  const blank = !data.creators.length && !data.brands.length && !(data.emailEvents || []).length && !data.profile.onboarding_done;
+  const waiting = blank && !data.cloudLive && data.syncState === "loading";
+  const [gaveUp, setGaveUp] = useState(false);
+  useEffect(() => {
+    if (!waiting) return;
+    const t = window.setTimeout(() => setGaveUp(true), 12_000);
+    return () => window.clearTimeout(t);
+  }, [waiting]);
+  if (waiting && !gaveUp) return <div className="loading-screen" role="status"><LogoMark size={40} /><span>Opening your workspace</span></div>;
+  return <>{children}</>;
 }
 
 /** "Fill the last N too?" on every page while it matters (night fill on, past its start, held back by your ceiling). */

@@ -41,13 +41,17 @@ export type Nudge = {
 
 const dayKey = (d: Date) => `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
 
-/** Outreach per local day — every email and follow-up you sent (see lib/outreach), scheduled ones not yet. */
+/**
+ * Outreach per local day — every email and follow-up (see lib/outreach), on the day it goes out: sent, waiting in
+ * Gmail's Scheduled folder, or waiting in Autopilot's queue. The same total as the dashboard's "Emails sent" for
+ * today, so the goal ring, the dashboard and Autopilot never disagree. One scheduled for tomorrow counts tomorrow.
+ */
 export function outreachByDay(log: Sent[], days = 15, now = new Date()) {
   const counts = new Map<string, number>();
   const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - (days - 1)).getTime();
   for (const s of log) {
     const t = new Date(s.at);
-    if (s.scheduled || t.getTime() < start) continue;
+    if (t.getTime() < start) continue;
     const key = dayKey(t);
     counts.set(key, (counts.get(key) || 0) + 1);
   }
@@ -71,7 +75,7 @@ export function coachStats(input: { log: Sent[]; goal: number; overdue: number; 
   const scoutGoal = input.scoutGoal || 10;
   const sentToday = back(0);
   const scout = mode === "scout";
-  return { goal: input.goal, sentToday, scheduled: input.log.filter((s) => s.scheduled).length, yesterday: back(1), weekAvg: Math.round(week.reduce((a, b) => a + b, 0) / 7), streak, overdue: input.overdue, oldestOverdueDays: input.oldestOverdueDays, replyNeeded: input.replyNeeded, hour: now.getHours(), weekday: now.getDay(), mode, found, scoutGoal, unit: scout ? "found" : "emails", value: scout ? found : sentToday, target: scout ? scoutGoal : input.goal };
+  return { goal: input.goal, sentToday, scheduled: input.log.filter((s) => s.scheduled && dayKey(new Date(s.at)) === dayKey(now)).length, yesterday: back(1), weekAvg: Math.round(week.reduce((a, b) => a + b, 0) / 7), streak, overdue: input.overdue, oldestOverdueDays: input.oldestOverdueDays, replyNeeded: input.replyNeeded, hour: now.getHours(), weekday: now.getDay(), mode, found, scoutGoal, unit: scout ? "found" : "emails", value: scout ? found : sentToday, target: scout ? scoutGoal : input.goal };
 }
 
 const pick = <T,>(list: T[], seed: number) => list[Math.abs(seed) % list.length];

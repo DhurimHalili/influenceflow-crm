@@ -349,3 +349,36 @@
 @keyframes ft-idea-in { from { opacity: 0; transform: translateY(4px); } }
 @media (max-width: 560px) { .ft-ideas-list li { grid-template-columns: minmax(0, 1fr); } .ft-idea-add { grid-column: 1; grid-row: auto; justify-self: start; } }
 @media (prefers-reduced-motion: reduce) { .ft-ideas-list li { animation: none; } }
+
+/* ---- Autopilot's own look wherever its emails show (list marker, dashboard mix) -------------------------------- */
+:root { --ap-a: #7c5cff; --ap-b: #12b5d6; }
+.ap-tag { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 7px 0 6px; border-radius: 999px; font-size: 11px; font-weight: 750; white-space: nowrap; vertical-align: middle;
+  color: #fff; background: linear-gradient(100deg, var(--ap-a), var(--ap-b), var(--ap-a)); background-size: 220% 100%; animation: ap-flow 4s linear infinite;
+  box-shadow: 0 1px 6px color-mix(in srgb, var(--ap-a) 35%, transparent); }
+.ap-tag b { font-weight: 800; padding-left: 5px; margin-left: 1px; border-left: 1px solid rgba(255, 255, 255, .45); font-variant-numeric: tabular-nums; }
+.ap-tag.is-sending svg { animation: ap-lift 1s ease-in-out infinite alternate; }
+.mix-autopilot { background: linear-gradient(90deg, var(--ap-a), var(--ap-b), var(--ap-a)); background-size: 220% 100%; animation: ap-flow 4s linear infinite; }
+@keyframes ap-flow { to { background-position: -220% 0; } }
+@keyframes ap-lift { to { transform: translate(1px, -2px); } }
+@media (prefers-reduced-motion: reduce) { .ap-tag, .mix-autopilot, .ap-tag.is-sending svg { animation: none; } }
+.qchip-ap svg { color: var(--ap-a); }
+.qchip-ap b { color: #fff; background: linear-gradient(100deg, var(--ap-a), var(--ap-b)); }
+.qchip-ap.on { border-color: var(--ap-a); background: color-mix(in srgb, var(--ap-a) 10%, var(--surface-solid)); }
+
+/* ---- each mailbox's limit on the Autopilot page ---- */
+.ap-goal .ap-goal-parts { display: block; margin-top: 2px; font-size: 12px; color: var(--muted); }
+.ap-part-ap { font-style: normal; font-weight: 750; background: linear-gradient(100deg, var(--ap-a), var(--ap-b)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.ap-boxes { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 6px; }
+.ap-boxes li { display: grid; grid-template-columns: minmax(0, 72px) minmax(40px, 1fr) auto auto; align-items: center; gap: 8px; font-size: 12.5px; }
+.ap-box-name { font-weight: 700; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ap-box-bar { height: 6px; border-radius: 999px; background: var(--surface-alt); overflow: hidden; }
+.ap-box-bar i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--ap-a), var(--ap-b)); transition: width .15s ease-out; }
+.ap-boxes li.is-full .ap-box-bar i { background: var(--success); }
+.ap-box-num { font-variant-numeric: tabular-nums; font-weight: 700; color: var(--text-soft); }
+.ap-boxes small { color: var(--muted); white-space: nowrap; }
+.ap-boxes li.is-full small { color: var(--success); font-weight: 700; }
+.ap-box-step { display: inline-flex; align-items: center; gap: 4px; }
+.ap-box-step button { width: 26px; height: 26px; border-radius: 8px; border: 1px solid var(--line-strong); background: var(--surface-solid); color: var(--text); font: inherit; font-weight: 800; cursor: pointer; }
+.ap-box-step button:disabled { opacity: .4; cursor: not-allowed; }
+.ap-box-step b { min-width: 18px; text-align: center; font-variant-numeric: tabular-nums; }
+.ap-perbox-toggle { justify-self: start; border: 0; background: none; padding: 2px 0; font: inherit; font-size: 12.5px; font-weight: 700; color: var(--accent); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }

@@ -9,10 +9,10 @@ import { bounceOf } from "../_shared/bounce.ts";
 import { fillReply, templateFor } from "../../../web/src/lib/replyTemplate.ts";
 import { draftHtml, pickSendAs, pickTarget, bodyOf as replyBodyOf, quoteBlock, replyRaw, replyRecipients, replySubject, threadUrl, type Msg, type SendAs } from "../_shared/replyDraft.ts";
 import { classifyIncoming, isReaction, mergeReading, myReplyIntent, notAReply, READER_VERSION, referralOf, stripQuoted, type IncomingKind, type TeamRole } from "../_shared/replyReader.ts";
-import { cancelOnReply, doneWithToday, fillFor, flushOne, insertQueue, loadWorld, planFor, poolOf, prepareOne, rowsOf, tick, type Kit, type PlanRow, type Row as AutoRow } from "./autopilot.ts";
+import { cancelOnReply, doneWithToday, fillFor, flushOne, insertQueue, loadWorld, mailboxDays, planFor, poolOf, prepareOne, rowsOf, tick, type Kit, type PlanRow, type Row as AutoRow } from "./autopilot.ts";
 import { awakeAt, planTimes } from "../../../web/src/lib/smartTime.ts";
 import { dayEndIn, dayKeyIn, validZone } from "../../../web/src/lib/zones.ts";
-import { fillTemplate, readAutopilot, readTemplates, ROUNDS, type Round } from "../../../web/src/lib/autopilot.ts";
+import { fillTemplate, readAutopilot, readTemplates, roomMap, ROUNDS, type Round } from "../../../web/src/lib/autopilot.ts";
 import { applyStyle, bodyOf as templateBody, claimProblem, styleOf, suggestTemplates, tooSimilar } from "../../../web/src/lib/templateSuggest.ts";
 import { analyzeStoredFile, bodyOf, drainQueue, gmailAttachment, processCreatorMail, processMyMail, repairAnchors, repairKitLists, sniff, type Fetcher, type FullMessage } from "./intel.ts";
 
@@ -2173,8 +2173,12 @@ Deno.serve(async (req) => {
       const pending = await pendingNow();
       const pool = poolOf(w, autoRows, new Set([...pending.map((p) => p.creator_id), ...(await doneWithToday(admin, userId, dayKeyIn(w.tz, now)))]), now);
       const ready = pool.ready.filter((r) => !exclude.has(r.id));
-      const plan = await planFor(admin, kit, w, autoRows, ready, { now, count: count || ready.length, taken: pending.map((p) => ({ mailbox: p.mailbox, at: new Date(p.send_at).getTime() })) });
-      return json({ ok: true, ready: pool.ready.length, byHand: pool.byHand.length, held: pool.held.length, ...plan, tz: w.tz, left: Math.max(0, 300 - (await todayCount(w.tz))) });
+      // Each mailbox only up to its room for today; an exact number per mailbox when you picked one.
+      const boxes = await mailboxDays(admin, w, autoRows, now);
+      const perBox = input.perBox && typeof input.perBox === "object" && !Array.isArray(input.perBox)
+        ? Object.fromEntries(Object.entries(input.perBox as Record<string, unknown>).slice(0, 10).map(([k, v]) => [k.toLowerCase().slice(0, 200), Math.max(0, Math.min(300, Math.round(Number(v)) || 0))])) : null;
+      const plan = await planFor(admin, kit, w, autoRows, ready, { now, count: count || ready.length, taken: pending.map((p) => ({ mailbox: p.mailbox, at: new Date(p.send_at).getTime() })), room: roomMap(boxes), perBox });
+      return json({ ok: true, ready: pool.ready.length, byHand: pool.byHand.length, held: pool.held.length, ...plan, boxes, tz: w.tz, left: Math.max(0, 300 - (await todayCount(w.tz))) });
     }
 
     if (action === "autopilot_start") {
@@ -2189,13 +2193,15 @@ Deno.serve(async (req) => {
       const end = dayEndIn(w.tz, now) - 60_000;
       const room = Math.max(0, 300 - (await todayCount(w.tz)));
       const taken = pending.map((p) => ({ mailbox: p.mailbox, at: new Date(p.send_at).getTime() }));
+      // Checked again here: a mailbox never goes past its room for today, whatever the preview said.
+      const boxRoom = roomMap(await mailboxDays(admin, w, autoRows, now));
       const ok: PlanRow[] = [];
       const rejected: { creatorId: string; why: string }[] = [];
       for (const x of items) {
         const r = ready.get(String(x.creatorId));
         const at = Math.round(Number(x.at));
         const t = r ? w.templates[r.round].find((tp) => tp.id === x.templateId) : undefined;
-        const why = !r ? "not_ready" : !t ? "template" : at < now + 15_000 || at > end ? "time" : r.zones.length && !awakeAt(r.zones, at) ? "their_night" : taken.some((o) => o.mailbox === r.mailbox && Math.abs(o.at - at) < 30_000) ? "too_close" : ok.length >= room ? "day_max" : "";
+        const why = !r ? "not_ready" : !t ? "template" : at < now + 15_000 || at > end ? "time" : r.zones.length && !awakeAt(r.zones, at) ? "their_night" : taken.some((o) => o.mailbox === r.mailbox && Math.abs(o.at - at) < 30_000) ? "too_close" : ok.length >= room ? "day_max" : (boxRoom.get(r.mailbox.toLowerCase()) ?? 0) <= ok.filter((o) => o.mailbox.toLowerCase() === r.mailbox.toLowerCase()).length ? "mailbox_full" : "";
         if (why) { rejected.push({ creatorId: String(x.creatorId), why }); continue; }
         const name = w.creators.find((c) => c.id === r!.id)?.name || r!.name;
         ok.push({ creatorId: r!.id, name, round: r!.round, mailbox: r!.mailbox, threadId: r!.threadId, templateId: t!.id, templateName: t!.name, text: fillTemplate(t!.text, { name, my_name: w.name, agency: w.prefs.agency_name }), at, theirClock: "", zone: r!.zones[0] || "", zones: r!.zones, offBy: 0, fit: null, asked: "" });

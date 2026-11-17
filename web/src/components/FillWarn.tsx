@@ -41,7 +41,8 @@ export function FillWarnLayer() {
   const endAt = dayEndIn(auto.zone, now);
   const inWindow = now >= startAt - 3 * HOUR && now < endAt - 30 * 60_000;
   const waitingToday = auto.today.filter((i) => i.status === "pending" || i.status === "sending").length;
-  const left = Math.max(0, stats.target - stats.value - waitingToday);
+  // stats.value already counts what Autopilot has waiting today (and Gmail's scheduled ones) — never subtract twice.
+  const left = Math.max(0, stats.target - stats.value);
   const noTemplate = auto.pool.held.filter((h) => h.why === "no-template").length;
   // Where {W.whens} follow-ups would land (the same planner the night fill uses, from the start time).
   const tonight = useMemo(() => {
@@ -49,7 +50,7 @@ export function FillWarnLayer() {
     const taken = auto.items.filter((i) => i.status === "pending" || i.status === "sending").map((i) => ({ mailbox: i.mailbox, at: new Date(i.send_at).getTime() }));
     return planTimes(auto.pool.ready.map((r) => ({ id: r.id, mailbox: r.mailbox, zones: r.zones, firstAt: r.firstAt, lastAt: r.lastAt, weight: r.overdueDays })), { now, userZone: auto.zone, from: Math.max(now, startAt), taken, seed: 7 }).placed.map((p) => p.at).sort((a, b) => a - b);
   }, [inWindow, auto.pool.ready, auto.items, auto.zone, now, startAt]);
-  const canFill = Math.min(left, tonight.length);
+  const canFill = Math.min(left, tonight.length, auto.canWithin);
   const key = `if.fillwarn.${data.profile.id}.${auto.todayKey}`;
   const due = auto.enabled && auto.loaded && data.ready && !data.demoSeeded && !ap.fill && inWindow && stats.unit === "emails" && !chase.today.followupsPaused && left > 0 && (canFill > 0 || noTemplate > 0);
 

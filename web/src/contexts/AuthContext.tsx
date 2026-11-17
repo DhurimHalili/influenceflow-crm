@@ -83,6 +83,19 @@ const friendly = (message: string, status?: number): AuthResult => {
   return { error: m || "Something went wrong. Please try again.", code: "other" };
 };
 
+/** A sign-in saved in this browser (Supabase's own storage), whether or not its access token is still fresh. */
+const hasStoredSession = () => {
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i) || "";
+      if (/^sb-.+-auth-token$/.test(key) && (localStorage.getItem(key) || "").includes("refresh_token")) return true;
+    }
+  } catch {
+    // storage blocked: nothing saved
+  }
+  return false;
+};
+
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -97,6 +110,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       : "",
   );
 
+  const settled = useRef(false);
   useEffect(() => {
     let mounted = true;
     const start = async () => {
@@ -114,20 +128,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } catch {
         if (mounted) setLinkError("We couldn't verify that link. Check your connection, or request a new one.");
       }
+      let found: Session | null = null;
       try {
         const { data } = await supabase.auth.getSession();
-        if (!mounted) return;
-        setSession(data.session);
+        found = data.session;
       } catch {
-        // Offline at startup: stay signed out until the network returns.
+        // Offline at startup: handled below.
       }
-      if (mounted) setLoading(false);
+      // A saved sign-in whose access token expired while the tab slept: one failed refresh (slow network,
+      // laptop just woke) used to drop you on the login page for a moment before the retry signed you back
+      // in. While a saved session exists, keep the loading screen and retry; Supabase removes the saved
+      // session itself when the refresh token is really dead, which ends the wait at once.
+      for (let i = 0; !found && mounted && hasStoredSession() && i < 5; i++) {
+        await new Promise((r) => setTimeout(r, 500 * (i + 1)));
+        if (!mounted) return;
+        try {
+          const { data, error } = await supabase.auth.refreshSession();
+          found = data.session;
+          if (!found && error && !isNetworkError(error.message) && (error.status ?? 500) < 500 && !hasStoredSession()) break;
+        } catch {
+          // still offline — try again
+        }
+      }
+      if (!mounted) return;
+      if (found) setSession(found);
+      settled.current = true;
+      setLoading(false);
     };
     void start();
     const { data } = supabase.auth.onAuthStateChange((event, nextSession) => {
       if (event === "PASSWORD_RECOVERY") setRecovery(true);
+      // The first "no session" while a saved one is still being refreshed isn't a sign-out — start() decides.
+      if (!nextSession && event === "INITIAL_SESSION" && !settled.current && hasStoredSession()) return;
       setSession(nextSession);
-      setLoading(false);
+      if (nextSession || settled.current || event === "SIGNED_OUT") setLoading(false);
     });
     return () => {
       mounted = false;

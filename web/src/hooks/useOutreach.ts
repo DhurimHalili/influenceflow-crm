@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useData } from "../contexts/DataContext";
 import { useGmail } from "../contexts/GmailContext";
 import { mailboxesOf } from "../lib/dashboardStats";
-import { build } from "../lib/outreach";
+import { build, withAutopilot } from "../lib/outreach";
+import { useAutopilotRows } from "../lib/autopilotStore";
 
 /** A clock that ticks once a minute, so a scheduled email counts the minute its send time passes. */
 function useMinute() {
@@ -19,10 +20,13 @@ export function useOutreachLogs() {
   const data = useData();
   const { leads } = useGmail();
   const minute = useMinute();
-  return useMemo(
-    () => build({ creators: data.creators, brands: data.brands, contacts: data.contacts, followups: data.followups, events: data.emailEvents || [], leads, now: new Date(minute * 60000) }),
-    [data.creators, data.brands, data.contacts, data.followups, data.emailEvents, leads, minute],
-  );
+  const queued = useAutopilotRows();
+  return useMemo(() => {
+    const logs = build({ creators: data.creators, brands: data.brands, contacts: data.contacts, followups: data.followups, events: data.emailEvents || [], leads, now: new Date(minute * 60000) });
+    // Autopilot's sends count everywhere a total of emails is shown (only for influencers still in your list).
+    const live = new Set(data.creators.filter((c) => !c.archived_at).map((c) => c.id));
+    return { ...logs, sent: withAutopilot(logs.sent, queued.filter((q) => live.has(q.creator_id)), data.emailEvents || []) };
+  }, [data.creators, data.brands, data.contacts, data.followups, data.emailEvents, leads, minute, queued]);
 }
 
 /** Everything you sent (and have scheduled), counted once. */
