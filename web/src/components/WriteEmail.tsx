@@ -116,7 +116,7 @@ export function WriteEmail({ to, recordId }: { to: string; recordId: string }) {
         </>}
         <span className="write-menu-head">{thread ? "New email from" : "Write from"}</span>
         {boxes.map((m) => <a role="menuitem" key={m.id} href={gmailComposeUrl(to, m.email)} target="_blank" rel="noopener noreferrer" onClick={() => setOpen(false)}><MailPlus size={14} aria-hidden="true" /><span>{m.email}{m.email === box && <small>{thread ? "where the conversation is" : "last used"}</small>}</span></a>)}
-        {autoByHand && <p className="write-menu-note"><PlaneTakeoff size={13} aria-hidden="true" />Autopilot skips them — they answered before, so this follow-up is yours to write.</p>}
+        {autoByHand && <p className="write-menu-note"><PlaneTakeoff size={13} aria-hidden="true" />{autoByHand.why === "marked" ? "Autopilot skips them — you marked them Replied (no reply is on file). This follow-up is yours, or set them back to Contacted on the profile." : autoByHand.why === "conversation" ? "Autopilot skips them — the deal moved past outreach, so this follow-up is yours to write." : "Autopilot skips them — they answered before, so this follow-up is yours to write."}</p>}
       </div>}
     </div>
       {autoReady && !autoWaiting && <button type="button" className="write-auto" onClick={() => setSheet(true)} title="Send it from the CRM with one of your follow-up templates — now or at a smart time"><PlaneTakeoff size={14} aria-hidden="true" /><span>Send {ordinal(autoReady.round)} follow-up</span></button>}

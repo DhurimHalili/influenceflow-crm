@@ -11,6 +11,8 @@ import { templateCount, readTemplates, ROUNDS, type HoldWhy } from "../lib/autop
 import { ordinal } from "../lib/followupEngine";
 import { timeIn, dayEndIn, dayStartIn, placeOf } from "../lib/zones";
 import { useOutreach } from "../hooks/useOutreach";
+import { useChase } from "../hooks/useChase";
+import { useAutopilotWaiting } from "../components/AutopilotTag";
 import { minutesOf } from "../lib/autopilot";
 import { dateFmt } from "../lib/days";
 import { FillAsk } from "../components/FillAsk";
@@ -59,7 +61,7 @@ function BoxLimits({ boxes, perBox, max, onChange }: { boxes: { mailbox: string;
         <button type="button" onClick={() => onChange(b.mailbox, Math.max(0, n - 1))} disabled={n <= 0} aria-label={`One fewer from ${b.mailbox}`}>−</button>
         <b aria-live="polite">{n}</b>
         <button type="button" onClick={() => onChange(b.mailbox, Math.min(top, n + 1))} disabled={n >= top} aria-label={`One more from ${b.mailbox}`}>+</button>
-      </span> : <small>{b.room ? `${b.room} left${b.ready < b.room ? ` · ${b.ready} ready` : ""}` : "at its limit"}</small>}
+      </span> : <small>{b.room ? `${b.room} left · ${b.ready} ready` : `at its limit${b.ready ? ` · ${b.ready} wait` : ""}`}</small>}
     </li>;
   })}</ul>;
 }
@@ -79,6 +81,14 @@ export default function AutopilotPage() {
   useEffect(() => watch(), [watch]);
   useEffect(() => { const t = window.setInterval(() => setNow(Date.now()), 30_000); return () => window.clearInterval(t); }, []);
 
+  // The same "due today" as the Follow up now chip on Influencers (no new-thread rounds, nothing Autopilot already has).
+  const chase = useChase();
+  const apWaiting = useAutopilotWaiting();
+  const dueNow = chase.due.filter((c) => c.type === "creator" && (c.state as { next?: string }).next !== "new-thread" && !apWaiting.has(c.id)).length;
+  const marked = auto.pool.byHand.filter((b) => b.why === "marked");
+  // Due, but Autopilot already sent to them today or you cancelled theirs: left alone until tomorrow.
+  const handled = auto.pool.queued.filter((id) => !apWaiting.has(id)).length;
+  const heldNow = auto.pool.held.filter((h) => h.why !== "new-thread").length;
   // Who can go today without any mailbox passing its daily limit (sent + scheduled + Autopilot count toward it).
   const can = Math.min(auto.fits.placed.length, auto.canWithin);
   const fitToday = auto.fits.placed.length;
@@ -178,7 +188,7 @@ export default function AutopilotPage() {
         <span className="ap-kicker"><PlaneTakeoff size={13} /> Ready to send</span>
         <b>{fitToday}</b>
         <div className="ap-rounds">{ROUNDS.map((r) => byRound[r] ? <span key={r} className={`ap-round r${r}`}>{ordinal(r)} ×{byRound[r]}</span> : null)}</div>
-        <p>{[asleep.length ? `${asleep.length} asleep till after your midnight` : "", auto.pool.byHand.length ? `${auto.pool.byHand.length} yours to write` : "", pendingToday.length ? `${pendingToday.length} already waiting` : ""].filter(Boolean).join(" · ") || "Only people who never answered."}</p>
+        <p>{dueNow > 0 ? <>Of <b>{dueNow}</b> due today (Follow up now): </> : null}{[`${fitToday} can go`, auto.pool.byHand.length ? `${auto.pool.byHand.length} yours to write` : "", heldNow ? `${heldNow} can't go (see why)` : "", asleep.length ? `${asleep.length} asleep till after your midnight` : "", handled ? `${handled} handled today (sent or cancelled)` : ""].filter(Boolean).join(" · ")}.{pendingToday.length ? ` ${pendingToday.length} more already waiting in Autopilot.` : ""}</p>
       </div>
       <div className="ap-launch">
         {can > 0 ? <>
@@ -196,6 +206,7 @@ export default function AutopilotPage() {
           {auto.boxes.length > 0 && <BoxLimits boxes={auto.boxes} perBox={perBox} max={boxMax} onChange={(m, n) => setPerBox((p) => ({ ...(p || {}), [m]: n }))} />}
           {auto.boxes.length > 1 && <button type="button" className="ap-perbox-toggle" onClick={() => (perBox ? setPerBox(null) : choosePerBox())}>{perBox ? "Mix mailboxes for me" : "Choose per mailbox"}</button>}
           <Button onClick={() => void makePlan()} loading={planning} disabled={!pickedTotal}>{planning ? "Planning…" : <>Plan {pickedTotal} <ArrowRight size={15} /></>}</Button>
+          {fitToday > can && <p className="ap-limit-note">{fitToday - can} more {fitToday - can === 1 ? "is" : "are"} ready but wait for tomorrow: {auto.boxes.filter((b) => b.ready > b.room).map((b) => `${b.mailbox.split("@")[0]} can send ${b.room} more today`).join(", ")}.</p>}
           <small>{perBox ? "Exactly these numbers, each from its own mailbox." : auto.boxes.length > 1 ? "Mailboxes mixed at random — none goes past its limit." : "You see who, which words and when before anything is queued."}</small>
         </> : <div className="ap-none">
           {fitToday > 0 && auto.canWithin === 0 ? <><Check size={18} /><p><b>Every mailbox is at its limit</b>{auto.boxes.map((b) => `${b.mailbox.split("@")[0]} ${b.used}/${b.limit}`).join(" · ")} today — the rest go tomorrow, so no mailbox sends more than it should.</p></>
@@ -244,7 +255,8 @@ export default function AutopilotPage() {
         </section>}
         {auto.pool.byHand.length > 0 && <section className="ap-card ap-hand">
           <h2><PenLine size={15} /> Yours to write · {auto.pool.byHand.length}</h2>
-          <p>They answered at some point — a template would read wrong, so Autopilot never writes to them.</p>
+          <p>They answered at some point, or the deal moved on — a template would read wrong, so Autopilot never writes to them.</p>
+          {marked.length > 0 && <div className="ap-marked"><b>{marked.length} marked Replied with no reply on file</b><span>Probably set by mistake — open them and tap “They never replied” if they never answered.</span><ul>{marked.slice(0, 12).map((m) => <li key={m.id}><Link to={`/app/influencers/${m.id}`}>{m.name}</Link></li>)}</ul></div>}
           <Link className="ap-fix" to="/app/influencers?follow=byhand">Follow up by hand <ArrowRight size={13} /></Link>
         </section>}
         <details className="ap-card ap-how">

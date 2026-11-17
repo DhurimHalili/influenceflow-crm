@@ -86,4 +86,15 @@ eq("so far: later days are still to come", sunday.days.slice(3).every((d) => d.s
   eq("one mailbox: a single card, no comparison", weeklyReport({ ...base, which: "last" }).mailboxes.length, 1);
 }
 
+// The weekly report never uses faces, people, body parts or animals (owner's rule) — in the verdicts or the email.
+{
+  const { readFileSync } = await import("node:fs");
+  const banned = /[\u{1F600}-\u{1F64F}\u{1F910}-\u{1F92F}\u{1F970}-\u{1F97A}\u{1F9D0}-\u{1F9DF}\u{1F466}-\u{1F487}\u{1F400}-\u{1F43F}\u{1F980}-\u{1F9AE}\u{1F4AA}\u{1F44A}-\u{1F450}\u{1F47B}\u{1F480}\u{1F90C}-\u{1F90F}\u{1F918}-\u{1F91F}\u{263A}\u{2639}]/u;
+  for (const f of ["weekly.ts", "weeklyEmail.ts"]) {
+    const text = readFileSync(new URL(`./${f}`, import.meta.url), "utf8");
+    const hit = text.split("\n").find((l) => banned.test(l));
+    eq(`${f}: no face / people / animal emojis`, hit || "", "");
+  }
+}
+
 if (fail) { console.log(`${fail} failed`); (globalThis as { process?: { exit(n: number): void } }).process?.exit(1); } else console.log("all weekly tests pass");

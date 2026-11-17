@@ -158,4 +158,11 @@ if (fail) { console.log(`\n${fail} failed`); process.exit(1); }
   check("limits: priority order kept inside a mailbox", pickWithin(list, 2, new Map([["dhurim@x.com", 2]]), null, 1).map((g) => g.id), ["a0", "a1"]);
 }
 
+// Marked "Replied" by hand but no reply on file anywhere → still yours, flagged as "marked" (not "they answered").
+{
+  const st = new Map([["m1", { kind: "due", round: 2, sent: 2, due: "2026-11-17", overdueDays: 0, last: { id: "x", at: "2026-11-11T19:58:00Z", dir: "out", source: "gmail", channel: "email", threadId: "t1" }, touches: [] } as unknown as FollowupState]]);
+  const p = autopilotPool({ creators: [{ id: "m1", name: "Iowa", country: "", pipeline_status: "replied", archived_at: null, contact_channel: "email", email_followups: true } as never], followups: [], events: [], states: st, mailboxes: ["g@x.com"], templates: { 1: [], 2: [], 3: [], 4: [] } });
+  check("marked Replied with no reply on file = by hand, why 'marked'", p.byHand.map((b) => b.why), ["marked"]);
+}
+
 console.log("\nall autopilot tests passed");
