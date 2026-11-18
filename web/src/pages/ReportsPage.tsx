@@ -207,8 +207,7 @@ export default function ReportsPage() {
       brandRows.set(name, row);
     }
 
-    const boxes = mailboxStats(events, gmail.leads, gmail.mailboxes.map((m) => m.email), range === "all" ? null : Number(range)).map((s) => ({ ...s, won: side(all.filter((p) => !p.inbound)).filter((p) => p.mailbox === s.mailbox && p.rank >= 4).length }));
-    const leadsIn = gmail.leads.filter((l) => new Date(l.first_at).getTime() >= from && (who === "creator" ? l.kind === "creator" : l.kind !== "creator") && (!box || l.mailbox.toLowerCase() === box));
+    const boxes = mailboxStats(events, gmail.mailboxes.map((m) => m.email), range === "all" ? null : Number(range)).map((s) => ({ ...s, won: side(all.filter((p) => !p.inbound)).filter((p) => p.mailbox === s.mailbox && p.rank >= 4).length }));
 
 
     return {
@@ -224,7 +223,7 @@ export default function ReportsPage() {
       repliedLogged: replied.length,
       closeDays: median(closeDays),
       closedCount: closeDays.length,
-      inbound: { count: inboundSide.length, won: inboundSide.filter((p) => p.rank >= 4).length, leads: leadsIn.length, leadsAdded: leadsIn.filter((l) => l.status === "added").length },
+      inbound: { count: inboundSide.length, won: inboundSide.filter((p) => p.rank >= 4).length },
       losses: losses.length,
       lossReasons,
       lostAfterReply: pct(losses.length, Math.max(1, stage(2))),
@@ -240,7 +239,7 @@ export default function ReportsPage() {
       boxes,
       gmail: events.length > 0,
     };
-  }, [data.creators, data.brands, data.campaigns, data.followups, data.emailEvents, data.activities, gmail.leads, gmail.mailboxes, from, rules, who, range, box]);
+  }, [data.creators, data.brands, data.campaigns, data.followups, data.emailEvents, data.activities, gmail.mailboxes, from, rules, who, range, box]);
 
   const top = report.funnel[0].value;
   const conversion = rateText(report.wonCount, report.contacted);
@@ -292,12 +291,12 @@ export default function ReportsPage() {
       </div>
 
       <div className="dash-panel side-stack">
-        <div className="mini-stat"><span className="mini-icon inbound"><Inbox size={15} /></span><div><small>Came to you</small><strong>{report.inbound.count} inbound {who === "creator" ? "influencer" : "brand"}{report.inbound.count === 1 ? "" : "s"}</strong><p>{report.inbound.count ? `${pct(report.inbound.won, report.inbound.count)}% became ${wonWord}` : "None in this range"}{report.inbound.leads ? ` · ${report.inbound.leads} spotted in Gmail, ${report.inbound.leadsAdded} added` : ""}</p></div></div>
+        <div className="mini-stat"><span className="mini-icon inbound"><Inbox size={15} /></span><div><small>Came to you</small><strong>{report.inbound.count} inbound {who === "creator" ? "influencer" : "brand"}{report.inbound.count === 1 ? "" : "s"}</strong><p>{report.inbound.count ? `${pct(report.inbound.won, report.inbound.count)}% became ${wonWord}` : "None in this range"}</p></div></div>
         <div className="mini-stat"><span className="mini-icon lost"><TrendingDown size={15} /></span><div><small>Where deals die</small><strong>{report.losses} lost after replying</strong><p>{report.losses ? report.lossReasons.slice(0, 3).map(([r, n]) => `${lossReasonLabel(r)} (${n})`).join(" · ") : "Nothing lost after a reply in this range"}</p></div></div>
         {report.lossReasons.length > 0 && <div className="loss-bars">{report.lossReasons.slice(0, 4).map(([r, n]) => <div key={r}><span>{lossReasonLabel(r)}</span><i><em style={{ width: `${pct(n, report.losses)}%` }} /></i><b>{n}</b></div>)}</div>}
       </div>
 
-      {report.boxes.length > 0 && <div className="dash-panel report-table wide mailbox-report"><div className="panel-heading"><div><span>Gmail · {range === "all" ? "all time" : `last ${RANGES.find((r) => r.value === range)?.label.toLowerCase()}`}</span><h2>Your mailboxes</h2></div><Link to="/app/settings#gmail">Manage</Link></div><table><thead><tr><th>Mailbox</th><th title="Every email that went out from this mailbox in the range — first emails, follow-ups and answers, each message once">Emails sent</th><th>People reached</th><th>Reply rate</th><th>{who === "creator" ? "Roster" : "Signed"} from it</th><th>Inbound leads</th></tr></thead><tbody>{report.boxes.map((b, i) => { const tone = mailboxTone(mailboxes.indexOf(b.mailbox)); const topSent = Math.max(1, ...report.boxes.map((x) => x.sent)); const peak = Math.max(1, ...b.daily); return <tr key={b.mailbox} className={`mbx-${tone}${box === b.mailbox ? " is-picked" : ""}`}><td><button type="button" className="mbx-cell" onClick={() => setBox(box === b.mailbox ? "" : b.mailbox)} title={box === b.mailbox ? "Show all mailboxes" : `Show only ${b.mailbox}`}><i className="mbx-dot" aria-hidden="true" /><MailboxName email={b.mailbox} />{i === 0 && b.sent > 0 && report.boxes.length > 1 && <Trophy size={12} className="mbx-top" />}</button></td><td><span className="mbx-sent"><b>{b.sent}</b><i aria-hidden="true"><em style={{ width: `${(b.sent / topSent) * 100}%` }} /></i><span className="mbx-spark" aria-hidden="true">{b.daily.slice(-14).map((n, k) => <i key={k} style={{ height: `${Math.max(8, (n / peak) * 100)}%`, opacity: n ? 1 : 0.25 }} />)}</span></span></td><td>{b.reached}</td><td><span className="rate-bar"><i style={{ width: `${b.replyRate}%` }} />{b.reached ? `${b.replyRate}%` : "—"}</span></td><td>{b.won}</td><td>{b.leads}</td></tr>; })}</tbody></table></div>}
+      {report.boxes.length > 0 && <div className="dash-panel report-table wide mailbox-report"><div className="panel-heading"><div><span>Gmail · {range === "all" ? "all time" : `last ${RANGES.find((r) => r.value === range)?.label.toLowerCase()}`}</span><h2>Your mailboxes</h2></div><Link to="/app/settings#gmail">Manage</Link></div><table><thead><tr><th>Mailbox</th><th title="Every email that went out from this mailbox in the range — first emails, follow-ups and answers, each message once">Emails sent</th><th>People reached</th><th>Reply rate</th><th>{who === "creator" ? "Roster" : "Signed"} from it</th></tr></thead><tbody>{report.boxes.map((b, i) => { const tone = mailboxTone(mailboxes.indexOf(b.mailbox)); const topSent = Math.max(1, ...report.boxes.map((x) => x.sent)); const peak = Math.max(1, ...b.daily); return <tr key={b.mailbox} className={`mbx-${tone}${box === b.mailbox ? " is-picked" : ""}`}><td><button type="button" className="mbx-cell" onClick={() => setBox(box === b.mailbox ? "" : b.mailbox)} title={box === b.mailbox ? "Show all mailboxes" : `Show only ${b.mailbox}`}><i className="mbx-dot" aria-hidden="true" /><MailboxName email={b.mailbox} />{i === 0 && b.sent > 0 && report.boxes.length > 1 && <Trophy size={12} className="mbx-top" />}</button></td><td><span className="mbx-sent"><b>{b.sent}</b><i aria-hidden="true"><em style={{ width: `${(b.sent / topSent) * 100}%` }} /></i><span className="mbx-spark" aria-hidden="true">{b.daily.slice(-14).map((n, k) => <i key={k} style={{ height: `${Math.max(8, (n / peak) * 100)}%`, opacity: n ? 1 : 0.25 }} />)}</span></span></td><td>{b.reached}</td><td><span className="rate-bar"><i style={{ width: `${b.replyRate}%` }} />{b.reached ? `${b.replyRate}%` : "—"}</span></td><td>{b.won}</td></tr>; })}</tbody></table></div>}
 
       <BestTimeCard />
       <div className="dash-panel wide"><div className="panel-heading"><div><span>Money</span><h2>Revenue & profit · 12 months</h2></div><BarChart3 size={16} /></div><div className="report-chart"><ResponsiveContainer width="100%" height="100%"><BarChart data={report.months} margin={{ top: 10, right: 8, left: 0, bottom: 0 }}><CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--line)" /><XAxis dataKey="name" tick={{ fontSize: 11, fill: "var(--muted)" }} axisLine={false} tickLine={false} /><YAxis tick={{ fontSize: 11, fill: "var(--muted)" }} axisLine={false} tickLine={false} tickFormatter={(v) => (v >= 1000 ? `${Math.round(v / 1000)}k` : String(v))} /><Tooltip formatter={(v) => money(Number(v))} cursor={{ fill: "var(--surface-alt)" }} contentStyle={{ borderRadius: 10, border: "1px solid var(--line)", background: "var(--surface-solid)" }} /><Legend wrapperStyle={{ fontSize: 12 }} /><Bar dataKey="Revenue" fill="color-mix(in srgb, var(--accent) 35%, var(--line))" radius={[6, 6, 0, 0]} /><Bar dataKey="Profit" fill="var(--success)" radius={[6, 6, 0, 0]} /></BarChart></ResponsiveContainer></div></div>

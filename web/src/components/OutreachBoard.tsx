@@ -78,7 +78,7 @@ export function OutreachBoard() {
   }, [sent, received, gmail.mailboxes]);
   const [boxPick, setBoxPick] = useState(() => { try { return localStorage.getItem("if.dash-mailbox") || ""; } catch { return ""; } });
   const box = mailboxes.includes(boxPick) ? boxPick : "";
-  const base = useMemo(() => ({ sent, received, creators: data.creators, brands: data.brands, contacts: data.contacts, campaigns: data.campaigns, activities: data.activities, leads: gmail.leads }), [sent, received, data.creators, data.brands, data.contacts, data.campaigns, data.activities, gmail.leads]);
+  const base = useMemo(() => ({ sent, received, creators: data.creators, brands: data.brands, contacts: data.contacts, campaigns: data.campaigns, activities: data.activities }), [sent, received, data.creators, data.brands, data.contacts, data.campaigns, data.activities]);
   const stats = useMemo(() => makeStats({ ...base, mailbox: box }), [base, box]);
   // Each mailbox's share, for the "who sent it" split (only with 2+ mailboxes).
   const perBox = useMemo(() => (mailboxes.length > 1 ? mailboxes.map((m) => ({ mailbox: m, stats: makeStats({ ...base, mailbox: m }) })) : []), [base, mailboxes]);

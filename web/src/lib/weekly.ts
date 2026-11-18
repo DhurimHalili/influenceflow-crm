@@ -1,4 +1,4 @@
-import type { Activity, Brand, BrandContact, Campaign, Creator, EmailEvent, Followup, FollowupRules, InboundLead } from "../types";
+import type { Activity, Brand, BrandContact, Campaign, Creator, EmailEvent, Followup, FollowupRules } from "../types";
 import { mailboxesOf, makeStats } from "./dashboardStats.ts";
 import { chaseList } from "./followupEngine.ts";
 import { build, type Sent } from "./outreach.ts";
@@ -15,7 +15,7 @@ import { build, type Sent } from "./outreach.ts";
 
 export type WeeklyInput = {
   creators: Creator[]; brands: Brand[]; contacts: BrandContact[]; followups: Followup[]; events: EmailEvent[];
-  leads: InboundLead[]; activities: Activity[]; campaigns: Campaign[];
+  activities: Activity[]; campaigns: Campaign[];
   goal: number; rules: FollowupRules; name: string; timeZone: string;
   /** "last" = the full week before the one `now` is in (Monday report); "this" = the week `now` is in (Sunday report). */
   which: "last" | "this";
@@ -43,7 +43,6 @@ export type WeeklyReport = {
   followups: Delta; newConversations: Delta;
   repliers: Delta; replies: number; replyRate: { contacted: number; replied: number; pct: number | null };
   negotiations: Delta; wins: Delta; lost: Delta; added: Delta;
-  leads: { received: number; answered: number };
   segments: { creator: number; brand: number };
   winNames: string[]; replyNames: string[]; lostNames: string[];
   /** Which mailbox did what (busiest first, colour = position, as in the app). Empty with no mailbox activity. */
@@ -106,8 +105,8 @@ export function weeklyReport(input: WeeklyInput): WeeklyReport {
   const partial = now.getTime() < e;
   // A finished week counts up to its end; a week in progress up to now (scheduled emails up to Sunday night).
   const end = Math.min(e, now.getTime());
-  const { sent, received } = build({ creators: input.creators, brands: input.brands, contacts: input.contacts, followups: input.followups, events: input.events, leads: input.leads, now });
-  const stats = makeStats({ sent, received, creators: input.creators, brands: input.brands, contacts: input.contacts, campaigns: input.campaigns, activities: input.activities, leads: input.leads });
+  const { sent, received } = build({ creators: input.creators, brands: input.brands, contacts: input.contacts, followups: input.followups, events: input.events, now });
+  const stats = makeStats({ sent, received, creators: input.creators, brands: input.brands, contacts: input.contacts, campaigns: input.campaigns, activities: input.activities });
   const within = (x: Sent, a: number, b: number) => { const t = new Date(x.at).getTime(); return t >= a && t < b; };
   const sentIn = (a: number, b: number) => sent.filter((x) => !x.scheduled && within(x, a, b)).length;
   const d = (now_: number, before: number): Delta => ({ now: now_, before });
@@ -146,7 +145,6 @@ export function weeklyReport(input: WeeklyInput): WeeklyReport {
   const wins = d(count("wins", s, end), count("wins", ps, s));
   const negotiations = d(count("negotiations", s, end), count("negotiations", ps, s));
   const lost = d(count("lost", s, end), count("lost", ps, s));
-  const leadsIn = input.leads.filter((l) => { const t = new Date(l.first_at).getTime(); return t >= s && t < end; });
 
   const segCount = (seg: "creator" | "brand") => sent.filter((x) => !x.scheduled && x.segment === seg && within(x, s, end)).length;
 
@@ -168,7 +166,7 @@ export function weeklyReport(input: WeeklyInput): WeeklyReport {
   const resultWord = resultsGood ? "good" : "quiet";
 
   // Which mailbox did what: each one's share, counted like the dashboard's mailbox chips.
-  const base = { sent, received, creators: input.creators, brands: input.brands, contacts: input.contacts, campaigns: input.campaigns, activities: input.activities, leads: input.leads };
+  const base = { sent, received, creators: input.creators, brands: input.brands, contacts: input.contacts, campaigns: input.campaigns, activities: input.activities };
   const order = mailboxesOf(sent, received);
   const mailboxes: MailboxLine[] = order.map((email, tone) => {
     const ms = makeStats({ ...base, mailbox: email });
@@ -201,7 +199,6 @@ export function weeklyReport(input: WeeklyInput): WeeklyReport {
     newConversations: d(count("first", s, end), count("first", ps, s)),
     repliers, replies: count("replies", s, end), replyRate: stats.replyRate("all", s, end),
     negotiations, wins, lost, added: d(count("added", s, end), count("added", ps, s)),
-    leads: { received: leadsIn.length, answered: leadsIn.filter((l) => (l.my_replies || []).length > 0 || !!l.replied_at).length },
     segments: { creator: segCount("creator"), brand: segCount("brand") },
     winNames: names("wins"), replyNames: names("replies"), lostNames: names("lost"),
     mailboxes, mailboxNote,

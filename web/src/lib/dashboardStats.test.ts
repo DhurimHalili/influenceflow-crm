@@ -29,12 +29,12 @@ const events = [
   ev("b1", "brand", "out", t - 10 * 60e3, { scheduled: true }), // send time passed: counts as sent
 ];
 const followups = [{ id: "f1", creator_id: "c1", brand_id: null, kind: "followup", channel: "whatsapp", note: "", at: iso(t - 1 * H) }] as never[];
-const { sent, received } = build({ creators, brands, contacts: [], followups, events, leads: [], now });
+const { sent, received } = build({ creators, brands, contacts: [], followups, events, now });
 const activities = [
   { id: "a1", text: "Gmail: b1 moved to Negotiating — they emailed", at: iso(t - 2 * H), entity_type: "brand", entity_id: "b1" },
   { id: "a2", text: "c2 updated to negotiating", at: iso(t - 30 * 60e3), entity_type: "creator", entity_id: "c2" },
 ] as never[];
-const st = makeStats({ sent, received, creators, brands, contacts: [], campaigns: [], activities, leads: [] });
+const st = makeStats({ sent, received, creators, brands, contacts: [], campaigns: [], activities });
 const r = rangeOf("today", now);
 const c = (m: Parameters<typeof st.count>[0], v: Parameters<typeof st.count>[1] = "all") => st.count(m, v, r.start, r.end);
 
@@ -65,9 +65,9 @@ eq("reply rate: first contacts in range who answered", st.replyRate("all", r.sta
     ev("m3", "creator", "out", t - 2 * H, { mailbox: "b@agency.com" }),
   ];
   const people = [rec("m1"), rec("m2"), rec("m3")];
-  const logs = build({ creators: people, brands: [], contacts: [], followups: [], events: two, leads: [], now });
+  const logs = build({ creators: people, brands: [], contacts: [], followups: [], events: two, now });
   const acts = [{ id: "x1", text: "m1 updated to negotiating", at: iso(t - 1 * H), entity_type: "creator", entity_id: "m1" }] as never[];
-  const base = { ...logs, creators: people, brands: [], contacts: [], campaigns: [], activities: acts, leads: [] };
+  const base = { ...logs, creators: people, brands: [], contacts: [], campaigns: [], activities: acts };
   const whole = makeStats(base), A = makeStats({ ...base, mailbox: "a@agency.com" }), B = makeStats({ ...base, mailbox: "b@agency.com" });
   const total = (x: typeof whole) => x.emailMix("all", r.start, r.end, r.horizon).total;
   eq("mailboxes, busiest first, case folded", mailboxesOf(logs.sent, logs.received), ["b@agency.com", "a@agency.com"]);
@@ -94,8 +94,8 @@ eq("reply rate: first contacts in range who answered", st.replyRate("all", r.sta
     ev("p5", "creator", "out", t - 5 * D),
     ev("p6", "creator", "out", t - 5 * D), ev("p6", "creator", "in", t - 5 * D + H, { reply_kind: "auto" }), ev("p6", "creator", "in", t - 1 * D),
   ];
-  const logs = build({ creators: who, brands: [], contacts: [], followups: [], events: mail, leads: [], now });
-  const S = makeStats({ ...logs, creators: who, brands: [], contacts: [], campaigns: [], activities: [], leads: [] });
+  const logs = build({ creators: who, brands: [], contacts: [], followups: [], events: mail, now });
+  const S = makeStats({ ...logs, creators: who, brands: [], contacts: [], campaigns: [], activities: [] });
   const from = t - 30 * D, to = t + H;
   eq("a long conversation is ONE reply; reactions and auto-replies are none", S.rows("replies", "all", from, to).map((x) => x.name).sort(), ["p1", "p3", "p6"]);
   eq("replies = people who replied", [S.count("replies", "all", from, to), S.repliers("all", from, to)], [3, 3]);

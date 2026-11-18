@@ -20,7 +20,6 @@ const HelpPage = lazy(() => import("./pages/PublicPages").then((module) => ({ de
 const DashboardPage = lazy(() => import("./pages/DashboardPage"));
 const MembersPage = lazy(() => import("./pages/MembersPage"));
 const ReportsPage = lazy(() => import("./pages/ReportsPage"));
-const LeadsPage = lazy(() => import("./pages/LeadsPage"));
 const InvoicesPage = lazy(() => import("./components/Money").then((m) => ({ default: m.InvoicesPage })));
 const PitchPage = lazy(() => import("./pages/PitchPage"));
 const MatchPage = lazy(() => import("./pages/MatchPage"));
@@ -98,7 +97,6 @@ export default function App() {
                   <Route path="campaigns" element={<CampaignsPage />} />
                   <Route path="calendar" element={<CalendarPage />} />
                   <Route path="reports" element={<ReportsPage />} />
-                  <Route path="leads" element={<LeadsPage />} />
                   <Route path="invoices" element={<InvoicesPage />} />
                   <Route path="pitch" element={<PitchPage />} />
                   <Route path="match" element={<MatchPage />} />
@@ -110,6 +108,7 @@ export default function App() {
                   <Route path="deleted" element={<DeletedPage />} />
                   <Route path="help" element={<HelpPage />} />
                   <Route path="hire" element={<Navigate to="/app" replace />} />
+                  <Route path="leads" element={<Navigate to="/app" replace />} />
                 </Route>
                 <Route path="*" element={<NotFound />} />
               </Routes>

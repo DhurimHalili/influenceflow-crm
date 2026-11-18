@@ -1,7 +1,6 @@
 import { FileBarChart, Send } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useData } from "../contexts/DataContext";
-import { useGmail } from "../contexts/GmailContext";
 import { useToast } from "../contexts/ToastContext";
 import { DEFAULT_FOLLOWUP_RULES } from "../lib/prefs";
 import { supabase } from "../lib/supabase";
@@ -33,7 +32,6 @@ export function useWeeklyStatus(open: boolean) {
 
 export function WeeklyReportDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const data = useData();
-  const { leads } = useGmail();
   const { toast } = useToast();
   const [which, setWhich] = useState<"last" | "this">(() => (new Date().getDay() === 0 || new Date().getDay() >= 5 ? "this" : "last"));
   const [sending, setSending] = useState(false);
@@ -52,9 +50,9 @@ export function WeeklyReportDialog({ open, onClose }: { open: boolean; onClose: 
   }, [open, prefs.weekly_backup, data.creators, data.brands, data.contacts, data.profile.rating_weights]);
   const mail = useMemo(() => {
     if (!open) return null;
-    const report = weeklyReport({ creators: data.creators.filter((c) => !c.archived_at), brands: data.brands.filter((b) => !b.archived_at), contacts: data.contacts, followups: data.followups, events: data.emailEvents || [], leads, activities: data.activities, campaigns: data.campaigns, goal: prefs.daily_email_goal || 50, rules: prefs.followup_rules || DEFAULT_FOLLOWUP_RULES, name: data.profile.display_name, timeZone: prefs.timezone || browserZone(), which, appUrl: `${window.location.origin}${window.location.pathname}` });
+    const report = weeklyReport({ creators: data.creators.filter((c) => !c.archived_at), brands: data.brands.filter((b) => !b.archived_at), contacts: data.contacts, followups: data.followups, events: data.emailEvents || [], activities: data.activities, campaigns: data.campaigns, goal: prefs.daily_email_goal || 50, rules: prefs.followup_rules || DEFAULT_FOLLOWUP_RULES, name: data.profile.display_name, timeZone: prefs.timezone || browserZone(), which, appUrl: `${window.location.origin}${window.location.pathname}` });
     return renderWeeklyEmail(report, { backup });
-  }, [backup, open, which, data.creators, data.brands, data.contacts, data.followups, data.emailEvents, leads, data.activities, data.campaigns, prefs, data.profile.display_name]);
+  }, [backup, open, which, data.creators, data.brands, data.contacts, data.followups, data.emailEvents, data.activities, data.campaigns, prefs, data.profile.display_name]);
 
   const sendNow = async () => {
     setSending(true);

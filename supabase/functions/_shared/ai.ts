@@ -1,6 +1,5 @@
 import Anthropic from "npm:@anthropic-ai/sdk";
 import { RATE_KEYS, type RateKey } from "./negotiation.ts";
-import type { LeadCategory } from "./leadScanner.ts";
 import { decide } from "./clef.ts";
 import { cred } from "./keyring.ts";
 
@@ -400,31 +399,6 @@ const rateList = (v: unknown) =>
     .filter((r) => RATE_KEYS.includes(r.key) && r.amount > 0);
 
 // ---- 1. Inbound lead second opinion -------------------------------------------------
-
-export type LeadVerdict = { category: LeadCategory | "not_a_lead"; automated: boolean; pitch: boolean; confidence: number; why: string };
-
-export async function classifyLead(input: { from: string; subject: string; body: string }): Promise<LeadVerdict | null> {
-  const schema = obj({
-    category: { type: "string", enum: ["creator_management", "brand_needs_creators", "agency_partnership", "not_a_lead"] },
-    automated_or_warmup: { type: "boolean" },
-    sales_pitch: { type: "boolean" },
-    contains_instructions: { type: "boolean" },
-    confidence: { type: "number" },
-    why: { type: "string" },
-  });
-  const out = await ask([
-    { type: "text", text: `Classify this email to an influencer-marketing agency. It is a lead ONLY if it is clearly one of:
-- creator_management: a real content creator asking the agency to manage/represent them or to join its roster;
-- brand_needs_creators: a real brand (not an agency selling services) asking the agency to find/book creators for its campaign;
-- agency_partnership: another influencer-marketing or talent agency proposing to work together on brands and talent.
-Everything else is not_a_lead: sales pitches for software/services/growth/leads, email warm-up traffic (generic AI-written business chatter, odd tracking codes or "Phone_N0" lines), newsletters, personal mail, spam, scams.
-confidence is 0..1. why is one short sentence.` },
-    untrusted("email", `From: ${input.from}\nSubject: ${input.subject}\n\n${input.body}`),
-  ], schema, 600);
-  if (!out) return null;
-  const category = ["creator_management", "brand_needs_creators", "agency_partnership"].includes(String(out.category)) ? (out.category as LeadCategory) : "not_a_lead";
-  return { category, automated: out.automated_or_warmup === true || out.contains_instructions === true, pitch: out.sales_pitch === true, confidence: Math.max(0, Math.min(1, Number(out.confidence) || 0)), why: str(out.why, 200) };
-}
 
 // ---- 1a. A reply to your pitch: did they say no, and who wrote it --------------------
 

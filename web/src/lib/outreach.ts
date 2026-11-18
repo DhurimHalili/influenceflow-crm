@@ -1,4 +1,4 @@
-import type { Brand, BrandContact, Creator, EmailEvent, Followup, InboundLead } from "../types";
+import type { Brand, BrandContact, Creator, EmailEvent, Followup } from "../types";
 import { timeline, type Touch } from "./followupEngine.ts";
 import { parseDay } from "./days.ts";
 
@@ -22,10 +22,9 @@ import { parseDay } from "./days.ts";
 // Out-of-office mail, emoji reactions and their management's automatic no
 // are not replies at all; someone who wrote to you first didn't "reply".
 // Emails waiting in Gmail's Scheduled folder are kept apart until their send
-// time passes. Your answers to people who emailed you first (inbound leads
-// not in the CRM yet) are emails too.
+// time passes.
 
-/** Who it was with: an influencer or the brand side (a brand, its people, a brand lead). */
+/** Who it was with: an influencer or the brand side (a brand and its people). */
 export type Segment = "creator" | "brand";
 
 export type Sent = {
@@ -36,7 +35,7 @@ export type Sent = {
   role: "first" | "followup" | "newthread" | "answer";
   scheduled: boolean;
   entityId: string;
-  entityType: "creator" | "brand" | "contact" | "lead";
+  entityType: "creator" | "brand" | "contact";
   segment: Segment;
   /** The CRM record it belongs to (a brand's person → the brand). */
   recordId: string;
@@ -55,9 +54,8 @@ export type Received = { key: string; at: string; entityId: string; segment: Seg
   /** The reply: this person's first real answer to your outreach. Everything after it is conversation. */
   first: boolean };
 
-type Input = { creators: Creator[]; brands: Brand[]; contacts?: BrandContact[]; followups: Followup[]; events: EmailEvent[]; leads?: InboundLead[]; now?: Date };
+type Input = { creators: Creator[]; brands: Brand[]; contacts?: BrandContact[]; followups: Followup[]; events: EmailEvent[]; now?: Date };
 
-const leadSegment = (lead: InboundLead): Segment => (lead.kind === "creator" ? "creator" : "brand");
 
 export function outreachLog(input: Input): Sent[] {
   return build(input).sent;
@@ -69,7 +67,7 @@ export function repliesLog(input: Input): Received[] {
 }
 
 /** Both logs in one pass. */
-export function build({ creators, brands, contacts = [], followups, events, leads = [], now = new Date() }: Input): { sent: Sent[]; received: Received[] } {
+export function build({ creators, brands, contacts = [], followups, events, now = new Date() }: Input): { sent: Sent[]; received: Received[] } {
   const mail = new Map<string, EmailEvent[]>();
   for (const e of events) mail.set(e.entity_id, [...(mail.get(e.entity_id) || []), e]);
   const logged = new Map<string, Followup[]>();
@@ -134,15 +132,6 @@ export function build({ creators, brands, contacts = [], followups, events, lead
     const day = parseDay(c.date_contacted);
     if (!day || c.pipeline_status === "new" || outDays.get(c.brand_id)?.has(day.toDateString())) continue;
     sent.push({ key: `contact:${c.id}`, at: day.toISOString(), kind: "email", role: "first", scheduled: false, entityId: c.id, entityType: "contact", segment: "brand", recordId: c.brand_id, mailbox: "", channel: "email" });
-  }
-  // Your answers to inbound leads (once they're added, the same Gmail message is already counted above).
-  for (const lead of leads) {
-    for (const r of lead.my_replies || []) {
-      const key = `g-${r.id}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      sent.push({ key, at: r.at, kind: "email", role: "answer", scheduled: waiting(r), entityId: lead.id, entityType: "lead", segment: leadSegment(lead), recordId: lead.id, mailbox: lead.mailbox, channel: "email" });
-    }
   }
   return { sent: sent.sort((a, b) => a.at.localeCompare(b.at)), received: received.sort((a, b) => a.at.localeCompare(b.at)) };
 }

@@ -77,11 +77,10 @@ const record = (extra: Record<string, unknown> = {}) => ({ type: "creator" as co
   const events = [ev("out", "2026-11-04T09:00:00"), ev("out", "2026-11-04T10:00:00"), ev("in", "2026-11-04T11:00:00"), ev("out", "2026-11-04T12:00:00")];
   const dm: Followup = { id: "f3", user_id: "u", creator_id: "c1", brand_id: null, kind: "followup", channel: "dm", note: "", at: "2026-11-04T13:00:00" };
   const creator = { id: "c1", name: "W", pipeline_status: "replied", date_contacted: "2026-11-04", archived_at: null } as never;
-  const lead = { id: "l1", mailbox: "a@b.com", my_replies: [{ id: "x1", at: "2026-11-04T14:00:00" }] } as never;
-  const log = outreachLog({ creators: [creator], brands: [], followups: [dm], events, leads: [lead] });
+  const log = outreachLog({ creators: [creator], brands: [], followups: [dm], events });
   const s = new Date("2026-11-04T00:00:00").getTime();
   const e = s + 86400000;
-  check("emails sent counts every email incl. follow-ups and lead answers", emailsIn(log, s, e), 4);
+  check("emails sent counts every email incl. follow-ups", emailsIn(log, s, e), 3);
   check("follow-ups counts only chasers (email + DM)", sentIn(log, s, e, "followup"), 2);
 }
 

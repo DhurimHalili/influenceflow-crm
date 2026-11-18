@@ -37,7 +37,7 @@ const events = [
   ev("c10", "out", at(6, 11)),
   ev("c11", "out", at(-2, 11)), // the week before: not counted
 ];
-const base = { creators, brands: [], contacts: [], followups: [], events, leads: [], activities: [], campaigns: [], goal: 5, rules: DEFAULT_FOLLOWUP_RULES, name: "Dhurim Halili", timeZone: BEL, now, appUrl: "https://example.com/crm" };
+const base = { creators, brands: [], contacts: [], followups: [], events, activities: [], campaigns: [], goal: 5, rules: DEFAULT_FOLLOWUP_RULES, name: "Dhurim Halili", timeZone: BEL, now, appUrl: "https://example.com/crm" };
 const r = weeklyReport({ ...base, which: "last" });
 eq("range", r.range, "Oct 26 – Nov 1, 2026");
 eq("sent per day (Mon..Sun)", r.days.map((d) => d.sent), [5, 3, 0, 2, 1, 0, 1]);

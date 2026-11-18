@@ -194,7 +194,7 @@ export function renderWeeklyEmail(r: WeeklyReport, opts: { backup?: BackupNote |
 
   ${section("From hello to deal", `<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>${funnelRow}</tr></table>`)}
 
-  ${section("What your emails were", `${mixBar}<div>${mixLegend}</div>${r.emails.otherFollowups ? `<div style="font:500 11px/1.5 ${FONT};color:#9a96ab;margin-top:6px">+ ${r.emails.otherFollowups} follow-up${r.emails.otherFollowups === 1 ? "" : "s"} on DMs, WhatsApp or calls.</div>` : ""}`, `Influencers ${num(r.segments.creator)} · Brands ${num(r.segments.brand)}${r.leads.received ? ` · ${r.leads.received} inbound lead${r.leads.received === 1 ? "" : "s"} (${r.leads.answered} answered)` : ""}`)}
+  ${section("What your emails were", `${mixBar}<div>${mixLegend}</div>${r.emails.otherFollowups ? `<div style="font:500 11px/1.5 ${FONT};color:#9a96ab;margin-top:6px">+ ${r.emails.otherFollowups} follow-up${r.emails.otherFollowups === 1 ? "" : "s"} on DMs, WhatsApp or calls.</div>` : ""}`, `Influencers ${num(r.segments.creator)} · Brands ${num(r.segments.brand)}`)}
 
   ${r.mailboxes.length ? section(r.mailboxes.length > 1 ? "Which mailbox did what" : "Your mailbox", r.mailboxes.map((m) => mailboxCard(m, r.mailboxes.reduce((a, x) => a + x.emails.now, 0))).join("") + `<div style="font:500 11px/1.5 ${FONT};color:#9a96ab;margin-top:2px">Emails count for the mailbox that sent them, replies for the one they came into; negotiations and deals for the mailbox that first emailed that person or brand.</div>`, r.mailboxNote ? esc(r.mailboxNote) : "") : ""}
 

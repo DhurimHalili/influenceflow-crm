@@ -18,15 +18,14 @@ function useMinute() {
 /** Everything you sent and every reply you got, counted once — see lib/outreach. */
 export function useOutreachLogs() {
   const data = useData();
-  const { leads } = useGmail();
   const minute = useMinute();
   const queued = useAutopilotRows();
   return useMemo(() => {
-    const logs = build({ creators: data.creators, brands: data.brands, contacts: data.contacts, followups: data.followups, events: data.emailEvents || [], leads, now: new Date(minute * 60000) });
+    const logs = build({ creators: data.creators, brands: data.brands, contacts: data.contacts, followups: data.followups, events: data.emailEvents || [], now: new Date(minute * 60000) });
     // Autopilot's sends count everywhere a total of emails is shown (only for influencers still in your list).
     const live = new Set(data.creators.filter((c) => !c.archived_at).map((c) => c.id));
     return { ...logs, sent: withAutopilot(logs.sent, queued.filter((q) => live.has(q.creator_id)), data.emailEvents || []) };
-  }, [data.creators, data.brands, data.contacts, data.followups, data.emailEvents, leads, minute, queued]);
+  }, [data.creators, data.brands, data.contacts, data.followups, data.emailEvents, minute, queued]);
 }
 
 /** Everything you sent (and have scheduled), counted once. */
