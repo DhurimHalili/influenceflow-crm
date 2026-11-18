@@ -222,7 +222,19 @@ async function gmail<T>(token: string, path: string, init?: RequestInit, attempt
 
 // ----- matching --------------------------------------------------------------
 
-async function addressBook(admin: Admin, userId: string, own: Set<string>) {
+// The address book is read on every sync, push and mailbox read; kept 90 s per member (data transfer). A contact
+// you just added is matched at most 90 s later. Links learned during a run are added to the same map, so it stays true.
+const bookCache = new Map<string, { at: number; book: Promise<Map<string, Entity[]>> }>();
+function addressBook(admin: Admin, userId: string, own: Set<string>, fresh = false) {
+  const key = `${userId}|${[...own].sort().join(",")}`;
+  const hit = bookCache.get(key);
+  if (!fresh && hit && Date.now() - hit.at < 90_000) return hit.book;
+  const book = loadAddressBook(admin, userId, own);
+  bookCache.set(key, { at: Date.now(), book });
+  book.catch(() => bookCache.delete(key));
+  return book;
+}
+async function loadAddressBook(admin: Admin, userId: string, own: Set<string>) {
   const [creators, brands, contacts] = await Promise.all([
     admin.from("creators").select("id, name, contact_email, secondary_email, team").eq("user_id", userId).is("archived_at", null),
     admin.from("brands").select("id, name, contact_email, secondary_email").eq("user_id", userId).is("archived_at", null),
@@ -1728,7 +1740,7 @@ async function send(admin: Admin, rows: TokenRow[], input: Record<string, unknow
   await admin.from("gmail_tokens").update({ send_day: today, send_count: sentToday + 1 }).eq("id", row.id);
   // Record it right away so the CRM updates without waiting for the next sync.
   const own = new Set(rows.map(mailboxOf).filter(Boolean));
-  const book = await addressBook(admin, row.user_id, own);
+  const book = await addressBook(admin, row.user_id, own, true);
   const meta = await gmail<Meta>(token, META_PATH(sent.id)).catch(() => null);
   const events = meta ? await matchAll(admin, row.user_id, [{ ...meta, labelIds: Array.from(new Set([...(meta.labelIds || []), "SENT"])) }], book, own, mailboxOf(row)) : [];
   if (events.length) await storeEvents(admin, events).catch(() => undefined);
@@ -1739,7 +1751,7 @@ async function send(admin: Admin, rows: TokenRow[], input: Record<string, unknow
 /** A message the CRM just sent, tracked at once (like send() does) so counts and statuses update without waiting for a sync. */
 async function recordSent(admin: Admin, row: TokenRow, rows: TokenRow[], gmailId: string) {
   const own = new Set(rows.map(mailboxOf).filter(Boolean));
-  const book = await addressBook(admin, row.user_id, own);
+  const book = await addressBook(admin, row.user_id, own, true);
   const token = await accessToken(admin, row);
   const meta = await gmail<Meta>(token, META_PATH(gmailId)).catch(() => null);
   const events = meta ? await matchAll(admin, row.user_id, [{ ...meta, labelIds: Array.from(new Set([...(meta.labelIds || []), "SENT"])) }], book, own, mailboxOf(row)) : [];
