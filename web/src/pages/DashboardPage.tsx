@@ -14,7 +14,6 @@ import { OutreachBoard } from "../components/OutreachBoard";
 import { TeamBoard } from "../components/Team";
 import { computePayout, profitOf } from "../lib/deal";
 import { flagFor } from "../lib/followupEngine";
-import { leadName, leadWaitingHours } from "../hooks/useLeadActions";
 import { currencySymbol, dateLabel, daysAgoLabel, daysSince, dueLabel, isOverdue, isPastDay, isTodayDay, money, relativeTime, timeLabel } from "../lib/utils";
 import { ENTITY_STATUSES, STATUS_LABELS } from "../types";
 
@@ -23,7 +22,7 @@ const NUDGES = [
   "Five emails today beat fifty next week.",
   "Check your yellow flags first — they're the replies you'd otherwise miss.",
   "Every roster creator started as a cold email. Send one more.",
-  "Reply to inbound leads while they're warm — speed wins deals.",
+  "When someone writes to you first, answer while they're warm — speed wins deals.",
   "A no today is often a yes next quarter. Log it, move on.",
   "Pitch the creator you'd be proud to sign.",
   "Small daily outreach compounds into a full roster.",
@@ -80,7 +79,6 @@ export default function DashboardPage() {
   const data = useData();
   const navigate = useNavigate();
   const chase = useChase();
-  const gmail = useGmail();
   const creators = data.creators.filter((item) => !item.archived_at);
   const brands = data.brands.filter((item) => !item.archived_at);
   const campaigns = data.campaigns.filter((item) => !item.archived_at);
@@ -143,12 +141,6 @@ export default function DashboardPage() {
       .filter((item) => item.pipeline_status === "inbound")
       .sort((a, b) => (a.date_contacted || a.status_updated_at || "").localeCompare(b.date_contacted || b.status_updated_at || ""))
       .forEach((item) => { const waited = daysSince(item.date_contacted || item.status_updated_at) || 0; push({ id: `in-${item.id}`, type: `Inbound ${item.kind.toLowerCase()} · ${waited ? `waiting ${daysAgoLabel(item.date_contacted || item.status_updated_at).replace(" ago", "")}` : "came in today"}`, title: item.name, detail: item.next_action || "Reached out to you — reply while they're warm", to: item.to, urgent: waited >= 1, rank: 0 }); });
-    // New people who emailed you first (spotted by the Gmail scanner).
-    // Waiting a day or more on your answer: its own, louder line.
-    const stale = gmail.leads.filter((l) => leadWaitingHours(l) >= 24).sort((a, b) => a.last_at.localeCompare(b.last_at));
-    if (stale.length) push({ id: "leads-waiting", type: `Gmail · waiting on your answer · ${Math.round(leadWaitingHours(stale[0]) / 24)}+ day${Math.round(leadWaitingHours(stale[0]) / 24) === 1 ? "" : "s"}`, title: stale.length === 1 ? leadName(stale[0]) : `${stale.length} inbound leads haven't heard back`, detail: `${stale.slice(0, 3).map((l) => l.company || leadName(l)).join(", ")} — answer in Gmail: a yes adds them, a no dismisses them`, to: "/app/leads", urgent: true, rank: 0 });
-    const freshLeads = gmail.leads.filter((l) => l.status === "new" && !stale.includes(l));
-    if (freshLeads.length) push({ id: "leads", type: `Gmail · ${freshLeads.length === 1 ? `new inbound ${freshLeads[0].kind === "creator" ? "creator" : "brand"}` : "new inbound leads"} · ${relativeTime(freshLeads[0].last_at)}`, title: freshLeads.length === 1 ? freshLeads[0].name || freshLeads[0].company || freshLeads[0].email : `${freshLeads.length} people emailed you first`, detail: freshLeads.length === 1 ? `“${freshLeads[0].subject || "(no subject)"}” — review and add to your CRM` : freshLeads.slice(0, 3).map((l) => l.company || l.name || l.email).join(", ") + " — review and add them", to: "/app/leads", urgent: true, rank: 0 });
     campaigns.filter((item) => item.status === "active" && isOverdue(item.due_date)).forEach((item) => push({ id: item.id, type: "Campaign overdue", title: item.name, detail: `Was due ${dateLabel(item.due_date)}`, to: `/app/campaigns?id=${item.id}`, urgent: true, rank: 0 }));
     const actionables = [
       ...creators.map((c) => ({ ...c, kind: "Influencer", to: `/app/influencers/${c.id}` })),

@@ -1,4 +1,4 @@
-import type { Activity, Brand, BrandContact, Campaign, Creator, InboundLead } from "../types";
+import type { Activity, Brand, BrandContact, Campaign, Creator } from "../types";
 import type { Received, Segment, Sent } from "./outreach.ts";
 
 // The numbers on the dashboard — one module, so every tile, chart and list
@@ -11,7 +11,7 @@ import type { Received, Segment, Sent } from "./outreach.ts";
 // Ranges are local calendar days. "Today" is compared with all of yesterday,
 // a week with the whole week before; "All time" has nothing to compare with.
 // A segment narrows everything to influencers or to the brand side (brands,
-// their people, brand leads); "all" is both.
+// their people); "all" is both.
 
 export type RangeKey = "today" | "yesterday" | "week" | "lastweek" | "30" | "90" | "all";
 export type View = "all" | Segment;
@@ -51,7 +51,6 @@ export type DashInput = {
   contacts: BrandContact[];
   campaigns: Campaign[];
   activities: Activity[];
-  leads: InboundLead[];
   /** Only what one mailbox did (lowercase address); empty = every mailbox. */
   mailbox?: string;
 };
@@ -91,7 +90,6 @@ function scopeTo(input: DashInput): DashInput {
     brands: input.brands.filter((b) => mine(b.id)),
     contacts: input.contacts.filter((c) => mine(c.brand_id)),
     campaigns: input.campaigns.filter((c) => mine(c.brand_id)),
-    leads: input.leads.filter((l) => (l.mailbox || "").toLowerCase() === box),
   };
 }
 
@@ -124,7 +122,6 @@ export function makeStats(all: DashInput) {
   const creatorById = new Map(all.creators.map((c) => [c.id, c]));
   const brandById = new Map(all.brands.map((b) => [b.id, b]));
   const contactById = new Map(all.contacts.map((c) => [c.id, c]));
-  const leadById = new Map(all.leads.map((l) => [l.id, l]));
   const campaignById = new Map(all.campaigns.map((c) => [c.id, c]));
   const input = scopeTo(all);
   const counted = new Set(input.creators.map((c) => c.id));
@@ -135,10 +132,6 @@ export function makeStats(all: DashInput) {
       const c = contactById.get(s.entityId);
       const b = c ? brandById.get(c.brand_id) : undefined;
       return { name: [`${c?.first_name || ""} ${c?.last_name || ""}`.trim(), b?.name].filter(Boolean).join(" · ") || "Brand contact", to: b ? `/app/brands/${b.id}` : "/app/brands" };
-    }
-    if (s.entityType === "lead") {
-      const l = leadById.get(s.entityId);
-      return { name: l ? l.name || l.company || l.email : "Inbound lead", to: "/app/leads" };
     }
     if (s.segment === "creator") return { name: creatorById.get(s.entityId)?.name || "Influencer (deleted)", to: `/app/influencers/${s.entityId}` };
     return { name: brandById.get(s.entityId)?.name || "Brand (deleted)", to: `/app/brands/${s.entityId}` };
@@ -244,7 +237,7 @@ export function makeStats(all: DashInput) {
    */
   function replyRate(view: View, s: number, e: number) {
     const opened = new Map<string, string>();
-    for (const x of input.sent) if (x.role === "first" && !x.scheduled && matches(view, x.segment) && within(x.at, s, e) && x.entityType !== "lead") opened.set(x.recordId, x.at);
+    for (const x of input.sent) if (x.role === "first" && !x.scheduled && matches(view, x.segment) && within(x.at, s, e)) opened.set(x.recordId, x.at);
     const answered = new Set<string>();
     const declined = new Set<string>();
     for (const r of input.received) {

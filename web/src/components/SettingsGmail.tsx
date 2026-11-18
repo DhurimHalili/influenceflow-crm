@@ -82,7 +82,7 @@ export function GmailSettings() {
     setBusy("");
     toast(res.ok ? res.message || "Gmail synced" : res.message || "Sync failed", res.ok ? (res.message ? "info" : "success") : "error");
   };
-  const stats = mailboxStats(data.emailEvents || [], gmail.leads, gmail.mailboxes.map((m) => m.email), range === "30" ? 30 : null);
+  const stats = mailboxStats(data.emailEvents || [], gmail.mailboxes.map((m) => m.email), range === "30" ? 30 : null);
   const statFor = (email: string) => stats.find((s) => s.mailbox === email);
   const top = stats.length > 1 && stats[0].sent > 0 ? stats[0].mailbox : "";
 
@@ -92,7 +92,7 @@ export function GmailSettings() {
         <div className="mbx-head"><span>{gmail.mailboxes.length} mailbox{gmail.mailboxes.length === 1 ? "" : "es"} connected</span><div className="mbx-head-actions"><Tabs active={range} onChange={(v) => setRange(v as "30" | "all")} tabs={[{ value: "30", label: "30 days" }, { value: "all", label: "All time" }]} /><Button size="sm" variant="secondary" onClick={() => void sync()} loading={busy === "sync" || gmail.syncing}><RefreshCcw size={14} /> Sync now</Button></div></div>
         <div className="mbx-list">{gmail.mailboxes.map((m) => { const st = statFor(m.email); return <article className={`mbx-card${m.error ? " has-error" : ""}`} key={m.id}>
           <div className="mbx-id"><span className={`gmail-dot ${m.error ? "bad" : "ok"}`} /><div><strong>{m.email}{top === m.email && <em className="mbx-top" title="Sends the most in this range"><Trophy size={11} /> Top sender</em>}</strong><small>{m.lastSyncAt ? `Synced ${relativeTime(m.lastSyncAt)}` : "First sync in progress…"}{m.canSend ? " · can send" : " · read only"}{m.canModify ? " · can cancel scheduled sends" : " · reconnect to let the CRM cancel scheduled sends"}{m.sentToday ? ` · ${m.sentToday} sent from the CRM today` : ""}</small></div><Button size="sm" variant="ghost" onClick={() => void disconnect(m.id, m.email)} loading={busy === `off:${m.id}`} aria-label={`Disconnect ${m.email}`}><Unplug size={14} /> <span className="hide-sm">Disconnect</span></Button></div>
-          <div className="mbx-stats"><div><b>{st?.sent ?? 0}</b><span>Sent</span></div><div><b>{st?.reached ?? 0}</b><span>Reached</span></div><div><b>{st?.reached ? `${st.replyRate}%` : "—"}</b><span>Reply rate</span></div><div><b>{st?.received ?? 0}</b><span>Received</span></div><div><b>{st?.leads ?? 0}</b><span>Leads</span></div><div className="mbx-spark-cell"><Spark values={st?.daily || []} /><span>Sent per day</span></div></div>
+          <div className="mbx-stats"><div><b>{st?.sent ?? 0}</b><span>Sent</span></div><div><b>{st?.reached ?? 0}</b><span>Reached</span></div><div><b>{st?.reached ? `${st.replyRate}%` : "—"}</b><span>Reply rate</span></div><div><b>{st?.received ?? 0}</b><span>Received</span></div><div className="mbx-spark-cell"><Spark values={st?.daily || []} /><span>Sent per day</span></div></div>
           {m.error && <div className="gmail-error"><AlertTriangle size={14} /><span>{m.error}</span>{/reconnect|expired|granted|allowed/i.test(m.error) && <Button size="sm" onClick={() => void connect(m.email)} loading={busy === `re:${m.email}`}>Reconnect</Button>}</div>}
           {!m.canRead && !m.error && <div className="gmail-error"><AlertTriangle size={14} /><span>Reading email wasn't allowed, so replies can't be tracked.</span><Button size="sm" onClick={() => void connect(m.email)}>Reconnect</Button></div>}
         </article>; })}</div>
@@ -110,7 +110,7 @@ export function GmailSettings() {
         {!gmail.configured && gmail.loaded && <p className="field-hint">If connecting fails, Gmail isn't set up on the server yet — see the README “Gmail sync” section.</p>}
       </div>}
     {gmail.loaded && <AiStatus />}
-    <p className="privacy-note gmail-privacy"><ShieldCheck size={15} /><span><strong>What InfluenceFlow keeps:</strong> for people in your CRM — who, when, the subject and Gmail's short preview, plus PDF/image attachments influencers send (media kits, rate cards, stats) in your private file storage. For possible new leads — the same metadata, only for messages that pass the strict scanner. Message bodies are read in memory to understand them and are never stored; the rest of your inbox is never stored. Google tokens are encrypted, never reach your browser, and access can be removed any time here or in your Google Account.</span></p>
+    <p className="privacy-note gmail-privacy"><ShieldCheck size={15} /><span><strong>What InfluenceFlow keeps:</strong> for people in your CRM — who, when, the subject and Gmail's short preview, plus PDF/image attachments influencers send (media kits, rate cards, stats) in your private file storage. Message bodies are read in memory to understand them and are never stored; the rest of your inbox is never stored. Google tokens are encrypted, never reach your browser, and access can be removed any time here or in your Google Account.</span></p>
   </div></section>;
 }
 

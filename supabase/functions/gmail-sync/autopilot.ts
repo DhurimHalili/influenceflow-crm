@@ -282,8 +282,7 @@ export async function insertQueue(admin: Admin, userId: string, tz: string, rows
 
 /**
  * Today's outreach on your clock, the way the coach counts it: every email you
- * sent (one per message), follow-ups you logged by hand, answers to inbound
- * leads, first contacts stamped today — plus what Gmail still holds to send
+ * sent (one per message), follow-ups you logged by hand, first contacts stamped today — plus what Gmail still holds to send
  * before midnight. Only today's rows are read.
  */
 export async function doneToday(admin: Admin, userId: string, tz: string, now: number) {
@@ -303,9 +302,6 @@ export async function doneToday(admin: Admin, userId: string, tz: string, now: n
     const same = (mailAt.get(f.creator_id || f.brand_id || "") || []).some((m) => Math.abs(m - t) < 6 * 3600_000);
     if ((f.channel && f.channel !== "email") || !same) manual++;
   }
-  const { data: leads } = await admin.from("inbound_leads").select("my_replies").eq("user_id", userId).gte("last_at", iso(start - 86400000)).limit(500);
-  let answers = 0;
-  for (const l of (leads || []) as { my_replies: { id?: string; at?: string }[] | null }[]) for (const r of l.my_replies || []) { const t = new Date(r.at || "").getTime(); if (t >= start && t <= now && !sent.has(String(r.id || ""))) answers++; }
   const day = dayKeyIn(tz, now);
   let stamps = 0;
   for (const table of ["creators", "brands"] as const) {
@@ -318,7 +314,7 @@ export async function doneToday(admin: Admin, userId: string, tz: string, now: n
       stamps += part.filter((id) => !touched.has(id)).length;
     }
   }
-  return { done: sent.size + manual + answers + stamps, later: later.size, ids: new Set([...sent, ...later]) };
+  return { done: sent.size + manual + stamps, later: later.size, ids: new Set([...sent, ...later]) };
 }
 
 /**

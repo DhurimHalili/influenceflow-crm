@@ -54,13 +54,12 @@ const followup = (r: Row) => ({ id: text(r.id), user_id: text(r.user_id), creato
 type Prefs = { weekly_report?: string; weekly_backup?: boolean; timezone?: string; daily_email_goal?: number; followup_rules?: Record<string, unknown> };
 
 async function reportFor(admin: SupabaseClient, userId: string, which: "last" | "this", now = new Date()) {
-  const [{ data: profile }, creators, brands, contacts, campaigns, activities, followups, events, leads] = await Promise.all([
+  const [{ data: profile }, creators, brands, contacts, campaigns, activities, followups, events] = await Promise.all([
     admin.from("profiles").select("display_name, preferences, rating_weights").eq("id", userId).maybeSingle(),
     all(admin, "creators", userId), all(admin, "brands", userId), all(admin, "brand_contacts", userId), all(admin, "campaigns", userId),
     all(admin, "activities", userId, { order: "at", max: 3000, columns: "id, text, at, entity_type, entity_id" }),
     all(admin, "followups", userId, { order: "at", max: 5000 }),
     all(admin, "email_events", userId, { order: "at", max: 6000 }),
-    all(admin, "inbound_leads", userId, { order: "last_at", max: 300, columns: "id, name, company, email, kind, status, first_at, last_at, my_replies, replied_at" }),
   ]);
   const prefs = ((profile?.preferences || {}) as Prefs);
   const rules = prefs.followup_rules && typeof prefs.followup_rules === "object" ? prefs.followup_rules : {};
@@ -73,7 +72,6 @@ async function reportFor(admin: SupabaseClient, userId: string, which: "last" | 
     activities: activities.map((a) => ({ ...a, text: text(a.text) })) as never[],
     followups: followups.map(followup) as never[],
     events: events.filter((e) => !e.bounced_at).map(event) as never[],
-    leads: leads.map((l) => ({ ...l, my_replies: Array.isArray(l.my_replies) ? l.my_replies : [] })) as never[],
     goal,
     rules: {
       gaps: Array.isArray(rules.gaps) ? rules.gaps.map(Number) : [1, 1, 1], then: Number(rules.then) || 2, stop_after: Number(rules.stop_after) || 0,

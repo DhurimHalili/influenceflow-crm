@@ -17,11 +17,9 @@ import { useAuth } from "../contexts/AuthContext";
 import { useAccess } from "../contexts/AccessContext";
 import { supabase } from "../lib/supabase";
 import { useData } from "../contexts/DataContext";
-import { useGmail } from "../contexts/GmailContext";
 import { useToast } from "../contexts/ToastContext";
 import { Avatar, Button, Logo, LogoMark, Modal } from "./ui";
 import { useChase } from "../hooks/useChase";
-import { useLeadActions } from "../hooks/useLeadActions";
 import { CoachLayer, CoachRing } from "./Coach";
 import { DayBriefLayer } from "./DayBrief";
 import { KeysNoticeLayer } from "./KeysNotice";
@@ -50,7 +48,6 @@ const navSections = [
     { to: "/app/autopilot", label: "Autopilot", icon: PlaneTakeoff },
     { to: "/app/brands", label: "Brands", icon: Building2 },
     { to: "/app/match", label: "Match", icon: Handshake },
-    { to: "/app/leads", label: "Inbound leads", icon: Inbox },
     { to: "/app/campaigns", label: "Campaigns", icon: BarChart3 },
     { to: "/app/invoices", label: "Invoices", icon: Receipt },
     { to: "/app/calendar", label: "Calendar", icon: CalendarDays },
@@ -117,8 +114,6 @@ function Shell() {
   // The weekly report counts days in your time zone: remember it once the workspace is loaded.
   const zoneMissing = data.cloudLive && !data.profile.preferences.timezone;
   useEffect(() => { if (zoneMissing) data.updateProfile({ preferences: { ...data.profile.preferences, timezone: browserZone() } }); }, [zoneMissing]); // eslint-disable-line react-hooks/exhaustive-deps
-  const gmail = useGmail();
-  const newLeads = gmail.leads.filter((l) => l.status === "new").length;
   const invoicesDue = useInvoicesToChase().length;
   const { toast } = useToast();
   const navigate = useNavigate();
@@ -159,25 +154,6 @@ function Shell() {
     setOnboardingStep(0);
     setOnboardingOpen(true);
   }, [setupKnown, setupDone]);
-  // You said yes to an inbound lead in Gmail ("sure", "send your media kit"):
-  // add them for you, once, on whichever tab or device sees it first.
-  const leadActions = useLeadActions();
-  const autoAdding = useRef(new Set<string>());
-  useEffect(() => {
-    if (!data.cloudLive) return;
-    for (const lead of gmail.leads) {
-      if (lead.status !== "new" || lead.my_intent !== "yes" || autoAdding.current.has(lead.id)) continue;
-      autoAdding.current.add(lead.id);
-      void (async () => {
-        if (!(await leadActions.claim(lead.id))) return;
-        const match = leadActions.existing(lead.email);
-        const type = match?.type || leadActions.primaryType(lead);
-        const record = match || leadActions.create(lead, type, lead.kind === "agency", true);
-        await leadActions.resolve(lead.id, { status: "added", entity_type: type, entity_id: record.id });
-        toast(`${record.name} added to your ${type === "creator" ? "influencers" : "brands"} — you said yes in Gmail`);
-      })();
-    }
-  }, [gmail.leads, data.cloudLive, leadActions, toast]);
   // Loss-reason picker: opens automatically only when a live deal just died.
   const lossIds = data.pendingLoss.map((l) => `${l.kind}:${l.id}`).join(",");
   const [lossReason, setLossReason] = useState("");
@@ -355,7 +331,7 @@ function Shell() {
       <div className="sidebar-top"><Logo /><button className="mobile-close" onClick={() => setMobileOpen(false)}><X size={19} /></button></div>
       <nav className="side-nav">
         {navSections.map((section) => (
-          <div className="nav-section" key={section.label}><span className="nav-label">{section.label}</span>{section.items.filter((item) => !("owner" in item) || isOwner).map((item) => <NavLink key={item.to} to={item.to} end={"end" in item ? item.end : false} className={({ isActive }) => isActive ? "active" : ""}><item.icon size={17} strokeWidth={1.8} /><span>{item.label}</span>{item.label === "Autopilot" && <AutopilotCount />}{item.label === "Calendar" && dueToday > 0 && <b className="nav-due" title={`${dueToday} due today or overdue`}>{dueToday}</b>}{(item.label === "Influencers" || item.label === "Brands") && (() => { const kind = item.label === "Influencers" ? "creator" : "brand"; const n = chase.due.filter((c) => c.type === kind).length + chase.reply.filter((c) => c.type === kind).length; return n > 0 ? <b className="nav-due nav-follow" title={`${n} need a follow-up or a reply`}>{n}</b> : null; })()}{item.label === "Invoices" && invoicesDue > 0 && <b className="nav-due" title={`${invoicesDue} invoice${invoicesDue === 1 ? "" : "s"} to chase today`}>{invoicesDue}</b>}{item.label === "Inbound leads" && newLeads > 0 && <b className="nav-due nav-leads" title={`${newLeads} new inbound lead${newLeads === 1 ? "" : "s"} to review`}>{newLeads}</b>}{item.label === "Members" && waitingMembers > 0 && <b className="nav-due nav-leads" title={`${waitingMembers} ${waitingMembers === 1 ? "person is" : "people are"} waiting for your approval`}>{waitingMembers}</b>}{item.label === "Archive" && <b>{data.creators.filter((x) => x.archived_at).length + data.brands.filter((x) => x.archived_at).length + data.campaigns.filter((x) => x.archived_at).length || ""}</b>}</NavLink>)}</div>
+          <div className="nav-section" key={section.label}><span className="nav-label">{section.label}</span>{section.items.filter((item) => !("owner" in item) || isOwner).map((item) => <NavLink key={item.to} to={item.to} end={"end" in item ? item.end : false} className={({ isActive }) => isActive ? "active" : ""}><item.icon size={17} strokeWidth={1.8} /><span>{item.label}</span>{item.label === "Autopilot" && <AutopilotCount />}{item.label === "Calendar" && dueToday > 0 && <b className="nav-due" title={`${dueToday} due today or overdue`}>{dueToday}</b>}{(item.label === "Influencers" || item.label === "Brands") && (() => { const kind = item.label === "Influencers" ? "creator" : "brand"; const n = chase.due.filter((c) => c.type === kind).length + chase.reply.filter((c) => c.type === kind).length; return n > 0 ? <b className="nav-due nav-follow" title={`${n} need a follow-up or a reply`}>{n}</b> : null; })()}{item.label === "Invoices" && invoicesDue > 0 && <b className="nav-due" title={`${invoicesDue} invoice${invoicesDue === 1 ? "" : "s"} to chase today`}>{invoicesDue}</b>}{item.label === "Members" && waitingMembers > 0 && <b className="nav-due nav-leads" title={`${waitingMembers} ${waitingMembers === 1 ? "person is" : "people are"} waiting for your approval`}>{waitingMembers}</b>}{item.label === "Archive" && <b>{data.creators.filter((x) => x.archived_at).length + data.brands.filter((x) => x.archived_at).length + data.campaigns.filter((x) => x.archived_at).length || ""}</b>}</NavLink>)}</div>
         ))}
       </nav>
       <SauceTicker />

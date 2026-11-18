@@ -557,35 +557,6 @@ export interface EmailEvent {
   bounce_to?: string;
 }
 
-/** Someone outside the CRM who wrote to one of your mailboxes and looks like a real enquiry. */
-export interface InboundLead {
-  id: string;
-  email: string;
-  name: string;
-  company: string;
-  mailbox: string;
-  kind: "brand" | "creator" | "agency" | "unknown";
-  /** creator_management · brand_needs_creators · agency_partnership */
-  category: string;
-  score: number;
-  reasons: string[];
-  subject: string;
-  snippet: string;
-  thread_id: string;
-  via_form: boolean;
-  messages: number;
-  first_at: string;
-  last_at: string;
-  status: "new" | "added" | "dismissed";
-  entity_type: "creator" | "brand" | null;
-  entity_id: string | null;
-  /** Your answers to them (each counts as an email sent). */
-  my_replies: { id: string; at: string; scheduled?: boolean }[];
-  /** What your latest clear answer said: 'yes' (add them), 'no' (dismissed) or ''. */
-  my_intent: "" | "yes" | "no";
-  replied_at: string | null;
-}
-
 export interface WorkspaceData {
   profile: Profile;
   creators: Creator[];
