@@ -106,6 +106,8 @@ function routes(): Route[] {
 
 export const aiProvider = (): AiProvider | null => routes()[0]?.provider ?? null;
 export const aiEnabled = () => routes().length > 0;
+/** Some route can do this kind of work at all (a PDF needs Gemini or OpenRouter). */
+export const aiCan = (need: Need) => routes().some((r) => r.can.includes(need));
 export const aiKeyCount = () => new Set(routes().map((r) => `${r.provider}:${r.key}`)).size;
 export const aiModel = () => routes()[0]?.model || "";
 
