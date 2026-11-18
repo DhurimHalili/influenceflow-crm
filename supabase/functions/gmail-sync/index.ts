@@ -74,6 +74,13 @@ const VALID_EMAIL = /^[^\s@<>(),;:"]+@[^\s@<>(),;:"]+\.[^\s@<>(),;:"]+$/;
 const BACKFILL_DAYS = 180;
 const LEAD_LOOKBACK_DAYS = 30;
 const USER_MIN_INTERVAL_MS = 30_000;
+/**
+ * Upkeep that re-reads whole lists (every email's thread, every price history, every recent record) runs on a slow
+ * clock — a 2-minute window every `everyMin` minutes — or when a run actually saved new mail. Running it on every
+ * run (each minute, every Gmail push, every mailbox read) was most of the project's data transfer: ~12 GB in a
+ * free plan of 5.5 GB.
+ */
+const upkeepDue = (everyMin: number, now = Date.now()) => Math.floor(now / 60_000) % everyMin < 2;
 const SENDS_PER_DAY = 400; // per mailbox, well under Gmail's own limits
 const MAX_MAILBOXES = 5;
 
@@ -1559,11 +1566,12 @@ async function readMailbox(admin: Admin, row: TokenRow, own: Set<string>, book: 
   await aiReadReplies(admin, row.user_id, token, mailbox, budget, deadline - 10_000).catch(() => 0);
 
   // d3. Deals agreed before their kit's prices were on file: give them the kit's asking price (their real %).
-  if (Date.now() < deadline - 10_000) await repairKitLists(admin, row.user_id, currency).catch(() => 0);
+  // (d3–d5 and g read whole lists, so they run on the slow upkeep clock — see upkeepDue.)
+  if (upkeepDue(60) && Date.now() < deadline - 10_000) await repairKitLists(admin, row.user_id, currency).catch(() => 0);
   // d4. Deals measured from a counter instead of their first asking price: put the % right.
-  if (Date.now() < deadline - 10_000) await repairAnchors(admin, row.user_id).catch(() => 0);
+  if (upkeepDue(60) && Date.now() < deadline - 10_000) await repairAnchors(admin, row.user_id).catch(() => 0);
   // d5. Tracked mail that left Gmail since the CRM saw it (Trash / deleted for good) — older mail, a little each run.
-  if (Date.now() < deadline - 10_000) await sweepGone(admin, row.user_id, token, mailbox, deadline - 8_000).catch(() => 0);
+  if (upkeepDue(30) && Date.now() < deadline - 10_000) await sweepGone(admin, row.user_id, token, mailbox, deadline - 8_000).catch(() => 0);
 
   // e. Files waiting for the AI.
   const aiRead = budget.ai > 0 && Date.now() < deadline - 10_000 ? await drainQueue({ admin, userId: row.user_id, currency, mailbox, get, max: Math.min(3, budget.ai), deadline: deadline - 8_000 }).catch(() => 0) : 0;
@@ -1580,7 +1588,7 @@ async function readMailbox(admin: Admin, row: TokenRow, own: Set<string>, book: 
   if (warmNow.length) patch.coverage = { ...coverage, warm: [...coverage.warm, ...warmNow].slice(-500), untracked: coverage.untracked.filter((u) => !warmNow.includes(u.id)), sent: Math.max(0, coverage.sent - warmNow.length), warmup: coverage.warmup + warmNow.length };
 
   // g. Self-heal: statuses of anything with mail in the last 14 days.
-  const { data: recent } = await admin.from("email_events").select("entity_id").eq("user_id", row.user_id).gte("at", new Date(Date.now() - 14 * 86400000).toISOString()).limit(2000);
+  const { data: recent } = upkeepDue(30) ? await admin.from("email_events").select("entity_id").eq("user_id", row.user_id).gte("at", new Date(Date.now() - 14 * 86400000).toISOString()).limit(2000) : { data: [] as { entity_id: string }[] };
   const changed = Date.now() < deadline - 3_000 ? await applyStatuses(admin, row.user_id, Array.from(new Set([...(recent || []).map((r) => r.entity_id), ...threadScan.rows.map((r) => r.entity_id)]))) : 0;
 
   if (markers.length) patch.backfilled = Array.from(new Set([...(markers.some((b) => b.startsWith(THREAD_SCAN_AT)) ? Array.from(done).filter((b) => !b.startsWith(THREAD_SCAN_AT)) : Array.from(done)), ...markers])).slice(-5000);
@@ -1625,13 +1633,16 @@ async function syncUser(admin: Admin, rows: TokenRow[], allRows: TokenRow[], dea
       await release(admin, row.id, "track_lock_until");
     }
   }));
+  // The steps below read whole lists: only when this run saved mail, or on the slow upkeep clock.
+  const fresh = results.some((r) => Number(r.events || 0) > 0 || Number(r.scheduledChanges || 0) > 0 || Number(r.statusChanges || 0) > 0);
+  const upkeep = fresh || opts.force || upkeepDue(15);
   // A shared manager's mail filed under the wrong creator: move it first, so nothing below acts on it.
-  if (deadline - Date.now() > 5_000) await rehomeTeamMail(admin, allRows[0].user_id, book, own).catch(() => 0);
+  if (upkeep && deadline - Date.now() > 5_000) await rehomeTeamMail(admin, allRows[0].user_id, book, own).catch(() => 0);
   // Their reply just landed before a scheduled bump of yours went out: cancel it now.
-  if (deadline - Date.now() > 5_000) await autoCancelCrossed(admin, allRows[0].user_id, allRows).catch(() => 0);
+  if (upkeep && deadline - Date.now() > 5_000) await autoCancelCrossed(admin, allRows[0].user_id, allRows).catch(() => 0);
   // A follow-up the CRM was about to send, to someone who just answered: cancelled now (the send checks again too).
-  await cancelOnReply(admin, allRows[0].user_id).catch(() => 0);
-  if (deadline - Date.now() > 5_000) await rereadReplies(admin, allRows[0].user_id).catch(() => 0);
+  if (upkeep) await cancelOnReply(admin, allRows[0].user_id).catch(() => 0);
+  if ((opts.force || upkeepDue(30)) && deadline - Date.now() > 5_000) await rereadReplies(admin, allRows[0].user_id).catch(() => 0);
   const readAll = async (until: number) => {
     const due = [...rows].filter((r) => opts.read === "now" || !r.read_at || Date.now() - new Date(r.read_at).getTime() >= (opts.read === "soon" ? READ_SOON_MS : READ_EVERY_MS)).sort((a, b) => (a.read_at || "").localeCompare(b.read_at || ""));
     const out: Record<string, unknown>[] = [];

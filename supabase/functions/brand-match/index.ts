@@ -200,7 +200,18 @@ async function sponsorBlock(id: string): Promise<Segment[] | undefined> {
 
 // ---- known brands ---------------------------------------------------------------------
 
-async function knownFor(admin: SupabaseClient, userId: string): Promise<{ known: Known[]; brands: BrandRow[] }> {
+// Brands + found brands of a member, kept 5 minutes: a cron run used to load all of them (≈100 KB) once per
+// creator / brand it handled — several times a run, every 3 minutes.
+const knownCache = new Map<string, { at: number; value: Promise<{ known: Known[]; brands: BrandRow[] }> }>();
+function knownFor(admin: SupabaseClient, userId: string): Promise<{ known: Known[]; brands: BrandRow[] }> {
+  const hit = knownCache.get(userId);
+  if (hit && Date.now() - hit.at < 5 * 60_000) return hit.value;
+  const value = loadKnown(admin, userId);
+  knownCache.set(userId, { at: Date.now(), value });
+  value.catch(() => knownCache.delete(userId));
+  return value;
+}
+async function loadKnown(admin: SupabaseClient, userId: string): Promise<{ known: Known[]; brands: BrandRow[] }> {
   const [{ data: brands }, { data: seen }] = await Promise.all([
     admin.from("brands").select("id, user_id, name, domain, archived_at").eq("user_id", userId).limit(3000),
     admin.from("seen_brands").select("brand_key, name, domain, domain_check").eq("user_id", userId).neq("domain", "").limit(5000),
@@ -946,6 +957,7 @@ async function autoAdd(admin: SupabaseClient, s: SeenRow, checked: { domain: str
     discovered: { creator_id: from.id, creator: from.name, kind: link.kind, at: new Date().toISOString(), auto: true },
   }).select("id").maybeSingle();
   if (error || !added) return;
+  knownCache.delete(s.user_id); // the new brand counts as known from now on
   await admin.from("seen_brands").update({ added_brand_id: added.id }).eq("user_id", s.user_id).eq("brand_key", s.brand_key);
   await admin.from("creator_brands").update({ brand_id: added.id }).eq("user_id", s.user_id).eq("brand_key", s.brand_key);
   await admin.from("activities").insert({ user_id: s.user_id, entity_type: "brand", entity_id: added.id, text: `Added from ${from.name}'s videos (${kindWord})` }).then(() => null, () => null);

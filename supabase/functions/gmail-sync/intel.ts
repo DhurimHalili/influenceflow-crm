@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
-import { aiEnabled, hasAudience, QuotaExhausted, readAttachment, readCreatorEmail, type AudienceFacts, type FileReading } from "../_shared/ai.ts";
+import { aiCan, aiEnabled, aiReadyAt, hasAudience, QuotaExhausted, readAttachment, readCreatorEmail, type AudienceFacts, type FileReading } from "../_shared/ai.ts";
 import { decodeEntities } from "../_shared/leadScanner.ts";
 import { backfillList, dropRepeatOffers, negotiate, normalizeRateHistory, normalizeRateMeta, offerEvent, openOffers, reanchor, setListPrices, theirPrices, type RateEvent, type RateKey, type RateMetaMap, type Rates } from "../_shared/negotiation.ts";
 import { isPlainYes, mentionsMoneyOrAudience, moneyMentions, ownText, readAgainstOffer, readMine, readOffer, readPrices, saysAmount, statesAudience, type PriceHit } from "../_shared/priceReader.ts";
@@ -672,7 +672,12 @@ export async function drainQueue(ctx: { admin: Admin; userId: string; currency: 
   let read = 0;
   for (const file of queue.slice(0, ctx.max)) {
     if (file.size > MAX_AI) { await ctx.admin.from("creator_files").update({ ai_attempts: 9, verdict: "Too large for the AI to read — open it to check" }).eq("id", file.id); continue; }
-    if (Date.now() > ctx.deadline || !(await aiAllowed(ctx.admin, ctx.userId))) break;
+    if (Date.now() > ctx.deadline) break;
+    // Download only when an AI that reads this kind of file is free right now. A 1.5 MB kit was fetched from
+    // storage every 2 minutes (149 times a day) while every PDF-capable key was out of quota — most of the data transfer.
+    const need = /pdf/i.test(file.mime) || /\.pdf$/i.test(file.filename) ? "pdf" : "image";
+    if (!aiCan(need) || (await aiReadyAt(need)) > Date.now()) continue;
+    if (!(await aiAllowed(ctx.admin, ctx.userId))) break;
     const bytes = await fileBytes(ctx.admin, file, ctx.get);
     const mime = bytes ? sniff(bytes) : null;
     if (!bytes || !mime) { await ctx.admin.from("creator_files").update({ ai_attempts: 9, verdict: "Couldn't open the file" }).eq("id", file.id); continue; }
