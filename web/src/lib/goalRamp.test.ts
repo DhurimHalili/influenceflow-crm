@@ -31,6 +31,9 @@ eq("stamp: not seen yet, today after launch → this week", stampNew({}, ["n@x.c
 eq("stamp: nothing new → null", stampNew(two, ["a@x.com"], "2026-11-26"), null);
 
 const plan = rampPlan(two, ["a@x.com", "b@x.com"], "2026-11-17");
+eq("never asks while a mailbox's first week isn't saved (it would read as week 1)", shouldAsk({ goal: 50, plan: rampPlan({ "a@x.com": "2026-11-09" }, ["a@x.com", "b@x.com"], "2026-11-17") }), false);
+eq("…and counts it", rampPlan({ "a@x.com": "2026-11-09" }, ["a@x.com", "b@x.com"], "2026-11-17").unstamped, 1);
+eq("both saved (week 2) with goal 40 → nothing to ask", shouldAsk({ goal: 40, plan: rampPlan({ "a@x.com": "2026-11-09", "b@x.com": "2026-11-09" }, ["a@x.com", "b@x.com"], "2026-11-19") }), false);
 eq("ask when goal 20 ≠ 40", shouldAsk({ goal: 20, plan }), true);
 eq("no ask when goal = 40", shouldAsk({ goal: 40, plan }), false);
 eq("no ask after 'keep mine' this week", shouldAsk({ goal: 20, plan, skip: { week: "2026-11-16", total: 40 } }), false);

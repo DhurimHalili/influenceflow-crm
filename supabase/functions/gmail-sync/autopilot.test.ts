@@ -179,5 +179,16 @@ const firstAt = NOW - 7 * 86400_000;
   eq("…and nothing once the waiting ones reach the goal", fillNeed({ goal: 50, doneToday: 3, pendingToday: 47, autoToday: 47, cap: 50, available: 40 }).allowed, 0);
 }
 
+// 13. The mailbox reached its daily limit since this was planned (10 already today in week 1): it doesn't go.
+{
+  const sent: string[] = [];
+  const full = Array.from({ length: 10 }, (_, i) => ({ gmail_id: `d${i}`, mailbox: "me@agency.com" }));
+  const dbFull = fakeDb({ autosend_queue: [{ status: "sending", gmail_id: "", mailbox: "me@agency.com" }], email_events: full, gmail_tokens: [] });
+  const res = await sendOne(dbFull, kitWith([mine("g1", firstAt)], sent), q, rows, world([out("g1", firstAt)]), NOW);
+  eq("mailbox at its limit → not sent (mailbox_full)", [res.status, res.reason, sent.length], ["cancelled", "mailbox_full", 0]);
+  const off = await sendOne(dbFull, kitWith([mine("g1", firstAt)], []), q, rows, world([out("g1", firstAt)], { prefs: { timezone: tz, mailbox_guard: { on: false } } as World["prefs"] }), NOW);
+  eq("…unless the guard is switched off", off.status, "sent");
+}
+
 if (failed) { console.error(`\n${failed} failed`); Deno.exit(1); }
 console.log("\nall autopilot server tests passed");

@@ -10,6 +10,7 @@ import { fillReply, templateFor } from "../../../web/src/lib/replyTemplate.ts";
 import { draftHtml, pickSendAs, pickTarget, bodyOf as replyBodyOf, quoteBlock, replyRaw, replyRecipients, replySubject, threadUrl, type Msg, type SendAs } from "../_shared/replyDraft.ts";
 import { classifyIncoming, isReaction, mergeReading, myReplyIntent, notAReply, READER_VERSION, referralOf, stripQuoted, type IncomingKind, type TeamRole } from "../_shared/replyReader.ts";
 import { cancelOnReply, doneWithToday, fillFor, flushOne, insertQueue, loadWorld, mailboxDays, planFor, poolOf, prepareOne, rowsOf, tick, type Kit, type PlanRow, type Row as AutoRow } from "./autopilot.ts";
+import { guardMailboxes } from "./guard.ts";
 import { awakeAt, planTimes } from "../../../web/src/lib/smartTime.ts";
 import { dayEndIn, dayKeyIn, validZone } from "../../../web/src/lib/zones.ts";
 import { fillTemplate, readAutopilot, readTemplates, roomMap, ROUNDS, type Round } from "../../../web/src/lib/autopilot.ts";
@@ -891,7 +892,7 @@ async function undoGmailStatus(admin: Admin, userId: string, type: "creator" | "
 // when it is trashed (it stays in Trash for 30 days; nothing is deleted
 // forever). Only a row of theirs that is still scheduled, in a mailbox of
 // theirs that granted gmail.modify, and only while Gmail still holds it unsent.
-async function cancelScheduledSend(admin: Admin, userId: string, rows: TokenRow[], gmailId: string, why: "manual" | "replied"): Promise<{ ok: true } | { error: string; status: number; code?: string }> {
+async function cancelScheduledSend(admin: Admin, userId: string, rows: TokenRow[], gmailId: string, why: "manual" | "replied" | "limit", note = ""): Promise<{ ok: true } | { error: string; status: number; code?: string }> {
   const { data: ev } = await admin.from("email_events").select("gmail_id, mailbox, scheduled, direction, entity_id, entity_type").eq("user_id", userId).eq("gmail_id", gmailId).eq("direction", "out").limit(1).maybeSingle();
   if (!ev) return { error: "That email isn't in your CRM.", status: 404 };
   if (!ev.scheduled) return { error: "That email has already gone out.", status: 409 };
@@ -907,7 +908,7 @@ async function cancelScheduledSend(admin: Admin, userId: string, rows: TokenRow[
     if (meta) await gmail(token, `/messages/${gmailId}/trash`, { method: "POST" });
     await admin.from("email_events").delete().eq("user_id", userId).eq("gmail_id", gmailId);
     await undoGmailStatus(admin, userId, ev.entity_type, ev.entity_id, "scheduled");
-    const text = why === "replied" ? "Gmail: they replied before your scheduled follow-up went out, so it was cancelled (it's in Gmail's Trash for 30 days)" : "Cancelled a scheduled email (it's in Gmail's Trash for 30 days)";
+    const text = why === "limit" && note ? note : why === "replied" ? "Gmail: they replied before your scheduled follow-up went out, so it was cancelled (it's in Gmail's Trash for 30 days)" : "Cancelled a scheduled email (it's in Gmail's Trash for 30 days)";
     await admin.from("activities").insert({ user_id: userId, text, at: new Date().toISOString(), entity_type: ev.entity_type, entity_id: ev.entity_id });
     return { ok: true };
   } catch (e) {
@@ -1510,6 +1511,9 @@ async function syncUser(admin: Admin, rows: TokenRow[], allRows: TokenRow[], dea
   if (upkeep && deadline - Date.now() > 5_000) await autoCancelCrossed(admin, allRows[0].user_id, allRows).catch(() => 0);
   // A follow-up the CRM was about to send, to someone who just answered: cancelled now (the send checks again too).
   if (upkeep) await cancelOnReply(admin, allRows[0].user_id).catch(() => 0);
+  // New mail of yours can push a mailbox past its daily limit: take back what hasn't gone out yet (Autopilot first,
+  // then Gmail-scheduled follow-ups, new emails, replies last). Only after a run that saved mail — that's the only time it changes.
+  if (fresh && deadline - Date.now() > 5_000) await guardMailboxes(admin, allRows[0].user_id, allRows as unknown as AutoRow[], (id, note) => cancelScheduledSend(admin, allRows[0].user_id, allRows, id, "limit", note)).catch(() => 0);
   if ((opts.force || upkeepDue(30)) && deadline - Date.now() > 5_000) await rereadReplies(admin, allRows[0].user_id).catch(() => 0);
   const readAll = async (until: number) => {
     const due = [...rows].filter((r) => opts.read === "now" || !r.read_at || Date.now() - new Date(r.read_at).getTime() >= (opts.read === "soon" ? READ_SOON_MS : READ_EVERY_MS)).sort((a, b) => (a.read_at || "").localeCompare(b.read_at || ""));

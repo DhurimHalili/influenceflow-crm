@@ -6,6 +6,7 @@ import { useGmail } from "../contexts/GmailContext";
 import { useToast } from "../contexts/ToastContext";
 import { useToday } from "../hooks/useChase";
 import { useMailboxOrder } from "../hooks/useOutreach";
+import { readGuard } from "../lib/mailboxGuard";
 import { RAMP_MAX, RAMP_STEP, rampPlan, shiftStart, shouldAsk, stampNew, type RampPlan } from "../lib/goalRamp";
 import { dateFmt } from "../lib/days";
 import { dayKeyIn, validZone } from "../lib/zones";
@@ -188,5 +189,20 @@ export function GoalRampSettings() {
       </span>
       <b className="gr-per">{b.perDay}<small>/day</small></b>
     </li>)}</ul>
+    <GuardSwitches />
+  </div>;
+}
+
+/** Keep every mailbox at its limit — what the CRM may take back when your own sends push one over. */
+function GuardSwitches() {
+  const data = useData();
+  const prefs = data.profile.preferences;
+  const g = readGuard(prefs.mailbox_guard);
+  const set = (next: Partial<typeof g>) => data.updateProfile({ preferences: { ...prefs, mailbox_guard: { ...g, ...next } } });
+  return <div className="gr-guard">
+    <label className="switch-row"><input type="checkbox" checked={g.on} onChange={(e) => set({ on: e.target.checked })} /><span className="switch" aria-hidden="true" />
+      <span><b>Never past a mailbox's limit</b><small>When your own replies or emails push a mailbox over, the CRM takes back what hasn't gone out yet — Autopilot's follow-ups first. You're shown who, so you can write to them tomorrow or DM them.</small></span></label>
+    {g.on && <label className="switch-row gr-guard-sub"><input type="checkbox" checked={g.gmail} onChange={(e) => set({ gmail: e.target.checked })} /><span className="switch" aria-hidden="true" />
+      <span><b>Also emails I scheduled in Gmail</b><small>Follow-ups first, then new emails, replies last. They go to Gmail's Trash for 30 days. Needs “Manage drafts and send” on the mailbox.</small></span></label>}
   </div>;
 }
