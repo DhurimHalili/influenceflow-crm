@@ -172,7 +172,7 @@ export function weeklyReport(input: WeeklyInput): WeeklyReport {
     const ms = makeStats({ ...base, mailbox: email });
     const m = ms.emailMix("all", s, end, horizon);
     const pm = ms.emailMix("all", ps, s, s);
-    return { email, tone, emails: d(m.total, pm.total), first: m.first, followups: m.followups, answers: m.answers, newthreads: m.newthreads, scheduled: m.scheduled, repliers: ms.repliers("all", s, end), replyRate: ms.replyRate("all", s, end), negotiations: ms.count("negotiations", "all", s, end), wins: ms.count("wins", "all", s, end) };
+    return { email, tone, emails: d(m.total, pm.total), first: m.first, followups: m.followups + m.autopilot, answers: m.answers, newthreads: m.newthreads, scheduled: m.scheduled, repliers: ms.repliers("all", s, end), replyRate: ms.replyRate("all", s, end), negotiations: ms.count("negotiations", "all", s, end), wins: ms.count("wins", "all", s, end) };
   }).filter((m) => m.emails.now || m.emails.before || m.repliers || m.negotiations || m.wins);
   const local = (e: string) => e.split("@")[0];
   let mailboxNote = "";
@@ -194,7 +194,7 @@ export function weeklyReport(input: WeeklyInput): WeeklyReport {
     range: `${fmt(s, { month: "short", day: "numeric" })} – ${fmt(e - DAY / 2, { month: "short", day: "numeric", year: "numeric" })}`,
     startMs: s, endMs: e, partial,
     goal, workdays, goalTotal, sent: d(total, sentIn(ps, s)), effort, daysHit, days,
-    emails: { total: d(mix.total, prevMix.total), first: mix.first, followups: mix.followups, answers: mix.answers, newthreads: mix.newthreads, scheduled: mix.scheduled, otherFollowups: mix.otherFollowups },
+    emails: { total: d(mix.total, prevMix.total), first: mix.first, followups: mix.followups + mix.autopilot, answers: mix.answers, newthreads: mix.newthreads, scheduled: mix.scheduled, otherFollowups: mix.otherFollowups },
     followups: d(count("followups", s, end), count("followups", ps, s)),
     newConversations: d(count("first", s, end), count("first", ps, s)),
     repliers, replies: count("replies", s, end), replyRate: stats.replyRate("all", s, end),

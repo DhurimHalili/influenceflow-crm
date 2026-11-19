@@ -125,7 +125,7 @@ export function renderWeeklyEmail(r: WeeklyReport, opts: { backup?: BackupNote |
     </tr>`;
   }).join("");
 
-  const mixParts: [string, number, string][] = [["New conversations", r.emails.first, "#6d5ae6"], ["Follow-ups", r.emails.followups, "#0ea5e9"], ["Answers", r.emails.answers, "#14b8a6"], ["New threads", r.emails.newthreads, "#f59e0b"], ["Scheduled", r.emails.scheduled, "#a3a0b8"]];
+  const mixParts: [string, number, string][] = [["New conversations", r.emails.first, "#6d5ae6"], ["Follow-ups", r.emails.followups, "#0ea5e9"], ["Answers", r.emails.answers, "#14b8a6"], ["New threads", r.emails.newthreads, "#f59e0b"]];
   const mixTotal = Math.max(1, mixParts.reduce((a, [, v]) => a + v, 0));
   const mixBar = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border-radius:7px;overflow:hidden"><tr>${mixParts.filter(([, v]) => v > 0).map(([, v, c]) => `<td width="${Math.max(2, Math.round((v / mixTotal) * 100))}%" style="height:14px;background:${c};font-size:0;line-height:0">&nbsp;</td>`).join("") || `<td style="height:14px;background:#f1eff8;font-size:0">&nbsp;</td>`}</tr></table>`;
   const mixLegend = mixParts.map(([label, v, c]) => `<span style="display:inline-block;padding:8px 12px 0 0;font:600 11px/1.3 ${FONT};color:#5b5770;white-space:nowrap"><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${c};margin-right:5px"></span>${label} <b style="color:#17142b">${num(v)}</b></span>`).join("");

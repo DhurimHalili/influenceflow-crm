@@ -922,6 +922,8 @@ body:has(.kit-page) { background: #fbfaf7; }
 .coach-ring-svg .track { stroke: var(--line); }
 .coach-ring-svg .fill { stroke: var(--accent); stroke-linecap: round; transition: stroke-dashoffset .6s ease; }
 .coach-ring-svg .fill.done { stroke: var(--success); }
+.coach-ring-svg .fill.waiting { stroke: color-mix(in srgb, var(--accent) 38%, transparent); stroke-linecap: butt; }
+.coach-made { display: block; font-style: normal; font-size: 11px; color: var(--muted); margin-top: 2px; line-height: 1.35; }
 .coach-card { display: grid; grid-template-columns: auto 1fr auto; gap: 18px; align-items: center; margin-bottom: 16px; padding: 16px 18px; border: 1px solid var(--line); border-radius: 18px; background: linear-gradient(120deg, color-mix(in srgb, var(--accent) 9%, var(--surface-solid)), var(--surface-solid) 60%); }
 .coach-card.tone-win { background: linear-gradient(120deg, color-mix(in srgb, var(--success) 14%, var(--surface-solid)), var(--surface-solid) 60%); border-color: color-mix(in srgb, var(--success) 30%, var(--line)); }
 .coach-card.tone-push { border-color: color-mix(in srgb, var(--accent) 30%, var(--line)); }

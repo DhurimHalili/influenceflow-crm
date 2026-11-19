@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowRight, BedDouble, Check, ChevronDown, Clock3, Layers, Loader2, Mail, Moon, PenLine, PlaneTakeoff, RefreshCcw, Send, ShieldCheck, Sparkles, Square, Undo2, X } from "lucide-react";
+import { AlertTriangle, ArrowRight, BedDouble, Check, ChevronDown, Clock3, Layers, Loader2, Mail, Moon, PenLine, PlaneTakeoff, RefreshCcw, RotateCcw, Send, ShieldCheck, Sparkles, Square, Undo2, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useCoach } from "../components/Coach";
@@ -91,8 +91,11 @@ export default function AutopilotPage() {
   const apWaiting = useAutopilotWaiting();
   const dueNow = chase.due.filter((c) => c.type === "creator" && (c.state as { next?: string }).next !== "new-thread" && !apWaiting.has(c.id)).length;
   const marked = auto.pool.byHand.filter((b) => b.why === "marked");
-  // Due, but Autopilot already sent to them today or you cancelled theirs: left alone until tomorrow.
+  // Due, but Autopilot already sent to them today (or it stopped for a reason that still holds): left alone until tomorrow.
   const handled = auto.pool.queued.filter((id) => !apWaiting.has(id)).length;
+  // People whose follow-up you cancelled today and haven't planned again: they're back in the list, marked.
+  const cancelledByYou = useMemo(() => new Set(auto.today.filter((i) => i.status === "cancelled" && i.reason === "by_you" && !apWaiting.has(i.creator_id)).map((i) => i.creator_id)), [auto.today, apWaiting]);
+  const backAgain = auto.pool.ready.filter((r) => cancelledByYou.has(r.id)).length;
   const heldNow = auto.pool.held.filter((h) => h.why !== "new-thread").length;
   // Who can go today without any mailbox passing its daily limit (sent + scheduled + Autopilot count toward it).
   const can = Math.min(auto.fits.placed.length, auto.canWithin);
@@ -199,7 +202,7 @@ export default function AutopilotPage() {
         <span className="ap-kicker"><PlaneTakeoff size={13} /> Ready to send</span>
         <b>{fitToday}</b>
         <div className="ap-rounds">{ROUNDS.map((r) => byRound[r] ? <span key={r} className={`ap-round r${r}`}>{ordinal(r)} ×{byRound[r]}</span> : null)}</div>
-        <p>{dueNow > 0 ? <>Of <b>{dueNow}</b> due today (Follow up now): </> : null}{[`${fitToday} can go`, auto.pool.byHand.length ? `${auto.pool.byHand.length} yours to write` : "", heldNow ? `${heldNow} can't go (see why)` : "", asleep.length ? `${asleep.length} asleep till after your midnight` : "", handled ? `${handled} handled today (sent or cancelled)` : ""].filter(Boolean).join(" · ")}.{pendingToday.length ? ` ${pendingToday.length} more already waiting in Autopilot.` : ""}</p>
+        <p>{dueNow > 0 ? <>Of <b>{dueNow}</b> due today (Follow up now): </> : null}{[`${fitToday} can go`, auto.pool.byHand.length ? `${auto.pool.byHand.length} yours to write` : "", heldNow ? `${heldNow} can't go (see why)` : "", asleep.length ? `${asleep.length} asleep till after your midnight` : "", handled ? `${handled} already sent today` : ""].filter(Boolean).join(" · ")}.{backAgain ? ` ${backAgain} you cancelled earlier ${backAgain === 1 ? "is" : "are"} back — plan ${backAgain === 1 ? "it" : "them"} again any time.` : ""}{pendingToday.length ? ` ${pendingToday.length} more already waiting in Autopilot.` : ""}</p>
       </div>
       <div className="ap-launch">
         {can > 0 ? <>
@@ -239,7 +242,7 @@ export default function AutopilotPage() {
         <button type="button" className="ap-x" onClick={() => setPlan(null)} aria-label="Close the plan"><X size={17} /></button>
       </header>
       <ol className="ap-timeline">
-        {plan.rows.map((r) => <PlanItem key={r.creatorId} r={r} off={dropped.has(r.creatorId)} many={many} toggle={() => setDropped((d) => { const n = new Set(d); if (n.has(r.creatorId)) n.delete(r.creatorId); else n.add(r.creatorId); return n; })} />)}
+        {plan.rows.map((r) => <PlanItem key={r.creatorId} r={r} again={cancelledByYou.has(r.creatorId)} off={dropped.has(r.creatorId)} many={many} toggle={() => setDropped((d) => { const n = new Set(d); if (n.has(r.creatorId)) n.delete(r.creatorId); else n.add(r.creatorId); return n; })} />)}
       </ol>
       {plan.asleep.length > 0 && <p className="ap-plan-note"><BedDouble size={14} /> {plan.asleep.length} more can't go today — it's night where they are until after your midnight.</p>}
       <footer>
@@ -293,7 +296,7 @@ export default function AutopilotPage() {
   </div>;
 }
 
-function PlanItem({ r, off, toggle, many }: { r: PlanRow; off: boolean; toggle: () => void; many: boolean }) {
+function PlanItem({ r, off, toggle, many, again }: { r: PlanRow; off: boolean; toggle: () => void; many: boolean; again: boolean }) {
   const [open, setOpen] = useState(false);
   return <li className={`ap-step${off ? " off" : ""}`}>
     <time dateTime={new Date(r.at).toISOString()}><b>{hm(r.at)}</b>{r.zone ? <small>{timeIn(r.zone, r.at)} {placeOf(r.zone)}</small> : <small>no country</small>}</time>
@@ -304,6 +307,7 @@ function PlanItem({ r, off, toggle, many }: { r: PlanRow; off: boolean; toggle: 
         <Link to={`/app/influencers/${r.creatorId}`} className="ap-name">{r.name}</Link>
         <span className={`ap-round r${r.round}`}>{ordinal(r.round)}</span>
         {many && <span className="ap-box">{r.mailbox.split("@")[0]}</span>}
+        {again && <span className="ap-again" title="You cancelled this follow-up earlier today — it's back because you're planning again"><RotateCcw size={11} aria-hidden="true" /> Cancelled earlier</span>}
       </div>
       <button type="button" className="ap-words" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
         <span><b>{r.templateName}</b>{r.fit?.why ? <em>{r.fit.why}</em> : null}{r.fit?.echo ? <em className="warn">repeats your last question — no other template left</em> : null}</span>
