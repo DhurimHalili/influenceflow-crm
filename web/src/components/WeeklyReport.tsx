@@ -5,8 +5,8 @@ import { useToast } from "../contexts/ToastContext";
 import { DEFAULT_FOLLOWUP_RULES } from "../lib/prefs";
 import { supabase } from "../lib/supabase";
 import { weeklyReport } from "../lib/weekly";
-import { backupFiles } from "../lib/backupBook";
-import { renderWeeklyEmail, type BackupNote } from "../lib/weeklyEmail";
+import { useCrmWorkbookInput } from "./ExcelCrm";
+import { backupName, backupSummary, renderWeeklyEmail, type BackupNote } from "../lib/weeklyEmail";
 import { Button, Modal } from "./ui";
 
 // The weekly report in the app: the exact email you get, rendered from your
@@ -37,17 +37,18 @@ export function WeeklyReportDialog({ open, onClose }: { open: boolean; onClose: 
   const [sending, setSending] = useState(false);
   const status = useWeeklyStatus(open);
   const prefs = data.profile.preferences;
-  // The real backup files, built here exactly as the server builds them — so the preview shows true sizes.
+  // The real backup file (the whole CRM workbook), built here exactly as the server builds it — so the preview shows its true size.
+  const workbookInput = useCrmWorkbookInput();
   const [backup, setBackup] = useState<BackupNote | null>(null);
   useEffect(() => {
     if (!open || prefs.weekly_backup === false) { setBackup(null); return; }
     let live = true;
-    const stamp = new Date().toISOString().slice(0, 10);
-    void backupFiles({ creators: data.creators as never[], brands: data.brands as never[], contacts: data.contacts as never[], weights: data.profile.rating_weights, stamp })
-      .then((files) => { if (live) setBackup({ files: files.map((f, i) => ({ name: f.filename, rows: f.rows, noun: i === 0 ? "influencers" : "brands", bytes: f.content.length })) }); })
+    const input = workbookInput();
+    void import("../lib/crmWorkbook").then(({ crmWorkbook }) => crmWorkbook(input))
+      .then((blob) => { if (live) setBackup({ files: [{ name: backupName(new Date().toISOString().slice(0, 10)), summary: backupSummary(input.creators.length, input.brands.length, input.events.length), bytes: blob.size }] }); })
       .catch(() => { if (live) setBackup(null); });
     return () => { live = false; };
-  }, [open, prefs.weekly_backup, data.creators, data.brands, data.contacts, data.profile.rating_weights]);
+  }, [open, prefs.weekly_backup, workbookInput]);
   const mail = useMemo(() => {
     if (!open) return null;
     const report = weeklyReport({ creators: data.creators.filter((c) => !c.archived_at), brands: data.brands.filter((b) => !b.archived_at), contacts: data.contacts, followups: data.followups, events: data.emailEvents || [], activities: data.activities, campaigns: data.campaigns, goal: prefs.daily_email_goal || 50, rules: prefs.followup_rules || DEFAULT_FOLLOWUP_RULES, name: data.profile.display_name, timeZone: prefs.timezone || browserZone(), which, appUrl: `${window.location.origin}${window.location.pathname}` });
@@ -98,7 +99,7 @@ export function WeeklyReportSettings() {
   return <div className="weekly-settings">
     <div className="weekly-settings-head"><strong>Weekly report by email</strong><small>Your week at a glance: effort vs your daily goal, replies, deals, every day, and which mailbox did what — with an honest (and sometimes funny) verdict. Sent to {status?.to || "your email"}, in {zone}.</small></div>
     <div className="reminder-options weekly-options">{([["sunday", "Sunday 18:00", "This week, before it ends (default)"], ["monday", "Monday 8:00", "Last week, start the new one with a plan"], ["off", "Off", "No weekly email"]] as const).map(([value, label, hint]) => <button type="button" key={value} className={mode === value ? "selected" : ""} onClick={() => set(value)} aria-pressed={mode === value}><span>{label}</span><small>{hint}</small></button>)}</div>
-    <label className="switch-row weekly-backup-toggle"><input type="checkbox" checked={prefs.weekly_backup !== false} disabled={mode === "off"} onChange={(event) => { data.updateProfile({ preferences: { ...prefs, weekly_backup: event.target.checked } }); toast(event.target.checked ? "Every weekly report now carries a backup of your influencers and brands (Excel)" : "Weekly backup off — the report comes without files"); }} /><span className="switch" aria-hidden="true" /><span>Attach a backup <small>Every influencer and brand as Excel, ready to import back. The CRM keeps no copy.</small></span></label>
+    <label className="switch-row weekly-backup-toggle"><input type="checkbox" checked={prefs.weekly_backup !== false} disabled={mode === "off"} onChange={(event) => { data.updateProfile({ preferences: { ...prefs, weekly_backup: event.target.checked } }); toast(event.target.checked ? "Every weekly report now carries your whole CRM as one Excel file" : "Weekly backup off — the report comes without files"); }} /><span className="switch" aria-hidden="true" /><span>Attach a backup <small>Your whole CRM in one Excel file — work in it, or import it back. The CRM keeps no copy.</small></span></label>
     <div className="weekly-settings-foot">
       <Button size="sm" variant="secondary" onClick={() => setOpen(true)}><FileBarChart size={14} /> Preview</Button>
       <span className={`weekly-mailer ${status ? (status.configured ? "ok" : "off") : ""}`}>{!status ? "Checking the mailer…" : status.configured ? (last ? `Last sent ${new Date(last.sent_at).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}` : "Mailer ready") : "Mailer not set up yet — previews still work"}</span>

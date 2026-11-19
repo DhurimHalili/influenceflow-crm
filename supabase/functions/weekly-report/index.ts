@@ -4,7 +4,7 @@ import nodemailer from "npm:nodemailer@6.9.16";
 import { safeZone, tzParts, weekStart, weeklyReport, type WeeklyReport } from "../../../web/src/lib/weekly.ts";
 import { renderWeeklyEmail, type BackupNote } from "../../../web/src/lib/weeklyEmail.ts";
 import { Buffer } from "node:buffer";
-// Compiled from web/src/lib/backupBook.ts by `npm run build` (same columns as the app's Export).
+// Compiled from web/src/lib/backupBook.ts by `npm run build`: the whole CRM as one workbook (the app's "Work in Excel" file).
 import { backupFiles } from "../_shared/generated/backupBook.js";
 
 // The weekly report email (the numbers and the design live in
@@ -15,6 +15,8 @@ import { backupFiles } from "../_shared/generated/backupBook.js";
 //   cron      — hourly, server only (x-cron-secret): every approved member whose
 //               report is due in THEIR time zone (Monday 08:00 → last week, or
 //               Sunday 18:00 → this week) gets it once; catch-up until the next day.
+//               Each member is sent by its own call (`cron_one`, same secret), so
+//               each gets the full CPU budget for their workbook.
 //   send_now  — the signed-in member: their report emailed right away (3 an hour).
 //   status    — is the mailer set up, and the last reports sent.
 // Sent through SMTP (Gmail, port 465) from SMTP_USER with the SMTP_PASSWORD
@@ -48,7 +50,9 @@ async function all(admin: SupabaseClient, table: string, userId: string, opts: {
 
 // The same light clean-up the app does when it loads a workspace.
 const record = (r: Row) => ({ ...r, name: text(r.name), pipeline_status: text(r.pipeline_status) || "new", contact_channel: CHANNELS.has(text(r.contact_channel)) ? text(r.contact_channel) : "email", email_followups: r.email_followups !== false, socials: Array.isArray(r.socials) ? r.socials : [], team: Array.isArray(r.team) ? r.team : [] });
-const event = (r: Row) => ({ id: text(r.id), gmail_id: text(r.gmail_id), thread_id: text(r.thread_id), direction: r.direction === "in" ? "in" : "out", entity_type: r.entity_type === "brand" ? "brand" : "creator", entity_id: text(r.entity_id), counterpart: text(r.counterpart), subject: text(r.subject), snippet: text(r.snippet), at: text(r.at), mailbox: text(r.mailbox).toLowerCase(), scheduled: r.scheduled === true, reply_kind: ["no", "team", "auto", "managed_no", "reaction"].includes(text(r.reply_kind)) ? text(r.reply_kind) : "", message_key: text(r.message_key), in_reply_to: text(r.in_reply_to) });
+// Only the columns the app itself loads (EVENT_COLS in the app) — never the server's bookkeeping.
+const EVENT_COLS = "id, gmail_id, thread_id, direction, entity_type, entity_id, counterpart, subject, snippet, at, created_at, mailbox, message_key, scheduled, reply_kind, in_reply_to, gone, gone_at, bounced_at";
+const event = (r: Row) => ({ id: text(r.id), gmail_id: text(r.gmail_id), thread_id: text(r.thread_id), direction: r.direction === "in" ? "in" : "out", entity_type: r.entity_type === "brand" ? "brand" : "creator", entity_id: text(r.entity_id), counterpart: text(r.counterpart), subject: text(r.subject), snippet: text(r.snippet), at: text(r.at), mailbox: text(r.mailbox).toLowerCase(), scheduled: r.scheduled === true, reply_kind: ["no", "maybe_no", "team", "auto", "managed_no", "reaction"].includes(text(r.reply_kind)) ? text(r.reply_kind) : "", message_key: text(r.message_key), in_reply_to: text(r.in_reply_to), gone: r.gone === "trash" || r.gone === "deleted" ? r.gone : "", gone_at: typeof r.gone_at === "string" ? r.gone_at : null, ...(typeof r.created_at === "string" && r.created_at ? { created_at: r.created_at } : {}) });
 const followup = (r: Row) => ({ id: text(r.id), user_id: text(r.user_id), creator_id: typeof r.creator_id === "string" ? r.creator_id : null, brand_id: typeof r.brand_id === "string" ? r.brand_id : null, kind: r.kind === "reply" ? "reply" : "followup", channel: text(r.channel), note: "", at: text(r.at) });
 
 type Prefs = { weekly_report?: string; weekly_backup?: boolean; timezone?: string; daily_email_goal?: number; followup_rules?: Record<string, unknown> };
@@ -59,34 +63,52 @@ async function reportFor(admin: SupabaseClient, userId: string, which: "last" | 
     all(admin, "creators", userId), all(admin, "brands", userId), all(admin, "brand_contacts", userId), all(admin, "campaigns", userId),
     all(admin, "activities", userId, { order: "at", max: 3000, columns: "id, text, at, entity_type, entity_id" }),
     all(admin, "followups", userId, { order: "at", max: 5000 }),
-    all(admin, "email_events", userId, { order: "at", max: 6000 }),
+    all(admin, "email_events", userId, { order: "at", max: 6000, columns: EVENT_COLS }),
   ]);
   const prefs = ((profile?.preferences || {}) as Prefs);
   const rules = prefs.followup_rules && typeof prefs.followup_rules === "object" ? prefs.followup_rules : {};
   const goal = Number(prefs.daily_email_goal) >= 5 && Number(prefs.daily_email_goal) <= 500 ? Math.round(Number(prefs.daily_email_goal)) : 50;
+  const mailEvents = events.filter((e) => !e.bounced_at).map(event);
+  const followupRows = followups.map(followup);
+  const activityRows = activities.map((a) => ({ ...a, text: text(a.text) }));
+  const ruleSet = {
+    gaps: Array.isArray(rules.gaps) ? rules.gaps.map(Number) : [1, 1, 1], then: Number(rules.then) || 2, stop_after: Number(rules.stop_after) || 0,
+    workdays: Array.isArray(rules.workdays) && rules.workdays.length ? rules.workdays.map(Number) : [1, 2, 3, 4, 5],
+    holidays: Array.isArray(rules.holidays) ? rules.holidays.filter((d) => typeof d === "string") as string[] : [],
+    reach_back_days: rules.reach_back_days === undefined ? 30 : Number(rules.reach_back_days) || 0,
+    thread_cap: rules.thread_cap === undefined ? 4 : Number(rules.thread_cap) || 0, new_thread_gap: rules.new_thread_gap === undefined ? 1 : Number(rules.new_thread_gap) || 0,
+  };
   const report = weeklyReport({
     creators: creators.filter((c) => !c.archived_at).map(record) as never[],
     brands: brands.filter((b) => !b.archived_at).map(record) as never[],
     contacts: contacts.map(record) as never[],
     campaigns: campaigns as never[],
-    activities: activities.map((a) => ({ ...a, text: text(a.text) })) as never[],
-    followups: followups.map(followup) as never[],
-    events: events.filter((e) => !e.bounced_at).map(event) as never[],
+    activities: activityRows as never[],
+    followups: followupRows as never[],
+    events: mailEvents as never[],
     goal,
-    rules: {
-      gaps: Array.isArray(rules.gaps) ? rules.gaps.map(Number) : [1, 1, 1], then: Number(rules.then) || 2, stop_after: Number(rules.stop_after) || 0,
-      workdays: Array.isArray(rules.workdays) && rules.workdays.length ? rules.workdays.map(Number) : [1, 2, 3, 4, 5],
-      holidays: Array.isArray(rules.holidays) ? rules.holidays.filter((d) => typeof d === "string") as string[] : [],
-      reach_back_days: rules.reach_back_days === undefined ? 30 : Number(rules.reach_back_days) || 0,
-      thread_cap: rules.thread_cap === undefined ? 4 : Number(rules.thread_cap) || 0, new_thread_gap: rules.new_thread_gap === undefined ? 1 : Number(rules.new_thread_gap) || 0,
-    },
+    rules: ruleSet,
     name: text(profile?.display_name), timeZone: safeZone(prefs.timezone), which, now, appUrl: APP_URL,
   });
-  // The weekly backup (default on): every influencer and brand, archived ones too, built in memory
-  // only when the email goes out — never stored anywhere.
+  // The weekly backup (default on): the whole CRM as one workbook (archived records too), built in memory only
+  // when the email goes out — never stored or logged. Reuses the rows the report already read; the only extra
+  // reads are three tiny ones (deal ↔ influencer links, Autopilot's last few days, the mailbox addresses).
   const backup = prefs.weekly_backup === false ? null : async () => {
     const stamp = dateOf(Date.now() - 12 * 3600000, report.timeZone); // today, in their time zone
-    const files = await backupFiles({ creators, brands, contacts, weights: (profile?.rating_weights || null) as never, stamp });
+    const since = dateOf(Date.now() - 4 * 86400000 - 12 * 3600000, report.timeZone);
+    const [links, queue, boxes] = await Promise.all([
+      admin.from("campaign_creators").select("campaign_id, creator_id").eq("user_id", userId).limit(5000),
+      admin.from("autosend_queue").select("id, creator_id, mailbox, thread_id, send_at, status, gmail_id, sent_at, round").eq("user_id", userId).gte("day", since).limit(1000),
+      admin.from("gmail_tokens").select("email").eq("user_id", userId).limit(20),
+    ]);
+    if (links.error || queue.error || boxes.error) throw new Error("load backup");
+    const files = await backupFiles({
+      creators, brands, contacts, campaigns, campaignCreators: (links.data || []) as never[],
+      events: mailEvents as never[], followups: followupRows as never[], activities: activityRows as never[],
+      autopilot: (queue.data || []).map((q) => ({ ...q, mailbox: text(q.mailbox).toLowerCase(), thread_id: text(q.thread_id), gmail_id: text(q.gmail_id) })) as never[],
+      goal, rules: ruleSet as never, mailboxes: (boxes.data || []).map((b) => text(b.email).toLowerCase()).filter(Boolean),
+      weights: (profile?.rating_weights || null) as never, timeZone: report.timeZone, stamp,
+    });
     // Gmail takes up to 25 MB per email: leave room for the report itself.
     return files.reduce((n, f) => n + f.content.length, 0) > 18 * 1024 * 1024 ? null : files;
   };
@@ -99,7 +121,7 @@ async function send(to: string, report: WeeklyReport & { backup?: (() => Promise
   transport ||= nodemailer.createTransport({ host: SMTP_HOST, port: 465, secure: true, auth: { user: SMTP_USER, pass: SMTP_PASSWORD } });
   // A backup that can't be built never blocks the report: it goes out without files.
   const files = report.backup ? await report.backup().catch(() => null) : null;
-  const note: BackupNote | null = files ? { files: files.map((f, i) => ({ name: f.filename, rows: f.rows, noun: i === 0 ? "influencers" : "brands", bytes: f.content.length })) } : null;
+  const note: BackupNote | null = files ? { files: files.map((f) => ({ name: f.filename, summary: f.summary, bytes: f.content.length })) } : null;
   const mail = renderWeeklyEmail(report, { backup: note });
   await transport.sendMail({
     from: { name: FROM_NAME, address: SMTP_USER }, to, subject: mail.subject, html: mail.html, text: mail.text, headers: { "X-Entity-Ref-ID": `weekly-${report.startMs}` },
@@ -141,12 +163,12 @@ Deno.serve(async (req) => {
       return json({ configured: !!SMTP_PASSWORD, range: r.range, tz: r.timeZone, sent: r.sent, goal: r.goalTotal, days: r.days.map((d) => [d.label, d.sent, d.status]), emails: r.emails, repliers: r.repliers, wins: r.wins, negotiations: r.negotiations, next: r.next, verdict: r.verdict.tone });
     }
     if (!SMTP_PASSWORD) return json({ sent: 0, skipped: "not_configured" });
-    const deadline = Date.now() + 120_000;
+    // One member per call (a worker below): building the whole-CRM workbook takes real CPU, and a function call
+    // only gets 2 s of it — every member gets their own budget, so one big workspace never stops the others.
     const now = new Date();
     const { data: members } = await admin.from("profiles").select("id, preferences").eq("access", "approved").limit(500);
-    let sent = 0, failed = 0;
+    const due: { user: string; which: "last" | "this"; ref: number; week: string }[] = [];
     for (const m of members || []) {
-      if (Date.now() > deadline) break;
       const prefs = (m.preferences || {}) as Prefs;
       // Sunday 18:00 (this week) unless you picked Monday or Off.
       const mode = prefs.weekly_report === "off" ? "off" : prefs.weekly_report === "monday" ? "monday" : "sunday";
@@ -154,29 +176,59 @@ Deno.serve(async (req) => {
       const tz = safeZone(prefs.timezone);
       const p = tzParts(now.getTime(), tz);
       // Due from the chosen hour, with a day of catch-up if a run was missed.
-      const due = mode === "monday" ? (p.wd === 1 && p.h >= 8) || (p.wd === 2 && p.h < 8) : (p.wd === 0 && p.h >= 18) || (p.wd === 1 && p.h < 6);
-      if (!due) continue;
+      const isDue = mode === "monday" ? (p.wd === 1 && p.h >= 8) || (p.wd === 2 && p.h < 8) : (p.wd === 0 && p.h >= 18) || (p.wd === 1 && p.h < 6);
+      if (!isDue) continue;
       const which = mode === "monday" ? "last" : "this";
       // Sunday's catch-up on Monday morning still reports the week that just ended.
-      const ref = mode === "sunday" && p.wd === 1 ? new Date(now.getTime() - 12 * 3600000) : now;
-      const week = dateOf(weekStart(ref.getTime(), tz, which === "last" ? -1 : 0), tz);
-      const { data: done } = await admin.from("weekly_reports").select("id").eq("user_id", m.id).eq("week_start", week).eq("kind", "auto").eq("status", "sent").limit(1);
-      if (done && done.length) continue;
-      const { data: u } = await admin.auth.admin.getUserById(m.id);
-      const to = u?.user?.email;
-      if (!to) continue;
-      try {
-        const report = await reportFor(admin, m.id, which, ref);
-        await send(to, report);
-        await admin.from("weekly_reports").insert({ user_id: m.id, week_start: week, kind: "auto", status: "sent", tone: report.verdict.tone });
-        sent++;
-      } catch (e) {
-        failed++;
-        await admin.from("weekly_reports").insert({ user_id: m.id, week_start: week, kind: "auto", status: "failed", error: why(e) });
-        if (why(e) === "smtp_auth") break;
-      }
+      const ref = mode === "sunday" && p.wd === 1 ? now.getTime() - 12 * 3600000 : now.getTime();
+      due.push({ user: m.id, which, ref, week: dateOf(weekStart(ref, tz, which === "last" ? -1 : 0), tz) });
     }
-    return json({ sent, failed });
+    if (!due.length) return json({ sent: 0, failed: 0 });
+    const { data: done } = await admin.from("weekly_reports").select("user_id, week_start").in("user_id", due.map((d) => d.user)).eq("kind", "auto").eq("status", "sent").in("week_start", [...new Set(due.map((d) => d.week))]);
+    const doneSet = new Set((done || []).map((d) => `${d.user_id}|${d.week_start}`));
+    const todo = due.filter((d) => !doneSet.has(`${d.user}|${d.week}`));
+    const self = `${Deno.env.get("SUPABASE_URL")}/functions/v1/weekly-report`;
+    let sent = 0, failed = 0, stop = false;
+    const deadline = Date.now() + 120_000;
+    for (let i = 0; i < todo.length && !stop && Date.now() < deadline; i += 2) {
+      await Promise.all(todo.slice(i, i + 2).map(async (d) => {
+        try {
+          const res = await fetch(self, { method: "POST", headers: { "Content-Type": "application/json", "x-cron-secret": given }, body: JSON.stringify({ action: "cron_one", ...d }) });
+          const out = await res.json().catch(() => ({})) as { status?: string; error?: string };
+          if (out.status === "sent") sent++; else if (out.status === "failed") failed++;
+          if (out.error === "smtp_auth") stop = true;
+        } catch { failed++; }
+      }));
+    }
+    return json({ sent, failed, due: todo.length });
+  }
+
+  // One member's weekly report (called by the cron above, server only).
+  if (input.action === "cron_one") {
+    const given = req.headers.get("x-cron-secret") || "";
+    const { data: ok } = given.length >= 32 ? await admin.rpc("gmail_cron_secret_ok", { p_secret: given }) : { data: false };
+    if (ok !== true) return json({ error: "Unauthorized" }, 401);
+    const user = typeof input.user === "string" && /^[0-9a-f-]{36}$/i.test(input.user) ? input.user : "";
+    const week = typeof input.week === "string" && /^\d{4}-\d{2}-\d{2}$/.test(input.week) ? input.week : "";
+    const ref = typeof input.ref === "number" && Number.isFinite(input.ref) ? new Date(input.ref) : null;
+    if (!user || !week || !ref || !SMTP_PASSWORD) return json({ status: "skipped" });
+    const which = input.which === "last" ? "last" : "this";
+    const { data: done } = await admin.from("weekly_reports").select("id").eq("user_id", user).eq("week_start", week).eq("kind", "auto").eq("status", "sent").limit(1);
+    if (done && done.length) return json({ status: "done" });
+    const { data: me } = await admin.from("profiles").select("access").eq("id", user).maybeSingle();
+    if (!me || me.access !== "approved") return json({ status: "skipped" });
+    const { data: u } = await admin.auth.admin.getUserById(user);
+    const to = u?.user?.email;
+    if (!to) return json({ status: "skipped" });
+    try {
+      const report = await reportFor(admin, user, which, ref);
+      await send(to, report);
+      await admin.from("weekly_reports").insert({ user_id: user, week_start: week, kind: "auto", status: "sent", tone: report.verdict.tone });
+      return json({ status: "sent" });
+    } catch (e) {
+      await admin.from("weekly_reports").insert({ user_id: user, week_start: week, kind: "auto", status: "failed", error: why(e) });
+      return json({ status: "failed", error: why(e) });
+    }
   }
 
   // Everything else is for the signed-in member only.

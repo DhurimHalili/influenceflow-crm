@@ -1,30 +1,58 @@
-// The weekly backup: every influencer and every brand (archived ones too) as Excel files, with the
-// SAME columns as the app's own export — so either file can go straight back in through Import.
-// Built in memory by the weekly-report function and attached to the email; nothing is stored.
+// The weekly backup: the WHOLE CRM as one Excel workbook — the same "Work in Excel" file the app builds
+// (lib/crmWorkbook.ts: dashboard, influencers, brands, every email, deals, contacts, reports, settings), with
+// its two Import tabs in the CRM's own export columns so the one file also restores everything through Import.
+// Built in memory by the weekly-report function and attached to the email; nothing is stored or logged.
 // The server runs a compiled copy (npm run build:backup → supabase/functions/_shared/generated/).
 
-import type { Brand, BrandContact, Creator, RatingWeights } from "../types";
-import { BRAND_HEADERS, brandRow, CREATOR_HEADERS, creatorRow } from "./exports";
-import { buildXlsx } from "./xlsx";
+import type { Activity, Brand, BrandContact, Campaign, Creator, EmailEvent, Followup, FollowupRules, RatingWeights } from "../types";
+import { crmWorkbook } from "./crmWorkbook";
+import type { QueuedSend } from "./outreach";
+import { creatorScore } from "./utils";
+import { backupName, backupSummary } from "./weeklyEmail";
 
-export type BackupFile = { filename: string; content: Uint8Array; contentType: string; rows: number };
+export type BackupFile = { filename: string; content: Uint8Array; contentType: string; summary: string };
 
 const XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 const list = <T,>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : []);
 const obj = <T,>(v: unknown, fallback: T): T => (v && typeof v === "object" && !Array.isArray(v) ? (v as T) : fallback);
+const text = (v: unknown) => (typeof v === "string" ? v : v == null ? "" : String(v));
 
-/** Raw rows (as stored) → the shapes the export expects; nothing is invented. */
-const asCreator = (r: Record<string, unknown>) => ({ ...r, name: String(r.name ?? ""), socials: list(r.socials), rates: obj(r.rates, {}), team: list(r.team) }) as unknown as Creator;
-const asBrand = (r: Record<string, unknown>) => ({ ...r, name: String(r.name ?? ""), socials: list(r.socials), brief: obj(r.brief, undefined) }) as unknown as Brand;
+/** Raw rows (as stored) → the shapes the workbook expects; nothing is invented. */
+const asCreator = (r: Record<string, unknown>) => ({ ...r, name: text(r.name), pipeline_status: text(r.pipeline_status) || "new", socials: list(r.socials), rates: obj(r.rates, {}), team: list(r.team) }) as unknown as Creator;
+const asBrand = (r: Record<string, unknown>) => ({ ...r, name: text(r.name), pipeline_status: text(r.pipeline_status) || "new", socials: list(r.socials), brief: obj(r.brief, undefined) }) as unknown as Brand;
+const asCampaign = (r: Record<string, unknown>, links: { campaign_id: string; creator_id: string }[]) =>
+  ({ ...r, name: text(r.name), deliverables: list(r.deliverables), creator_ids: links.filter((l) => l.campaign_id === r.id).map((l) => l.creator_id) }) as unknown as Campaign;
 
-export async function backupFiles(input: { creators: Record<string, unknown>[]; brands: Record<string, unknown>[]; contacts: Record<string, unknown>[]; weights?: RatingWeights | null; stamp: string }): Promise<BackupFile[]> {
-  const creators = input.creators.map(asCreator).sort((a, b) => Number(!!a.archived_at) - Number(!!b.archived_at) || a.name.localeCompare(b.name));
-  const brands = input.brands.map(asBrand).sort((a, b) => Number(!!a.archived_at) - Number(!!b.archived_at) || a.name.localeCompare(b.name));
-  const contacts = input.contacts as unknown as BrandContact[];
-  const book = async (name: string, headers: Record<string, string>, rows: Record<string, string | number | boolean | null | undefined>[]) =>
-    new Uint8Array(await buildXlsx([{ name, keys: Object.keys(headers), headers, rows }]).arrayBuffer());
-  return [
-    { filename: `influencers-${input.stamp}.xlsx`, content: await book("Influencers", CREATOR_HEADERS, creators.map((c) => creatorRow(c, input.weights))), contentType: XLSX, rows: creators.length },
-    { filename: `brands-${input.stamp}.xlsx`, content: await book("Brands", BRAND_HEADERS, brands.map((b) => brandRow(b, contacts))), contentType: XLSX, rows: brands.length },
-  ];
+export type BackupInput = {
+  creators: Record<string, unknown>[];
+  brands: Record<string, unknown>[];
+  contacts: Record<string, unknown>[];
+  campaigns: Record<string, unknown>[];
+  campaignCreators: { campaign_id: string; creator_id: string }[];
+  /** Already cleaned the way the app loads them (bounced mail left out). */
+  events: EmailEvent[];
+  followups: Followup[];
+  activities: Activity[];
+  autopilot: QueuedSend[];
+  goal: number;
+  rules: Pick<FollowupRules, "gaps" | "then" | "thread_cap" | "new_thread_gap">;
+  mailboxes: string[];
+  weights?: RatingWeights | null;
+  timeZone: string;
+  stamp: string;
+  now?: Date;
+};
+
+export async function backupFiles(input: BackupInput): Promise<BackupFile[]> {
+  const creators = input.creators.map(asCreator);
+  const brands = input.brands.map(asBrand);
+  const blob = await crmWorkbook({
+    creators, brands, contacts: input.contacts as unknown as BrandContact[],
+    campaigns: input.campaigns.map((c) => asCampaign(c, input.campaignCreators)),
+    events: input.events, followups: input.followups, activities: input.activities, autopilot: input.autopilot,
+    goal: input.goal, rules: input.rules, mailboxes: input.mailboxes, weights: input.weights, timeZone: input.timeZone, now: input.now,
+    score: (c) => creatorScore(c, input.weights),
+  });
+  const content = new Uint8Array(await blob.arrayBuffer());
+  return [{ filename: backupName(input.stamp), content, contentType: XLSX, summary: backupSummary(creators.length, brands.length, input.events.length) }];
 }

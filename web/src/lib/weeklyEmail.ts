@@ -88,22 +88,29 @@ const goalBar = (value: number, goal: number, color: string, height = 12) => {
     ${cell(fill, color)}${cell(toGoal, "#e7e4f3")}<td width="3" style="width:3px;min-width:3px;height:${height + 6}px;background:#17142b;font-size:0;line-height:0;border-radius:2px">&nbsp;</td>${cell(over, "#16a34a")}${cell(rest, "#f1eff8")}</tr></table>`;
 };
 
-/** The Excel files attached to this email (weekly backup). */
-export type BackupNote = { files: { name: string; rows: number; noun: string; bytes: number }[] };
+/** The Excel file attached to this email (weekly backup: the whole CRM in one workbook). */
+export type BackupNote = { files: { name: string; summary: string; bytes: number }[] };
+
+export const backupName = (stamp: string) => `influenceflow-crm-${stamp}.xlsx`;
+const count = (n: number, one: string, many: string) => `${n.toLocaleString("en-US")} ${n === 1 ? one : many}`;
+/** "321 influencers · 408 brands · 5,210 emails" — the line under the file in the email. */
+export const backupSummary = (influencers: number, brands: number, emails: number) =>
+  [count(influencers, "influencer", "influencers"), count(brands, "brand", "brands"), count(emails, "email", "emails")].join(" · ");
 
 const size = (bytes: number) => (bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`);
 
-/** "Your backup": one row per attached file, and how to bring it back. */
+/** "Your backup": the attached workbook, how to keep working in it, and how to bring it back. */
 const backupCard = (b: BackupNote) => `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:separate;background:#ffffff;border:1px solid #ece9f5;border-radius:16px">
   ${b.files.map((f, i) => `<tr><td style="padding:${i ? "4px" : "14px"} 14px ${i === b.files.length - 1 ? "12px" : "4px"}">
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
       <td width="44" style="width:44px;vertical-align:middle"><div style="width:40px;height:40px;border-radius:10px;background:#e8f6ee;border:1px solid #bfe6cf;text-align:center;font:800 10px/40px ${FONT};letter-spacing:.04em;color:#15803d">XLSX</div></td>
       <td style="padding-left:12px;vertical-align:middle"><div style="font:700 13.5px/1.35 ${FONT};color:#17142b;word-break:break-all">${esc(f.name)}</div>
-        <div style="font:500 12px/1.4 ${FONT};color:#7c7891;margin-top:2px">${num(f.rows)} ${esc(f.noun)} · ${size(f.bytes)} · attached</div></td>
+        <div style="font:500 12px/1.4 ${FONT};color:#7c7891;margin-top:2px">${esc(f.summary)} · ${size(f.bytes)} · attached</div></td>
     </tr></table></td></tr>`).join("")}
   <tr><td style="padding:10px 14px 14px;border-top:1px solid #f0eef7">
-    <div style="font:500 12px/1.55 ${FONT};color:#5b5770"><b style="color:#17142b">To restore:</b> Influencers or Brands → Import → drop the file. Every column comes back by name; anyone already in your CRM shows as a duplicate, so nothing is added twice.</div>
-    <div style="font:500 11px/1.5 ${FONT};color:#9a96ab;margin-top:6px">Archived records are included (marked “Archived”). The CRM keeps no copy of these files — they exist only in this email.</div>
+    <div style="font:500 12px/1.55 ${FONT};color:#5b5770"><b style="color:#17142b">Keep working in Excel:</b> open the “Start here” tab — dashboard, follow-ups due, every email, deals and reports, all live formulas.</div>
+    <div style="font:500 12px/1.55 ${FONT};color:#5b5770;margin-top:6px"><b style="color:#17142b">To restore:</b> Influencers or Brands → Import → drop this file. It opens its Import tab by itself; anyone already in your CRM shows as a duplicate, so nothing is added twice.</div>
+    <div style="font:500 11px/1.5 ${FONT};color:#9a96ab;margin-top:6px">Archived records are included (marked “Archived”). The CRM keeps no copy of this file — it exists only in this email.</div>
   </td></tr></table>`;
 
 export function renderWeeklyEmail(r: WeeklyReport, opts: { backup?: BackupNote | null } = {}): { subject: string; html: string; text: string } {
@@ -211,7 +218,7 @@ export function renderWeeklyEmail(r: WeeklyReport, opts: { backup?: BackupNote |
     </tr></table>
     <table role="presentation" cellpadding="0" cellspacing="0" style="margin:16px auto 0"><tr><td bgcolor="#6d5ae6" style="border-radius:12px;background:#6d5ae6"><a href="${esc(link("/app"))}" style="display:inline-block;padding:13px 26px;font:800 14px/1 ${FONT};color:#ffffff;text-decoration:none">Open your CRM →</a></td></tr></table>`)}
 
-  ${opts.backup?.files.length ? section("Your backup", backupCard(opts.backup), "Everything in your CRM as Excel — keep it safe, restore it any time.") : ""}
+  ${opts.backup?.files.length ? section("Your backup", backupCard(opts.backup), "Your whole CRM in one Excel file — keep it safe, work in it, restore from it any time.") : ""}
 
   <tr><td style="padding:22px 24px 26px;font:500 11px/1.6 ${FONT};color:#9a96ab;text-align:center">
     Counted in ${esc(r.timeZone)} exactly like your dashboard — emails, follow-ups on any channel, replies from real people (auto-replies never count).<br>
@@ -228,7 +235,7 @@ export function renderWeeklyEmail(r: WeeklyReport, opts: { backup?: BackupNote |
     "", ...r.days.map((d) => `${d.label} ${d.date}: ${d.status === "future" ? "—" : d.sent} (${DAYC[d.status].word})`),
     ...(r.mailboxes.length ? ["", "By mailbox:", ...r.mailboxes.map((m) => `${m.email}: ${m.emails.now} emails (${m.first} new, ${m.followups} follow-ups) · ${m.repliers} replied${m.replyRate.pct === null ? "" : ` (${m.replyRate.pct}%)`} · ${m.negotiations} negotiating · ${m.wins} won`)] : []),
     "", `Waiting: ${r.next.due} follow-ups due, ${r.next.newThreads} new threads, ${r.next.replyNeeded} replies owed`,
-    ...(opts.backup?.files.length ? ["", "Your backup (attached):", ...opts.backup.files.map((f) => `${f.name} — ${f.rows} ${f.noun}, ${size(f.bytes)}`), "To restore: Influencers or Brands → Import → drop the file."] : []),
+    ...(opts.backup?.files.length ? ["", "Your backup (attached):", ...opts.backup.files.map((f) => `${f.name} — ${f.summary}, ${size(f.bytes)}`), "Keep working in Excel: open the “Start here” tab.", "To restore: Influencers or Brands → Import → drop this file."] : []),
     app ? `Open your CRM: ${link("/app")}` : "",
   ].join("\n");
   return { subject, html, text };

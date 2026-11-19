@@ -10,12 +10,14 @@
 // Formulas use only functions every spreadsheet has (Excel 2019+/365, Google Sheets, LibreOffice, Numbers):
 // COUNTIFS, SUMIFS, MAXIFS, MINIFS, WORKDAY, INDEX… (MAXIFS/MINIFS stored with Excel's _xlfn. prefix).
 
-import type { Activity, Brand, BrandContact, Campaign, Creator, EmailEvent, Followup, FollowupRules } from "../types";
+import type { Activity, Brand, BrandContact, Campaign, Creator, EmailEvent, Followup, FollowupRules, RatingWeights } from "../types";
 import { STATUS_LABELS } from "../types";
 import { build, withAutopilot, type QueuedSend, type Sent } from "./outreach.ts";
 import { CHANNEL_LABELS } from "./followupEngine.ts";
 import { statusOfActivity } from "./dashboardStats.ts";
 import { RATE_FIELDS } from "./prefs.ts";
+import { BRAND_HEADERS, brandRow, CREATOR_HEADERS, creatorRow } from "./exports";
+import { offsetMin, validZone } from "./zones.ts";
 import { buildRichXlsx, col, D, richParts, S, sheetRef, type XCell, type XSheet } from "./xlsxRich.ts";
 
 export type WorkbookInput = {
@@ -32,6 +34,10 @@ export type WorkbookInput = {
   mailboxes: string[];
   /** The app's star rating (weights included); falls back to the stored stars. */
   score?: (c: Creator) => number;
+  /** Star weights for the Import tabs' rating column (same as Export). */
+  weights?: RatingWeights | null;
+  /** Dates are written in this zone (the member's). Without it: the local time of the machine that builds it. */
+  timeZone?: string;
   now?: Date;
 };
 
@@ -52,20 +58,26 @@ const SPARE_PEOPLE = 1000;
 const SPARE_LOG = 5000;
 const SPARE_DEALS = 300;
 
-// Excel serial dates (days since 1899-12-30), in the local time of the machine that exports.
-const serial = (d: Date) => Date.UTC(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), d.getMinutes(), d.getSeconds()) / 86400000 + 25569;
-const dayOnly = (v?: string | null): number | null => {
-  if (!v) return null;
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v);
-  if (m) return Date.UTC(+m[1], +m[2] - 1, +m[3]) / 86400000 + 25569;
-  const d = new Date(v);
-  return Number.isNaN(d.getTime()) ? null : Math.floor(serial(d));
-};
-const dateTime = (v?: string | null): number | null => {
-  if (!v) return null;
-  const d = new Date(v);
-  return Number.isNaN(d.getTime()) ? null : Math.round(serial(d) * 1440) / 1440;
-};
+// Excel serial dates (days since 1899-12-30) — wall-clock time in the member's zone, else the building machine's.
+function clock(zone?: string) {
+  const tz = zone && validZone(zone) ? zone : "";
+  const serial = (d: Date) => (tz
+    ? (d.getTime() + offsetMin(tz, d.getTime()) * 60_000) / 86400000 + 25569
+    : Date.UTC(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), d.getMinutes(), d.getSeconds()) / 86400000 + 25569);
+  const dayOnly = (v?: string | null): number | null => {
+    if (!v) return null;
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v);
+    if (m) return Date.UTC(+m[1], +m[2] - 1, +m[3]) / 86400000 + 25569;
+    const d = new Date(v);
+    return Number.isNaN(d.getTime()) ? null : Math.floor(serial(d));
+  };
+  const dateTime = (v?: string | null): number | null => {
+    if (!v) return null;
+    const d = new Date(v);
+    return Number.isNaN(d.getTime()) ? null : Math.round(serial(d) * 1440) / 1440;
+  };
+  return { serial, dayOnly, dateTime };
+}
 const label = (s: string) => STATUS_LABELS[s as keyof typeof STATUS_LABELS] || s || "";
 const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v !== 0 ? v : null);
 const clean = (s: unknown) => String(s ?? "").replace(/\s+/g, " ").trim();
@@ -85,6 +97,7 @@ export function crmWorkbook(input: WorkbookInput) {
 
 export function crmWorkbookSheets(input: WorkbookInput): { sheets: XSheet[]; names: { name: string; ref: string }[]; active: number } {
   const now = input.now || new Date();
+  const { serial, dayOnly, dateTime } = clock(input.timeZone);
   const creators = [...input.creators].sort((a, b) => Number(!!a.archived_at) - Number(!!b.archived_at) || clean(a.name).localeCompare(clean(b.name)));
   const brands = [...input.brands].sort((a, b) => Number(!!a.archived_at) - Number(!!b.archived_at) || clean(a.name).localeCompare(clean(b.name)));
   const campaigns = [...input.campaigns].filter((c) => !c.archived_at);
@@ -501,6 +514,7 @@ export function crmWorkbookSheets(input: WorkbookInput): { sheets: XSheet[]; nam
     [{ v: "Contacts", s: S.label }, { v: "People at brands.", s: S.wrap }],
     [{ v: "Reports", s: S.label }, { v: "Pick any period: outreach, funnels, money, mailboxes, countries, niches.", s: S.wrap }],
     [{ v: "Settings", s: S.label }, { v: "Daily goal, follow-up waits, and the lists behind every dropdown.", s: S.wrap }],
+    [{ v: "Import · Influencers / Brands", s: S.label }, { v: "Exact copies in the CRM's own export columns, archived ones too — to bring everything back: Influencers or Brands → Import → drop this file (the right tab opens by itself). Don't edit these two.", s: S.wrap }],
     [],
     [{ v: "Your daily routine", s: S.section }, { v: "", s: S.section }],
     [{ v: "1. See what's due", s: S.label }, { v: "Influencers (or Brands) → filter “Next step (auto)” to “Follow up now”, “Reply needed” or “Start new thread”.", s: S.wrap }],
@@ -526,6 +540,17 @@ export function crmWorkbookSheets(input: WorkbookInput): { sheets: XSheet[]; nam
 
   const settingsSheet: XSheet = { name: "Settings", tab: "FF6B7280", cols: [44, 10, 4, 14, 14, 12, 12, 12, 14, 14, 12, 28, 12, 12], rows: settings, grid: false, heights: { 1: 30 }, merges: ["A2:B2"] };
 
-  const sheets = [helpSheet, dashSheet, infSheet, brSheet, logSheet, dealSheet, contactSheet, repSheet, settingsSheet];
+  // ---- Import tabs: the same columns as Export, so the CRM can read this file straight back -----------------
+  const importSheet = (name: string, headers: Record<string, string>, rows: Record<string, unknown>[]): XSheet => {
+    const keys = Object.keys(headers);
+    return {
+      name, tab: "FF9CA3AF", cols: keys.map((k) => (/name|email|notes|link|channel|website/i.test(k) ? 26 : 14)), freeze: { row: 1, col: 1 },
+      rows: [keys.map((k) => ({ v: headers[k], s: S.header })), ...rows.map((r) => keys.map((k) => { const v = r[k]; return typeof v === "number" || typeof v === "boolean" ? v : v == null ? "" : String(v); }))],
+    };
+  };
+  const importInf = importSheet("Import · Influencers", CREATOR_HEADERS, creators.map((c) => creatorRow(c, input.weights)));
+  const importBr = importSheet("Import · Brands", BRAND_HEADERS, brands.map((b) => brandRow(b, input.contacts)));
+
+  const sheets = [helpSheet, dashSheet, infSheet, brSheet, logSheet, dealSheet, contactSheet, repSheet, settingsSheet, importInf, importBr];
   return { sheets, names, active: 1 };
 }
