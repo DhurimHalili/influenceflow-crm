@@ -45,5 +45,16 @@ eq("only changed rows are written", changedRows(edited.creators, base.creators).
 // 5. No base: the cloud wins, nothing is deleted.
 eq("no base → no deletes", removedIds(empty.creators, null, ["a"]), []);
 
+// 6. A blank / stale profile (missing settings its base had) never beats the cloud's — Granit's templates case.
+{
+  const withPrefs = (prefs: Record<string, unknown>) => ({ ...base, profile: { ...base.profile, preferences: prefs } } as unknown as WorkspaceData);
+  const baseP = withPrefs({ timezone: "Europe/Belgrade", followup_templates: { 1: ["a"] } });
+  const blank = withPrefs({ timezone: "Europe/Budapest" });
+  const cloudP = withPrefs({ timezone: "Europe/Belgrade", followup_templates: { 1: ["a"] }, autopilot: { fill: true } });
+  eq("stale local profile → the cloud's settings", (mergeWorkspace(blank, baseP, cloudP, () => true, 500).profile.preferences as unknown as Record<string, unknown>).followup_templates, { 1: ["a"] });
+  const edited = withPrefs({ timezone: "Europe/Paris", followup_templates: { 1: ["a"] } });
+  eq("a real local edit still wins", (mergeWorkspace(edited, baseP, cloudP, () => true, 500).profile.preferences as unknown as Record<string, unknown>).timezone, "Europe/Paris");
+}
+
 if (fail) { console.error(`\n${fail} failed`); process.exit(1); }
 console.log("\nall sync tests passed");

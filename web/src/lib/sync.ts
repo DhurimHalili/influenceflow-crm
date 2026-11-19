@@ -91,7 +91,8 @@ export const mergeWorkspace = (
     .slice(0, limit);
   return {
     ...cloud,
-    profile: sameRecord(local.profile, base.profile) ? cloud.profile : local.profile,
+    // A local profile missing settings its base had is blank / stale (the app never removes a setting): the cloud's wins.
+    profile: sameRecord(local.profile, base.profile) || staleProfile(local, base) ? cloud.profile : local.profile,
     creators: mergeRows(local.creators, base.creators, cloud.creators, deleted.creators),
     brands: mergeRows(local.brands, base.brands, cloud.brands, deleted.brands),
     contacts: mergeRows(local.contacts, base.contacts, cloud.contacts, deleted.contacts),
@@ -100,6 +101,12 @@ export const mergeWorkspace = (
     followups: mergeRows(local.followups, base.followups, cloud.followups),
     activities,
   };
+};
+
+const staleProfile = (local: WorkspaceData, base: WorkspaceData) => {
+  const mine = (local.profile?.preferences || {}) as unknown as Record<string, unknown>;
+  const had = (base.profile?.preferences || {}) as unknown as Record<string, unknown>;
+  return Object.keys(had).some((k) => had[k] !== undefined && (!(k in mine) || mine[k] === undefined));
 };
 
 /** What is kept as the base: everything but the insert-only audit log. */
