@@ -543,15 +543,17 @@ async function upsertResilient(table: string, rows: Record<string, unknown>[], o
  */
 async function saveProfile(full: WorkspaceData, base: WorkspaceData | null, userId: string) {
   const { preferences, ...columns } = full.profile as unknown as Record<string, unknown> & { preferences?: Record<string, unknown> };
-  if (!base) { await upsertResilient("profiles", [{ ...full.profile, id: userId } as unknown as Record<string, unknown>]); return; }
+  // No base = nothing to compare with: never write a whole profile blind (a blank one would overwrite real settings).
+  if (!base) return;
   const before = base.profile as unknown as Record<string, unknown> & { preferences?: Record<string, unknown> };
   const { preferences: _p, ...beforeColumns } = before;
+  const { patch, drop, stale } = preferencesPatch(preferences, before.preferences);
+  // A copy missing settings its base had is blank or stale, not an edit: nothing of the profile is written from it.
+  if (stale) return;
   if (!sameRecord(columns as never, beforeColumns as never)) await upsertResilient("profiles", [{ ...columns, id: userId }]);
-  const { patch, drop } = preferencesPatch(preferences, before.preferences);
   if (!Object.keys(patch).length && !drop.length) return;
   const { error } = await supabase.rpc("merge_preferences", { patch, drop_keys: drop });
-  // A database without the function yet: the old whole-row write.
-  if (error) await upsertResilient("profiles", [{ ...full.profile, id: userId } as unknown as Record<string, unknown>]);
+  if (error) throw error;
 }
 
 // Only records changed on this device since `base` (the last copy it knows
