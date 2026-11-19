@@ -1,5 +1,5 @@
 import { motion, AnimatePresence } from "framer-motion";
-import { ArrowRight, CalendarClock, Check, Flame, Radar, Target, Trophy, X, Zap } from "lucide-react";
+import { ArrowRight, Check, Flame, Radar, Target, Trophy, X, Zap } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useData } from "../contexts/DataContext";
@@ -41,24 +41,46 @@ export function useCoach(): { stats: CoachStats; nudge: Nudge; enabled: boolean 
   return { stats, nudge, enabled: prefs.coach !== false };
 }
 
-/** The goal ring: solid = sent, pale = still waiting to go out (scheduled in Gmail or in Autopilot). */
-function Ring({ value, goal, waiting = 0, size = 34 }: { value: number; goal: number; waiting?: number; size?: number }) {
+/** Today's number split three ways: sent, scheduled in Gmail, waiting in Autopilot (scout days: nothing waits). */
+const partsOf = (s: CoachStats) => {
+  if (s.unit === "found") return { sent: s.value, gmail: 0, autopilot: 0 };
+  const autopilot = Math.min(s.autopilot, s.scheduled);
+  return { sent: Math.max(0, s.sentToday - s.scheduled), gmail: s.scheduled - autopilot, autopilot };
+};
+
+/** The goal ring: solid = sent, mid = scheduled in Gmail, pale = waiting in Autopilot — same order as the legend. */
+function Ring({ value, goal, stats, size = 34 }: { value: number; goal: number; stats?: CoachStats; size?: number }) {
   const r = (size - 5) / 2;
   const c = 2 * Math.PI * r;
-  const total = Math.min(1, goal ? value / goal : 0);
-  const sent = Math.min(total, goal ? Math.max(0, value - waiting) / goal : 0);
+  const p = stats ? partsOf(stats) : { sent: value, gmail: 0, autopilot: 0 };
+  const share = (n: number) => (goal ? n / goal : 0);
+  const sent = Math.min(1, share(p.sent));
+  const gmail = Math.min(1 - sent, share(p.gmail));
+  const auto = Math.min(1 - sent - gmail, share(p.autopilot));
+  const arc = (from: number, len: number, cls: string) => len > 0 && <circle cx={size / 2} cy={size / 2} r={r} className={`fill ${cls}`} strokeDasharray={`${c * len} ${c}`} strokeDashoffset={-c * from} />;
   return <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="coach-ring-svg" aria-hidden="true">
     <circle cx={size / 2} cy={size / 2} r={r} className="track" />
-    {total > sent && <circle cx={size / 2} cy={size / 2} r={r} className="fill waiting" strokeDasharray={`${c * (total - sent)} ${c}`} strokeDashoffset={-c * sent} />}
-    <circle cx={size / 2} cy={size / 2} r={r} className={`fill${total >= 1 && !waiting ? " done" : ""}`} strokeDasharray={c} strokeDashoffset={c * (1 - sent)} />
+    {arc(sent + gmail, auto, "waiting auto")}
+    {arc(sent, gmail, "waiting gmail")}
+    <circle cx={size / 2} cy={size / 2} r={r} className={`fill${sent >= 1 ? " done" : ""}`} strokeDasharray={c} strokeDashoffset={c * (1 - sent)} />
   </svg>;
 }
-/** "23 sent · 1 scheduled · 17 in Autopilot" — what today's number is made of. */
+/** "23 sent · 1 scheduled in Gmail · 17 waiting in Autopilot" — for tooltips and screen readers. */
 const madeOf = (s: CoachStats) => {
   if (s.unit === "found" || !s.scheduled) return "";
-  const gmail = s.scheduled - s.autopilot;
-  return [`${s.sentToday - s.scheduled} sent`, gmail ? `${gmail} scheduled in Gmail` : "", s.autopilot ? `${s.autopilot} waiting in Autopilot` : ""].filter(Boolean).join(" · ");
+  const p = partsOf(s);
+  return [`${p.sent} sent`, p.gmail ? `${p.gmail} scheduled in Gmail` : "", p.autopilot ? `${p.autopilot} waiting in Autopilot` : ""].filter(Boolean).join(" · ");
 };
+/** The ring's key: one line per part, with the swatch the ring draws it in. Only when something still waits. */
+function RingKey({ stats }: { stats: CoachStats }) {
+  if (stats.unit === "found" || !stats.scheduled) return null;
+  const p = partsOf(stats);
+  return <ul className="coach-key" aria-label={madeOf(stats)}>
+    <li><i className="sent" aria-hidden="true" /><b>{p.sent}</b> sent</li>
+    {p.gmail > 0 && <li><i className="gmail" aria-hidden="true" /><b>{p.gmail}</b> in Gmail</li>}
+    {p.autopilot > 0 && <li><i className="auto" aria-hidden="true" /><b>{p.autopilot}</b> Autopilot</li>}
+  </ul>;
+}
 
 const TONE_ICON = { push: Zap, focus: Target, cheer: Flame, win: Trophy } as const;
 const unitWord = (s: CoachStats) => (s.unit === "found" ? "found" : "emails");
@@ -69,12 +91,12 @@ export function CoachCard() {
   const Icon = stats.unit === "found" ? Radar : TONE_ICON[nudge.tone];
   const ch = nudge.challenge;
   return <section className={`coach-card tone-${nudge.tone}${stats.unit === "found" ? " is-scout" : ""}`} aria-live="polite">
-    <div className="coach-goal"><Ring value={stats.value} goal={stats.target} waiting={stats.unit === "found" ? 0 : stats.scheduled} size={64} /><div><b>{stats.value}</b><small>of {stats.target}{stats.unit === "found" ? " found" : ""}</small>{madeOf(stats) && <em className="coach-made">{madeOf(stats)}</em>}</div></div>
+    <div className="coach-goal"><div className="coach-dial"><Ring value={stats.value} goal={stats.target} stats={stats} size={64} /><div><b>{stats.value}</b><small>of {stats.target}{stats.unit === "found" ? " found" : ""}</small></div></div><RingKey stats={stats} /></div>
     <div className="coach-body"><span className="coach-kicker"><Icon size={13} /> {stats.unit === "found" ? "Scout day" : stats.mode === "light" ? "Today's challenge · no follow-ups" : "Today's challenge"}</span><h2>{nudge.title}</h2><p>{nudge.body}</p>
       {ch && <div className="coach-progress"><i><b style={{ width: `${Math.min(100, (ch.current / Math.max(1, ch.target)) * 100)}%` }} /></i><small>{ch.label}: {ch.current}/{ch.target}</small></div>}
     </div>
     <div className="coach-side">
-      <div className="coach-mini">{stats.streak > 0 && <span title="Weekdays in a row you hit the goal"><Flame size={12} /> {stats.streak}-day streak</span>}<span>Yesterday {stats.yesterday}</span>{stats.weekAvg > 0 && <span>7-day avg {stats.weekAvg}</span>}{stats.scheduled > 0 && <span className="coach-sched" title="Counted toward today's goal, not sent yet — the pale part of the ring"><CalendarClock size={12} /> {stats.scheduled} not sent yet</span>}</div>
+      <div className="coach-mini">{stats.streak > 0 && <span title="Weekdays in a row you hit the goal"><Flame size={12} /> {stats.streak}-day streak</span>}<span>Yesterday {stats.yesterday}</span>{stats.weekAvg > 0 && <span>7-day avg {stats.weekAvg}</span>}</div>
       {nudge.cta && <Link className="btn btn-primary btn-sm" to={nudge.cta.to}>{nudge.cta.label} <ArrowRight size={14} /></Link>}
     </div>
   </section>;
@@ -86,13 +108,14 @@ export function CoachRing() {
   const navigate = useNavigate();
   if (!enabled) return null;
   return <div className="coach-top">
-    <button type="button" className={`coach-top-btn${stats.value >= stats.target ? " done" : ""}${stats.unit === "found" ? " is-scout" : ""}`} onClick={() => setOpen((v) => !v)} aria-expanded={open} title={stats.unit === "found" ? `Scout day: ${stats.value} of ${stats.target} new influencers found` : `${stats.sentToday} of ${stats.goal} emails today${madeOf(stats) ? ` — ${madeOf(stats)}` : ""}`}><Ring value={stats.value} goal={stats.target} waiting={stats.unit === "found" ? 0 : stats.scheduled} size={28} /><span>{stats.unit === "found" && <Radar size={12} className="coach-top-unit" aria-hidden="true" />}{stats.value}<small>/{stats.target}</small></span></button>
+    <button type="button" className={`coach-top-btn${stats.value >= stats.target ? " done" : ""}${stats.unit === "found" ? " is-scout" : ""}`} onClick={() => setOpen((v) => !v)} aria-expanded={open} title={stats.unit === "found" ? `Scout day: ${stats.value} of ${stats.target} new influencers found` : `${stats.sentToday} of ${stats.goal} emails today${madeOf(stats) ? ` — ${madeOf(stats)}` : ""}`}><Ring value={stats.value} goal={stats.target} stats={stats} size={28} /><span>{stats.unit === "found" && <Radar size={12} className="coach-top-unit" aria-hidden="true" />}{stats.value}<small>/{stats.target}</small></span></button>
     <AnimatePresence>{open && <motion.div className="coach-pop" role="dialog" aria-label="Today's goal" initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.15 }}>
       <div className="coach-pop-head">
-        <Ring value={stats.value} goal={stats.target} waiting={stats.unit === "found" ? 0 : stats.scheduled} size={46} />
-        <span><b>{stats.value}<small> / {stats.target}</small></b><em>{stats.unit === "found" ? "new influencers found today" : madeOf(stats) || "emails sent today"}</em></span>
+        <Ring value={stats.value} goal={stats.target} stats={stats} size={46} />
+        <span><b>{stats.value}<small> / {stats.target}</small></b><em>{stats.unit === "found" ? "new influencers found today" : stats.scheduled ? "today, counting what still waits" : "emails sent today"}</em></span>
         <button type="button" className="coach-pop-x" onClick={() => setOpen(false)} aria-label="Close"><X size={15} /></button>
       </div>
+      <RingKey stats={stats} />
       <strong>{nudge.title}</strong><p>{nudge.body}</p>
       {nudge.cta && <button type="button" className="btn btn-primary btn-sm" onClick={() => { setOpen(false); navigate(nudge.cta!.to); }}>{nudge.cta.label} <ArrowRight size={14} /></button>}
     </motion.div>}</AnimatePresence>

@@ -922,13 +922,22 @@ body:has(.kit-page) { background: #fbfaf7; }
 .coach-ring-svg .track { stroke: var(--line); }
 .coach-ring-svg .fill { stroke: var(--accent); stroke-linecap: round; transition: stroke-dashoffset .6s ease; }
 .coach-ring-svg .fill.done { stroke: var(--success); }
-.coach-ring-svg .fill.waiting { stroke: color-mix(in srgb, var(--accent) 38%, transparent); stroke-linecap: butt; }
-.coach-made { display: block; font-style: normal; font-size: 11px; color: var(--muted); margin-top: 2px; line-height: 1.35; }
+.coach-ring-svg .fill.waiting { stroke-linecap: butt; }
+.coach-ring-svg .fill.gmail { stroke: color-mix(in srgb, var(--accent) 55%, transparent); }
+.coach-ring-svg .fill.auto { stroke: color-mix(in srgb, var(--accent) 26%, transparent); }
 .coach-card { display: grid; grid-template-columns: auto 1fr auto; gap: 18px; align-items: center; margin-bottom: 16px; padding: 16px 18px; border: 1px solid var(--line); border-radius: 18px; background: linear-gradient(120deg, color-mix(in srgb, var(--accent) 9%, var(--surface-solid)), var(--surface-solid) 60%); }
 .coach-card.tone-win { background: linear-gradient(120deg, color-mix(in srgb, var(--success) 14%, var(--surface-solid)), var(--surface-solid) 60%); border-color: color-mix(in srgb, var(--success) 30%, var(--line)); }
 .coach-card.tone-push { border-color: color-mix(in srgb, var(--accent) 30%, var(--line)); }
-.coach-goal { position: relative; width: 64px; height: 64px; }
-.coach-goal > div { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; line-height: 1; }
+.coach-goal { display: grid; justify-items: center; gap: 8px; }
+.coach-dial { position: relative; width: 64px; height: 64px; }
+.coach-dial > div { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; line-height: 1; }
+.coach-key { display: grid; gap: 3px; margin: 0; padding: 0; list-style: none; font-size: 11px; line-height: 1.2; color: var(--muted); white-space: nowrap; }
+.coach-key li { display: flex; align-items: center; gap: 6px; }
+.coach-key b { min-width: 2ch; text-align: right; font-size: 11.5px; font-weight: 800; color: var(--text); font-variant-numeric: tabular-nums; }
+.coach-key i { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--accent); }
+.coach-key i.gmail { background: color-mix(in srgb, var(--accent) 55%, transparent); }
+.coach-key i.auto { background: color-mix(in srgb, var(--accent) 26%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent); }
+.coach-pop > .coach-key { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
 .coach-goal b { font-size: 18px; font-weight: 850; }
 .coach-goal small { font-size: 10px; color: var(--muted); }
 .coach-goal .coach-ring-svg circle { stroke-width: 6; }
@@ -949,8 +958,6 @@ body:has(.kit-page) { background: #fbfaf7; }
 .momentum-sched svg { flex: none; }
 .momentum-tile { container-type: inline-size; }
 @container (max-width: 112px) { .momentum-sched .ms-word { display: none; } }
-.coach-mini span.coach-sched { background: var(--accent-soft); color: var(--accent); }
-.coach-mini span.coach-sched svg { color: var(--accent); }
 @media (max-width: 760px) {
   .coach-card { grid-template-columns: auto 1fr; }
   .coach-side { grid-column: 1 / -1; justify-items: stretch; }
