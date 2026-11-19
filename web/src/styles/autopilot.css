@@ -396,3 +396,42 @@
 .ap-marked ul { list-style: none; margin: 2px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 10px; }
 .ap-marked a { color: var(--accent); font-weight: 700; text-decoration: none; }
 .ap-plan-unsent { display: inline-flex; align-items: center; gap: 6px; margin: 0 0 6px !important; padding: 4px 10px; border-radius: 999px; font-size: 12px !important; font-weight: 700; color: var(--text) !important; background: color-mix(in srgb, var(--warning) 16%, var(--surface-solid)); border: 1px solid color-mix(in srgb, var(--warning) 45%, var(--line)); }
+
+/* Mailbox guard — what was taken back to keep a mailbox at its limit (components/LimitGuard.tsx) */
+.lg-banner.warn { border-color: color-mix(in srgb, var(--warning, #c98a14) 55%, var(--line)); }
+.lg-banner.warn > svg { color: var(--warning, #c98a14); }
+.lg-list { display: grid; gap: 12px; }
+.lg-box { border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; background: var(--surface-solid); border-left: 4px solid var(--mbx, var(--accent)); display: grid; gap: 8px; min-width: 0; }
+.lg-box > header { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.lg-mail { display: inline-flex; align-items: center; gap: 6px; font-weight: 700; font-size: 13px; color: var(--text); min-width: 0; overflow-wrap: anywhere; }
+.lg-mail svg { color: var(--mbx, var(--accent)); flex: none; }
+.lg-meter { font-size: 12px; color: var(--text-soft); font-variant-numeric: tabular-nums; padding: 2px 9px; border-radius: 999px; background: var(--surface-alt); }
+.lg-meter b { color: var(--text); font-weight: 800; }
+.lg-meter.over { background: color-mix(in srgb, var(--danger, #d64545) 14%, var(--surface-solid)); color: var(--danger, #d64545); }
+.lg-meter small { font-weight: 600; }
+.lg-sum, .lg-over, .lg-empty { margin: 0; font-size: 12.5px; line-height: 1.45; color: var(--text-soft); }
+.lg-over { display: flex; gap: 6px; align-items: flex-start; color: var(--danger, #d64545); }
+.lg-empty { display: flex; gap: 6px; align-items: center; }
+.lg-box ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.lg-box li { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 10px; padding: 7px 6px; border-radius: 10px; }
+.lg-box li:hover { background: var(--surface-alt); }
+.lg-what { display: grid; gap: 1px; min-width: 0; }
+.lg-what a, .lg-what b { font-weight: 700; font-size: 13.5px; color: var(--text); text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lg-what a:hover, .lg-what a:focus-visible { text-decoration: underline; }
+.lg-what small { font-size: 12px; color: var(--muted); }
+.lg-tag { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; font-weight: 700; padding: 3px 8px; border-radius: 999px; background: var(--surface-alt); color: var(--text-soft); white-space: nowrap; }
+.lg-tag.warn { background: color-mix(in srgb, var(--warning, #c98a14) 16%, var(--surface-solid)); color: var(--text); white-space: normal; }
+.lg-go { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 9px; color: var(--muted); }
+.lg-go:hover, .lg-go:focus-visible { background: var(--surface-alt); color: var(--accent); }
+.ap-kept { margin-top: 14px; display: grid; gap: 8px; }
+.ap-kept h3 { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 13px; color: var(--text-soft); }
+.gr-guard { display: grid; gap: 10px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+.gr-guard .switch-row { align-items: flex-start; }
+.gr-guard .switch-row > span:last-child { display: grid; gap: 2px; }
+.gr-guard small { font-size: 12px; color: var(--muted); line-height: 1.45; }
+.gr-guard-sub { padding-left: 18px; }
+@media (max-width: 520px) {
+  .lg-box li { grid-template-columns: minmax(0, 1fr) auto; }
+  .lg-go { display: none; }
+  .lg-tag.warn { grid-column: 1 / -1; justify-self: start; }
+}

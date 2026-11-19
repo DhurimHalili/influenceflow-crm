@@ -28,22 +28,25 @@ export function weekOf(start: string, today: string): number {
 export const perDay = (week: number) => Math.min(RAMP_MAX, RAMP_STEP * Math.max(1, week));
 
 export type RampBox = { mailbox: string; start: string; week: number; perDay: number; next: number; full: boolean };
-export type RampPlan = { boxes: RampBox[]; total: number; nextTotal: number; week: string };
+/** `unstamped`: connected mailboxes whose first week isn't saved yet — the numbers are a guess until `stampNew` writes it. */
+export type RampPlan = { boxes: RampBox[]; total: number; nextTotal: number; week: string; unstamped: number };
 
 /** This week's target for each mailbox you have, and the sum. A mailbox with no start yet counts as starting this week. */
 export function rampPlan(starts: Record<string, string> | undefined, mailboxes: string[], today: string): RampPlan {
   const week = mondayOf(today);
   const seen = new Set<string>();
   const boxes: RampBox[] = [];
+  let unstamped = 0;
   for (const raw of mailboxes) {
     const mailbox = raw.trim().toLowerCase();
     if (!mailbox || seen.has(mailbox)) continue;
     seen.add(mailbox);
+    if (!isDayKey(starts?.[mailbox])) unstamped++;
     const start = isDayKey(starts?.[mailbox]) ? mondayOf(starts![mailbox]) : week;
     const w = toMs(start) > toMs(week) ? 1 : weekOf(start, today);
     boxes.push({ mailbox, start, week: w, perDay: perDay(w), next: perDay(w + 1), full: perDay(w) >= RAMP_MAX });
   }
-  return { boxes, total: boxes.reduce((s, b) => s + b.perDay, 0), nextTotal: boxes.reduce((s, b) => s + b.next, 0), week };
+  return { boxes, total: boxes.reduce((s, b) => s + b.perDay, 0), nextTotal: boxes.reduce((s, b) => s + b.next, 0), week, unstamped };
 }
 
 /** The ramp went live this week: a mailbox the CRM already tracked before it started with the others (anchor). */
@@ -71,7 +74,9 @@ export function stampNew(starts: Record<string, string> | undefined, mailboxes: 
 
 /** Ask when the goal isn't this week's number and they haven't said "keep mine" to this exact number this week. */
 export function shouldAsk(o: { goal: number; plan: RampPlan; skip?: { week?: string; total?: number } | null }): boolean {
-  if (!o.plan.boxes.length || o.plan.total === o.goal) return false;
+  // Never on a guess: a mailbox whose first week isn't saved yet would read as week 1 (Granit saw "50 → 20" for
+  // two week-2 mailboxes on the morning the ramp went live, before their start was written).
+  if (!o.plan.boxes.length || o.plan.unstamped > 0 || o.plan.total === o.goal) return false;
   return !(o.skip && o.skip.week === o.plan.week && o.skip.total === o.plan.total);
 }
 

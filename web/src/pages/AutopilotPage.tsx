@@ -1,3 +1,4 @@
+import { TrimList, useMailboxTrims } from "../components/LimitGuard";
 import { AlertTriangle, ArrowRight, BedDouble, Check, ChevronDown, Clock3, Layers, Loader2, Mail, Moon, PenLine, PlaneTakeoff, RefreshCcw, RotateCcw, Send, ShieldCheck, Sparkles, Square, Undo2, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
@@ -32,7 +33,7 @@ const inWords = (ms: number) => { const m = Math.round(ms / 60_000); return m <=
 const ORIGIN: Record<QueueItem["origin"], string> = { batch: "You started it", fill: "Night fill", manual: "From their profile" };
 const REASON: Record<string, string> = {
   replied: "They replied — cancelled", you_followed_up: "You followed up yourself", scheduled_in_gmail: "You scheduled one in Gmail", goal_met: "Goal already met",
-  day_over: "The day ended first", their_night: "Too late in their day", status: "No longer Contacted / No reply", gone: "Conversation gone from Gmail", fill_off: "Night fill switched off",
+  day_over: "The day ended first", mailbox_full: "Mailbox reached its daily limit — taken back", their_night: "Too late in their day", status: "No longer Contacted / No reply", gone: "Conversation gone from Gmail", fill_off: "Night fill switched off",
   by_you: "Cancelled by you", mailbox: "Mailbox can't send — reconnect it", mailbox_limit: "Mailbox hit its daily limit", no_recipient: "Couldn't tell who to send to", interrupted: "Interrupted — not sent", gmail_busy: "Gmail was busy", access: "Account not approved",
 };
 const HELD: Record<HoldWhy, { title: string; fix?: { to: string; label: string } }> = {
@@ -258,6 +259,7 @@ export default function AutopilotPage() {
         {!queue.length && <div className="ap-empty"><Clock3 size={18} /><p>Nothing on autopilot today. Plan some above{ap.fill ? ", or let the night fill top you up" : ""}.</p></div>}
         {upcoming.length > 0 && <ol className="ap-list">{upcoming.map((i) => <QueueLine key={i.id} i={i} name={nameOf(i.creator_id)} now={now} many={many} onCancel={() => void auto.cancel({ id: i.id }).then((r) => toast(r.ok ? "Cancelled — it won't be sent" : r.message, r.ok ? "success" : "error"))} />)}</ol>}
         {sent.length > 0 && <><h3><Check size={14} /> Sent · {sent.length}</h3><ol className="ap-list done">{sent.map((i) => <QueueLine key={i.id} i={i} name={nameOf(i.creator_id)} now={now} many={many} />)}</ol></>}
+        <KeptUnderLimit />
         {missed.length > 0 && <details className="ap-missed"><summary><Undo2 size={14} /> Didn't go · {missed.length}<ChevronDown size={14} /></summary><ol className="ap-list off">{missed.map((i) => <QueueLine key={i.id} i={i} name={nameOf(i.creator_id)} now={now} many={many} />)}</ol></details>}
       </section>
 
@@ -370,4 +372,12 @@ function NightFill() {
     <small className="ap-fill-foot">{ap.cap ? `Leaves room: never more than ${ap.cap} from the CRM in a day — past that it asks first.` : "No ceiling: as many as your goal needs."}</small>
     {auto.day && auto.day.short > 0 && !auto.day.declined && !auto.day.extra_ok && ap.fill && <FillAsk short={auto.day.short} />}
   </section>;
+}
+
+/** What the mailbox guard took back today (Autopilot's and Gmail-scheduled), and any mailbox still over. */
+function KeptUnderLimit() {
+  const trims = useMailboxTrims();
+  const auto = useAutopilot();
+  if (!trims.length && !auto.boxes.some((b) => b.used > b.limit)) return null;
+  return <section className="ap-kept" aria-label="Kept under the limit"><h3><ShieldCheck size={14} /> Kept under the limit · {trims.filter((t) => t.status === "cancelled").length}</h3><TrimList trims={trims} compact /></section>;
 }

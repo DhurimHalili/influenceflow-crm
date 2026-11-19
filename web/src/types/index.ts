@@ -62,6 +62,8 @@ export interface WorkspacePreferences {
   notices?: Record<string, number>;
   /** Each mailbox's first week of the 10-a-day ramp (its Monday) — lib/goalRamp. */
   mailbox_ramp?: Record<string, string>;
+  /** Mailbox guard (lib/mailboxGuard): keep every mailbox at its daily limit; `gmail` = may also cancel emails you scheduled in Gmail. */
+  mailbox_guard?: { on: boolean; gmail: boolean };
   /** "Keep my goal" for this week's ramp number (asked again next week or when the number changes). */
   goal_skip?: { week: string; total: number };
   /** Daily browser summary of due actions. */

@@ -17,6 +17,7 @@
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { assignTemplates, autopilotPool, dayCap, fillNeed, fillTemplate, minutesOf, pickWithin, readAutopilot, readTemplates, roomMap, ruleFit, shiftToZone, type BoxDay, type Fit, type Ready, type Round, type TemplateBook } from "../../../web/src/lib/autopilot.ts";
 import { rampPlan, readRamp } from "../../../web/src/lib/goalRamp.ts";
+import { readGuard } from "../../../web/src/lib/mailboxGuard.ts";
 import { followupState, type FollowupState } from "../../../web/src/lib/followupEngine.ts";
 import { openBounces } from "../../../web/src/lib/bounces.ts";
 import { followupsPaused, modeOn, normalizeWeekend } from "../../../web/src/lib/dayMode.ts";
@@ -362,6 +363,11 @@ type Outcome = { status: "sent" | "cancelled" | "failed" | "retry"; reason: stri
 async function reasonNotToSend(admin: Admin, q: QueueRow, w: World, now: number): Promise<string> {
   const end = dayEndIn(w.tz, now);
   if (dayKeyIn(w.tz, now) !== q.day || now >= end) return "day_over";
+  // The mailbox reached its daily limit since this was planned (your own replies / emails count too): it doesn't go.
+  if (readGuard((w.prefs as { mailbox_guard?: unknown }).mailbox_guard).on) {
+    const [box] = await mailboxDays(admin, w, [{ id: "", user_id: w.userId, email: q.mailbox, scopes: "" }], now);
+    if (box && box.used > box.limit) return "mailbox_full"; // `used` counts this one already
+  }
   const sendAt = new Date(q.send_at).getTime();
   const zones = q.their_zone ? q.their_zone.split(",").filter(validZone) : [];
   // Late (the cron was down, or a retry): only while it's still their day.
@@ -443,7 +449,7 @@ export async function sendOne(admin: Admin, kit: Kit, q: QueueRow, rows: Row[], 
 const ORDINAL = ["", "1st", "2nd", "3rd", "4th"];
 const REASON_TEXT: Record<string, string> = {
   replied: "they replied", you_followed_up: "you followed up yourself", scheduled_in_gmail: "you scheduled one in Gmail", goal_met: "your goal was already met",
-  day_over: "the day ended before it could go", their_night: "it was too late in their day", status: "they're no longer Contacted / No reply", gone: "the conversation is gone from Gmail", fill_off: "the night fill was switched off",
+  day_over: "the day ended before it could go", mailbox_full: "the mailbox reached its daily limit", their_night: "it was too late in their day", status: "they're no longer Contacted / No reply", gone: "the conversation is gone from Gmail", fill_off: "the night fill was switched off",
 };
 
 /** Apply what happened to a queued row (and log it on the influencer's timeline). */

@@ -8,6 +8,7 @@ import { Sheet,
 } from "lucide-react";
 import { AutopilotProvider, useAutopilot, useAutopilotPrefs } from "../contexts/AutopilotContext";
 import { FillAsk } from "./FillAsk";
+import { LimitBanner } from "./LimitGuard";
 import { dayStartIn } from "../lib/zones";
 import { minutesOf } from "../lib/autopilot";
 import { useInvoicesToChase } from "./Money";
@@ -384,7 +385,7 @@ function Shell() {
         {setupKnown && !setupDone && bannerVisible && (
           <div className="onboarding-banner"><div><Sparkles size={16} /><span><strong>Your workspace is almost ready.</strong> Take the 30-second setup and start with your real workspace.</span></div><div><Button size="sm" onClick={() => { setOnboardingStep(0); setOnboardingOpen(true); }}>Finish setup</Button><button onClick={() => setBannerVisible(false)} aria-label="Dismiss"><X size={16} /></button></div></div>
         )}
-        <main className="app-main"><FillBanner /><motion.div key={location.pathname} initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.22 }}><Outlet /></motion.div></main>
+        <main className="app-main"><FillBanner /><LimitBanner /><motion.div key={location.pathname} initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.22 }}><Outlet /></motion.div></main>
       </div>
 
       <AnimatePresence>

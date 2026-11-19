@@ -34,19 +34,33 @@ export const changedRows = <T extends Row>(local: T[], base: T[] | null): T[] =>
   });
 };
 
-/** Records deleted here since the base copy. */
-export const removedIds = <T extends Row>(local: T[], base: T[] | null): string[] => {
-  if (!base) return [];
+/** Kinds of records a person can delete. */
+export type DeletableKind = "creators" | "brands" | "contacts" | "campaigns" | "meetings";
+/** Ids deleted ON PURPOSE on this device (a delete button, a merge), not yet confirmed by the cloud. */
+export type Deleted = Partial<Record<DeletableKind, string[]>>;
+export const DELETABLE: DeletableKind[] = ["creators", "brands", "contacts", "campaigns", "meetings"];
+
+/**
+ * Records deleted here since the base copy — ONLY those deleted on purpose (`deleted`). A record that is merely
+ * missing from this device's copy (a saved copy that didn't load, an older copy, storage that was full) is never
+ * a delete: on 19 Nov 2026 a browser whose saved copy came back empty deleted a member's whole workspace this way,
+ * and the database's cascades took their follow-ups, files and Match data with it.
+ */
+export const removedIds = <T extends Row>(local: T[], base: T[] | null, deleted?: readonly string[]): string[] => {
+  if (!base || !deleted?.length) return [];
   const now = new Set(local.map((row) => row.id));
-  return base.filter((row) => !now.has(row.id)).map((row) => row.id);
+  const doomed = new Set(deleted);
+  return base.filter((row) => !now.has(row.id) && doomed.has(row.id)).map((row) => row.id);
 };
 
-const mergeRows = <T extends Row>(local: T[], base: T[], cloud: T[]): T[] => {
+const mergeRows = <T extends Row>(local: T[], base: T[], cloud: T[], deleted: readonly string[] = []): T[] => {
   const before = new Map(base.map((row) => [row.id, row]));
   const mine = new Map(local.map((row) => [row.id, row]));
   const theirs = new Map(cloud.map((row) => [row.id, row]));
-  // New on another device: shown first, like a fresh add.
-  const out: T[] = cloud.filter((row) => !mine.has(row.id) && !before.has(row.id));
+  const doomed = new Set(deleted);
+  // New on another device: shown first, like a fresh add. Also anything the cloud has that this copy lacks
+  // without a delete on record here — a missing record is never read as "deleted here".
+  const out: T[] = cloud.filter((row) => !mine.has(row.id) && (!before.has(row.id) || !doomed.has(row.id)));
   for (const row of local) {
     const prev = before.get(row.id);
     const remote = theirs.get(row.id);
@@ -68,6 +82,7 @@ export const mergeWorkspace = (
   cloud: WorkspaceData,
   unsyncedActivity: (id: string) => boolean,
   limit: number,
+  deleted: Deleted = {},
 ): WorkspaceData => {
   if (!base) return cloud;
   const cloudActivity = new Set(cloud.activities.map((a) => a.id));
@@ -77,11 +92,11 @@ export const mergeWorkspace = (
   return {
     ...cloud,
     profile: sameRecord(local.profile, base.profile) ? cloud.profile : local.profile,
-    creators: mergeRows(local.creators, base.creators, cloud.creators),
-    brands: mergeRows(local.brands, base.brands, cloud.brands),
-    contacts: mergeRows(local.contacts, base.contacts, cloud.contacts),
-    campaigns: mergeRows(local.campaigns, base.campaigns, cloud.campaigns),
-    meetings: mergeRows(local.meetings, base.meetings, cloud.meetings),
+    creators: mergeRows(local.creators, base.creators, cloud.creators, deleted.creators),
+    brands: mergeRows(local.brands, base.brands, cloud.brands, deleted.brands),
+    contacts: mergeRows(local.contacts, base.contacts, cloud.contacts, deleted.contacts),
+    campaigns: mergeRows(local.campaigns, base.campaigns, cloud.campaigns, deleted.campaigns),
+    meetings: mergeRows(local.meetings, base.meetings, cloud.meetings, deleted.meetings),
     followups: mergeRows(local.followups, base.followups, cloud.followups),
     activities,
   };

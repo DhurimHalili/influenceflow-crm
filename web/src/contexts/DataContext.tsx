@@ -4,7 +4,7 @@ import { EMPTY_RATES, normalizePreferences, normalizeRates } from "../lib/prefs"
 import { normalize, OUTREACH_STAGES, setActiveCurrency, overallStars, RATING_DIMS, ratedCount, sanitize, today, uid } from "../lib/utils";
 import { hasSupabase, supabase } from "../lib/supabase";
 import { changedParts, loadCloudWorkspace, persistCloudWorkspace, workspaceStamps, type WorkspaceStamps } from "../services/supabaseWorkspace";
-import { mergeWorkspace, sameRecord, toBase } from "../lib/sync";
+import { DELETABLE, mergeWorkspace, sameRecord, toBase, type DeletableKind, type Deleted } from "../lib/sync";
 import type { Activity, Brand, BrandContact, Campaign, Creator, Followup, Meeting, Profile, TeamMember, WorkspaceData } from "../types";
 import { useAuth } from "./AuthContext";
 import { socialKey } from "../lib/socials";
@@ -197,6 +197,10 @@ export function DataProvider({ children }: { children: ReactNode }) {
   // measured against it, so only records really changed here are pushed.
   const baseKey = `influenceflow.sync-base.${userId}`;
   const baseRef = useRef<WorkspaceData | null>(null);
+  // Deletes made ON PURPOSE on this device that the cloud hasn't confirmed yet. Only these ever delete a record in
+  // the cloud (lib/sync removedIds): a record merely missing from this device's copy is never a delete.
+  const deletedKey = `influenceflow.deleted.${userId}`;
+  const deletedRef = useRef<Deleted>({});
   // The last download as it came from the cloud, and the fingerprints it matched: a pull
   // downloads only the parts whose fingerprint changed since (often nothing at all).
   const lastCloud = useRef<WorkspaceData | null>(null);
@@ -236,6 +240,22 @@ export function DataProvider({ children }: { children: ReactNode }) {
   // Audit entries the cloud already has: only new ones are written on save
   // (they are insert-only), keeping every sync small.
   const syncedActivities = useRef<Set<string>>(new Set());
+
+  const writeDeleted = useCallback((value: Deleted) => {
+    deletedRef.current = value;
+    try {
+      if (DELETABLE.some((k) => value[k]?.length)) localStorage.setItem(deletedKey, JSON.stringify(value));
+      else localStorage.removeItem(deletedKey);
+    } catch {
+      // storage unavailable: this session still remembers them
+    }
+  }, [deletedKey]);
+  /** Record a delete the person asked for (button, bulk delete, merge). */
+  const markDeleted = useCallback((kind: DeletableKind, ids: string[]) => {
+    if (!ids.length) return;
+    const cur = deletedRef.current;
+    writeDeleted({ ...cur, [kind]: [...new Set([...(cur[kind] || []), ...ids])] });
+  }, [writeDeleted]);
 
   const saveBase = useCallback(
     (value: WorkspaceData) => {
@@ -300,11 +320,18 @@ export function DataProvider({ children }: { children: ReactNode }) {
     setReady(false);
     retryCount.current = 0;
     let local = blankWorkspace(userId);
+    let localOk = false;
     try {
       const stored = localStorage.getItem(storageKey);
-      if (stored) local = upgradeWorkspace({ ...(JSON.parse(stored) as WorkspaceData), demoSeeded: false }, userId);
+      if (stored) { local = upgradeWorkspace({ ...(JSON.parse(stored) as WorkspaceData), demoSeeded: false }, userId); localOk = true; }
     } catch {
       local = blankWorkspace(userId);
+    }
+    try {
+      const d = JSON.parse(localStorage.getItem(deletedKey) || "{}") as Deleted;
+      deletedRef.current = Object.fromEntries(DELETABLE.map((k) => [k, Array.isArray(d?.[k]) ? d[k]!.filter((x) => typeof x === "string") : []]));
+    } catch {
+      deletedRef.current = {};
     }
     setRawData(local);
     // Base: the stored one, else — when nothing was pending — this copy
@@ -317,6 +344,9 @@ export function DataProvider({ children }: { children: ReactNode }) {
     } catch {
       baseRef.current = null;
     }
+    // No saved copy on this device (never saved, cleared, or unreadable): there is nothing here to merge — the
+    // cloud copy is the truth. Merging an empty copy against an old base once read the whole workspace as deleted.
+    if (!localOk) { baseRef.current = null; writePending(false); }
     if (!baseRef.current && !readPending()) baseRef.current = toBase(local);
     setReady(true);
     if (!hasSupabase || userId === "guest") {
@@ -345,7 +375,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
             // Edits the cloud never confirmed are kept record by record;
             // everything else (including work from other devices) comes from
             // the cloud. They are pushed on the next save.
-            setRawData((current) => mergeWorkspace(current, prevBase, fresh, () => true, ACTIVITY_LIMIT));
+            setRawData((current) => mergeWorkspace(current, prevBase, fresh, () => true, ACTIVITY_LIMIT, deletedRef.current));
           } else {
             if (readPending()) writePending(false);
             setRawData(fresh);
@@ -397,10 +427,11 @@ export function DataProvider({ children }: { children: ReactNode }) {
     const snapshot = dataRef.current;
     const doomed = [...activityTombstones.current];
     const doomedFollowups = [...followupTombstones.current];
+    const deletedNow: Deleted = Object.fromEntries(DELETABLE.map((k) => [k, [...(deletedRef.current[k] || [])]]));
     const newActivities = snapshot.activities.filter((a) => !syncedActivities.current.has(a.id));
     inFlight.current = true;
     setSyncState("saving");
-    void persistCloudWorkspace({ ...snapshot, activities: newActivities, demoSeeded: false }, owner, baseRef.current, doomed, doomedFollowups)
+    void persistCloudWorkspace({ ...snapshot, activities: newActivities, demoSeeded: false }, owner, baseRef.current, doomed, doomedFollowups, deletedNow)
       .then(() => {
         if (userRef.current !== owner) return;
         saveBase(snapshot);
@@ -408,6 +439,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
         newActivities.forEach((a) => syncedActivities.current.add(a.id));
         activityTombstones.current = activityTombstones.current.filter((id) => !doomed.includes(id));
         followupTombstones.current = followupTombstones.current.filter((id) => !doomedFollowups.includes(id));
+        const sent = deletedNow;
+        writeDeleted(Object.fromEntries(DELETABLE.map((k) => [k, (deletedRef.current[k] || []).filter((id) => !(sent[k] || []).includes(id))])));
         if (editVersion.current === version && !queued.current) {
           writePending(false);
           setSyncState("synced");
@@ -431,7 +464,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
           pullRef.current();
         }
       });
-  }, [writePending, saveBase]);
+  }, [writePending, saveBase, writeDeleted]);
 
   // Pull: bring in changes made on other devices (phone, other tabs) when
   // this one is opened, refocused or reconnects, and every 45 s while it is
@@ -463,7 +496,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
         const wasSynced = syncedActivities.current;
         syncedActivities.current = new Set([...wasSynced, ...cloud.activities.map((a) => a.id)]);
         setRawData((current) => {
-          const merged = mergeWorkspace(current, prevBase, fresh, (id) => !wasSynced.has(id), ACTIVITY_LIMIT);
+          const merged = mergeWorkspace(current, prevBase, fresh, (id) => !wasSynced.has(id), ACTIVITY_LIMIT, deletedRef.current);
           return sameRecord(merged, current) ? current : merged;
         });
         saveBase(fresh);
@@ -729,6 +762,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
 
   const mergeCreators = async (keepId: string, removeId: string, merged: Partial<Creator>) => {
     if (!(await moveHistory("creator", keepId, removeId))) return false;
+    markDeleted("creators", [removeId]);
     setData((current) => {
       const removed = current.creators.find((item) => item.id === removeId);
       const kept = current.creators.find((item) => item.id === keepId);
@@ -883,6 +917,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
 
   const mergeBrands = async (keepId: string, removeId: string, merged: Partial<Brand>) => {
     if (!(await moveHistory("brand", keepId, removeId))) return false;
+    markDeleted("brands", [removeId]);
     setData((current) => {
       const removed = current.brands.find((item) => item.id === removeId);
       const kept = current.brands.find((item) => item.id === keepId);
@@ -963,8 +998,9 @@ export function DataProvider({ children }: { children: ReactNode }) {
     });
     if (toDenied && lostStamp && contact) queueLoss({ kind: "contact", id, name: label });
   };
-  const deleteContact = (id: string) =>
-    setData((current) => {
+  const deleteContact = (id: string) => {
+    markDeleted("contacts", [id]);
+    return setData((current) => {
       const contact = current.contacts.find((item) => item.id === id);
       const label = contact ? `${contact.first_name} ${contact.last_name}`.trim() || "Brand contact" : "Brand contact";
       return addActivity(
@@ -974,6 +1010,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
         contact?.brand_id,
       );
     });
+  };
 
   const addCampaign = (value: NewCampaign) => {
     const campaign: Campaign = withDealMath({
@@ -1066,8 +1103,9 @@ export function DataProvider({ children }: { children: ReactNode }) {
       if (opts?.quiet || (Object.keys(value).length === 1 && value.reminder_sent !== undefined)) return next;
       return addActivity(next, opts?.activity || `${meeting?.title || "Meeting"} updated`, "meeting", id);
     });
-  const deleteMeeting = (id: string) =>
-    setData((current) => {
+  const deleteMeeting = (id: string) => {
+    markDeleted("meetings", [id]);
+    return setData((current) => {
       const meeting = current.meetings.find((item) => item.id === id);
       return addActivity(
         { ...current, meetings: current.meetings.filter((item) => item.id !== id) },
@@ -1075,6 +1113,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
         "meeting",
       );
     });
+  };
 
   const archive = (type: "creator" | "brand" | "campaign", ids: string[], restore = false) =>
     setData((current) => {
@@ -1096,6 +1135,13 @@ export function DataProvider({ children }: { children: ReactNode }) {
     if (type === "brand") {
       for (const c of data.campaigns) if (ids.includes(c.brand_id)) doomed.add(c.id);
     }
+    if (type === "creator") markDeleted("creators", ids);
+    if (type === "brand") {
+      markDeleted("brands", ids);
+      markDeleted("contacts", data.contacts.filter((c) => ids.includes(c.brand_id)).map((c) => c.id));
+      markDeleted("campaigns", data.campaigns.filter((c) => ids.includes(c.brand_id)).map((c) => c.id));
+    }
+    if (type === "campaign") markDeleted("campaigns", ids);
     const deadActivities = data.activities.filter((a) => a.entity_id && doomed.has(a.entity_id)).map((a) => a.id);
     if (deadActivities.length)
       activityTombstones.current = [...activityTombstones.current, ...deadActivities.filter((id) => !activityTombstones.current.includes(id))];

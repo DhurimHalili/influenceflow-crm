@@ -6,7 +6,7 @@ import { normalizePreferences, normalizeRates } from "../lib/prefs";
 import { PLATFORMS, type Activity, type AudienceSnapshot, type CreatorAudience, type EmailEvent, type Brand, type BrandContact, type Campaign, type Creator, type Followup, type Meeting, type Platform, type Profile, type TeamMember, type WorkspaceData } from "../types";
 import { asPlatform, detectPlatform, normalizeSocials, socialsWithChannel } from "../lib/socials";
 import { normalizeBrief } from "../lib/brandBrief";
-import { changedRows, removedIds, sameRecord } from "../lib/sync";
+import { changedRows, removedIds, sameRecord, type Deleted } from "../lib/sync";
 import { withDealMath } from "../lib/deal";
 import { normalizeRateHistory, normalizeRateMeta } from "../lib/negotiation";
 import { normalizeTerms } from "../lib/dealTerms";
@@ -423,6 +423,9 @@ export async function loadCloudWorkspace(userId: string, opts?: { only?: Set<Wor
     }
   }
   const storedProfile = (profile.data as Record<string, unknown> | null) || null;
+  // Every member has a profile row (made at sign-up). None back = a read that didn't see it — never "defaults": a blank
+  // profile showed goal 50 / no mailbox weeks to the goal popup, and saving it would overwrite real settings.
+  if (need("profile") && !storedProfile) throw new Error("profile not readable");
   // Follow-up history and Gmail activity: read twice before giving up, then the load fails (never "none").
   const followupRows = need("followups") ? await mustLoad(() => fetchAll("followups", userId, { order: "at", max: 5000 })) : [];
   const eventRows = need("events") ? await mustLoad(() => fetchAll("email_events", userId, { order: "at", max: 6000, select: EVENT_COLS })) : [];
@@ -561,6 +564,7 @@ export async function persistCloudWorkspace(
   base: WorkspaceData | null,
   activityTombstones: string[] = [],
   followupTombstones: string[] = [],
+  deleted: Deleted = {},
 ) {
   if (full.demoSeeded) return;
   const owned = <T extends { user_id: string }>(rows: T[]) => rows.map((row) => ({ ...row, user_id: userId }));
@@ -647,11 +651,11 @@ export async function persistCloudWorkspace(
   }
 
   const removals: [string, string[]][] = [
-    ["brand_contacts", removedIds(full.contacts, base?.contacts ?? null)],
-    ["meetings", removedIds(full.meetings, base?.meetings ?? null)],
-    ["campaigns", removedIds(full.campaigns, base?.campaigns ?? null)],
-    ["creators", removedIds(full.creators, base?.creators ?? null)],
-    ["brands", removedIds(full.brands, base?.brands ?? null)],
+    ["brand_contacts", removedIds(full.contacts, base?.contacts ?? null, deleted.contacts)],
+    ["meetings", removedIds(full.meetings, base?.meetings ?? null, deleted.meetings)],
+    ["campaigns", removedIds(full.campaigns, base?.campaigns ?? null, deleted.campaigns)],
+    ["creators", removedIds(full.creators, base?.creators ?? null, deleted.creators)],
+    ["brands", removedIds(full.brands, base?.brands ?? null, deleted.brands)],
   ];
   await Promise.all(
     removals

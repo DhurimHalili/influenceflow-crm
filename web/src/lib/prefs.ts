@@ -1,3 +1,4 @@
+import { readGuard } from "./mailboxGuard";
 import { normalizeCriteria } from "./criteria";
 import { normalizeWeekend } from "./dayMode";
 import { readTemplate } from "./replyTemplate";
@@ -122,6 +123,7 @@ export const normalizePreferences =(value: unknown): WorkspacePreferences => {
     ...(v.notices && typeof v.notices === "object" ? { notices: readNotices(v.notices) } : {}),
     ...(v.mailbox_ramp && typeof v.mailbox_ramp === "object" ? { mailbox_ramp: readRamp(v.mailbox_ramp) } : {}),
     ...(readSkip(v.goal_skip) ? { goal_skip: readSkip(v.goal_skip)! } : {}),
+    ...(v.mailbox_guard !== undefined ? { mailbox_guard: readGuard(v.mailbox_guard) } : {}),
     action_digest: v.action_digest !== false,
     followup_rules: normalizeFollowupRules(v.followup_rules),
     start_page: v.start_page === "influencers" || v.start_page === "calendar" ? v.start_page : "dashboard",
