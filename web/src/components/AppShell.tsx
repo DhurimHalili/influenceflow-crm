@@ -1,6 +1,6 @@
 import { browserZone } from "./WeeklyReport";
 import { AnimatePresence, motion } from "framer-motion";
-import {
+import { Sheet,
   Archive, BarChart3, Building2, CalendarDays, Check, ChevronRight, CircleDollarSign, Clock3, Cloud, CloudOff, Command, HelpCircle, Inbox, LoaderCircle,
   Keyboard, LayoutDashboard, Compass, LogOut, UserCheck, Menu, MessageCircle, MonitorX, Moon, Palette, Plus, Search, SearchX, Settings, ShieldCheck, Sun,
   Sparkles, TrendingUp, UserX, Users, Wallet, X,
@@ -18,6 +18,7 @@ import { useAccess } from "../contexts/AccessContext";
 import { supabase } from "../lib/supabase";
 import { useData } from "../contexts/DataContext";
 import { useToast } from "../contexts/ToastContext";
+import { useExcelCrm } from "./ExcelCrm";
 import { Avatar, Button, Logo, LogoMark, Modal } from "./ui";
 import { useChase } from "../hooks/useChase";
 import { CoachLayer, CoachRing } from "./Coach";
@@ -132,6 +133,7 @@ function Shell() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [commandOpen, setCommandOpen] = useState(false);
+  const excel = useExcelCrm();
   const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [bannerVisible, setBannerVisible] = useState(true);
   const [onboardingStep, setOnboardingStep] = useState(0);
@@ -395,7 +397,7 @@ function Shell() {
 
       <Modal open={commandOpen} onClose={() => setCommandOpen(false)} title="Command center" description="Jump anywhere or start a new workflow.">
         <div className="command-list">
-          {[{ label: "Add influencer", to: "/app/influencers?new=1", icon: Users }, { label: "Add brand", to: "/app/brands?new=1", icon: Building2 }, { label: "New inbound brand", to: "/app/brands?new=inbound", icon: Inbox }, { label: "New inbound influencer", to: "/app/influencers?new=inbound", icon: Inbox }, { label: "Create campaign", to: "/app/campaigns?new=1", icon: BarChart3 }, { label: "Schedule meeting", to: "/app/calendar?new=1", icon: CalendarDays }, { label: "Search workspace", action: () => setSearchOpen(true), icon: Search }, { label: "Settings", to: "/app/settings", icon: Settings }, { label: "Keyboard shortcuts", action: () => setShortcutsOpen(true), icon: Keyboard }, { label: "Sign out", action: () => setSignOutOpen(true), icon: LogOut }].map((command) => <button key={command.label} onClick={() => { setCommandOpen(false); if (command.to) navigate(command.to); else command.action?.(); }}><command.icon size={17} /><span>{command.label}</span><ChevronRight size={15} /></button>)}
+          {[{ label: "Add influencer", to: "/app/influencers?new=1", icon: Users }, { label: "Add brand", to: "/app/brands?new=1", icon: Building2 }, { label: "New inbound brand", to: "/app/brands?new=inbound", icon: Inbox }, { label: "New inbound influencer", to: "/app/influencers?new=inbound", icon: Inbox }, { label: "Create campaign", to: "/app/campaigns?new=1", icon: BarChart3 }, { label: "Schedule meeting", to: "/app/calendar?new=1", icon: CalendarDays }, { label: "Search workspace", action: () => setSearchOpen(true), icon: Search }, { label: excel.busy ? "Building the Excel file…" : "Download the CRM as Excel", action: () => void excel.run(), icon: Sheet }, { label: "Settings", to: "/app/settings", icon: Settings }, { label: "Keyboard shortcuts", action: () => setShortcutsOpen(true), icon: Keyboard }, { label: "Sign out", action: () => setSignOutOpen(true), icon: LogOut }].map((command) => <button key={command.label} onClick={() => { setCommandOpen(false); if (command.to) navigate(command.to); else command.action?.(); }}><command.icon size={17} /><span>{command.label}</span><ChevronRight size={15} /></button>)}
         </div>
       </Modal>
 
