@@ -30,8 +30,10 @@ jobs:
           cache-dependency-path: web/package-lock.json
       - name: Build site
         env:
-          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
-          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          # Public values (they ship inside the site anyway): the Supabase project in the "Professional" org
+          # since the Nov 2026 move. The anon key only works together with RLS; it is not a secret.
+          VITE_SUPABASE_URL: https://sqofkahywzjpkgtzvoaz.supabase.co
+          VITE_SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNxb2ZrYWh5d3pqcGtndHp2b2F6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTUwNTk3MDMsImV4cCI6MjExMDYzNTcwM30.u3i9L1COcOvS8SOmaaw4E9c6T-z5agqMDMDObeywrEM
         run: |
           cd web
           echo "VITE_SUPABASE_URL=$VITE_SUPABASE_URL" > .env

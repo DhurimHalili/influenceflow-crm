@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 const TOKEN = readFileSync(join(homedir(), "Downloads", "supabase-token.txt"), "utf8").trim();
 async function sql(query) {
-  const r = await fetch(`https://api.supabase.com/v1/projects/oyyuugucxqtenuqbbbur/database/query`, {
+  const r = await fetch(`https://api.supabase.com/v1/projects/sqofkahywzjpkgtzvoaz/database/query`, {
     method: "POST", headers: { Authorization: `Bearer ${TOKEN}`, "Content-Type": "application/json" }, body: JSON.stringify({ query }),
   });
   if (!r.ok) throw new Error(await r.text());

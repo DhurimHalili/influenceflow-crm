@@ -1,7 +1,7 @@
 # StackHawk DAST config for the Supabase backend (database REST API + edge functions).
 # TARGET IS THE STAGING PROJECT ONLY (xxhblarkcaqzhwrtdqgn): fake seed users, fake data,
 # no Gmail / AI / SMTP / YouTube secrets, so nothing can leave Supabase.
-# Never point APP_HOST at production (oyyuugucxqtenuqbbbur).
+# Never point APP_HOST at production (sqofkahywzjpkgtzvoaz).
 #
 # Credentials come from the gitignored .hawk-profiles.env:
 #   set -a; . ./.hawk-profiles.env; set +a
