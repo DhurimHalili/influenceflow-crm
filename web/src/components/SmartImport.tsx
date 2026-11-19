@@ -68,7 +68,9 @@ export function SmartImport({ kind, onReady, template }: { kind: ImportKind; onR
         const sheets = await readXlsx(file);
         if (!sheets.length) return setError("That workbook has no rows.");
         setBook({ name: file.name, sheets });
-        const best = sheets.reduce((bi, s, i) => (s.rows.length > sheets[bi].rows.length ? i : bi), 0);
+        // A CRM workbook / weekly backup opens on its Import tab for this list; any other file on its biggest tab.
+        const own = sheets.findIndex((s) => { const r = readSheet(s.rows, kind); return r.rows.length > 0 && isCrmExport(r, kind); });
+        const best = own >= 0 ? own : sheets.reduce((bi, s, i) => (s.rows.length > sheets[bi].rows.length ? i : bi), 0);
         setSheetIndex(best);
         load(sheets[best].rows, `${file.name} · ${sheets[best].name}`);
       } else if (/\.xls$/i.test(file.name)) {

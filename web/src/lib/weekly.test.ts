@@ -65,9 +65,9 @@ eq("plain-text part", mail.text.includes("Sent 12 / 25 goal (48%)"), true);
 eq("greets by first name", mail.html.includes("Dhurim, here's your week"), true);
 // The weekly backup: listed only when files are attached, names escaped, in the text part too.
 eq("no backup section without files", mail.html.includes("Your backup"), false);
-const withBackup = renderWeeklyEmail(r, { backup: { files: [{ name: "influencers-<x>.xlsx", rows: 321, noun: "influencers", bytes: 230000 }, { name: "brands-2026-11-15.xlsx", rows: 408, noun: "brands", bytes: 2_400_000 }] } });
-eq("backup listed with rows and size", [withBackup.html.includes("Your backup"), withBackup.html.includes("321 influencers · 225 KB"), withBackup.html.includes("408 brands · 2.3 MB")], [true, true, true]);
-eq("backup file names escaped", withBackup.html.includes("influencers-&lt;x&gt;.xlsx"), true);
+const withBackup = renderWeeklyEmail(r, { backup: { files: [{ name: "influenceflow-crm-<x>.xlsx", summary: "321 influencers · 408 brands · 5,210 emails", bytes: 2_400_000 }] } });
+eq("backup listed with rows and size", [withBackup.html.includes("Your backup"), withBackup.html.includes("321 influencers · 408 brands · 5,210 emails · 2.3 MB"), withBackup.html.includes("Start here")], [true, true, true]);
+eq("backup file names escaped", withBackup.html.includes("influenceflow-crm-&lt;x&gt;.xlsx"), true);
 eq("backup in the plain-text part", withBackup.text.includes("To restore: Influencers or Brands → Import"), true);
 
 // "This week so far" on Sunday evening: future days are not judged.
