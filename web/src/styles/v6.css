@@ -1003,3 +1003,17 @@
 .weekly-backup-toggle .switch { flex: none; margin-top: 2px; }
 .weekly-backup-toggle > span:last-child { display: grid; gap: 2px; color: var(--text); }
 .weekly-backup-toggle small { color: var(--muted); font-size: 12px; font-weight: 500; line-height: 1.45; }
+
+/* Settings → Data & backup: the working Excel CRM, the main way out of the app. */
+.excel-crm { width: 100%; display: flex; align-items: center; gap: 13px; margin-bottom: 10px; padding: 14px 15px; border-radius: 14px; border: 1px solid color-mix(in srgb, #16a34a 34%, var(--line)); background: linear-gradient(135deg, color-mix(in srgb, #16a34a 9%, var(--surface-solid)), color-mix(in srgb, var(--accent) 6%, var(--surface-solid))); color: var(--text); font: inherit; text-align: left; cursor: pointer; transition: border-color .15s ease-out, transform .15s ease-out, box-shadow .15s ease-out; }
+.excel-crm:hover:not(:disabled) { border-color: color-mix(in srgb, #16a34a 60%, var(--line)); box-shadow: 0 6px 18px -10px color-mix(in srgb, #16a34a 55%, transparent); }
+.excel-crm:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.excel-crm:disabled { cursor: progress; opacity: .8; }
+.excel-crm > div { flex: 1; min-width: 0; display: grid; gap: 3px; }
+.excel-crm strong { font-size: 14px; font-weight: 750; }
+.excel-crm small { color: var(--text-soft, var(--muted)); font-size: 12px; line-height: 1.45; }
+.excel-crm em { font-style: normal; font-size: 11px; font-weight: 650; color: color-mix(in srgb, #16a34a 75%, var(--text)); overflow-wrap: anywhere; }
+.excel-crm > svg { flex: none; width: 17px; height: 17px; color: var(--muted); }
+.excel-crm-ico { flex: none; width: 40px; height: 40px; display: grid; place-items: center; border-radius: 12px; background: #16a34a; color: #fff; }
+.excel-crm-ico svg { width: 20px; height: 20px; }
+@media (prefers-reduced-motion: reduce) { .excel-crm { transition: none; } }

@@ -14,10 +14,11 @@ import type { EmailTemplate, ThemeName, WorkspaceData } from "../types";
 import { columnKeys } from "../lib/exportFormats";
 import { CoachSettings, FollowupRulesSettings, GmailSettings, WeekendSettings } from "../components/SettingsGmail";
 import { ApiKeysSettings } from "../components/ApiKeys";
+import { useExcelCrm } from "../components/ExcelCrm";
 import { TeamSettings } from "../components/Team";
 import { WeeklyReportSettings } from "../components/WeeklyReport";
 import { AvatarButton } from "../components/AvatarEditor";
-import { CalendarDays, CornerUpLeft, KeyRound, Layers, Mail, Target, Youtube } from "lucide-react";
+import { CalendarDays, CornerUpLeft, KeyRound, Layers, Mail, Sheet, Target, Youtube } from "lucide-react";
 import { FollowupTemplates } from "../components/FollowupTemplates";
 import { useAutopilot } from "../contexts/AutopilotContext";
 import { ReplyTemplateSettings } from "../components/ReplyTemplateSettings";
@@ -342,6 +343,7 @@ export function SettingsPage() {
     toast(`${built.rows.length} ${type} exported (archived included)`);
   };
 
+  const excel = useExcelCrm();
   // One Excel file, one sheet per record type — the whole workspace at a glance.
   const exportWorkbook = async () => {
     const sets = [
@@ -374,7 +376,7 @@ export function SettingsPage() {
       <NotificationSettings />
       <ScoringSettings />
       <TemplateSettings />
-      <section id="data" className="settings-section"><div className="settings-heading"><span><Database /></span><div><h2>Data & backup</h2><p>Export everything in versioned formats or import a previous workspace safely.</p></div></div><div className="settings-body"><div className="data-actions"><button onClick={() => void exportWorkbook()}><span><Download /></span><div><strong>Everything in Excel</strong><small>One .xlsx — influencers, brands, contacts and campaigns, a sheet each</small></div><Download /></button><button onClick={exportBackup}><span><HardDriveDownload /></span><div><strong>JSON backup v2</strong><small>All records, links, settings and activity</small></div><Download /></button><button onClick={() => fileRef.current?.click()}><span><Upload /></span><div><strong>Import backup</strong><small>Validate and preview before changes</small></div><ChevronRight /></button><input ref={fileRef} type="file" accept=".json,application/json" onChange={readBackup} hidden /></div><div className="csv-export-row"><span><FileJson /> CSV exports</span>{(["influencers", "brands", "contacts", "campaigns"] as const).map((type) => <button key={type} onClick={() => exportCollection(type)}>{type}<Download /></button>)}</div>{importError && <div className="import-error"><AlertTriangle /> <span><strong>Backup validation failed</strong>{importError}</span><button onClick={() => fileRef.current?.click()}><RefreshCcw /> Retry</button></div>}<div className="privacy-note"><LockKeyhole /><span><strong>Your exports are generated in the browser.</strong>Keep backup files somewhere private. They can contain contact and campaign details.</span></div></div>      </section>
+      <section id="data" className="settings-section"><div className="settings-heading"><span><Database /></span><div><h2>Data & backup</h2><p>Export everything in versioned formats or import a previous workspace safely.</p></div></div><div className="settings-body"><button type="button" className="excel-crm" onClick={() => void excel.run()} disabled={excel.busy} aria-busy={excel.busy}><span className="excel-crm-ico"><Sheet /></span><div><strong>{excel.busy ? "Building your workbook…" : "Work in Excel — the whole CRM"}</strong><small>Influencers, brands, every email, deals, a live dashboard and reports. Status dropdowns, “Follow up now” and next follow-up dates keep working in Excel or Google Sheets — add people, log emails, change statuses.</small><em>Dashboard · Influencers · Brands · Email log · Deals · Contacts · Reports · Settings</em></div><Download /></button><div className="data-actions"><button onClick={() => void exportWorkbook()}><span><Download /></span><div><strong>Plain data in Excel</strong><small>Just the records — influencers, brands, contacts and campaigns, a sheet each</small></div><Download /></button><button onClick={exportBackup}><span><HardDriveDownload /></span><div><strong>JSON backup v2</strong><small>All records, links, settings and activity</small></div><Download /></button><button onClick={() => fileRef.current?.click()}><span><Upload /></span><div><strong>Import backup</strong><small>Validate and preview before changes</small></div><ChevronRight /></button><input ref={fileRef} type="file" accept=".json,application/json" onChange={readBackup} hidden /></div><div className="csv-export-row"><span><FileJson /> CSV exports</span>{(["influencers", "brands", "contacts", "campaigns"] as const).map((type) => <button key={type} onClick={() => exportCollection(type)}>{type}<Download /></button>)}</div>{importError && <div className="import-error"><AlertTriangle /> <span><strong>Backup validation failed</strong>{importError}</span><button onClick={() => fileRef.current?.click()}><RefreshCcw /> Retry</button></div>}<div className="privacy-note"><LockKeyhole /><span><strong>Your exports are generated in the browser.</strong>Keep backup files somewhere private. They can contain contact and campaign details.</span></div></div>      </section>
       <VersionCard />
       <DangerZone onExport={exportBackup} />
     </main></div>
