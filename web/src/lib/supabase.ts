@@ -67,6 +67,54 @@ const readAuthRedirect = (): AuthRedirect | null => {
 
 export const pendingAuthRedirect: AuthRedirect | null = readAuthRedirect()
 
+// ---------------------------------------------------------------------------
+// A session ended on the server (signed out on every device, revoked, deleted)
+// while this tab still holds its token. Table reads keep working until the token
+// runs out (the database only checks its signature), but every server function
+// asks the auth server and answers 401 — the app looked signed in while every
+// action said "Unauthorized". On a function 401 we ask the auth server once; if it
+// says the session is gone, this device signs out and the login page says why.
+// Offline / server errors never sign anyone out.
+const SESSION_ENDED = 'if.session-ended'
+let checkingSession: Promise<void> | null = null
+
+function checkSessionAlive(): Promise<void> {
+  if (checkingSession) return checkingSession
+  checkingSession = (async () => {
+    const { data } = await supabase.auth.getSession()
+    if (!data.session) return
+    // Ask the auth server straight (no library lock: getUser() can sit behind the lock while this burst holds it).
+    const res = await fetch(`${url}/auth/v1/user`, { headers: { apikey: anon, Authorization: `Bearer ${data.session.access_token}` } })
+    // 401/403 = this session no longer exists on the server. Network trouble / 5xx never signs anyone out.
+    const ended = res.status === 401 || res.status === 403
+    if (!ended) return
+    endedNote = null
+    try { sessionStorage.setItem(SESSION_ENDED, '1') } catch { /* the login page just won't explain */ }
+    await supabase.auth.signOut({ scope: 'local' })
+  })().catch(() => undefined).finally(() => { checkingSession = null })
+  return checkingSession
+}
+
+const watchedFetch: typeof fetch = async (input, init) => {
+  const res = await fetch(input, init)
+  if (res.status === 401) {
+    const target = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+    if (target.includes('/functions/v1/')) void checkSessionAlive()
+  }
+  return res
+}
+
+/** True on the first login page after this device was signed out because the session ended elsewhere. */
+let endedNote: boolean | null = null
+export function takeSessionEnded(): boolean {
+  if (endedNote !== null) return endedNote  // the login page can mount more than once in one load
+  try {
+    endedNote = sessionStorage.getItem(SESSION_ENDED) === '1'
+    sessionStorage.removeItem(SESSION_ENDED)
+  } catch { endedNote = false }
+  return endedNote
+}
+
 export const supabase = createClient(
   url || 'https://placeholder.supabase.co',
   anon || 'placeholder',
@@ -77,6 +125,7 @@ export const supabase = createClient(
       // Handled above (hash routing makes the built-in detection unreliable).
       detectSessionInUrl: false,
     },
+    global: { fetch: watchedFetch },
   },
 )
 
@@ -84,3 +133,4 @@ export const supabase = createClient(
 // already allow-listed in Supabase (Auth → URL Configuration); whatever form
 // the returned fragment takes, readAuthRedirect() handles it.
 export const authRedirectUrl = () => `${window.location.origin}${window.location.pathname}#/update-password`
+

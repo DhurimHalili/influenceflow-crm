@@ -5,6 +5,7 @@ import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { Button, Input, Logo } from "../components/ui";
 import { pwnedCount, pwnedMessage } from "../lib/pwned";
+import { takeSessionEnded } from "../lib/supabase";
 
 const LAST_EMAIL = "if.last-email";
 const readLastEmail = () => { try { return localStorage.getItem(LAST_EMAIL) || ""; } catch { return ""; } };
@@ -81,6 +82,8 @@ function AuthPage({ mode, returnTo }: { mode: "login" | "signup"; returnTo?: str
   const [trap, setTrap] = useState("");
   const [openedAt] = useState(() => Date.now());
   const [held, setHeld] = useState(false);
+  // Signed out here because the session ended on the server (another device chose "Sign out everywhere", access changed…).
+  const [ended] = useState(() => mode === "login" && takeSessionEnded());
   if (!authLoading && user) return <Navigate to={recovery ? "/update-password" : ((location.state as { from?: { pathname?: string } } | null)?.from?.pathname || "/app")} replace />;
   const suggestion = emailSuggestion(email);
   const submit = async (event: FormEvent) => {
@@ -100,6 +103,7 @@ function AuthPage({ mode, returnTo }: { mode: "login" | "signup"; returnTo?: str
   const resetLink = `/forgot-password?email=${encodeURIComponent(email.trim())}`;
   return <AuthShell kicker="Private workspace" title={mode === "login" ? "Members only." : "Ask to join."} lead={mode === "login" ? "This CRM is private. Sign in with your account to continue." : "Every account is approved by hand before it can open anything."}>
     <span className="auth-kicker">{mode === "login" ? "Sign in" : "Request access"}</span><h2>{mode === "login" ? "Welcome back" : "Ask to join"}</h2><p>{mode === "login" ? "Enter the email and password you signed up with." : "Create your login. The owner approves every member by hand, and you'll get an email once you're in."}</p>
+    {ended && !error ? <div className="form-note" role="status"><span>Your session ended, so this device was signed out. Sign in again — everything you saved is still here.</span></div> : null}
     {held ? <div className="form-note" role="status"><span>Thanks — your request is noted. You'll get an email if it's approved.</span></div> : null}
     <form onSubmit={submit} noValidate hidden={held}>
       {mode === "signup" && <label className="auth-trap" aria-hidden="true">Company website<input tabIndex={-1} autoComplete="off" value={trap} onChange={(event) => setTrap(event.target.value)} name="website" /></label>}
