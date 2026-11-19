@@ -46,6 +46,8 @@ export type Sent = {
   threadId?: string;
   /** Sent or waiting in Autopilot's queue (not Gmail's Scheduled folder). */
   autopilot?: boolean;
+  /** Autopilot: which follow-up of the thread it is (1–4). */
+  round?: number;
 };
 
 /** A message from their side: an email reply or one you logged ("They replied"). */
@@ -151,7 +153,7 @@ export const emailsIn = (log: Sent[], start: number, end: number) => log.filter(
 export const scheduledNow = (log: Sent[], kind?: Sent["kind"]) => log.filter((s) => s.scheduled && (!kind || s.kind === kind));
 
 /** A row of Autopilot's queue (autosend_queue), as the app reads it. */
-export type QueuedSend = { id: string; creator_id: string; mailbox: string; thread_id: string; send_at: string; status: string; gmail_id: string; sent_at: string | null };
+export type QueuedSend = { id: string; creator_id: string; mailbox: string; thread_id: string; send_at: string; status: string; gmail_id: string; sent_at: string | null; round?: number };
 
 /**
  * Autopilot's emails in the same log: one waiting in its queue counts like an email in Gmail's Scheduled folder
@@ -161,11 +163,14 @@ export type QueuedSend = { id: string; creator_id: string; mailbox: string; thre
 export function withAutopilot(sent: Sent[], rows: QueuedSend[], events: EmailEvent[]): Sent[] {
   if (!rows.length) return sent;
   const tracked = new Set(events.map((e) => e.gmail_id).filter(Boolean));
+  // An Autopilot email the sync already brought in is the real Gmail row — still worth knowing who sent it.
+  const byAutopilot = new Map(rows.filter((r) => r.status === "sent" && r.gmail_id && tracked.has(r.gmail_id)).map((r) => [`g-${r.gmail_id}`, r]));
+  const base = byAutopilot.size ? sent.map((x) => { const r = byAutopilot.get(x.key); return r ? { ...x, autopilot: true, round: r.round } : x; }) : sent;
   const extra: Sent[] = [];
   for (const r of rows) {
     const waiting = r.status === "pending" || r.status === "sending";
     if (!waiting && (r.status !== "sent" || !r.gmail_id || tracked.has(r.gmail_id))) continue;
-    extra.push({ key: `autopilot:${r.id}`, at: waiting ? r.send_at : r.sent_at || r.send_at, kind: "followup", role: "followup", scheduled: waiting, autopilot: true, entityId: r.creator_id, entityType: "creator", segment: "creator", recordId: r.creator_id, mailbox: (r.mailbox || "").toLowerCase(), channel: "email", threadId: r.thread_id || undefined });
+    extra.push({ key: `autopilot:${r.id}`, at: waiting ? r.send_at : r.sent_at || r.send_at, kind: "followup", role: "followup", scheduled: waiting, autopilot: true, round: r.round, entityId: r.creator_id, entityType: "creator", segment: "creator", recordId: r.creator_id, mailbox: (r.mailbox || "").toLowerCase(), channel: "email", threadId: r.thread_id || undefined });
   }
-  return extra.length ? [...sent, ...extra].sort((a, b) => a.at.localeCompare(b.at)) : sent;
+  return extra.length ? [...base, ...extra].sort((a, b) => a.at.localeCompare(b.at)) : base;
 }

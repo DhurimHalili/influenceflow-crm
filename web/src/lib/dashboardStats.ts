@@ -93,9 +93,10 @@ function scopeTo(input: DashInput): DashInput {
   };
 }
 
+const ORD = ["", "1st", "2nd", "3rd", "4th"];
 export type MetricKey = "emails" | "followups" | "first" | "newthreads" | "answers" | "replies" | "negotiations" | "wins" | "lost" | "added"
   // The parts of "Emails sent" (email only): what each email was.
-  | "e_first" | "e_followups" | "e_answers" | "e_newthreads" | "e_scheduled" | "e_autopilot";
+  | "e_first" | "e_followups" | "e_answers" | "e_newthreads" | "e_autopilot" | "e_scheduled" | "w_autopilot" | "waiting";
 
 /** One row behind a number: who, when, what. */
 export type Row = { key: string; at: string; name: string; to: string; tag: string; sub: string; segment: Segment };
@@ -161,19 +162,23 @@ export function makeStats(all: DashInput) {
         // Waiting to go out: counted by its send time, up to the end of the period.
         if (x.scheduled ? !withScheduled || !within(x.at, s, Math.max(e, horizon)) : !within(x.at, s, e)) continue;
         const w = who(x);
-        const tag = x.scheduled ? `${x.autopilot ? "Autopilot" : "Scheduled"} · ${new Date(x.at).toLocaleString("en-US", { weekday: "short", hour: "numeric", minute: "2-digit" })}` : x.channel === "email" ? ROLE_WORD[x.role] : `${ROLE_WORD[x.role]} · ${CHANNEL_WORD[x.channel] || x.channel}`;
+        const what = x.autopilot && x.round ? `${ORD[x.round] || ""} follow-up` : ROLE_WORD[x.role];
+        const tag = x.scheduled ? `${what} · ${x.autopilot ? "Autopilot" : "Gmail"} · ${new Date(x.at).toLocaleString("en-US", { weekday: "short", hour: "numeric", minute: "2-digit" })}` : x.channel === "email" ? `${what}${x.autopilot ? " · Autopilot" : ""}` : `${ROLE_WORD[x.role]} · ${CHANNEL_WORD[x.channel] || x.channel}`;
         out.push({ key: x.key, at: x.at, name: w.name, to: w.to, tag, sub: x.mailbox || (x.channel === "email" ? "Logged by hand" : ""), segment: x.segment });
       }
     };
     const email = (x: Sent) => x.channel === "email";
     switch (metric) {
-      case "emails": sentRows(email, true); break;
+      // Sent means sent: an email waiting (Gmail's Scheduled folder or Autopilot) is counted apart until it goes out.
+      case "emails": sentRows((x) => email(x) && !x.scheduled); break;
       case "e_first": sentRows((x) => email(x) && !x.scheduled && x.role === "first"); break;
-      case "e_followups": sentRows((x) => email(x) && !x.scheduled && x.role === "followup"); break;
+      case "e_followups": sentRows((x) => email(x) && !x.scheduled && x.role === "followup" && !x.autopilot); break;
+      case "e_autopilot": sentRows((x) => email(x) && !x.scheduled && !!x.autopilot); break;
       case "e_answers": sentRows((x) => email(x) && !x.scheduled && x.role === "answer"); break;
       case "e_newthreads": sentRows((x) => email(x) && !x.scheduled && x.role === "newthread"); break;
       case "e_scheduled": sentRows((x) => email(x) && x.scheduled && !x.autopilot, true); break;
-      case "e_autopilot": sentRows((x) => email(x) && x.scheduled && !!x.autopilot, true); break;
+      case "w_autopilot": sentRows((x) => email(x) && x.scheduled && !!x.autopilot, true); break;
+      case "waiting": sentRows((x) => email(x) && x.scheduled, true); break;
       case "followups": sentRows((x) => x.role === "followup"); break;
       case "first": sentRows((x) => x.role === "first"); break;
       case "newthreads": sentRows((x) => x.role === "newthread"); break;
@@ -220,14 +225,24 @@ export function makeStats(all: DashInput) {
 
   const count = (metric: MetricKey, view: View, s: number, e: number, horizon = e) => rows(metric, view, s, e, horizon).length;
 
-  /** "Emails sent" taken apart: every part adds up to the total. */
+  /**
+   * "Emails sent" taken apart: every part adds up to the total, and only emails that went out count.
+   * `waiting` = emails due to go out before the period ends (Gmail's Scheduled folder + Autopilot's queue),
+   * shown apart — what they are, who sends them and when the next one goes.
+   */
   function emailMix(view: View, s: number, e: number, horizon = e) {
     const part = (m: MetricKey) => count(m, view, s, e, horizon);
-    const mix = { first: part("e_first"), followups: part("e_followups"), answers: part("e_answers"), newthreads: part("e_newthreads"), scheduled: part("e_scheduled"), autopilot: part("e_autopilot") };
-    const otherFollowups = count("followups", view, s, e) - mix.followups;
+    const mix = { first: part("e_first"), followups: part("e_followups"), autopilot: part("e_autopilot"), answers: part("e_answers"), newthreads: part("e_newthreads") };
+    const otherFollowups = count("followups", view, s, e) - mix.followups - mix.autopilot;
+    const pending = input.sent.filter((x) => x.scheduled && x.channel === "email" && matches(view, x.segment) && within(x.at, s, Math.max(e, horizon))).sort((a, b) => a.at.localeCompare(b.at));
+    const kinds = (list: Sent[]) => ({ first: list.filter((x) => x.role === "first").length, followup: list.filter((x) => x.role === "followup").length, newthread: list.filter((x) => x.role === "newthread").length, answer: list.filter((x) => x.role === "answer").length });
+    const gmail = pending.filter((x) => !x.autopilot), auto = pending.filter((x) => x.autopilot);
+    const rounds: Record<number, number> = {};
+    for (const x of auto) if (x.round) rounds[x.round] = (rounds[x.round] || 0) + 1;
+    const waiting = { total: pending.length, next: pending[0]?.at || "", gmail: { n: gmail.length, kinds: kinds(gmail) }, autopilot: { n: auto.length, rounds } };
     // Scheduled for a day after this period: not counted yet, but worth showing.
     const later = horizon < Number.MAX_SAFE_INTEGER ? input.sent.filter((x) => x.scheduled && x.channel === "email" && matches(view, x.segment) && new Date(x.at).getTime() >= Math.max(e, horizon)).length : 0;
-    return { ...mix, total: mix.first + mix.followups + mix.answers + mix.newthreads + mix.scheduled + mix.autopilot, otherFollowups, later };
+    return { ...mix, scheduled: gmail.length, total: mix.first + mix.followups + mix.autopilot + mix.answers + mix.newthreads, otherFollowups, later, waiting };
   }
 
   /**

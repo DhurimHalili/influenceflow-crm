@@ -131,13 +131,16 @@ async function pendingOf(admin: Admin, userId: string) {
 
 /** Who may get a follow-up now. `anyWords`: one you write yourself (a profile) needs no saved template. */
 /**
- * People Autopilot leaves alone for the rest of today: one you cancelled (you meant it), one it
- * already sent to, one that failed (no retry storms), or one it stopped for a reason that still
- * holds. A follow-up cancelled only because your goal was met can come back.
+ * People Autopilot leaves alone for the rest of today: one it already sent to, one that failed (no retry
+ * storms), or one it stopped for a reason that still holds (they replied, you wrote yourself…). A follow-up
+ * cancelled only because your goal was met can come back. One YOU cancelled stays out of the night fill
+ * (`fill`: you meant "not tonight"), but you can plan it again yourself — cancelling by mistake never hides
+ * people from "Send for me".
  */
-export async function doneWithToday(admin: Admin, userId: string, day: string): Promise<Set<string>> {
+export async function doneWithToday(admin: Admin, userId: string, day: string, opts: { fill?: boolean } = {}): Promise<Set<string>> {
   const { data } = await admin.from("autosend_queue").select("creator_id, status, reason").eq("user_id", userId).eq("day", day).in("status", ["sent", "failed", "cancelled"]).limit(3000);
-  return new Set(((data || []) as { creator_id: string; status: string; reason: string }[]).filter((r) => r.status !== "cancelled" || !["goal_met", "fill_off", "day_over"].includes(r.reason)).map((r) => r.creator_id));
+  const back = new Set(["goal_met", "fill_off", "day_over", ...(opts.fill ? [] : ["by_you"])]);
+  return new Set(((data || []) as { creator_id: string; status: string; reason: string }[]).filter((r) => r.status !== "cancelled" || !back.has(r.reason)).map((r) => r.creator_id));
 }
 
 export function poolOf(w: World, rows: Row[], queued: Set<string>, now: number, anyWords = false) {
@@ -553,7 +556,7 @@ export async function fillFor(admin: Admin, kit: Kit, userId: string, prefs: Pre
   const autoToday = list.filter((x) => ["pending", "sending", "sent"].includes(x.status)).length;
   const batchToday = list.filter((x) => x.origin === "batch").length;
   const cap = Math.min(DAY_MAX, dayCap(auto.cap, batchToday, dayRow?.extra_ok === true));
-  const queued = new Set([...(await pendingOf(admin, userId)).map((p) => p.creator_id), ...(await doneWithToday(admin, userId, day))]);
+  const queued = new Set([...(await pendingOf(admin, userId)).map((p) => p.creator_id), ...(await doneWithToday(admin, userId, day, { fill: true }))]);
   const pool = poolOf(w, rows, queued, now);
   const taken = pending.map((p) => ({ mailbox: p.mailbox, at: new Date(p.send_at).getTime() }));
   const from = Math.max(now, startMs);
@@ -597,10 +600,13 @@ export async function cancelOnReply(admin: Admin, userId: string): Promise<numbe
     let reason = answered.has(q.creator_id) ? "replied" : "";
     if (!reason && (manual.get(q.creator_id) || "") > q.created_at) reason = "you_followed_up";
     if (!reason) {
-      const { data: mineNow } = await admin.from("email_events").select("gmail_id").eq("user_id", userId).eq("entity_id", q.creator_id).eq("direction", "out").eq("scheduled", false).gt("at", q.created_at).limit(5);
+      // An email you wrote them yourself — sent, or waiting in Gmail's Scheduled folder — since this was queued.
+      const { data: mineNow } = await admin.from("email_events").select("gmail_id, scheduled").eq("user_id", userId).eq("entity_id", q.creator_id).eq("direction", "out").or(`at.gt."${q.created_at}",created_at.gt."${q.created_at}"`).limit(5);
       if ((mineNow || []).length) {
         const ours = await ourSends(admin, userId, q.creator_id);
-        if (((mineNow || []) as { gmail_id: string }[]).some((e) => !ours.has(e.gmail_id))) reason = "you_followed_up";
+        const yours = ((mineNow || []) as { gmail_id: string; scheduled: boolean }[]).filter((e) => !ours.has(e.gmail_id));
+        if (yours.some((e) => !e.scheduled)) reason = "you_followed_up";
+        else if (yours.length) reason = "scheduled_in_gmail";
       }
     }
     if (!reason) continue;

@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { ArrowRight, Building2, CalendarClock, CheckCircle2, Handshake, Inbox, Mail, RefreshCw, Reply, Send, ShieldCheck, Sparkles, Trash2, Trophy, UserPlus, Users, X, XCircle } from "lucide-react";
+import { ArrowRight, Building2, CalendarClock, Clock3, PlaneTakeoff, CheckCircle2, Handshake, Inbox, Mail, RefreshCw, Reply, Send, ShieldCheck, Sparkles, Trash2, Trophy, UserPlus, Users, X, XCircle } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useData } from "../contexts/DataContext";
 import { useGmail } from "../contexts/GmailContext";
@@ -59,7 +59,7 @@ const recall = <T extends string>(key: string, allowed: readonly T[], fallback: 
 
 type Open = { metric: MetricKey; view: View; start: number; end: number; horizon?: number; title: string } | null;
 
-const METRIC_WORD: Record<MetricKey, string> = { emails: "Emails sent", followups: "Follow-ups", first: "New conversations", newthreads: "New threads", answers: "Answers", replies: "Replies received", negotiations: "Negotiations started", wins: "Wins", lost: "Lost", added: "Added", e_first: "New conversations", e_followups: "Follow-ups by email", e_answers: "Answers", e_newthreads: "New threads", e_autopilot: "Scheduled by Autopilot", e_scheduled: "Scheduled emails" };
+const METRIC_WORD: Record<MetricKey, string> = { emails: "Emails sent", followups: "Follow-ups", first: "New conversations", newthreads: "New threads", answers: "Answers", replies: "Replies received", negotiations: "Negotiations started", wins: "Wins", lost: "Lost", added: "Added", e_first: "New conversations", e_followups: "Follow-ups by email", e_answers: "Answers", e_newthreads: "New threads", e_autopilot: "Sent by Autopilot", e_scheduled: "Scheduled in Gmail", w_autopilot: "Waiting in Autopilot", waiting: "Waiting to go out" };
 
 export function OutreachBoard() {
   const data = useData();
@@ -139,12 +139,17 @@ export function OutreachBoard() {
   const emailsDelta = range.compare ? mix.total - stats.emailMix(view, range.prevStart, range.prevEnd).total : null;
   const PARTS: { key: MetricKey; n: number; label: string; hint: string; tone: string }[] = [
     { key: "e_first", n: mix.first, label: "New conversations", hint: "First email to someone", tone: "first" },
-    { key: "e_followups", n: mix.followups, label: "Follow-ups", hint: "Chasing your own email", tone: "followups" },
-    { key: "e_answers", n: mix.answers, label: "Answers", hint: "Replying, negotiating, lead answers", tone: "answers" },
+    { key: "e_followups", n: mix.followups, label: "Follow-ups", hint: "Chasing your own email — written and sent by you", tone: "followups" },
+    { key: "e_autopilot", n: mix.autopilot, label: "By Autopilot", hint: "Follow-ups Autopilot already sent for you", tone: "autopilot" },
+    { key: "e_answers", n: mix.answers, label: "Answers", hint: "Replying, negotiating", tone: "answers" },
     { key: "e_newthreads", n: mix.newthreads, label: "New threads", hint: "Fresh thread after the follow-up cap", tone: "newthreads" },
-    { key: "e_scheduled", n: mix.scheduled, label: "Scheduled", hint: "Waiting in Gmail — counted by send time; cancel it and it's gone", tone: "scheduled" },
-    { key: "e_autopilot", n: mix.autopilot, label: "By Autopilot", hint: "Waiting in Autopilot's queue — goes out at its time unless they reply first", tone: "autopilot" },
   ];
+  const wait = mix.waiting;
+  const ORD = ["", "1st", "2nd", "3rd", "4th"];
+  const KIND_WORD: Record<keyof typeof wait.gmail.kinds, [string, string]> = { first: ["new email", "new emails"], followup: ["follow-up", "follow-ups"], newthread: ["new thread", "new threads"], answer: ["reply", "replies"] };
+  const gmailKinds = (Object.keys(KIND_WORD) as (keyof typeof KIND_WORD)[]).filter((k) => wait.gmail.kinds[k] > 0).map((k) => `${wait.gmail.kinds[k]} ${KIND_WORD[k][wait.gmail.kinds[k] === 1 ? 0 : 1]}`).join(" · ");
+  const apRounds = Object.entries(wait.autopilot.rounds).sort(([a], [b]) => Number(a) - Number(b)).map(([r, n]) => `${ORD[Number(r)]} ×${n}`).join(" · ");
+  const openWait = (metric: MetricKey, title: string) => setOpen((cur) => (cur && cur.metric === metric && cur.view === view ? null : { metric, view, start: range.start, end: range.end, horizon: range.horizon, title }));
   const parts = PARTS.filter((p) => p.n > 0 || p.key === "e_first" || p.key === "e_followups");
 
   const sides: { seg: "creator" | "brand"; title: string; icon: typeof Users; tiles: { key: MetricKey; label: string; icon: typeof Mail; invert?: boolean }[] }[] = [
@@ -197,7 +202,7 @@ export function OutreachBoard() {
     <div className="ob-hero">
       <div className={`ob-total${open?.metric === "emails" && open.view === view ? " on" : ""}`}>
         <button type="button" className="ob-total-main" onClick={() => setOpen((cur) => (cur && cur.metric === "emails" && cur.view === view && cur.start === range.start ? null : { metric: "emails", view, start: range.start, end: range.end, horizon: range.horizon, title: `Emails sent${view === "creator" ? " · influencers" : view === "brand" ? " · brands" : ""}` }))} aria-label={`Emails sent: ${mix.total}. Show every email`}>
-          <span className="ob-total-label"><span className="ob-ico"><Mail size={15} /></span><span><small>Emails sent</small><em>Every email · {box ? box : mailboxes.length > 1 ? `${mailboxes.length} mailboxes` : "all mailboxes"}{mix.scheduled || mix.autopilot ? ` · ${mix.scheduled && mix.autopilot ? "scheduled + Autopilot" : mix.autopilot ? "Autopilot's queue" : "scheduled"} included` : ""}</em></span></span>
+          <span className="ob-total-label"><span className="ob-ico"><Mail size={15} /></span><span><small>Emails sent</small><em>Only emails that went out · {box ? box : mailboxes.length > 1 ? `${mailboxes.length} mailboxes` : "all mailboxes"}</em></span></span>
           <span className="ob-total-row"><strong>{mix.total.toLocaleString("en-US")}</strong>{emailsDelta !== null && <em className={emailsDelta === 0 ? "delta-flat" : emailsDelta > 0 ? "delta-up" : "delta-down"}>{emailsDelta === 0 ? `— ${range.prevLabel}` : `${emailsDelta > 0 ? "+" : ""}${emailsDelta} ${range.prevLabel}`}</em>}</span>
         </button>
         <div className="ob-mix-bar" role="img" aria-label={parts.map((p) => `${p.n} ${p.label.toLowerCase()}`).join(", ")}>{mix.total ? PARTS.filter((p) => p.n > 0).map((p) => <i key={p.key} className={`mix-${p.tone}`} style={{ flexGrow: p.n }} />) : <i className="mix-empty" />}</div>
@@ -207,6 +212,17 @@ export function OutreachBoard() {
             <i className={`mix-dot mix-${p.tone}`} aria-hidden="true" /><b>{p.n.toLocaleString("en-US")}</b><span>{p.label}</span>{mix.total > 0 && p.n > 0 && <small>{Math.round((p.n / mix.total) * 100)}%</small>}
           </button>;
         })}</div>
+        {wait.total > 0 && <div className="ob-wait" aria-label="Emails waiting to go out">
+          <div className="ob-wait-head">
+            <span className="ob-wait-ico" aria-hidden="true"><Clock3 size={15} /></span>
+            <span><b>{wait.total}</b> waiting to go out {range.key === "today" ? "later today" : "in this period"}{wait.next && sendsAt(wait.next) ? <em> · next one {sendsAt(wait.next)}</em> : null}</span>
+            <small>Not counted in Emails sent until each one goes out — cancel it and it's gone.</small>
+          </div>
+          <div className="ob-wait-chips">
+            {wait.autopilot.n > 0 && <button type="button" className={`ob-wait-chip is-ap${open?.metric === "w_autopilot" ? " on" : ""}`} aria-expanded={open?.metric === "w_autopilot"} onClick={() => openWait("w_autopilot", "Waiting in Autopilot")}><PlaneTakeoff size={13} aria-hidden="true" /><b>{wait.autopilot.n}</b><span>Autopilot follow-up{wait.autopilot.n === 1 ? "" : "s"}</span>{apRounds && <small>{apRounds}</small>}</button>}
+            {wait.gmail.n > 0 && <button type="button" className={`ob-wait-chip is-gmail${open?.metric === "e_scheduled" ? " on" : ""}`} aria-expanded={open?.metric === "e_scheduled"} onClick={() => openWait("e_scheduled", "Scheduled in Gmail")}><CalendarClock size={13} aria-hidden="true" /><b>{wait.gmail.n}</b><span>scheduled by you in Gmail</span>{gmailKinds && <small>{gmailKinds}</small>}</button>}
+          </div>
+        </div>}
         {!box && perBox.length > 1 && <MailboxSplit rows={perBox.map((b, i) => {
           const m = b.stats.emailMix(view, range.start, range.end, range.horizon);
           const rr = b.stats.replyRate(view, range.start, range.end);

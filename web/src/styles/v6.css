@@ -854,6 +854,28 @@
 .db-foot { color: var(--muted); font-size: 11.5px; }
 @media (max-width: 480px) { .db-hero { height: 140px; } .db-body { padding: 18px 16px 16px; } .db-body h2 { font-size: 20px; } .db-actions { flex-wrap: wrap; } .db-actions .btn { flex: 1 1 auto; justify-content: center; } }
 
+/* Waiting to go out: emails not sent yet (Gmail's Scheduled folder + Autopilot) — apart from "Emails sent". */
+.ob-wait { margin-top: 12px; padding: 11px 12px; display: grid; gap: 9px; border-radius: 13px; border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--line)); background: color-mix(in srgb, var(--accent) 4%, var(--surface-solid)); position: relative; overflow: hidden; }
+.ob-wait::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 4px; background: repeating-linear-gradient(135deg, var(--accent) 0 4px, color-mix(in srgb, var(--accent) 35%, transparent) 4px 8px); }
+.ob-wait-head { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 2px 9px; padding-left: 4px; }
+.ob-wait-ico { grid-row: span 2; display: grid; place-items: center; width: 30px; height: 30px; border-radius: 10px; background: color-mix(in srgb, var(--accent) 13%, var(--surface-solid)); color: var(--accent); }
+.ob-wait-head > span { font-size: 13.5px; font-weight: 650; color: var(--text); }
+.ob-wait-head > span b { font-size: 17px; font-weight: 800; margin-right: 2px; font-variant-numeric: tabular-nums; }
+.ob-wait-head > span em { font-style: normal; font-weight: 600; color: var(--accent); }
+.ob-wait-head small { color: var(--muted); font-size: 11.5px; line-height: 1.4; }
+.ob-wait-chips { display: flex; flex-wrap: wrap; gap: 7px; padding-left: 4px; }
+.ob-wait-chip { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px 6px; min-height: 34px; padding: 6px 11px; border-radius: 11px; border: 1px solid var(--line); background: var(--surface-solid); color: var(--text); font: inherit; font-size: 12.5px; cursor: pointer; text-align: left; transition: border-color .15s ease-out, background .15s ease-out, transform .15s ease-out; }
+.ob-wait-chip:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+.ob-wait-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ob-wait-chip.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--surface-solid)); }
+.ob-wait-chip b { font-weight: 800; font-variant-numeric: tabular-nums; }
+.ob-wait-chip small { color: var(--muted); font-size: 11.5px; font-weight: 600; }
+.ob-wait-chip.is-ap svg { color: var(--ap-a, var(--accent)); }
+.ob-wait-chip.is-ap { border-image: none; box-shadow: inset 3px 0 0 var(--ap-a, var(--accent)); }
+.ob-wait-chip.is-gmail svg { color: var(--accent); }
+.ob-wait-chip.is-gmail { box-shadow: inset 3px 0 0 color-mix(in srgb, var(--accent) 55%, transparent); }
+@media (max-width: 560px) { .ob-wait-chip { flex: 1 1 100%; } }
+@media (prefers-reduced-motion: reduce) { .ob-wait-chip { transition: none; } }
 .ob-ahead { margin-top: 12px; padding: 10px 12px; display: grid; gap: 9px; border: 1px dashed color-mix(in srgb, var(--accent) 38%, var(--line)); border-radius: 13px; background: color-mix(in srgb, var(--accent) 4%, var(--surface-solid)); }
 .ob-ahead-label { display: flex; align-items: flex-start; gap: 8px; color: var(--accent); }
 .ob-ahead-label svg { margin-top: 2px; flex: none; }

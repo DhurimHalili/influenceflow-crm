@@ -126,8 +126,9 @@ export function AutopilotProvider({ children }: { children: ReactNode }) {
   const templates = useMemo(() => readTemplates(prefs?.followup_templates), [prefs?.followup_templates]);
   const states = useMemo(() => new Map(chase.list.filter((c) => c.type === "creator").map((c) => [c.id, c.state])), [chase.list]);
   const sendBoxes = useMemo(() => gmail.mailboxes.filter((m) => m.canSend || m.canModify).map((m) => m.email), [gmail.mailboxes]);
-  // Left alone today: waiting already, or one Autopilot sent / you cancelled / couldn't go (same rule as the server's doneWithToday).
-  const skip = useMemo(() => new Set([...pendingByCreator.keys(), ...today.filter((i) => i.status === "sent" || i.status === "failed" || (i.status === "cancelled" && !["goal_met", "fill_off", "day_over"].includes(i.reason))).map((i) => i.creator_id)]), [pendingByCreator, today]);
+  // Left alone today: waiting already, or one Autopilot sent / couldn't go / stopped for a reason that still holds
+  // (same rule as the server's doneWithToday). One YOU cancelled comes back: you can plan it again any time.
+  const skip = useMemo(() => new Set([...pendingByCreator.keys(), ...today.filter((i) => i.status === "sent" || i.status === "failed" || (i.status === "cancelled" && !["goal_met", "fill_off", "day_over", "by_you"].includes(i.reason))).map((i) => i.creator_id)]), [pendingByCreator, today]);
   const wrong = useWrongEmails();
   const bounced = useMemo(() => new Set(wrong.keys()), [wrong]);
   const pool = useMemo(() => autopilotPool({ creators: data.creators, followups: data.followups, events: data.emailEvents || [], states, mailboxes: sendBoxes, templates, queued: skip, paused: chase.today.followupsPaused, bounced }), [data.creators, data.followups, data.emailEvents, states, sendBoxes, templates, skip, chase.today.followupsPaused, bounced]);

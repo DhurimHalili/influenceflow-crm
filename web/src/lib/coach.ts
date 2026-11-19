@@ -8,8 +8,10 @@ import type { Sent } from "./outreach";
 export type CoachStats = {
   goal: number;
   sentToday: number;
-  /** Waiting in Gmail's Scheduled folder (they count once they go out). */
+  /** Today's emails still waiting to go out (Gmail's Scheduled folder + Autopilot): part of sentToday, shown apart. */
   scheduled: number;
+  /** Of those, waiting in Autopilot's queue. */
+  autopilot: number;
   yesterday: number;
   weekAvg: number;
   /** Consecutive days (before today) the goal was hit. */
@@ -75,7 +77,7 @@ export function coachStats(input: { log: Sent[]; goal: number; overdue: number; 
   const scoutGoal = input.scoutGoal || 10;
   const sentToday = back(0);
   const scout = mode === "scout";
-  return { goal: input.goal, sentToday, scheduled: input.log.filter((s) => s.scheduled && dayKey(new Date(s.at)) === dayKey(now)).length, yesterday: back(1), weekAvg: Math.round(week.reduce((a, b) => a + b, 0) / 7), streak, overdue: input.overdue, oldestOverdueDays: input.oldestOverdueDays, replyNeeded: input.replyNeeded, hour: now.getHours(), weekday: now.getDay(), mode, found, scoutGoal, unit: scout ? "found" : "emails", value: scout ? found : sentToday, target: scout ? scoutGoal : input.goal };
+  return { goal: input.goal, sentToday, scheduled: input.log.filter((s) => s.scheduled && s.channel === "email" && dayKey(new Date(s.at)) === dayKey(now)).length, autopilot: input.log.filter((s) => s.scheduled && s.autopilot && dayKey(new Date(s.at)) === dayKey(now)).length, yesterday: back(1), weekAvg: Math.round(week.reduce((a, b) => a + b, 0) / 7), streak, overdue: input.overdue, oldestOverdueDays: input.oldestOverdueDays, replyNeeded: input.replyNeeded, hour: now.getHours(), weekday: now.getDay(), mode, found, scoutGoal, unit: scout ? "found" : "emails", value: scout ? found : sentToday, target: scout ? scoutGoal : input.goal };
 }
 
 const pick = <T,>(list: T[], seed: number) => list[Math.abs(seed) % list.length];

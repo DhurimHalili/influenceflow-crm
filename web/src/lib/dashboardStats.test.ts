@@ -107,4 +107,19 @@ eq("reply rate: first contacts in range who answered", st.replyRate("all", r.sta
   eq("reply rate: people, with the no's shown", S.replyRate("all", from, to), { contacted: 5, replied: 3, declined: 1, pct: 60 });
 }
 
+// Sent means sent: a waiting email (Gmail Scheduled / Autopilot queue) is shown apart, never in "Emails sent".
+{
+  const { withAutopilot } = await import("./outreach.ts");
+  const ap = withAutopilot(sent, [
+    { id: "q1", creator_id: "c2", mailbox: "a@x.com", thread_id: "t-c2", send_at: iso(t + 1 * H), status: "pending", gmail_id: "", sent_at: null, round: 2 },
+    { id: "q2", creator_id: "c1", mailbox: "a@x.com", thread_id: "t-c1", send_at: iso(t - 2 * H), status: "sent", gmail_id: "g2", sent_at: iso(t - 2 * H), round: 1 },
+  ], events as never[]);
+  const S = makeStats({ sent: ap, received, creators, brands, contacts: [], campaigns: [], activities });
+  const mix = S.emailMix("all", r.start, r.end, r.horizon);
+  eq("emails sent = only emails that went out", [S.count("emails", "all", r.start, r.end, r.horizon), mix.total], [4, 4]);
+  eq("parts add up (a synced Autopilot email counts as By Autopilot, not as your follow-up)", [mix.first, mix.followups, mix.autopilot, mix.answers, mix.newthreads], [1, 1, 1, 1, 0]);
+  eq("waiting apart: 1 Gmail follow-up + 1 Autopilot 2nd", [mix.waiting.total, mix.waiting.gmail.n, mix.waiting.gmail.kinds.followup, mix.waiting.autopilot.n, mix.waiting.autopilot.rounds], [2, 1, 1, 1, { 2: 1 }]);
+  eq("the next one to go", mix.waiting.next, iso(t + 1 * H));
+}
+
 if (fail) { console.log(`${fail} failed`); (globalThis as { process?: { exit(n: number): void } }).process?.exit(1); } else console.log("all passed");
