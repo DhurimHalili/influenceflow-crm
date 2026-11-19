@@ -2,7 +2,7 @@
 // The send path's safety checks against a fake Gmail and a fake database: nothing goes to someone who
 // answered (even a reply the sync hasn't seen), nothing after you followed up yourself, nothing on another day.
 import { mailboxDays, sendOne, statesOf, poolOf, type Kit, type QueueRow, type World } from "./autopilot.ts";
-import { pickWithin, roomMap } from "../../../web/src/lib/autopilot.ts";
+import { fillNeed, pickWithin, roomMap } from "../../../web/src/lib/autopilot.ts";
 import { dayKeyIn } from "../../../web/src/lib/zones.ts";
 import type { Msg } from "../_shared/replyDraft.ts";
 
@@ -158,6 +158,25 @@ const firstAt = NOW - 7 * 86400_000;
   const ready = [...Array.from({ length: 6 }, (_, i) => ({ id: `a${i}`, mailbox: "me@agency.com" })), ...Array.from({ length: 6 }, (_, i) => ({ id: `b${i}`, mailbox: "second@agency.com" }))];
   const picked = pickWithin(ready, 6, roomMap(days), null, 11);
   eq("planning 6 stays inside both limits (2 + 3 = 5 at most)", [picked.length, picked.filter((p) => p.mailbox === "me@agency.com").length], [5, 2]);
+}
+
+// 12. The fill never doubles anyone: only people with a real follow-up due and nothing waiting for them.
+{
+  const at = Date.UTC(2026, 10, 15, 23, 30); // Mon 00:30 in Kosovo
+  const base = world([]).creators[0];
+  const creators = ["c1", "c2", "c3", "c4"].map((id) => ({ ...base, id, name: `Person ${id}` }));
+  const first = (id: string) => out(`f-${id}`, Date.UTC(2026, 10, 12, 9), { entity_id: id, thread_id: `t-${id}`, gmail_id: `f-${id}`, id: `f-${id}` });
+  const events = [
+    ...creators.map((c) => first(c.id)),
+    out("s-c3", at + 10 * 3600_000, { entity_id: "c3", thread_id: "t-c3", gmail_id: "s-c3", id: "s-c3", scheduled: true }), // you scheduled one in Gmail
+    out("y-c4", at - 10 * 60_000, { entity_id: "c4", thread_id: "t-c4", gmail_id: "y-c4", id: "y-c4" }), // you followed up yourself today
+  ];
+  const pool = poolOf(world(events, { creators }), rows, new Set(["c2"]), at); // c2 already waits in Autopilot
+  eq("fill pool: only the one with a real follow-up due (not queued, not scheduled in Gmail, not emailed today)", pool.ready.map((r) => r.id), ["c1"]);
+  eq("…the one already waiting is reported as queued, never planned again", pool.queued, ["c2"]);
+  // Goal 50: 2 sent + 1 scheduled in Gmail (done today) + 33 waiting in Autopilot → it may add 14, never more.
+  eq("fill count = goal − done − already waiting", fillNeed({ goal: 50, doneToday: 3, pendingToday: 33, autoToday: 33, cap: 50, available: 40 }), { need: 14, allowed: 14, short: 0 });
+  eq("…and nothing once the waiting ones reach the goal", fillNeed({ goal: 50, doneToday: 3, pendingToday: 47, autoToday: 47, cap: 50, available: 40 }).allowed, 0);
 }
 
 if (failed) { console.error(`\n${failed} failed`); Deno.exit(1); }
