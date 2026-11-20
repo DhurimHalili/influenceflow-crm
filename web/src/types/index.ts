@@ -77,7 +77,7 @@ export interface WorkspacePreferences {
   daily_email_goal: number;
   /** Show the coach's nudges and celebrations. */
   coach: boolean;
-  /** Read YouTube numbers automatically (quick fill, on save, and every hour). */
+  /** Read YouTube numbers automatically (quick fill, on save, and a daily background refresh). */
   youtube_auto: boolean;
   /** Average views also count videos younger than a day (off: only videos 1 day+ old). */
   youtube_recent?: boolean;
