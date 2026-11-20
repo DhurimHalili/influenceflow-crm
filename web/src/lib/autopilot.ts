@@ -25,6 +25,7 @@ import type { Creator, EmailEvent, Followup } from "../types";
 export type { Creator, EmailEvent, Followup, FollowupRules } from "../types";
 import type { FollowupState } from "./followupEngine.ts";
 import { zonesOf } from "./zones.ts";
+import { answerKind, clashWhy, lastQuestion, pairFit, questionKind, type QuestionKind } from "./followupPairing.ts";
 
 export const ROUNDS = [1, 2, 3, 4] as const;
 export type Round = (typeof ROUNDS)[number];
@@ -108,7 +109,7 @@ export function fillNeed(o: { goal: number; doneToday: number; pendingToday: num
 
 // ----- who ------------------------------------------------------------------------------
 
-export type HoldWhy = "new-thread" | "past-4" | "other-channel" | "no-thread" | "mailbox" | "no-template" | "paused" | "bounced";
+export type HoldWhy = "new-thread" | "past-4" | "other-channel" | "no-thread" | "mailbox" | "no-template" | "no-answer" | "paused" | "bounced";
 export type Ready = {
   id: string; name: string; round: Round; threadId: string; mailbox: string; subject: string;
   /** Your email in that thread they'd be answering: the latest one (theirs never exists). */
@@ -116,7 +117,8 @@ export type Ready = {
 };
 /** replied = they answered (email or logged); conversation = the deal moved on; marked = you set "Replied" but no reply is on file anywhere. */
 export type ByHand = { id: string; name: string; round: number; why: "replied" | "conversation" | "marked" };
-export type Held = { id: string; name: string; round: number; why: HoldWhy; mailbox?: string };
+/** no-answer: your last email asked `asked` (a `kind` question) and none of that follow-up's templates can answer it. */
+export type Held = { id: string; name: string; round: number; why: HoldWhy; mailbox?: string; asked?: string; kind?: QuestionKind };
 export type Pool = { ready: Ready[]; byHand: ByHand[]; held: Held[]; queued: string[] };
 
 const LIVE = new Set(["contacted", "no_reply"]);
@@ -177,6 +179,14 @@ export function autopilotPool(input: PoolInput): Pool {
     const mailbox = (last.mailbox || "").toLowerCase();
     if (!boxes.has(mailbox)) { hold("mailbox", mailbox); continue; }
     if (!input.templates[round as Round].length) { hold("no-template"); continue; }
+    // Your last email asked something none of these templates can answer ("Should I check back later?" and only
+    // "Seems like it might be." on file): never sent — held, with the question, until you add an answer.
+    // (Read from Gmail's preview when the app has it; the server checks the full email again before planning.)
+    const snip = (last as { snippet?: string }).snippet || "";
+    if (snip) {
+      const kind = questionKind(snip);
+      if (!input.templates[round as Round].some((t) => pairFit(kind, answerKind(t.text)) > 0)) { out.held.push({ id: c.id, name: c.name, round, why: "no-answer", asked: lastQuestion(snip), kind }); continue; }
+    }
     out.ready.push({
       id: c.id, name: c.name, round: round as Round, threadId: thread, mailbox, subject: (mail[0].subject || "").replace(/^\s*(re|fwd?)\s*:\s*/gi, ""),
       lastGmailId: last.gmail_id, firstAt: new Date(mail[0].at).getTime(), lastAt: new Date(last.at).getTime(),
@@ -199,7 +209,8 @@ export function shiftToZone(zone: string, offsetOf: (zone: string, ms: number) =
 
 // ----- which words ------------------------------------------------------------------------
 
-export type Fit = { score: number; echo: boolean; why: string };
+/** clash = it answers a different question than your last email asked — never sent, whatever an AI thinks. */
+export type Fit = { score: number; echo: boolean; why: string; clash?: boolean };
 
 const STOP = new Set("a an the and or but so to of in on for with at by from this that these those it its is are was were be been am i you we they he she my your our their me us them just still any some do does did would could should will can may might there here what which who how about if then than as".split(" "));
 const words = (s: string) => s.toLowerCase().replace(/[’']/g, "").match(/[a-z0-9]+/g) || [];
@@ -232,11 +243,8 @@ export function ctaOf(text: string): string[] {
 }
 
 const lead = (q: string) => words(q).slice(0, 3).join(" ");
-const opening = (text: string) => (freshPart(text).split("\n").map((l) => l.trim()).find((l) => l && !/^(hi|hey|hello|dear|good (morning|afternoon|evening))\b[^.!?]{0,40}[,!.]?$/i.test(l)) || "").toLowerCase();
 /** A yes/no question about timing or interest ("Is this a bad time?") — the next one should answer it. */
 const ASKS_TIMING = /\b(bad|good|wrong|right|better|busy) time\b|\btoo busy\b|\bstill interested\b|\bnot (for|a fit)\b|\bwrong person\b|\bany interest\b|\bnot interested\b/i;
-const OBSERVES = /^(looks like|seems like|it seems|i guess|guess it is|maybe it is|i take it|i'll take (that|it) as|sounds like|fair enough|no worries)/i;
-const MIRRORS = /^(it might be|it may be|it could be|it is|it isn't|maybe not)\b/i;
 
 /**
  * How well one of your templates follows the email it answers (your last one).
@@ -261,13 +269,16 @@ export function ruleFit(previous: string, template: string, round: number): Fit 
     const prevLeads = new Set(prevQ.map((q) => words(q).slice(0, 2).join(" ")));
     if (tplQ.every((q) => !prevLeads.has(words(q).slice(0, 2).join(" ")))) { score += 0.12; why.push("asks it differently"); }
   }
-  // Following on from a yes/no question about timing: answer it like a person would.
-  if (round >= 2 && prevQ.some((q) => ASKS_TIMING.test(q))) {
-    const open = opening(template);
-    if (OBSERVES.test(open)) { score += 0.3; why.push("answers your last question"); }
-    else if (MIRRORS.test(open)) { score += 0.12; why.push("answers your last question"); }
-    else if (tplQ.some((q) => ASKS_TIMING.test(q))) { score -= 0.25; why.push("asks about timing again"); }
+  // Does it make sense right after that email? ("Should I check back later?" → "I guess I will." yes;
+  // → "Seems like it might be." never.) A clash is final; otherwise the answer that fits exactly wins.
+  const kind = questionKind(previous);
+  const pair = pairFit(kind, answerKind(template));
+  if (pair === 0) return { score: 0, echo, why: clashWhy(previous, template), clash: true };
+  if (!echo && kind !== "statement" && kind !== "other") {
+    score = 0.35 * score + 0.65 * pair;
+    if (pair >= 1 && round >= 2 && kind !== "interested") why.unshift("answers your last question exactly");
   }
+  if (round >= 2 && prevQ.some((q) => ASKS_TIMING.test(q)) && tplQ.some((q) => ASKS_TIMING.test(q))) { score -= 0.25; why.push("asks about timing again"); }
   // Whole phrases copied from the email it follows read like a bot.
   const prevWords = words(freshPart(previous));
   const grams = new Set<string>();
@@ -327,24 +338,37 @@ export type ToAssign = { id: string; round: Round; fits?: Record<string, Fit> };
  */
 export function assignTemplates(rows: ToAssign[], book: TemplateBook, recent: Record<string, number> = {}, seed = 0): Map<string, string> {
   const out = new Map<string, string>();
+  const used: Record<string, number> = { ...recent };
   for (const r of ROUNDS) {
-    const list = rows.filter((x) => x.round === r);
-    const tpls = book[r];
-    if (!list.length || !tpls.length) continue;
-    const m = list.length, k = tpls.length;
-    const base = Math.floor(m / k), top = Math.ceil(m / k);
-    // Each template offered as `top + 1` seats; seats past the even share cost more and more.
-    const seats: { tpl: number; q: number }[] = [];
-    for (let j = 0; j < k; j++) for (let q = 0; q <= top; q++) seats.push({ tpl: j, q });
-    const seatCost = (q: number) => (q < base ? 0 : q < top ? 0.02 : 2.5 + (q - top) * 2);
-    const cost = list.map((row, i) => seats.map((s) => {
-      const t = tpls[s.tpl];
-      const fit = row.fits?.[t.id];
-      const jitter = ((Math.imul(seed + i * 7919 + s.tpl * 104729, 2654435761) >>> 0) % 1000) / 200000;
-      return seatCost(s.q) + (1 - (fit ? fit.score : 0.6)) + (fit?.echo ? 5 : 0) + (recent[t.id] || 0) * 0.004 + jitter;
-    }));
-    const pick = hungarian(cost);
-    list.forEach((row, i) => out.set(row.id, tpls[seats[pick[i]].tpl].id));
+    const all = book[r];
+    if (!all.length) continue;
+    // Only templates that can follow each person's last email; people with the same choice are spread together.
+    // Someone no template can answer gets nothing (Autopilot holds them and says why).
+    const groups = new Map<string, { tpls: TemplateBook[Round]; rows: ToAssign[] }>();
+    for (const row of rows.filter((x) => x.round === r)) {
+      const ok = all.filter((t) => !row.fits?.[t.id]?.clash);
+      if (!ok.length) continue;
+      const key = ok.map((t) => t.id).join("|");
+      const g = groups.get(key) || { tpls: ok, rows: [] };
+      g.rows.push(row);
+      groups.set(key, g);
+    }
+    for (const { tpls, rows: list } of [...groups.values()].sort((a, b) => a.tpls.length - b.tpls.length)) {
+      const m = list.length, k = tpls.length;
+      const base = Math.floor(m / k), top = Math.ceil(m / k);
+      // Each template offered as `top + 1` seats; seats past the even share cost more and more.
+      const seats: { tpl: number; q: number }[] = [];
+      for (let j = 0; j < k; j++) for (let q = 0; q <= top; q++) seats.push({ tpl: j, q });
+      const seatCost = (q: number) => (q < base ? 0 : q < top ? 0.02 : 2.5 + (q - top) * 2);
+      const cost = list.map((row, i) => seats.map((s) => {
+        const t = tpls[s.tpl];
+        const fit = row.fits?.[t.id];
+        const jitter = ((Math.imul(seed + i * 7919 + s.tpl * 104729, 2654435761) >>> 0) % 1000) / 200000;
+        return seatCost(s.q) + (1 - (fit ? fit.score : 0.6)) + (fit?.echo ? 5 : 0) + (used[t.id] || 0) * 0.004 + jitter;
+      }));
+      const pick = hungarian(cost);
+      list.forEach((row, i) => { const id = tpls[seats[pick[i]].tpl].id; out.set(row.id, id); used[id] = (used[id] || 0) + 1; });
+    }
   }
   return out;
 }

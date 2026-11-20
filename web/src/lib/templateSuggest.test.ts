@@ -11,9 +11,9 @@ const mine = book({ 3: ["Not the best time?", "Maybe its a bad time?"], 4: ["may
 const s = styleOf(mine);
 eq("no greeting / no sign-off when yours have none", [s.greeting, s.signoff, s.oneLine], [null, null, true]);
 const four = suggestTemplates(4, mine, 4);
-eq("4th answers each 3rd (negation kept right)", four.slice(0, 2).map((x) => x.text), ["Looks like it's not — I'll come back another time.", "Looks like it is — I'll come back another time."]);
+eq("4th: the missing answer first (nothing answers 'Not the best time?'), then the rest", four.map((x) => [x.text, !!x.important]), [["Looks like it's not. I'll come back another time.", true], ["Seems like it's not. I'll reach out another day.", true], ["Seems like it is. I'll come back another time.", false], ["Looks like it is. I'll reach out another day.", false]]);
 eq("…no 'Hi' or 'Kind regards' added", four.every((x) => !/^hi\b|regards/i.test(x.text)), true);
-eq("…and says which 3rd it answers", four[0].why, "Answers your 3rd: “Not the best time?”");
+eq("…and says which 3rd it answers", [four[0].why, four[2].why], ["Missing: nothing answers your 3rd “Not the best time?”", "Answers your 3rd: “Maybe its a bad time?”"]);
 
 // Someone who writes "Hi {first_name}," … "Best,\n{my_name}" gets the same frame.
 const formal = book({ 1: ["Hi {first_name},\n\nWould you be open to it?\n\nBest,\n{my_name}"], 2: ["Hi {first_name},\n\nJust checking in.\n\nBest,\n{my_name}"] });
@@ -26,12 +26,17 @@ eq("a deadline you never used is refused", claimProblem("We close the list tomor
 eq("'brands are ready' is refused", claimProblem("We have brands ready for you.", mine), "brands ready");
 eq("a number is refused", claimProblem("It pays $2,000.", mine), "a number");
 eq("…unless your own templates say it", claimProblem("Wrapping up the list this week.", book({ 2: ["We wrap up this week."] })), null);
-eq("plain words are fine", claimProblem("Looks like it's not — I'll come back another time.", mine), null);
+eq("plain words are fine", claimProblem("Looks like it's not. I'll come back another time.", mine), null);
 
 eq("similar wording is caught", tooSimilar("Is this a bad time?", "Hi {first_name},\n\nIs this a bad time?"), true);
 eq("different wording passes", tooSimilar("Is this a bad time?", "Any thoughts on this?"), false);
 eq("never suggests what you already have", suggestTemplates(3, book({ 3: ["Is this a bad time?"] })).some((x) => /bad time/i.test(x.text)), false);
-eq("answers: busy → is", answersTo("Too busy right now?")[0], "Looks like it is — I'll come back another time.");
+eq("answers: busy → is", answersTo("Too busy right now?")[0], "Seems like it is. I'll come back another time.");
+eq("answers: check back later → I guess I will (never 'it might be'), closed with another verb", answersTo("Should I check back later?")[0], "I guess I will. I'll come back another time.");
+eq("no suggestion ever has a dash", [3, 4].flatMap((r) => suggestTemplates(r as 3 | 4, mine, 6)).every((x) => !/[—–]| - /.test(x.text)), true);
+const member = book({ 3: ["Is this a bad time?", "Not the right time?", "Should I come back later?"], 4: ["Looks like it is. We'll come back another time.", "No worries. We'll check back another day."] });
+const miss = suggestTemplates(4, member, 6).filter((x) => x.important);
+eq("member: the missing answers come first, marked important, in 'we'", miss.map((x) => x.text), ["Looks like it's not. We'll come back another time.", "Seems like it's not. We'll check back another day.", "I guess we will. We'll check back another day.", "We'll take that as a yes and reach out another day."]);
 eq("empty book → a gentle default frame", styleOf(book({})).greeting, "Hi {first_name},");
 if (fail) { console.log(`${fail} failed`); process.exit(1); }
 console.log("all template suggestion tests passed");

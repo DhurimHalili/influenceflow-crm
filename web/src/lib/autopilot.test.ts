@@ -90,7 +90,21 @@ const third = "Hi Sam,\n\nIs this a bad time?\n\nDhurim";
 const looks = ruleFit(third, "Looks like it might — I'll come back another time.", 4);
 const mirror = ruleFit(third, "It might be, I'll come back another time.", 4);
 const again = ruleFit(third, "Is this a bad time? Let me know.", 4);
-truthy("follow-up 4: 'Looks like it might' beats 'It might be'", looks.score > mirror.score);
+truthy("follow-up 4: both answer 'Is this a bad time?' — both fit", looks.score > 0.8 && mirror.score > 0.8 && !looks.clash && !mirror.clash);
+// The owner's screenshot (Nov 2026): "Should I check back later?" was followed by "Seems like it might be." — never again.
+const later = "Should I check back later?";
+const wrong = ruleFit(later, "Seems like it might be. I'll reach out another day.", 4);
+const right = ruleFit(later, "I guess i will, i'll come back another time.", 4);
+const calm = ruleFit(later, "No worries. I'll check back another day.", 4);
+truthy("follow-up 4 after 'Should I check back later?': 'Seems like it might be' is a clash", wrong.clash === true && wrong.score === 0);
+truthy("…'I guess i will' answers it exactly and beats 'No worries'", right.score > calm.score && !calm.clash);
+const book4 = { 1: [], 2: [], 3: [], 4: [{ id: "a", name: "A", text: "Seems like it might be. I'll reach out another day." }, { id: "b", name: "B", text: "Maybe it is, i'll come back another day." }, { id: "c", name: "C", text: "I guess i will, i'll come back another time." }, { id: "d", name: "D", text: "No worries. I'll check back another day." }] };
+const fitsFor = (prev: string) => Object.fromEntries(book4[4].map((t) => [t.id, ruleFit(prev, t.text, 4)]));
+const assigned = assignTemplates([...Array.from({ length: 6 }, (_, i) => ({ id: `l${i}`, round: 4 as const, fits: fitsFor(later) })), ...Array.from({ length: 4 }, (_, i) => ({ id: `b${i}`, round: 4 as const, fits: fitsFor(third) }))], book4 as never);
+check("after 'check back later?' only C or D are ever used", [...assigned.entries()].filter(([k]) => k.startsWith("l")).every(([, t]) => t === "c" || t === "d"), true);
+check("after 'bad time?' never 'I guess i will'", [...assigned.entries()].filter(([k]) => k.startsWith("b")).every(([, t]) => t !== "c"), true);
+const lonely = { 1: [], 2: [], 3: [], 4: [{ id: "a", name: "A", text: "Seems like it might be. I'll reach out another day." }] };
+check("no template can answer → nobody is assigned one", assignTemplates([{ id: "x", round: 4, fits: { a: ruleFit("Are you still there?", lonely[4][0].text, 4) } }], lonely as never).size, 0);
 truthy("follow-up 4: asking 'bad time' again is worst", again.score < mirror.score && again.echo);
 check("no question: the last line before the sign-off", ctaOf("Hey,\n\nWe have a deal for you.\nLet me know if you're up for it\n\nCheers,\nD"), ["Let me know if you're up for it"]);
 check("quoted thread ignored", ctaOf("Any thoughts?\n\nOn Mon, 9 Nov 2026 at 10:00, Dhurim <d@x.com> wrote:\n> Are you interested?"), ["Any thoughts?"]);
@@ -120,6 +134,11 @@ check("held: no template for follow-up 2, mailbox not connected", pool.held.map(
 check("ready rows carry the thread, mailbox and zones", [pool.ready[0].threadId, pool.ready[0].mailbox, pool.ready[0].round, pool.ready[0].zones.length], ["t-A", "me@agency.com", 1, 2]);
 check("someone who replied stays 'by hand' even with a cancelled follow-up today", autopilotPool({ creators, followups, events, states, mailboxes: ["me@agency.com"], templates: book({ 1: ["x"] }), queued: new Set(["B"]) }).byHand.map((r) => r.id).includes("B"), true);
 check("queued people aren't offered twice", autopilotPool({ creators, followups, events, states, mailboxes: ["me@agency.com"], templates: book({ 1: ["x"] }), queued: new Set(["A"]) }).queued, ["A"]);
+// Their last email (A's) asked "Are you still there?" (Gmail's preview) and the only 1st template can't follow it.
+const asked = events.map((e) => (e.entity_id === "A" && e.direction === "out" ? { ...e, snippet: "Are you still there? On Mon, Nov 9, 2026 at 8:00 AM Me <me@agency.com> wrote: Would you be interested?" } : e));
+const stuck = autopilotPool({ creators, followups, events: asked, states, mailboxes: ["me@agency.com"], templates: book({ 1: ["Seems like it might be. I'll reach out another day."] }) });
+check("no template answers their last question → held 'no-answer' with the question, never ready", [stuck.ready.some((r) => r.id === "A"), stuck.held.find((h) => h.id === "A")?.why, stuck.held.find((h) => h.id === "A")?.asked], [false, "no-answer", "Are you still there?"]);
+check("…a template that can follow it makes them ready again", autopilotPool({ creators, followups, events: asked, states, mailboxes: ["me@agency.com"], templates: book({ 1: ["I guess you're not around. I'll come back another time."] }) }).ready.some((r) => r.id === "A"), true);
 check("weekend light day: everyone held, nobody sent", autopilotPool({ creators, followups, events, states, mailboxes: ["me@agency.com"], templates: book({ 1: ["x"] }), paused: true }).ready.length, 0);
 check("everReplied: logged by hand counts", everReplied("A", [], [{ id: "f", user_id: "u", creator_id: "A", brand_id: null, kind: "reply", channel: "dm", note: "", at: "2026-11-10T10:00:00Z" } as Followup]), true);
 

@@ -64,7 +64,8 @@ export function FollowupSheet({ creatorId, name, open, onClose }: { creatorId: s
       if (!r.ok) { setError(r.message); return; }
       setPrep(r.data);
       if (r.data.ok) {
-        const first = r.data.templates[0];
+        // Never start on a template that doesn't answer their last email.
+        const first = r.data.templates.find((t) => !t.clash);
         setPick(first?.id || "");
         setText(first?.text || "");
         setWhen(r.data.smart ? "smart" : "now");
@@ -93,7 +94,7 @@ export function FollowupSheet({ creatorId, name, open, onClose }: { creatorId: s
 
   const choose = (id: string) => {
     const t = ok?.templates.find((x) => x.id === id);
-    if (!t) return;
+    if (!t || t.clash) return;
     const before = text;
     setPick(id);
     setText(t.text);
@@ -123,14 +124,15 @@ export function FollowupSheet({ creatorId, name, open, onClose }: { creatorId: s
         <div><b>{prep.code === "queued" ? "A follow-up to them is already waiting." : "The CRM won't send this one."}</b><p>{prep.code === "queued" ? "Cancel it under the email button (or on the Autopilot page) to write a different one." : WHY[prep.code] || WHY.not_due}</p></div>
       </div>}
       {ok && <>
-        {ok.asked && <p className="fs-asked"><Sparkles size={14} aria-hidden="true" /><span>Your last email asked <q>{ok.asked}</q> — {ok.templates.length > 1 ? `the best fit is on top${ok.ai ? " (checked by AI)" : ""}` : "your template follows it"}.</span></p>}
+        {ok.noAnswer ? <p className="fs-noanswer" role="alert"><TriangleAlert size={16} aria-hidden="true" /><span><b>None of your {ordinal(ok.round)} follow-ups answers <q>{ok.question?.text || ok.asked}</q>.</b> Autopilot won't send them one that doesn't fit. Write your own words below, or <Link to="/app/settings#follow-templates" onClick={() => { try { sessionStorage.setItem("if.session.followup-templates.round", JSON.stringify(ok.round)); } catch { /* last tab */ } }}>add an answer to your templates</Link>.</span></p>
+          : ok.asked && <p className="fs-asked"><Sparkles size={14} aria-hidden="true" /><span>Your last email asked <q>{ok.asked}</q>. {ok.templates.length > 1 ? `The best fit is on top${ok.ai ? " (checked by AI)" : ""}; ones that don't answer it are greyed out.` : "Your template follows it."}</span></p>}
         <div className="fs-grid">
           {ok.templates.length > 0 && <div className="fs-picks" role="radiogroup" aria-label="Template">
-            {ok.templates.map((t, i) => <button key={t.id} type="button" role="radio" aria-checked={pick === t.id && !edited} className={`fs-pick${pick === t.id ? " on" : ""}${t.echo ? " echo" : ""}`} onClick={() => choose(t.id)}>
+            {ok.templates.map((t, i) => <button key={t.id} type="button" role="radio" aria-checked={pick === t.id && !edited} aria-disabled={t.clash || undefined} className={`fs-pick${pick === t.id ? " on" : ""}${t.echo ? " echo" : ""}${t.clash ? " clash" : ""}`} onClick={() => choose(t.id)} title={t.clash ? "Doesn't answer their last email — never sent" : undefined}>
               <span className="fs-dot" aria-hidden="true">{pick === t.id && <Check size={11} />}</span>
               <span className="fs-pick-body">
-                <b>{t.name}{i === 0 && ok.templates.length > 1 && !t.echo && <em className="fs-best">Best fit</em>}</b>
-                {t.echo ? <small className="warn">Asks your last question again</small> : t.why ? <small>{t.why.charAt(0).toUpperCase() + t.why.slice(1)}</small> : null}
+                <b>{t.name}{i === 0 && ok.templates.length > 1 && !t.echo && !t.clash && <em className="fs-best">Best fit</em>}</b>
+                {t.clash ? <small className="warn">{t.why || "Doesn't answer their last email"}</small> : t.echo ? <small className="warn">Asks your last question again</small> : t.why ? <small>{t.why.charAt(0).toUpperCase() + t.why.slice(1)}</small> : null}
                 <span className="fs-snip">{t.text.split("\n").filter(Boolean).slice(0, 2).join(" ")}</span>
               </span>
             </button>)}

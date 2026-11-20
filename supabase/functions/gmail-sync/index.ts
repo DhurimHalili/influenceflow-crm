@@ -9,7 +9,8 @@ import { bounceOf } from "../_shared/bounce.ts";
 import { fillReply, templateFor } from "../../../web/src/lib/replyTemplate.ts";
 import { draftHtml, pickSendAs, pickTarget, bodyOf as replyBodyOf, quoteBlock, replyRaw, replyRecipients, replySubject, threadUrl, type Msg, type SendAs } from "../_shared/replyDraft.ts";
 import { classifyIncoming, isReaction, mergeReading, myReplyIntent, notAReply, READER_VERSION, referralOf, stripQuoted, type IncomingKind, type TeamRole } from "../_shared/replyReader.ts";
-import { cancelOnReply, doneWithToday, fillFor, flushOne, insertQueue, loadWorld, mailboxDays, planFor, poolOf, prepareOne, rowsOf, tick, type Kit, type PlanRow, type Row as AutoRow } from "./autopilot.ts";
+import { answerKind, pairFit, questionKind } from "../../../web/src/lib/followupPairing.ts";
+import { canFollow, cancelOnReply, doneWithToday, fillFor, flushOne, insertQueue, loadWorld, mailboxDays, planFor, poolOf, prepareOne, rowsOf, tick, type Kit, type PlanRow, type Row as AutoRow } from "./autopilot.ts";
 import { guardMailboxes } from "./guard.ts";
 import { awakeAt, planTimes } from "../../../web/src/lib/smartTime.ts";
 import { dayEndIn, dayKeyIn, validZone } from "../../../web/src/lib/zones.ts";
@@ -1917,15 +1918,21 @@ Deno.serve(async (req) => {
     const rounds = Object.fromEntries(ROUNDS.map((r) => [r, book[r].map((t) => templateBody(t.text)).filter(Boolean)]));
     let fromAi: { text: string; answers: string }[] | null = null;
     if (aiEnabled()) { try { fromAi = await suggestFollowups({ round, count: 5, rounds }); } catch (e) { if (!(e instanceof QuotaExhausted)) console.error("template_suggest ai failed"); } }
-    const out: { text: string; why: string; by: "ai" | "rules" }[] = [];
+    const out: { text: string; why: string; by: "ai" | "rules"; important?: boolean }[] = [];
+    // Your missing answers (red in Settings) always come first — the AI never pushes them out.
+    for (const r of rules) if (r.important) out.push(r);
+    // What each question of the follow-up before can take as an answer: an AI idea that answers none of them is dropped.
+    const prevKinds = round > 1 ? [...new Set(book[(round - 1) as Round].map((t) => questionKind(t.text)))] : [];
     for (const x of fromAi || []) {
-      const text = applyStyle(templateBody(x.text), style);
-      if (text.length > 900 || claimProblem(text, book) || book[round as Round].some((t) => tooSimilar(t.text, text)) || out.some((o) => o.text === text || tooSimilar(o.text, text, 0.9))) continue;
+      // Plain words like a person types them: no dashes, no markdown, no bullet points.
+      const text = applyStyle(templateBody(x.text).replace(/\s*[—–]\s*/g, ". ").replace(/\*\*|__|^[-•*]\s+/gm, "").replace(/\.\s*\./g, "."), style);
+      if (prevKinds.length && !prevKinds.some((k) => pairFit(k, answerKind(text)) > 0)) continue;
+      if (text.length > 900 || / - /.test(text) || claimProblem(text, book) || book[round as Round].some((t) => tooSimilar(t.text, text) && answerKind(t.text) === answerKind(text)) || out.some((o) => o.text === text || tooSimilar(o.text, text, 0.9))) continue;
       out.push({ text, why: round === 4 && x.answers ? `Answers your 3rd: “${x.answers.length > 48 ? `${x.answers.slice(0, 46)}…` : x.answers}”` : "Written in your style", by: "ai" });
-      if (out.length >= 4) break;
+      if (out.length >= 6) break;
     }
-    for (const r of rules) if (out.length < 4 && !out.some((o) => o.text === r.text || tooSimilar(o.text, r.text, 0.9))) out.push(r);
-    return json({ suggestions: out, ai: out.some((o) => o.by === "ai") });
+    for (const r of rules) if (out.length < 6 && !out.some((o) => o.text === r.text || tooSimilar(o.text, r.text, 0.9))) out.push(r);
+    return json({ suggestions: out.slice(0, 6), ai: out.some((o) => o.by === "ai") });
   }
 
   if (action === "import_assist") {
@@ -2077,13 +2084,21 @@ Deno.serve(async (req) => {
       const taken = pending.map((p) => ({ mailbox: p.mailbox, at: new Date(p.send_at).getTime() }));
       // Checked again here: a mailbox never goes past its room for today, whatever the preview said.
       const boxRoom = roomMap(await mailboxDays(admin, w, autoRows, now));
+      // Your last email to each, as Gmail previews it: a template that answers a different question never goes.
+      const lastIds = items.map((x) => ready.get(String(x.creatorId))?.lastGmailId).filter((g): g is string => !!g);
+      const lastText = new Map<string, string>();
+      for (let i = 0; i < lastIds.length; i += 150) {
+        const { data: ev } = await admin.from("email_events").select("gmail_id, snippet").eq("user_id", userId).in("gmail_id", lastIds.slice(i, i + 150));
+        for (const e of (ev || []) as { gmail_id: string; snippet: string | null }[]) lastText.set(e.gmail_id, e.snippet || "");
+      }
       const ok: PlanRow[] = [];
       const rejected: { creatorId: string; why: string }[] = [];
       for (const x of items) {
         const r = ready.get(String(x.creatorId));
         const at = Math.round(Number(x.at));
         const t = r ? w.templates[r.round].find((tp) => tp.id === x.templateId) : undefined;
-        const why = !r ? "not_ready" : !t ? "template" : at < now + 15_000 || at > end ? "time" : r.zones.length && !awakeAt(r.zones, at) ? "their_night" : taken.some((o) => o.mailbox === r.mailbox && Math.abs(o.at - at) < 30_000) ? "too_close" : ok.length >= room ? "day_max" : (boxRoom.get(r.mailbox.toLowerCase()) ?? 0) <= ok.filter((o) => o.mailbox.toLowerCase() === r.mailbox.toLowerCase()).length ? "mailbox_full" : "";
+        const prevSnip = r ? lastText.get(r.lastGmailId) || "" : "";
+        const why = !r ? "not_ready" : !t ? "template" : prevSnip && !canFollow(prevSnip, t.text) ? "no_answer" : at < now + 15_000 || at > end ? "time" : r.zones.length && !awakeAt(r.zones, at) ? "their_night" : taken.some((o) => o.mailbox === r.mailbox && Math.abs(o.at - at) < 30_000) ? "too_close" : ok.length >= room ? "day_max" : (boxRoom.get(r.mailbox.toLowerCase()) ?? 0) <= ok.filter((o) => o.mailbox.toLowerCase() === r.mailbox.toLowerCase()).length ? "mailbox_full" : "";
         if (why) { rejected.push({ creatorId: String(x.creatorId), why }); continue; }
         const name = w.creators.find((c) => c.id === r!.id)?.name || r!.name;
         ok.push({ creatorId: r!.id, name, round: r!.round, mailbox: r!.mailbox, threadId: r!.threadId, templateId: t!.id, templateName: t!.name, text: fillTemplate(t!.text, { name, my_name: w.name, agency: w.prefs.agency_name }), at, theirClock: "", zone: r!.zones[0] || "", zones: r!.zones, offBy: 0, fit: null, asked: "" });
@@ -2114,6 +2129,10 @@ Deno.serve(async (req) => {
         return json({ error: hand ? "They've answered before — this one is yours to write in Gmail." : "Their follow-up isn't due, or can't go from the CRM.", code: hand ? "replied" : "not_ready" }, 409);
       }
       const t = w.templates[r.round].find((x) => x.id === input.templateId);
+      if (t) {
+        const { data: ev } = await admin.from("email_events").select("snippet").eq("user_id", userId).eq("gmail_id", r.lastGmailId).maybeSingle();
+        if (ev?.snippet && !canFollow(ev.snippet, t.text)) return json({ error: `“${t.name}” doesn't answer your last email — pick another, or write your own words.`, code: "no_answer" }, 409);
+      }
       const end = dayEndIn(w.tz, now) - 60_000;
       let at = now + 10_000;
       let warn = "";

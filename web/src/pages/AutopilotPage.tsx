@@ -1,3 +1,4 @@
+import { AnswerGuard } from "../components/AnswerGuard";
 import { TrimList, useMailboxTrims } from "../components/LimitGuard";
 import { AlertTriangle, ArrowRight, BedDouble, Check, ChevronDown, Clock3, Layers, Loader2, Mail, Moon, PenLine, PlaneTakeoff, RefreshCcw, RotateCcw, Send, ShieldCheck, Sparkles, Square, Undo2, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -32,12 +33,14 @@ const left = (ms: number) => { const m = Math.max(0, Math.round(ms / 60_000)); r
 const inWords = (ms: number) => { const m = Math.round(ms / 60_000); return m <= 0 ? "now" : m < 60 ? `in ${m} min` : `in ${Math.floor(m / 60)} h ${m % 60} min`; };
 const ORIGIN: Record<QueueItem["origin"], string> = { batch: "You started it", fill: "Night fill", manual: "From their profile" };
 const REASON: Record<string, string> = {
+  no_answer: "Its words didn't answer your last email's question — not sent",
   replied: "They replied — cancelled", you_followed_up: "You followed up yourself", scheduled_in_gmail: "You scheduled one in Gmail", goal_met: "Goal already met",
   day_over: "The day ended first", mailbox_full: "Mailbox reached its daily limit — taken back", their_night: "Too late in their day", status: "No longer Contacted / No reply", gone: "Conversation gone from Gmail", fill_off: "Night fill switched off",
   by_you: "Cancelled by you", mailbox: "Mailbox can't send — reconnect it", mailbox_limit: "Mailbox hit its daily limit", no_recipient: "Couldn't tell who to send to", interrupted: "Interrupted — not sent", gmail_busy: "Gmail was busy", access: "Account not approved",
 };
 const HELD: Record<HoldWhy, { title: string; fix?: { to: string; label: string } }> = {
   "no-template": { title: "No template for that follow-up yet", fix: { to: "/app/settings#follow-templates", label: "Write one" } },
+  "no-answer": { title: "No template answers their last question", fix: { to: "/app/settings#follow-templates", label: "Add the answer" } },
   mailbox: { title: "Their mailbox isn't connected or can't send", fix: { to: "/app/settings#gmail", label: "Reconnect" } },
   "new-thread": { title: "4 follow-ups done — a new thread is next", fix: { to: "/app/influencers?follow=thread", label: "See them" } },
   "past-4": { title: "Past the 4th follow-up" },
@@ -184,8 +187,15 @@ export default function AutopilotPage() {
   const passed = keep.filter((r) => r.at < now + 15_000).length;
   const many = gmail.mailboxes.length > 1;
 
+  // People no template can answer: from the pool (Gmail's preview) and from the last plan (the full email, wins).
+  const unanswered = [
+    ...auto.pool.held.filter((h) => h.why === "no-answer").map((h) => ({ id: h.id, name: h.name, round: h.round, asked: h.asked || "", kind: h.kind })),
+    ...(plan?.blocked || []).map((b) => ({ id: b.creatorId, name: b.name, round: b.round, asked: b.asked, kind: b.kind })),
+  ];
+
   return <div className="ap">
     {header}
+    <AnswerGuard people={unanswered} />
     {!total && <section className="ap-setup">
       <PenLine size={22} />
       <div><h2>Write your follow-ups once</h2><p>Save a few ways to say each follow-up (1st to 4th). Autopilot spreads them evenly and picks the one that fits each email — {auto.pool.ready.length + auto.pool.held.length} follow-up{auto.pool.ready.length + auto.pool.held.length === 1 ? " is" : "s are"} due today.</p></div>
