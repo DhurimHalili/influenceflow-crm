@@ -5,9 +5,15 @@
 import { useEffect, useState } from "react";
 import { supabase } from "./supabase";
 
-export type Service = "youtube" | "gemini" | "groq" | "cloudflare" | "openrouter" | "hunter" | "clay";
+export type Service = "youtube" | "gemini" | "groq" | "cloudflare" | "openrouter" | "apollo" | "hunter" | "clay";
 export type SavedKey = { slot: number; hint: string; label: string; status: "" | "ok" | "refused" | "quota" | "not_enabled"; checked_at: string | null; saved_at: string | null };
-export type ServiceRow = { service: Service; max: number; keys: SavedKey[]; workspace: boolean; left: number | null; paused_until: string | null; usage?: { used: number; capacity: number; background: number } };
+export type ServiceRow = {
+  service: Service; max: number; keys: SavedKey[]; workspace: boolean; left: number | null; paused_until: string | null; usage?: { used: number; capacity: number; background: number };
+  /** The workspace (server) key was refused / ran dry — the owner should paste their own. */
+  workspace_status?: "" | "refused" | "quota";
+  /** Apollo: credits the CRM spent this month (searching is free). */
+  used?: number;
+};
 export type KeyStatus = { owner: boolean; rows: ServiceRow[] };
 export type SaveResult = { ok: true; service: Service; slot: number; hint: string; label: string; left: number | null; total: number | null; resets: string | null; checked_at: string };
 
@@ -22,8 +28,8 @@ export async function keysCall<T>(body: Record<string, unknown>): Promise<{ data
   return { error: "The server didn't answer — nothing changed. Try again in a moment." };
 }
 
-/** A working key of this service (your own, or — for the owner — the workspace's). */
-export const usable = (row: ServiceRow | undefined) => !!row && (row.workspace || row.keys.some((k) => k.status !== "refused"));
+/** A working key of this service (your own, or — for the owner — the workspace's while it isn't refused). */
+export const usable = (row: ServiceRow | undefined) => !!row && ((row.workspace && row.workspace_status !== "refused") || row.keys.some((k) => k.status !== "refused"));
 
 /** The four things every member needs for the CRM to run on their own keys. */
 export function readiness(st: KeyStatus | null) {
@@ -31,8 +37,8 @@ export function readiness(st: KeyStatus | null) {
   const items = [
     { id: "youtube", label: "YouTube key", what: "stats, videos, sponsors", done: usable(get("youtube")) },
     { id: "ai", label: "An AI key", what: "prices, media kits, replies · Gemini is free", done: AI_SERVICES.some((s) => usable(get(s))) },
-    { id: "clay", label: "Clay key", what: "company facts, LinkedIn people", done: usable(get("clay")) },
-    { id: "hunter", label: "Hunter key", what: "work emails of the deal-makers", done: usable(get("hunter")) },
+    { id: "people", label: "Apollo key", what: "everyone at a brand by job title · searching is free", done: usable(get("apollo")) || usable(get("clay")) },
+    { id: "hunter", label: "Hunter key", what: "work emails when Apollo has none", done: usable(get("hunter")) },
   ];
   return { items, done: items.filter((i) => i.done).length, all: items.every((i) => i.done) };
 }

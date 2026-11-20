@@ -69,6 +69,7 @@ export function credsFrom(keys: Partial<Record<Service, string[]>>): Record<stri
   }
   if (list("hunter").length) out.HUNTER_API_KEY = list("hunter")[0];
   if (list("clay").length) out.CLAY_API_KEY = list("clay")[0];
+  if (list("apollo").length) out.APOLLO_API_KEY = list("apollo")[0];
   return out;
 }
 

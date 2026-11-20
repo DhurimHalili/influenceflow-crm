@@ -1,4 +1,4 @@
-import { AlertTriangle, Check, CircleAlert, Cloud, Crosshair, ExternalLink, Eye, EyeOff, KeyRound, Layers, LockKeyhole, Plus, RefreshCw, ShieldCheck, Sparkles, Trash2, Waypoints, Youtube, Zap } from "lucide-react";
+import { AlertTriangle, Check, CircleAlert, Cloud, Crosshair, ExternalLink, Eye, EyeOff, KeyRound, Layers, LockKeyhole, Plus, RefreshCw, Rocket, ShieldCheck, Sparkles, Trash2, Waypoints, Youtube, Zap } from "lucide-react";
 import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useData } from "../contexts/DataContext";
@@ -11,7 +11,7 @@ import { Button } from "./ui";
 import { openKeysNotice } from "../lib/keysNotice";
 
 // Settings → Your API keys. Every member runs the CRM on their own keys: YouTube (stats, videos), AI (prices,
-// kits, replies) and lookups (Clay, Hunter). A key is typed here once, checked with the service, sealed on the
+// kits, replies) and lookups (Apollo, Hunter, Clay). A key is typed here once, checked with the service, sealed on the
 // server and never shown again — only its last 4 characters. The field is a masked text input (no password
 // manager save) and the typed value is dropped from memory the moment it's saved; nothing goes to storage.
 
@@ -22,6 +22,7 @@ const INFO: Record<Service, Info> = {
   groq: { name: "Groq", icon: Zap, gives: "Fast backup reader for emails and images", free: "Free tier", keyUrl: "https://console.groq.com/keys", where: <>GroqCloud → <b>API Keys</b> → Create</>, placeholder: "gsk_…" },
   cloudflare: { name: "Cloudflare", icon: Cloud, gives: "Small decisions (topics, deals) · backup reader", free: "Free: 10,000 neurons a day", keyUrl: "https://dash.cloudflare.com/profile/api-tokens", where: <>My Profile → API Tokens → <b>Create Token</b> with the “Workers AI” template · Account ID is on the Workers AI page</>, placeholder: "Token" },
   openrouter: { name: "OpenRouter", icon: Waypoints, gives: "Backup reader · reads PDFs", free: "Free models available", keyUrl: "https://openrouter.ai/settings/keys", where: <>OpenRouter → Settings → <b>Keys</b> → Create</>, placeholder: "sk-or-…" },
+  apollo: { name: "Apollo", icon: Rocket, gives: "Everyone at a brand by the job titles you rank · their LinkedIn and work email", free: "Free plan: searching costs nothing; 1 credit per email you unlock", keyUrl: "https://app.apollo.io/#/settings/integrations/api_keys", where: <>Apollo (signed up with your work email) → Settings → Integrations → API → <b>Create new key</b> with <b>Set as master key</b> on</>, placeholder: "Paste your API key" },
   clay: { name: "Clay", icon: Layers, gives: "Company facts and the people at a brand, by job title", free: "Free: 100 results every 30 days", keyUrl: "https://app.clay.com/workspaces/~/api-and-cli?tab=api-keys", where: <>Clay → API and CLI → API keys → <b>Add API key</b></>, placeholder: "clay_scoped_…" },
   hunter: { name: "Hunter", icon: Crosshair, gives: "Work emails of the people who decide · company facts", free: "Free: 50 credits a month", keyUrl: "https://hunter.io/api-keys", where: <>Hunter → <b>API</b> → copy your key</>, placeholder: "Paste your API key" },
 };
@@ -41,7 +42,7 @@ export function ApiKeysSettings() {
   const ready = readiness(status);
   const row = (s: Service) => status?.rows.find((r) => r.service === s);
 
-  return <section id="keys" className="settings-section"><div className="settings-heading"><span><KeyRound /></span><div><h2>Your API keys</h2><p>The CRM runs on your own keys — YouTube for channels, an AI for reading mail, Clay and Hunter for finding people. Free tiers are plenty for most people.</p></div></div><div className="settings-body">
+  return <section id="keys" className="settings-section"><div className="settings-heading"><span><KeyRound /></span><div><h2>Your API keys</h2><p>The CRM runs on your own keys — YouTube for channels, an AI for reading mail, Apollo and Hunter for finding people. Free tiers are plenty for most people.</p></div></div><div className="settings-body">
     <span id="lookups" className="ak-anchor" aria-hidden="true" />
     {!cloud ? <p className="lk-note">Sign in to your cloud workspace to add keys.</p>
       : error && !status ? <div className="lk-load-error" role="alert"><CircleAlert size={15} aria-hidden="true" /><span>{error}</span><Button size="sm" variant="secondary" onClick={() => void reload()}><RefreshCw size={13} /> Try again</Button></div>
@@ -60,8 +61,9 @@ export function ApiKeysSettings() {
             <Group title="AI reading" note="Any one is enough — Gemini is free. Add more and the CRM moves to the next when one is busy. Without any: rules still read prices, but media kits and unclear replies wait.">
               <div className="lk-grid">{(["gemini", "groq", "cloudflare", "openrouter"] as Service[]).map((s) => <ServiceCard key={s} row={row(s)!} owner={status.owner} onChanged={reload} backup={s !== "gemini"} />)}</div>
             </Group>
-            <Group title="Finding people" note="Without them: LinkedIn pages still come from brands' own sites; people and company facts don't.">
-              <div className="lk-grid">{(["clay", "hunter"] as Service[]).map((s) => <ServiceCard key={s} row={row(s)!} owner={status.owner} onChanged={reload} />)}</div>
+            <Group title="Finding people" note="Apollo finds everyone at a brand by the titles you rank (Settings → Finding people) and unlocks their email; Hunter steps in when Apollo has no email; Clay is an optional extra. Without any: LinkedIn pages still come from brands' own sites.">
+              <ServiceCard row={row("apollo")!} owner={status.owner} onChanged={reload} wide />
+              <div className="lk-grid">{(["hunter", "clay"] as Service[]).map((s) => <ServiceCard key={s} row={row(s)!} owner={status.owner} onChanged={reload} backup={s === "clay"} />)}</div>
             </Group>
           </>}
   </div></section>;
@@ -80,11 +82,13 @@ export function ServiceCard({ row, owner, onChanged, wide = false, backup = fals
   const live = row.keys.filter((k) => k.status !== "refused");
   // Which slot the form writes: a new one (-1) or the key being replaced.
   // The key you need opens ready to paste; backups (Groq, Cloudflare, OpenRouter) wait behind a button.
-  const startOpen = !row.keys.length && !row.workspace && !backup;
+  // The server's own key that the service refused (or ran dry) counts as broken: the paste box opens for yours.
+  const wsBad = row.workspace && !live.length ? row.workspace_status || "" : "";
+  const startOpen = !row.keys.length && (!row.workspace || wsBad === "refused") && (!backup || wsBad === "refused");
   const [form, setForm] = useState<null | { slot: number }>(startOpen ? { slot: -1 } : null);
   useEffect(() => { if (startOpen) setForm((f) => f || { slot: -1 }); }, [startOpen]);
-  const state = row.keys.some((k) => k.status === "refused") && !live.length ? "refused" : row.keys.some((k) => k.status === "quota" || k.status === "not_enabled") && !live.some((k) => k.status === "ok") ? "quota" : live.length ? "ok" : row.workspace ? "workspace" : "off";
-  const pill = { ok: live.length > 1 ? `Connected · ${live.length} keys` : "Connected", refused: "Key refused", quota: "Needs attention", workspace: "Workspace key", off: backup ? "Optional" : "Not connected" }[state];
+  const state = (row.keys.some((k) => k.status === "refused") && !live.length) || wsBad === "refused" ? "refused" : (row.keys.some((k) => k.status === "quota" || k.status === "not_enabled") && !live.some((k) => k.status === "ok")) || wsBad === "quota" ? "quota" : live.length ? "ok" : row.workspace ? "workspace" : "off";
+  const pill = { ok: live.length > 1 ? `Connected · ${live.length} keys` : "Connected", refused: wsBad ? "Server key refused" : "Key refused", quota: wsBad ? "Server key out of credits" : "Needs attention", workspace: "Workspace key", off: backup ? "Optional" : "Not connected" }[state];
   const after = async (msg: string) => { if (msg) toast(msg, "success"); await onChanged(); void m.refreshStatus(); };
   const extra = form && row.service === "youtube" && (form.slot > 0 || (form.slot === -1 && row.keys.length > 0));
 
@@ -97,11 +101,13 @@ export function ServiceCard({ row, owner, onChanged, wide = false, backup = fals
 
     {row.usage && (row.keys.length > 0 || row.workspace) && <YoutubeMeter usage={row.usage} />}
     {row.keys.map((k) => <KeyRow key={k.slot} k={k} row={row} multi={row.max > 1} replacing={form?.slot === k.slot} onReplace={() => setForm({ slot: k.slot })} onChanged={after} />)}
+    {wsBad === "refused" && <p className="lk-warn" role="status">{info.name} stopped accepting the key set on the server, so {info.name} lookups are paused. Paste your own key below — it's checked first and used instead from then on.</p>}
+    {wsBad === "quota" && <p className="lk-warn" role="status">The {info.name} key set on the server is out of credits{row.paused_until ? ` until ${dateLabel(row.paused_until)}` : ""}. Add your own key to keep going now.</p>}
     {state === "workspace" && !form && <p className="lk-note">You're using the workspace key set on the server{owner ? " (yours, as the owner)" : ""}{row.left !== null ? ` · ${row.left} ${row.service === "hunter" ? "credits" : "results"} left` : ""}. Add your own key to use your own allowance instead.</p>}
 
     {form ? <KeyForm service={row.service} slot={form.slot} replacing={form.slot >= 0} extra={!!extra} canCancel={row.keys.length > 0 || row.workspace} onCancel={() => setForm(null)} onSaved={async (r) => { setForm(null); await after(`${info.name} connected${r.label ? ` · ${r.label}` : ""}${r.left !== null ? ` · ${r.left} credits left` : ""}`); }} />
       : <div className="lk-actions">
-        {!row.keys.length && <Button size="sm" variant="secondary" onClick={() => setForm({ slot: -1 })}><KeyRound size={13} /> {row.workspace ? "Use my own key" : backup ? `Add ${info.name} as a backup` : `Add ${info.name} key`}</Button>}
+        {!row.keys.length && <Button size="sm" variant={wsBad ? "primary" : "secondary"} onClick={() => setForm({ slot: -1 })}><KeyRound size={13} /> {wsBad ? `Paste a new ${info.name} key` : row.workspace ? "Use my own key" : backup ? `Add ${info.name}${row.service === "clay" ? "" : " as a backup"}` : `Add ${info.name} key`}</Button>}
         {row.max > 1 && row.keys.length > 0 && row.keys.length < row.max && <Button size="sm" variant="ghost" onClick={() => setForm({ slot: -1 })}><Plus size={13} /> Add another key</Button>}
       </div>}
   </article>;
@@ -134,6 +140,7 @@ function KeyRow({ k, row, multi, replacing, onReplace, onChanged }: { k: SavedKe
       <div><dt>{multi ? `Key ${k.slot + 1}` : "Key"}</dt><dd className="lk-hint">•••• {k.hint}</dd></div>
       <div><dt>Account</dt><dd>{fresh?.label || k.label || "—"}</dd></div>
       {(row.service === "hunter" || row.service === "clay") && <div><dt>{row.service === "hunter" ? "Credits" : "Results · 30 days"}</dt><dd>{k.status === "refused" ? "Stopped" : credits || "—"}</dd></div>}
+      {row.service === "apollo" && <div><dt>Credits used · this month</dt><dd title="Searching is free; each email you unlock and each company record costs 1">{k.status === "refused" ? "Stopped" : (row.used ?? 0).toLocaleString("en-US")}</dd></div>}
       <div><dt>Checked</dt><dd>{ago(fresh?.checked_at || k.checked_at)}</dd></div>
     </dl>
     {k.status === "refused" && <p className="lk-warn" role="status">{info.name} stopped accepting this key, so it isn't used. Replace it — nothing else is lost.</p>}

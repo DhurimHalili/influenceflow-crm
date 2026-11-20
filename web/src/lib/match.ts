@@ -37,7 +37,7 @@ export type BrandIntel = {
   people?: { at: string; domain: string; total: number; list: HunterPerson[] } | null;
 };
 export type CompanyFacts = {
-  domain: string; at: string; linkedin?: string; linkedin_via?: "site" | "wikidata" | "hunter" | "clay"; wd_at?: string; hunter_at?: string; clay_at?: string; facts_via?: "hunter" | "clay";
+  domain: string; at: string; linkedin?: string; linkedin_via?: "site" | "wikidata" | "hunter" | "clay" | "apollo"; wd_at?: string; hunter_at?: string; clay_at?: string; apollo_at?: string; facts_via?: "hunter" | "clay" | "apollo";
   size?: string; employees?: number; revenue?: string; industry?: string; country?: string; founded?: number; name?: string;
 };
 export type HunterPerson = { first: string; last: string; title: string; email: string; linkedin: string; confidence: number; department: string; seniority: string; via?: "hunter" | "clay" };

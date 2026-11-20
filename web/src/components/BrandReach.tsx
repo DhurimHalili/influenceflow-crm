@@ -1,17 +1,17 @@
-import { BadgeCheck, Banknote, Building2, CalendarDays, Check, ExternalLink, Linkedin, Loader2, MapPin, Pencil, Plus, Search, Sparkles, UsersRound } from "lucide-react";
-import { useMemo, useState, type FormEvent } from "react";
-import { Link } from "react-router-dom";
+import { BadgeCheck, Banknote, Building2, CalendarDays, ExternalLink, Linkedin, MapPin, Pencil, Search, UsersRound } from "lucide-react";
+import { useState, type FormEvent } from "react";
 import { useData } from "../contexts/DataContext";
 import { useMatch } from "../contexts/MatchContext";
 import { useToast } from "../contexts/ToastContext";
-import { brandDomain, countryName, type HunterPerson } from "../lib/match";
+import { brandDomain, countryName } from "../lib/match";
 import { dateLabel } from "../lib/utils";
 import type { Brand, BrandContact, SocialLink } from "../types";
-import { Avatar, Button } from "./ui";
+import { PeopleFinder } from "./PeopleFinder";
+import { Button } from "./ui";
 
 // Who to reach at a brand: its LinkedIn page (only from a source tied to its own website — their site,
 // Wikidata, Hunter — or pasted by you), company facts, one-tap LinkedIn searches for the people who
-// decide on creator deals, and people Hunter knows with their work email (on request, one credit).
+// decide on creator deals, and the people finder (components/PeopleFinder.tsx: Apollo first, by your ranked titles).
 
 /** A LinkedIn company / showcase / school page, cleaned — "" when it isn't one. */
 function companyPage(url: string | undefined | null): string {
@@ -29,6 +29,7 @@ const VIA: Record<string, { label: string; tip: string; sure: boolean }> = {
   wikidata: { label: "Wikidata, same website", tip: "Wikidata lists this page for the company whose official website is theirs.", sure: true },
   hunter: { label: "Hunter, by website", tip: "Hunter's company record for their website lists this page. Worth a glance before you rely on it.", sure: false },
   clay: { label: "Clay, by website", tip: "Clay's company record for their website lists this page. Worth a glance before you rely on it.", sure: false },
+  apollo: { label: "Apollo, by website", tip: "Apollo's company record for their website lists this page. Worth a glance before you rely on it.", sure: false },
 };
 
 /** Searches for the people who say yes to creator deals. */
@@ -40,7 +41,6 @@ const ROLES: { label: string; words: string }[] = [
   { label: "Brand & social", words: "brand social" },
   { label: "Founder", words: "founder" },
 ];
-const DEAL_MAKER = /influencer|creator|talent|ambassador|affiliate|partnership|collab|sponsor|brand|social|community|pr\b|marketing|cmo/i;
 
 export function BrandReach({ brand, contacts }: { brand: Brand; contacts: BrandContact[] }) {
   const data = useData();
@@ -49,7 +49,6 @@ export function BrandReach({ brand, contacts }: { brand: Brand; contacts: BrandC
   const domain = brandDomain(brand);
   const intel = m.intel.get(brand.id)?.intel || null;
   const co = intel?.company && (!domain || intel.company.domain === domain) ? intel.company : null;
-  const people = intel?.people && (!domain || intel.people.domain === domain) ? intel.people : null;
   const mine = (brand.socials || []).find((s) => s.platform === "LinkedIn");
   const minePage = companyPage(mine?.url);
   const page = minePage || co?.linkedin || "";
@@ -57,17 +56,15 @@ export function BrandReach({ brand, contacts }: { brand: Brand; contacts: BrandC
   const slug = page.replace(/^https:\/\/www\.linkedin\.com\//, "");
   const hunter = m.status?.hunter;
   const clay = m.status?.clay;
-  const services = [clay?.configured ? "Clay" : "", hunter?.configured ? "Hunter" : ""].filter(Boolean);
-  const credits = (clay?.configured ? clay.left : 0) + (hunter?.configured ? hunter.left : 0);
-  const canFacts = !!domain && ((!!clay?.configured && clay.left > 0 && !co?.clay_at) || (!!hunter?.configured && hunter.left > 0 && !co?.hunter_at));
+  const apollo = m.status?.apollo;
+  const services = [apollo?.configured ? "Apollo" : "", clay?.configured ? "Clay" : "", hunter?.configured ? "Hunter" : ""].filter(Boolean);
+  const canFacts = !!domain && ((!!apollo?.configured && !apollo.paused && !co?.apollo_at) || (!!clay?.configured && clay.left > 0 && !co?.clay_at) || (!!hunter?.configured && hunter.left > 0 && !co?.hunter_at));
   const [editing, setEditing] = useState(false);
   const [typed, setTyped] = useState("");
   const typedPage = companyPage(typed);
-  const looked = !!co?.wd_at || !!co?.hunter_at || !!co?.clay_at || via === "site";
+  const looked = !!co?.wd_at || !!co?.hunter_at || !!co?.clay_at || !!co?.apollo_at || via === "site";
   const facts = co && [co.size || (co.employees ? `${co.employees.toLocaleString("en-US")}` : ""), co.revenue, co.industry, co.founded, co.country].some(Boolean);
   const busyCompany = m.looking.has(`company:${brand.id}`);
-  const busyPeople = m.looking.has(`people:${brand.id}`);
-  const known = useMemo(() => new Set(contacts.flatMap((c) => [c.email.toLowerCase(), `${c.first_name} ${c.last_name}`.trim().toLowerCase()]).filter(Boolean)), [contacts]);
 
   const savePage = (e: FormEvent) => {
     e.preventDefault();
@@ -81,12 +78,7 @@ export function BrandReach({ brand, contacts }: { brand: Brand; contacts: BrandC
   const search = (words: string) => slug.startsWith("company/")
     ? `https://www.linkedin.com/${slug}/people/?keywords=${encodeURIComponent(words)}`
     : `https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(`${words} ${brand.name}`)}`;
-  const addPerson = (p: HunterPerson) => {
-    const c = data.addContact({ brand_id: brand.id, first_name: p.first || p.email.split("@")[0], last_name: p.last, title: p.title, email: p.email, linkedin_url: p.linkedin, pipeline_status: "new", date_contacted: null, notes: p.email ? `Found by Hunter (${p.confidence}% sure of the email).` : "Found by Clay — no email on record yet." });
-    toast(`${p.first || p.email} added to ${brand.name}'s people.`, "success", { label: "Undo", run: () => data.deleteContact(c.id) });
-  };
   const viaInfo = VIA[via];
-  const creditLine = [clay?.configured ? `Clay ${clay.left} left (30 days)` : "", hunter?.configured ? `Hunter ${hunter.left} left this month` : ""].filter(Boolean).join(" · ");
 
   return <div className="reach">
     <div className={`reach-li${page ? " found" : ""}`}>
@@ -108,7 +100,7 @@ export function BrandReach({ brand, contacts }: { brand: Brand; contacts: BrandC
       </div>
       <div className="reach-li-actions">
         {page && !editing && <button type="button" className="mx-icon-btn" onClick={() => { setTyped(minePage || page); setEditing(true); }} aria-label="Change LinkedIn page" title="Change"><Pencil size={13} /></button>}
-        {canFacts && <Button size="sm" variant="secondary" loading={busyCompany} onClick={() => void m.lookup(brand.id, "company")} title={`${services.join(" + ")} record for their website: LinkedIn, size, revenue, industry`}><Building2 size={13} /> Company facts</Button>}
+        {canFacts && <Button size="sm" variant="secondary" loading={busyCompany} onClick={() => void m.lookup(brand.id, "company")} title={`${services.join(", then ")} record for their website: LinkedIn, size, revenue, industry${apollo?.configured ? " · 1 Apollo credit" : ""}`}><Building2 size={13} /> Company facts</Button>}
       </div>
     </div>
 
@@ -118,31 +110,14 @@ export function BrandReach({ brand, contacts }: { brand: Brand; contacts: BrandC
       {co.industry && <li><Building2 size={13} aria-hidden="true" />{co.industry}</li>}
       {co.founded && <li><CalendarDays size={13} aria-hidden="true" />Since {co.founded}</li>}
       {co.country && <li><MapPin size={13} aria-hidden="true" />{countryName(co.country)}</li>}
-      <li className="reach-src">{co.facts_via === "clay" ? "Clay" : "Hunter"} · {dateLabel((co.facts_via === "clay" ? co.clay_at : co.hunter_at) || co.at)}</li>
+      <li className="reach-src">{co.facts_via === "apollo" ? "Apollo" : co.facts_via === "clay" ? "Clay" : "Hunter"} · {dateLabel((co.facts_via === "apollo" ? co.apollo_at : co.facts_via === "clay" ? co.clay_at : co.hunter_at) || co.at)}</li>
     </ul> : null}
 
+    <PeopleFinder brand={brand} contacts={contacts} />
+
     <div className="reach-find">
-      <small><Search size={12} aria-hidden="true" /> Find who decides on creator deals{page ? "" : " — LinkedIn search"}</small>
+      <small><Search size={12} aria-hidden="true" /> Or search LinkedIn yourself{page ? ` — inside ${brand.name}'s page` : ""}</small>
       <div className="reach-chips">{ROLES.map((r) => <a key={r.label} href={search(r.words)} target="_blank" rel="noopener noreferrer">{r.label}<ExternalLink size={11} aria-hidden="true" /></a>)}</div>
     </div>
-
-    {!services.length && domain && m.status ? <p className="reach-connect"><Sparkles size={13} aria-hidden="true" /><span>See who works there — with work emails and LinkedIn — and company facts: <Link to="/app/settings#keys">add your Clay or Hunter key in Settings</Link>.</span></p> : null}
-    {services.length && domain ? <div className="reach-people">
-      <div className="reach-people-head">
-        <span><Sparkles size={13} aria-hidden="true" /> <b>People who work there</b>{people ? <small> · {dateLabel(people.at)}{people.total > people.list.length ? ` · ${people.total} known in all` : ""}</small> : <small> · from {services.join(" + ")}, deal-makers first</small>}</span>
-        <Button size="sm" variant={people ? "ghost" : "secondary"} loading={busyPeople} disabled={credits <= 0} onClick={() => void m.lookup(brand.id, "people")} title={[hunter?.configured ? "Hunter: 1 credit, work emails" : "", clay?.configured ? "Clay: up to 5 results, LinkedIn" : ""].filter(Boolean).join(" · ")}>{people ? "Search again" : "Find people"}</Button>
-      </div>
-      {people && (people.list.length ? <ul className="reach-people-list">{people.list.map((p) => {
-        const added = known.has(p.email.toLowerCase()) || known.has(`${p.first} ${p.last}`.trim().toLowerCase());
-        return <li key={p.email || `${p.first} ${p.last} ${p.title}`} className={DEAL_MAKER.test(p.title) ? "maker" : ""}>
-          <Avatar name={`${p.first} ${p.last}`.trim() || p.email} size="sm" />
-          <span className="reach-person"><strong>{`${p.first} ${p.last}`.trim() || p.email}</strong><small>{p.title || "Role not listed"}</small></span>
-          {p.email ? <span className="reach-mail"><a href={`mailto:${p.email}`}>{p.email}</a><small>{p.confidence}% sure · Hunter</small></span> : <span className="reach-mail"><em>No email yet</em><small>LinkedIn · Clay</small></span>}
-          {p.linkedin || !p.email ? <a className="mx-icon-btn" href={p.linkedin || `https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(`${p.first} ${p.last} ${brand.name}`)}`} target="_blank" rel="noopener noreferrer" aria-label={`${p.first}'s LinkedIn`} title="LinkedIn"><Linkedin size={13} /></a> : <span className="reach-gap" />}
-          {added ? <span className="reach-added"><Check size={12} aria-hidden="true" /> Added</span> : <Button size="sm" variant="secondary" onClick={() => addPerson(p)}><Plus size={12} /> Add</Button>}
-        </li>;
-      })}</ul> : <p className="reach-empty">No one at {domain} in partnerships, marketing, communication, sales or leadership is on record yet.</p>)}
-      {creditLine && <p className="reach-credits">{busyPeople || busyCompany ? <Loader2 size={11} className="spin" aria-hidden="true" /> : null}{creditLine}. A search is kept, so the same brand never costs twice.</p>}
-    </div> : null}
   </div>;
 }
