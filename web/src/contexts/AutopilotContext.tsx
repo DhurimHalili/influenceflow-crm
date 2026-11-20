@@ -5,6 +5,7 @@ import { invoke, useGmail } from "./GmailContext";
 import { hasSupabase, supabase } from "../lib/supabase";
 import { autopilotPool, readAutopilot, readTemplates, type Pool, type Round } from "../lib/autopilot";
 import { planTimes, type Plan } from "../lib/smartTime";
+import type { QuestionKind } from "../lib/followupPairing";
 import { dayKeyIn, validZone } from "../lib/zones";
 import { useChase } from "../hooks/useChase";
 import { useWrongEmails } from "../components/Bounces";
@@ -25,9 +26,9 @@ export type QueueItem = {
 };
 export type DayRow = { day: string; extra_ok: boolean; declined: boolean; checked_at: string | null; need: number; short: number; available: number; note: string };
 export type PlanRow = { creatorId: string; name: string; round: Round; mailbox: string; threadId: string; templateId: string; templateName: string; text: string; at: number; theirClock: string; zone: string; zones: string[]; offBy: number; fit: QueueItem["fit"]; asked: string };
-export type PlanAnswer = { ok: true; rows: PlanRow[]; can: number; asleep: { creatorId: string; name: string; zone: string; theirClock: string; opensAt: number | null }[]; full: number; from: number; until: number; ai: boolean; seed: number; ready: number; byHand: number; held: number; tz: string; left: number };
+export type PlanAnswer = { ok: true; rows: PlanRow[]; blocked?: { creatorId: string; name: string; round: number; asked: string; kind: QuestionKind }[]; can: number; asleep: { creatorId: string; name: string; zone: string; theirClock: string; opensAt: number | null }[]; full: number; from: number; until: number; ai: boolean; seed: number; ready: number; byHand: number; held: number; tz: string; left: number };
 export type Prepared =
-  | { ok: true; round: Round; mailbox: string; threadId: string; subject: string; zones: string[]; country: string; asked: string; ai: boolean; templates: { id: string; name: string; text: string; score: number; echo: boolean; why: string; by: "ai" | "rules" }[]; smart: { at: number; theirClock: string; offBy: number } | null; asleep: { theirClock: string; opensAt: number | null } | null; firstAt: number; lastAt: number; window: { from: number; until: number }; theirNow: string }
+  | { ok: true; round: Round; mailbox: string; threadId: string; subject: string; zones: string[]; country: string; asked: string; ai: boolean; templates: { id: string; name: string; text: string; score: number; echo: boolean; clash?: boolean; why: string; by: "ai" | "rules" }[]; question?: { text: string; kind: QuestionKind }; noAnswer?: boolean; smart: { at: number; theirClock: string; offBy: number } | null; asleep: { theirClock: string; opensAt: number | null } | null; firstAt: number; lastAt: number; window: { from: number; until: number }; theirNow: string }
   | { ok: false; code: string; round?: number; id?: string };
 
 type Result<T> = { ok: true; data: T } | { ok: false; message: string; code?: string };

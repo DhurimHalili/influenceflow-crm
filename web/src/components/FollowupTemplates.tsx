@@ -1,4 +1,4 @@
-import { Copy, Layers, Loader2, Plus, RotateCcw, Save, Sparkles, Trash2, Wand2 } from "lucide-react";
+import { CircleAlert, Copy, CornerDownRight, Layers, Loader2, Plus, RotateCcw, Save, Sparkles, Trash2, Wand2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useData } from "../contexts/DataContext";
@@ -7,7 +7,8 @@ import { useSessionState } from "../hooks/useSessionState";
 import { fillTemplate, newTemplateId, readTemplates, ROUNDS, TEMPLATE_MAX, TEMPLATES_PER_ROUND, NAME_MAX, type Round, type TemplateBook } from "../lib/autopilot";
 import { ordinal } from "../lib/followupEngine";
 import { REPLY_TOKENS } from "../lib/replyTemplate";
-import { suggestTemplates, type Suggestion } from "../lib/templateSuggest";
+import { missingAnswers, suggestTemplates, type Suggestion } from "../lib/templateSuggest";
+import { ASKS, pairFit, questionKind, answerKind } from "../lib/followupPairing";
 import { invoke } from "../contexts/GmailContext";
 import { Button } from "./ui";
 
@@ -17,10 +18,10 @@ import { Button } from "./ui";
 // email first. Edits survive a reload (session draft) until saved or discarded.
 
 const TIPS: Record<Round, { lead: string; example: string }> = {
-  1: { lead: "Follows your first email. Don't ask its question again in the same words — if it asked “Are you interested?”, ask “Would you be interested…”. The CRM picks the template that fits each email.", example: "Hi {first_name},\n\nIt seems you missed our email — would you be interested in this opportunity?" },
-  2: { lead: "A second, lighter nudge. Short reads human.", example: "Hi {first_name},\n\nJust bringing this back to the top of your inbox — happy to share the details." },
-  3: { lead: "Often a simple question that's easy to answer.", example: "Hi {first_name},\n\nIs this a bad time?" },
-  4: { lead: "The last one in this thread. It should answer your 3rd — after “Is this a bad time?”: “Looks like it might — I'll come back another time.”", example: "Hi {first_name},\n\nLooks like it might — I'll come back another time." },
+  1: { lead: "Follows your first email. Don't ask its question again in the same words: if it asked “Are you interested?”, ask “Would you be interested…”. The CRM picks the template that fits each email.", example: "It seems you missed our email. Would you be interested in this opportunity?" },
+  2: { lead: "A second, lighter nudge. Short reads human.", example: "Just bringing this back to the top of your inbox." },
+  3: { lead: "Often a simple question that's easy to answer. Every question you ask here needs an answer in your 4th.", example: "Is this a bad time?" },
+  4: { lead: "The last one in this thread, and it answers your 3rd. Each kind of question needs its own answer: “Is this a bad time?” → “Seems like it is.”, “Not the best time?” → “Looks like it's not.”, “Should I check back later?” → “I guess I will.” The CRM only ever sends an answer that fits the question that person got.", example: "Seems like it is. I'll come back another time." },
 };
 const TOKEN_HELP: Record<(typeof REPLY_TOKENS)[number], string> = { "{first_name}": "first name", "{name}": "full name", "{my_name}": "your name", "{agency}": "your agency" };
 const same = (a: TemplateBook, b: TemplateBook) => JSON.stringify(a) === JSON.stringify(b);
@@ -83,7 +84,7 @@ export function FollowupTemplates({ readyByRound }: { readyByRound?: Record<numb
   const [asking, setAsking] = useState(false);
   const ideas = (aiIdeas && aiIdeas.round === round ? aiIdeas.list : ruleIdeas).filter((x) => !book[round].some((t) => t.text.trim() === x.text.trim()));
   const [ideasOpen, setIdeasOpen] = useState(false);
-  const showIdeas = list.length < TEMPLATES_PER_ROUND && (ideasOpen || list.length < 3);
+  const showIdeas = list.length < TEMPLATES_PER_ROUND && (ideasOpen || list.length < 3 || ideas.some((x) => x.important));
   const askAi = async () => {
     setAsking(true);
     const res = await invoke<{ suggestions?: Suggestion[]; ai?: boolean }>("gmail-sync", { action: "template_suggest", round, book: readTemplates(book) });
@@ -100,6 +101,19 @@ export function FollowupTemplates({ readyByRound }: { readyByRound?: Record<numb
     toast("Added — reword it if you like, then save", "success");
   };
 
+  // Your questions the next follow-up can't answer: red, first, with answers in your words (one tap adds one).
+  const gaps = useMemo(() => missingAnswers(book), [book]);
+  const gapRounds = new Set(gaps.map((g) => g.round));
+  const addAnswer = (r: Round, text: string) => {
+    if (book[r].length >= TEMPLATES_PER_ROUND) { toast(`${TEMPLATES_PER_ROUND} is the most per follow-up`, "info"); return; }
+    const id = newTemplateId();
+    edit({ ...book, [r]: [...book[r], { id, name: `${ordinal(r)} · ${letter(book[r].length)}`, text }] });
+    setRound(r);
+    toast(`Added to your ${ordinal(r)} follow-ups — save to use it`, "success");
+  };
+  // Which of this round's templates can't follow ANY question of the round before (they'd never be sent).
+  const orphan = (text: string) => round > 1 && book[(round - 1) as Round].length > 0 && text.trim() !== "" && !book[(round - 1) as Round].some((p) => pairFit(questionKind(p.text), answerKind(text)) > 0);
+
   const due = readyByRound?.[round] || 0;
   const spread = list.filter((t) => t.text.trim()).length;
   return <section id="follow-templates" className="settings-section" onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "s" && dirty) { e.preventDefault(); save(); } }}>
@@ -108,17 +122,27 @@ export function FollowupTemplates({ readyByRound }: { readyByRound?: Record<numb
       <div className="ft-rounds" role="tablist" aria-label="Which follow-up">
         {ROUNDS.map((r) => {
           const n = book[r].length;
-          return <button key={r} type="button" role="tab" aria-selected={round === r} className={`ft-round${round === r ? " on" : ""}${n ? "" : " empty"}`} onClick={() => setRound(r)}>
+          return <button key={r} type="button" role="tab" aria-selected={round === r} className={`ft-round${round === r ? " on" : ""}${n ? "" : " empty"}${gapRounds.has(r) ? " gap" : ""}`} onClick={() => setRound(r)}>
             <b>{ordinal(r)}</b><span>follow-up</span><em>{n ? `${n} template${n === 1 ? "" : "s"}` : "none yet"}</em>
+            {gapRounds.has(r) && <i className="ft-gap-dot" aria-label="A question has no answer here" />}
           </button>;
         })}
       </div>
+      {gaps.length > 0 && <div className="ft-gaps" role="alert">
+        <div className="ft-gaps-head"><CircleAlert size={18} aria-hidden="true" /><div><b>{gaps.length === 1 ? "One of your questions has no answer" : `${gaps.length} of your questions have no answer`}</b><small>The CRM never sends an answer that doesn't fit the question someone got. Add one of these (or your own words) so everyone gets a follow-up that makes sense.</small></div></div>
+        {gaps.map((g) => <div key={`${g.round}|${g.question}`} className={`ft-gap${g.any ? "" : " hard"}`}>
+          <div className="ft-gap-q"><span className="ft-gap-tag">Your {ordinal(g.round - 1)}</span><q>{g.question}</q><small>{ASKS[g.kind]}</small></div>
+          <p className="ft-gap-why"><CornerDownRight size={14} aria-hidden="true" /><span>{g.any ? <>None of your {ordinal(g.round)} follow-ups answers it directly. Only a general one like “No worries” can go after it.</> : <><b>Autopilot is holding everyone who got this</b>: none of your {ordinal(g.round)} follow-ups can follow it.</>}</span></p>
+          {g.answers.length > 0 && <div className="ft-gap-fix">{g.answers.map((a) => <button key={a} type="button" onClick={() => addAnswer(g.round as Round, a)}><Plus size={13} aria-hidden="true" /><span>{a}</span></button>)}</div>}
+        </div>)}
+      </div>}
       <p className="ft-tip"><Wand2 size={14} aria-hidden="true" />{TIPS[round].lead}</p>
       {spread > 0 && <p className={`ft-spread${spread < 3 ? " low" : ""}`}>{due > 0 ? <>{due} {ordinal(round)} follow-up{due === 1 ? " is" : "s are"} due today → each template goes to about <b>{Math.ceil(due / spread)}</b> {Math.ceil(due / spread) === 1 ? "person" : "people"}.</> : <>{spread} template{spread === 1 ? "" : "s"} for the {ordinal(round)} follow-up.</>} {spread < 3 && "Three or more keep the same words from going to many people at once — that's what spam filters notice."}</p>}
       <div className="ft-list">
         {list.map((t) => {
           const filled = fillTemplate(t.text, sample);
-          return <article key={t.id} className="ft-card">
+          const lost = orphan(t.text);
+          return <article key={t.id} className={`ft-card${lost ? " orphan" : ""}`}>
             <header>
               <input className="ft-name" value={t.name} maxLength={NAME_MAX} aria-label="Template name" onChange={(e) => patch(t.id, { name: e.target.value })} />
               <span className="ft-actions">
@@ -132,6 +156,7 @@ export function FollowupTemplates({ readyByRound }: { readyByRound?: Record<numb
               <small className={t.text.trim() ? "" : "warn"}>{t.text.trim() ? `${t.text.length}/${TEMPLATE_MAX}` : "Empty — it won't be used"}</small>
             </footer>
             {t.text.trim() && filled !== t.text && <p className="ft-preview" aria-label="How it reads"><span>Reads as</span>{filled.split("\n").filter(Boolean).slice(0, 3).join(" ")}</p>}
+            {lost && <p className="ft-orphan"><CircleAlert size={13} aria-hidden="true" />It doesn't answer any of your {ordinal(round - 1)} follow-ups, so it will never be sent. Reword it to answer one of them.</p>}
           </article>;
         })}
         {!list.length && <div className="ft-empty">
@@ -143,15 +168,15 @@ export function FollowupTemplates({ readyByRound }: { readyByRound?: Record<numb
       </div>
       {list.length < TEMPLATES_PER_ROUND && (showIdeas ? <div className="ft-ideas">
         <div className="ft-ideas-head">
-          <span><Sparkles size={15} aria-hidden="true" /><b>Ideas for your {ordinal(round)} follow-up</b><small>{round === 4 ? "Each one answers one of your 3rd follow-ups." : "In your words — no greetings or sign-offs you don't use."} Nothing that isn't true: no deadlines, numbers or “brands ready”.</small></span>
+          <span><Sparkles size={15} aria-hidden="true" /><b>Ideas for your {ordinal(round)} follow-up</b><small>{round === 4 ? "Each one answers one of your 3rd follow-ups, in your own words." : "In your words, with no greetings or sign-offs you don't use."} Nothing that isn't true: no deadlines, numbers or “brands ready”.</small></span>
           <span className="ft-ideas-actions">
             <Button size="sm" variant="secondary" onClick={() => void askAi()} loading={asking} disabled={asking}>{asking ? <Loader2 size={14} className="spin" /> : <Wand2 size={14} />} {aiIdeas?.round === round ? "More ideas" : "Ask AI for more"}</Button>
             {list.length >= 3 && <button type="button" className="ft-ideas-hide" onClick={() => setIdeasOpen(false)}>Hide</button>}
           </span>
         </div>
-        {ideas.length ? <ul className="ft-ideas-list">{ideas.map((x, i) => <li key={`${round}-${i}-${x.text.slice(0, 20)}`}>
+        {ideas.length ? <ul className="ft-ideas-list">{ideas.map((x, i) => <li key={`${round}-${i}-${x.text.slice(0, 20)}`} className={x.important ? "important" : ""}>
           <p>{x.text}</p>
-          <span className="ft-idea-why">{x.by === "ai" && <em>AI</em>}{x.why}</span>
+          <span className="ft-idea-why">{x.important && <em className="imp">Important</em>}{x.by === "ai" && <em>AI</em>}{x.why}</span>
           <button type="button" className="ft-idea-add" onClick={() => addIdea(x)} aria-label={`Add this idea: ${x.text.slice(0, 60)}`}><Plus size={14} /> Add</button>
         </li>)}</ul> : <p className="ft-ideas-empty">No new ideas that differ enough from yours — ask the AI for fresh ones.</p>}
       </div> : <button type="button" className="ft-ideas-open" onClick={() => setIdeasOpen(true)}><Sparkles size={14} /> Ideas for more {ordinal(round)} follow-ups</button>)}

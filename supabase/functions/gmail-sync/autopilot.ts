@@ -15,6 +15,7 @@
 // (`cancelOnReply`). Nothing here logs email text, addresses or names.
 
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
+import { answerKind, lastQuestion, pairFit, questionKind, type QuestionKind } from "../../../web/src/lib/followupPairing.ts";
 import { assignTemplates, autopilotPool, dayCap, fillNeed, fillTemplate, minutesOf, pickWithin, readAutopilot, readTemplates, roomMap, ruleFit, shiftToZone, type BoxDay, type Fit, type Ready, type Round, type TemplateBook } from "../../../web/src/lib/autopilot.ts";
 import { rampPlan, readRamp } from "../../../web/src/lib/goalRamp.ts";
 import { readGuard } from "../../../web/src/lib/mailboxGuard.ts";
@@ -200,6 +201,8 @@ async function fitsOf(ready: Ready[], prev: Map<string, Prev>, book: TemplateBoo
       for (const [tid, a] of Object.entries(p.fits)) {
         const rule = s[tid];
         if (!rule) continue;
+        // A template that answers a different question is out, whatever an AI thinks of it.
+        if (rule.clash) continue;
         // The rules' "asks the same question again" stands; otherwise the AI weighs most.
         const echo = rule.echo || (a.repeats && a.fit < 0.35);
         s[tid] = { score: echo ? Math.min(rule.score, a.fit, 0.1) : 0.6 * a.fit + 0.4 * rule.score, echo, why: a.why || rule.why, by: "ai" };
@@ -221,7 +224,9 @@ async function recentUse(admin: Admin, userId: string) {
 // ----- planning ---------------------------------------------------------------------------------------
 
 export type PlanRow = { creatorId: string; name: string; round: Round; mailbox: string; threadId: string; templateId: string; templateName: string; text: string; at: number; theirClock: string; zone: string; zones: string[]; offBy: number; fit: { score: number; why: string; by: "ai" | "rules"; echo: boolean } | null; asked: string };
-export type PlanOut = { rows: PlanRow[]; can: number; asleep: { creatorId: string; name: string; zone: string; theirClock: string; opensAt: number | null }[]; full: number; from: number; until: number; ai: boolean; seed: number };
+/** People no template can answer: your last email asked `asked` and none of that follow-up's templates fit after it. */
+export type Blocked = { creatorId: string; name: string; round: Round; asked: string; kind: QuestionKind };
+export type PlanOut = { rows: PlanRow[]; blocked: Blocked[]; can: number; asleep: { creatorId: string; name: string; zone: string; theirClock: string; opensAt: number | null }[]; full: number; from: number; until: number; ai: boolean; seed: number };
 
 const priority = (a: Ready, b: Ready) => b.overdueDays - a.overdueDays || a.round - b.round || a.id.localeCompare(b.id);
 
@@ -245,17 +250,22 @@ export async function planFor(admin: Admin, kit: Kit, w: World, rows: Row[], rea
   const pick = assignTemplates(going.map((r) => ({ id: r.id, round: r.round, fits: scored.get(r.id) })), w.templates, await recentUse(admin, w.userId), seed);
   const byName = new Map(w.creators.map((c) => [c.id, c.name]));
   const out: PlanRow[] = [];
+  const blocked: Blocked[] = [];
   for (const r of going) {
     const p = placed.get(r.id)!;
     const tid = pick.get(r.id);
     const t = w.templates[r.round].find((x) => x.id === tid);
-    if (!t) continue;
+    if (!t) {
+      const text = prev.get(r.id)?.text || "";
+      blocked.push({ creatorId: r.id, name: byName.get(r.id) || r.name, round: r.round, asked: lastQuestion(text), kind: questionKind(text) });
+      continue;
+    }
     const f = scored.get(r.id)?.[t.id];
     out.push({ creatorId: r.id, name: byName.get(r.id) || r.name, round: r.round, mailbox: r.mailbox, threadId: r.threadId, templateId: t.id, templateName: t.name, text: fillTemplate(t.text, { name: byName.get(r.id) || r.name, my_name: w.name, agency: w.prefs.agency_name }), at: p.at, theirClock: p.theirClock, zone: p.zone, zones: r.zones, offBy: p.offBy, fit: f ? { score: Math.round(f.score * 100) / 100, why: f.why, by: f.by, echo: f.echo } : null, asked: askedOf(prev.get(r.id)?.text || "") });
   }
   out.sort((a, b) => a.at - b.at);
   const asleep = all.unplaced.filter((u) => u.why === "asleep").map((u) => ({ creatorId: u.id, name: byName.get(u.id) || "", zone: u.zone, theirClock: u.theirClock, opensAt: u.opensAt }));
-  return { rows: out, can: all.placed.length, asleep, full: all.unplaced.filter((u) => u.why === "full").length, from: plan.from || all.from, until: plan.until || all.until, ai, seed };
+  return { rows: out, blocked, can: all.placed.length, asleep, full: all.unplaced.filter((u) => u.why === "full").length, from: plan.from || all.from, until: plan.until || all.until, ai, seed };
 }
 
 /** The question your last email ended on, shortened ("Are you interested?"). */
@@ -428,6 +438,10 @@ export async function sendOne(admin: Admin, kit: Kit, q: QueueRow, rows: Row[], 
     const from = pickSendAs(latest, own, sendAs, mailboxOf(row));
     const full = await kit.call<Msg>(token, `/messages/${latest.id}?format=full`).catch(() => null);
     const body = full ? bodyOf(full.payload) : { html: "", text: "" };
+    // Last check on the words: they must make sense after the email they answer (queued before a template changed,
+    // or before this rule existed) — "Should I check back later?" is never followed by "Seems like it might be.".
+    const prevText = body.text || htmlToText(body.html);
+    if (prevText.trim() && !canFollow(prevText, q.body)) return { status: "cancelled", reason: "no_answer" };
     const quote = full ? quoteBlock(latest, body) : "";
     const quotedText = full ? { attr: quoteAttr(latest), text: body.text || htmlToText(body.html) } : null;
     const raw = replyRaw({ from: from.email, fromName: from.name, to, subject: replySubject(headerOf(latest, "Subject")), messageId: headerOf(latest, "Message-ID"), references: headerOf(latest, "References"), html: sentHtml(q.body, from.signature, quote), text: sentText(q.body, from.signature, quotedText) });
@@ -448,6 +462,7 @@ export async function sendOne(admin: Admin, kit: Kit, q: QueueRow, rows: Row[], 
 
 const ORDINAL = ["", "1st", "2nd", "3rd", "4th"];
 const REASON_TEXT: Record<string, string> = {
+  no_answer: "its words didn't answer the question in your last email (add an answer in Settings → Follow-up templates)",
   replied: "they replied", you_followed_up: "you followed up yourself", scheduled_in_gmail: "you scheduled one in Gmail", goal_met: "your goal was already met",
   day_over: "the day ended before it could go", mailbox_full: "the mailbox reached its daily limit", their_night: "it was too late in their day", status: "they're no longer Contacted / No reply", gone: "the conversation is gone from Gmail", fill_off: "the night fill was switched off",
 };
@@ -628,6 +643,11 @@ export async function cancelOnReply(admin: Admin, userId: string): Promise<numbe
 // ----- one influencer, from their profile -----------------------------------------------------------------
 
 /** Everything the profile's "Send follow-up" sheet shows: each template ranked for THIS email, and the smart time. */
+/** Can this template follow that email? (the same rule as the plan, for Start / a profile's send) */
+export function canFollow(previous: string, template: string): boolean {
+  return pairFit(questionKind(previous), answerKind(template)) > 0;
+}
+
 export async function prepareOne(admin: Admin, kit: Kit, userId: string, creatorId: string, rows: Row[]) {
   const now = Date.now();
   const w = await loadWorld(admin, userId, [creatorId]);
@@ -645,13 +665,15 @@ export async function prepareOne(admin: Admin, kit: Kit, userId: string, creator
   const { fits, ai } = await fitsOf([r], prev, w.templates);
   const s = fits.get(r.id) || {};
   const name = w.creators.find((c) => c.id === creatorId)?.name || r.name;
-  const ranked = w.templates[r.round].map((t) => ({ id: t.id, name: t.name, text: fillTemplate(t.text, { name, my_name: w.name, agency: w.prefs.agency_name }), score: Math.round((s[t.id]?.score ?? 0.6) * 100) / 100, echo: !!s[t.id]?.echo, why: s[t.id]?.why || "", by: s[t.id]?.by || "rules" })).sort((a, b) => Number(a.echo) - Number(b.echo) || b.score - a.score);
+  const ranked = w.templates[r.round].map((t) => ({ id: t.id, name: t.name, text: fillTemplate(t.text, { name, my_name: w.name, agency: w.prefs.agency_name }), score: Math.round((s[t.id]?.score ?? 0.6) * 100) / 100, echo: !!s[t.id]?.echo, clash: !!s[t.id]?.clash, why: s[t.id]?.why || "", by: s[t.id]?.by || "rules" })).sort((a, b) => Number(a.clash) - Number(b.clash) || Number(a.echo) - Number(b.echo) || b.score - a.score);
+  const prevText = prev.get(r.id)?.text || "";
   const taken = pending.map((p) => ({ mailbox: p.mailbox, at: new Date(p.send_at).getTime() }));
   const smart = planTimes([{ id: r.id, mailbox: r.mailbox, zones: r.zones, firstAt: r.firstAt, lastAt: r.lastAt }], { now, userZone: w.tz, taken, seed: hash(r.id) % 1000 });
   const placed = smart.placed[0];
   const asleep = smart.unplaced[0];
   return {
-    ok: true as const, round: r.round, mailbox: r.mailbox, threadId: r.threadId, subject: r.subject, zones: r.zones, country: r.country, asked: askedOf(prev.get(r.id)?.text || ""), ai,
+    ok: true as const, round: r.round, mailbox: r.mailbox, threadId: r.threadId, subject: r.subject, zones: r.zones, country: r.country, asked: askedOf(prevText), ai,
+    question: { text: lastQuestion(prevText), kind: questionKind(prevText) }, noAnswer: ranked.length > 0 && ranked.every((t) => t.clash),
     templates: ranked, smart: placed ? { at: placed.at, theirClock: placed.theirClock, offBy: placed.offBy } : null,
     asleep: asleep ? { theirClock: asleep.theirClock, opensAt: asleep.opensAt } : null, firstAt: r.firstAt, lastAt: r.lastAt, window: { from: smart.from, until: smart.until },
     theirNow: r.zones[0] ? `${Math.floor(localMinute(r.zones[0], now) / 60)}:${String(localMinute(r.zones[0], now) % 60).padStart(2, "0")}` : "",

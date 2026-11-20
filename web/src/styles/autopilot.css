@@ -435,3 +435,61 @@
   .lg-go { display: none; }
   .lg-tag.warn { grid-column: 1 / -1; justify-self: start; }
 }
+
+/* ---- Every follow-up answers the question its person got (followupPairing.ts) ---------------------------- */
+.ft-round { position: relative; }
+.ft-gap-dot { position: absolute; top: 7px; right: 7px; width: 8px; height: 8px; border-radius: 999px; background: var(--danger, #d64545); box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger, #d64545) 22%, transparent); }
+.ft-gaps { display: grid; gap: 10px; padding: 14px; border-radius: 16px; border: 1.5px solid color-mix(in srgb, var(--danger, #d64545) 55%, var(--line)); background: linear-gradient(135deg, color-mix(in srgb, var(--danger, #d64545) 9%, var(--surface-solid)), var(--surface-solid) 70%); }
+.ft-gaps-head { display: flex; gap: 10px; align-items: flex-start; }
+.ft-gaps-head > svg { color: var(--danger, #d64545); flex: none; margin-top: 1px; }
+.ft-gaps-head b { display: block; font-size: 14px; color: var(--text); }
+.ft-gaps-head small { display: block; font-size: 12.5px; color: var(--text-soft); line-height: 1.45; margin-top: 2px; }
+.ft-gap { display: grid; gap: 8px; padding: 12px; border-radius: 12px; background: var(--surface-solid); border: 1px solid color-mix(in srgb, var(--danger, #d64545) 30%, var(--line)); }
+.ft-gap.hard { border-width: 2px; border-color: var(--danger, #d64545); }
+.ft-gap-q { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.ft-gap-q q { font-weight: 800; font-size: 14px; color: var(--text); quotes: "“" "”"; }
+.ft-gap-q small { font-size: 12px; color: var(--muted); }
+.ft-gap-tag { font-size: 10.5px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; padding: 2px 7px; border-radius: 999px; background: color-mix(in srgb, var(--danger, #d64545) 14%, var(--surface-solid)); color: var(--danger, #d64545); }
+.ft-gap-why { display: flex; gap: 6px; align-items: flex-start; margin: 0; font-size: 12.5px; color: var(--text-soft); line-height: 1.45; }
+.ft-gap-why > svg { flex: none; margin-top: 2px; color: var(--danger, #d64545); }
+.ft-gap-why b { color: var(--danger, #d64545); }
+.ft-gap-fix { display: flex; flex-wrap: wrap; gap: 6px; }
+.ft-gap-fix button { display: inline-flex; align-items: center; gap: 6px; padding: 7px 11px; border-radius: 10px; border: 1px solid var(--line-strong); background: var(--surface-solid); color: var(--text); font: inherit; font-size: 13px; text-align: left; cursor: pointer; transition: border-color .15s ease-out, background .15s ease-out; max-width: 100%; }
+.ft-gap-fix button svg { color: var(--accent); flex: none; }
+.ft-gap-fix button span { overflow-wrap: anywhere; }
+.ft-gap-fix button:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 7%, var(--surface-solid)); }
+.ft-gap-fix button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ft-card.orphan { border-color: color-mix(in srgb, var(--danger, #d64545) 55%, var(--line)); }
+.ft-orphan { display: flex; gap: 6px; align-items: flex-start; margin: 0; padding: 0 2px; font-size: 12.5px; color: var(--danger, #d64545); font-weight: 600; }
+.ft-orphan svg { flex: none; margin-top: 2px; }
+.ft-ideas-list li.important { border-color: color-mix(in srgb, var(--danger, #d64545) 50%, var(--line)); background: color-mix(in srgb, var(--danger, #d64545) 5%, var(--surface-solid)); }
+.ft-idea-why em.imp { background: var(--danger, #d64545); color: #fff; }
+
+/* Autopilot: people no template can answer */
+.ag { display: grid; gap: 12px; padding: 16px; border-radius: 18px; border: 2px solid var(--danger, #d64545); background:
+  repeating-linear-gradient(135deg, color-mix(in srgb, var(--danger, #d64545) 6%, transparent) 0 10px, transparent 10px 20px), var(--surface-solid);
+  box-shadow: 0 8px 28px color-mix(in srgb, var(--danger, #d64545) 18%, transparent); }
+.ag-head { display: flex; gap: 12px; align-items: flex-start; }
+.ag-ico { width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; background: var(--danger, #d64545); color: #fff; flex: none; animation: ag-pulse 2.4s ease-in-out infinite; }
+@keyframes ag-pulse { 0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--danger, #d64545) 40%, transparent); } 50% { box-shadow: 0 0 0 8px transparent; } }
+.ag-head h2 { margin: 0; font-size: 17px; color: var(--text); }
+.ag-head p { margin: 3px 0 0; font-size: 13px; color: var(--text-soft); line-height: 1.5; max-width: 72ch; }
+.ag-list { display: grid; gap: 8px; }
+.ag-item { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr) auto; gap: 14px; align-items: center; padding: 12px; border-radius: 14px; background: var(--surface-solid); border: 1px solid var(--line); }
+.ag-chat { display: grid; gap: 6px; justify-items: start; min-width: 0; }
+.ag-bubble { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 7px 11px; border-radius: 14px; font-size: 13px; overflow-wrap: anywhere; }
+.ag-bubble.you { background: var(--accent); color: #fff; font-weight: 700; border-bottom-left-radius: 4px; }
+.ag-bubble.gap { margin-left: 18px; border: 1.5px dashed var(--danger, #d64545); color: var(--danger, #d64545); font-weight: 700; background: color-mix(in srgb, var(--danger, #d64545) 6%, var(--surface-solid)); border-bottom-right-radius: 4px; }
+.ag-body { display: grid; gap: 3px; min-width: 0; }
+.ag-body b { font-size: 14px; color: var(--text); }
+.ag-body small { font-size: 12.5px; color: var(--text-soft); line-height: 1.45; }
+.ag-fix { white-space: nowrap; }
+@media (max-width: 760px) { .ag-item { grid-template-columns: minmax(0, 1fr); } .ag-fix { justify-self: start; } }
+@media (prefers-reduced-motion: reduce) { .ag-ico { animation: none; } }
+
+/* Send follow-up sheet: templates that don't answer their last email */
+.fs-pick.clash { opacity: .55; cursor: not-allowed; border-style: dashed; }
+.fs-pick.clash .fs-snip { text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--danger, #d64545) 60%, transparent); }
+.fs-noanswer { display: flex; gap: 8px; align-items: flex-start; margin: 0; padding: 11px 13px; border-radius: 12px; font-size: 13px; line-height: 1.5; color: var(--text); background: color-mix(in srgb, var(--danger, #d64545) 10%, var(--surface-solid)); border: 1.5px solid color-mix(in srgb, var(--danger, #d64545) 50%, var(--line)); }
+.fs-noanswer > svg { color: var(--danger, #d64545); flex: none; margin-top: 2px; }
+.fs-noanswer a { color: var(--accent); font-weight: 700; }
