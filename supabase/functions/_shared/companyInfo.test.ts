@@ -1,6 +1,6 @@
 // Run: deno run --allow-read --allow-env supabase/functions/_shared/companyInfo.test.ts
 // Recorded answers — no network.
-import { clayCompany, clayPeople, hunterCompany, hunterPeople, mergePeople, linkedinCompany, roleRank, siteLinkedin, wikidataLinkedin } from "./companyInfo.ts";
+import { clayCompany, clayPeople, hunterCompany, hunterPeople, mergePeople, linkedinCompany, roleRank, siteLinkedin, wikidataFacts, wikidataLinkedin } from "./companyInfo.ts";
 
 let fail = 0;
 const eq = (name: string, got: unknown, want: unknown) => {
@@ -69,5 +69,18 @@ const cp = await clayPeople("acme.com", 5, clay([{ status: 200, body: { data: [
 eq("clay people: names, titles, safe LinkedIn only", cp.ok ? cp.value.map((p) => [p.first, p.last, p.title, p.linkedin]) : cp, [["Lee", "Chan", "Brand Partnerships Lead", "https://www.linkedin.com/in/leechan"], ["Ann", "Lee", "Founder", ""]]);
 const merged = mergePeople([{ first: "Ann", last: "Lee", title: "Founder", email: "ann@acme.com", linkedin: "", confidence: 98, department: "", seniority: "" }], cp.ok ? cp.value : []);
 eq("merge: one row per person, Hunter's email + Clay's LinkedIn", merged.map((p) => [p.first, p.email, p.via]), [["Lee", "", "clay"], ["Ann", "ann@acme.com", "hunter"]]);
+
+// Wikidata facts: one item whose website IS theirs → facts; two → nothing (never a guess); busy → throws (asked later).
+{
+  const wd = (items: string[], status = 200) => async (url: string) => {
+    if (url.includes("rdfs%3Alabel%20%3Fn")) return { status, body: { results: { bindings: items.map((i) => ({ i: { value: `http://www.wikidata.org/entity/${i}` }, site: { value: "https://www.acme.com/" } })) } } };
+    if (url.includes("EntityData")) return { status: 200, body: { entities: { Q7: { claims: { P1128: [{ rank: "normal", mainsnak: { snaktype: "value", datavalue: { value: { amount: "+120" } } } }], P17: [{ rank: "normal", mainsnak: { snaktype: "value", datavalue: { value: { id: "Q30" } } } }] } } } } };
+    return { status: 200, body: { results: { bindings: [{ q: { value: "http://www.wikidata.org/entity/Q30" }, l: { value: "United States" }, iso: { value: "US" } }] } } };
+  };
+  const one = await wikidataFacts("Acme", "acme.com", wd(["Q7"]), "2026-11-20T00:00:00Z");
+  eq("wikidata facts: the one item", one && [one.facts.qid, one.facts.employees?.v, one.facts.country?.v], ["Q7", 120, "US"]);
+  eq("wikidata facts: two items for the site → nothing", await wikidataFacts("Acme", "acme.com", wd(["Q7", "Q8"])), null);
+  eq("wikidata facts: busy → throws", await wikidataFacts("Acme", "acme.com", wd(["Q7"], 429)).then(() => "no throw", () => "throws"), "throws");
+}
 
 if (fail) { console.log(`\n${fail} failed`); Deno.exit(1); } else console.log("\nall passed");

@@ -19,7 +19,7 @@ import { answerKind, lastQuestion, pairFit, questionKind, type QuestionKind } fr
 import { assignTemplates, autopilotPool, dayCap, fillNeed, fillTemplate, minutesOf, pickWithin, readAutopilot, readTemplates, roomMap, ruleFit, shiftToZone, type BoxDay, type Fit, type Ready, type Round, type TemplateBook } from "../../../web/src/lib/autopilot.ts";
 import { rampPlan, readRamp } from "../../../web/src/lib/goalRamp.ts";
 import { readGuard } from "../../../web/src/lib/mailboxGuard.ts";
-import { followupState, type FollowupState } from "../../../web/src/lib/followupEngine.ts";
+import { followupState, rulesFrom, type FollowupState } from "../../../web/src/lib/followupEngine.ts";
 import { openBounces } from "../../../web/src/lib/bounces.ts";
 import { followupsPaused, modeOn, normalizeWeekend } from "../../../web/src/lib/dayMode.ts";
 import { awakeAt, hash, planTimes, type PlanItem } from "../../../web/src/lib/smartTime.ts";
@@ -63,15 +63,9 @@ export type World = {
 const CREATOR_COLS = "id, name, country, youtube, pipeline_status, archived_at, contact_channel, email_followups, followup_snooze_until, primary_thread, primary_thread_at, new_thread_gap, date_contacted, status_source, status_updated_at, lost_at, lost_reason, created_at, contact_email, team";
 const EVENT_COLS = "gmail_id, thread_id, direction, entity_type, entity_id, at, mailbox, scheduled, reply_kind, message_key, in_reply_to, subject, counterpart, gone";
 
+/** The member's follow-up rules, read the same way as the app (`rulesFrom`). */
 export function rulesOf(prefs: Prefs): FollowupRules {
-  const r = (prefs.followup_rules && typeof prefs.followup_rules === "object" ? prefs.followup_rules : {}) as Record<string, unknown>;
-  return {
-    gaps: Array.isArray(r.gaps) ? r.gaps.map(Number) : [1, 1, 1], then: Number(r.then) || 2, stop_after: Number(r.stop_after) || 0,
-    workdays: Array.isArray(r.workdays) && r.workdays.length ? r.workdays.map(Number) : [1, 2, 3, 4, 5],
-    holidays: Array.isArray(r.holidays) ? (r.holidays.filter((d) => typeof d === "string") as string[]) : [],
-    reach_back_days: r.reach_back_days === undefined ? 30 : Number(r.reach_back_days) || 0,
-    thread_cap: r.thread_cap === undefined ? 4 : Number(r.thread_cap) || 0, new_thread_gap: r.new_thread_gap === undefined ? 1 : Number(r.new_thread_gap) || 0,
-  } as FollowupRules;
+  return rulesFrom(prefs.followup_rules);
 }
 
 /** Only what autopilot needs: live influencers (Contacted / No reply) and their mail — never whole tables. */

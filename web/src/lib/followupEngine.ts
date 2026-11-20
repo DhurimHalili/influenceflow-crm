@@ -1,4 +1,4 @@
-import type { Brand, Creator, EmailEvent, EntityStatus, Followup, FollowupRules } from "../types";
+import type { Brand, Creator, DayUnit, EmailEvent, EntityStatus, Followup, FollowupRules } from "../types";
 import { dateFmt, dayKey, parseDay } from "./days.ts";
 import { isAck, quotedOwnDate } from "./replyReader.ts";
 
@@ -80,13 +80,14 @@ export type FollowupState = ({ thread?: ThreadInfo }) & (
   /** won = they are Signed / on your roster; agreed = that message is the one that closed the price (confirm it). */
   | { kind: "reply-needed"; since: string; days: number; touches: Touch[]; last: Touch; cancel?: Touch; won?: boolean; agreed?: boolean }
   /** round = the cadence step (what sets the clock); sent = every message you sent since their last reply, on any channel (what the words say). */
-  | { kind: "waiting"; round: number; sent?: number; due: string; last: Touch; touches: Touch[]; cancel?: Touch; next?: NextStep }
-  | { kind: "due"; round: number; sent?: number; due: string; overdueDays: number; last: Touch; touches: Touch[]; cancel?: Touch; next?: NextStep }
+  /** by = a new thread's window ends then (late after it); unit = how `overdueDays` counts. */
+  | { kind: "waiting"; round: number; sent?: number; due: string; by?: string; last: Touch; touches: Touch[]; cancel?: Touch; next?: NextStep; unit?: DayUnit }
+  | { kind: "due"; round: number; sent?: number; due: string; by?: string; overdueDays: number; last: Touch; touches: Touch[]; cancel?: Touch; next?: NextStep; unit?: DayUnit }
   | { kind: "exhausted"; round: number; sent?: number; last: Touch; touches: Touch[]; cancel?: Touch }
   /** Their management / an autoresponder declined by email: reach them on another channel. */
   | { kind: "managed"; since: string; last: Touch; touches: Touch[]; cancel?: Touch }
-  /** They said no a while ago (Denied): time to try again. */
-  | { kind: "reach-back"; since: string; due: string; touches: Touch[]; reason: string; cancel?: Touch });
+  /** They said no a while ago (Denied): time to start a new thread with them. wait = the rule ("1 month"). */
+  | { kind: "reach-back"; since: string; due: string; touches: Touch[]; reason: string; cancel?: Touch; wait?: string });
 
 /** Statuses where nobody needs chasing. */
 export const NOT_CHASED: EntityStatus[] = ["denied", "signed", "roster"];
@@ -131,11 +132,91 @@ export const businessDaysBetween = (a: Date, b: Date, rules: FollowupRules) => {
   return count;
 };
 
-/** Wait (in business days) after the touch that opened `round` (1 = your first email). */
+/** Wait after the touch that opened `round` (1 = your first email), in `rules.gap_unit`. */
 export const gapFor = (round: number, rules: FollowupRules) => rules.gaps[round - 1] ?? rules.then;
 
-/** Follow-up day for a message sent on `sent`: wait `gap` business days, follow up on the next one. */
-export const dueDate = (sent: Date, round: number, rules: FollowupRules) => addBusinessDays(sent, gapFor(round, rules) + 1, rules);
+/** The day itself, or the next business day when it's a day off. */
+export const onWorkday = (day: Date, rules: FollowupRules) => {
+  const d = new Date(day);
+  d.setHours(0, 0, 0, 0);
+  for (let i = 0; i < 60 && rules.workdays.length && !isWorkday(d, rules); i++) d.setDate(d.getDate() + 1);
+  return d;
+};
+
+/**
+ * `n` days after `from`. Business: wait `n` full business days, the day after is the day (Mon + 1 → Wed).
+ * Calendar: exactly `n` days later ("30 days" = 30 days), moved to the next business day when it's a day off.
+ */
+export const addDays = (from: Date, n: number, unit: DayUnit | undefined, rules: FollowupRules) => {
+  if (unit !== "calendar") return addBusinessDays(from, n + 1, rules);
+  const d = new Date(from);
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() + Math.max(0, n));
+  return onWorkday(d, rules);
+};
+
+/** Days strictly after `a` up to and including `b`, counted the same way (0 when b ≤ a). */
+export const daysBetween = (a: Date, b: Date, unit: DayUnit | undefined, rules: FollowupRules) => {
+  if (unit !== "calendar") return businessDaysBetween(a, b, rules);
+  const x = new Date(a); x.setHours(0, 0, 0, 0);
+  const y = new Date(b); y.setHours(0, 0, 0, 0);
+  return Math.max(0, Math.round((y.getTime() - x.getTime()) / 86400000));
+};
+
+/** Follow-up day for a message sent on `sent`. */
+export const dueDate = (sent: Date, round: number, rules: FollowupRules) => addDays(sent, gapFor(round, rules), rules.gap_unit, rules);
+
+/** "2 weeks", "1 month", "10 business days", "3 days". */
+export const waitWords = (n: number, unit: DayUnit | undefined) => {
+  if (unit === "calendar") {
+    if (n > 0 && n % 30 === 0) return `${n / 30} month${n === 30 ? "" : "s"}`;
+    if (n > 0 && n % 7 === 0) return `${n / 7} week${n === 7 ? "" : "s"}`;
+    return `${n} day${n === 1 ? "" : "s"}`;
+  }
+  return `${n} business day${n === 1 ? "" : "s"}`;
+};
+
+/** The new-thread window after the last follow-up: from `start` days, late after `late` (a record's own wait moves both). */
+export const threadWindow = (rules: FollowupRules, own?: number | null) => {
+  const start = own ?? rules.new_thread_gap ?? 14;
+  const late = Math.max(start, (rules.new_thread_late ?? 21) + (own == null ? 0 : own - (rules.new_thread_gap ?? 14)));
+  const unit: DayUnit = own == null ? rules.new_thread_unit ?? "calendar" : "calendar";
+  return { start, late, unit };
+};
+
+const UNITS = new Set(["business", "calendar"]);
+const int = (v: unknown, lo: number, hi: number, fallback: number) => { const n = Math.round(Number(v)); return v === undefined || v === null || v === "" || !Number.isFinite(n) ? fallback : Math.max(lo, Math.min(hi, n)); };
+
+/**
+ * Follow-up rules from whatever was saved (app + server use this one reader).
+ * Rules saved before day types existed counted the new-thread wait in business days with a 1-day default;
+ * the owner's rule (Nov 2026) is 2 to 3 weeks, so those come back as the new default window.
+ */
+export function rulesFrom(value: unknown): FollowupRules {
+  const v = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  const gaps = Array.isArray(v.gaps) ? v.gaps.slice(0, 12).map((g) => int(g, 0, 60, 1)) : [];
+  const workdays = Array.isArray(v.workdays) ? Array.from(new Set(v.workdays.map(Number).filter((d) => Number.isInteger(d) && d >= 0 && d <= 6))).sort() : [];
+  const holidays = Array.isArray(v.holidays) ? v.holidays.filter((d): d is string => typeof d === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d)).slice(0, 200) : [];
+  const unit = (x: unknown, fallback: DayUnit): DayUnit => (UNITS.has(String(x)) ? (x as DayUnit) : fallback);
+  const known = UNITS.has(String(v.new_thread_unit));
+  const start = known ? int(v.new_thread_gap, 0, 120, 14) : 14;
+  return {
+    gaps: gaps.length ? gaps : [1, 1, 1],
+    then: int(v.then, 1, 60, 2),
+    stop_after: int(v.stop_after, 0, 60, 0),
+    workdays: workdays.length ? workdays : [1, 2, 3, 4, 5],
+    holidays,
+    gap_unit: unit(v.gap_unit, "business"),
+    reach_back_days: int(v.reach_back_days, 0, 365, 30),
+    reach_back_unit: unit(v.reach_back_unit, "calendar"),
+    // An agency stops at 4 follow-ups in one thread and starts a fresh one.
+    thread_cap: int(v.thread_cap, 0, 12, 4),
+    new_thread_gap: start,
+    new_thread_late: known ? Math.max(start, int(v.new_thread_late, 0, 180, start + 7)) : 21,
+    new_thread_unit: known ? (v.new_thread_unit as DayUnit) : "calendar",
+    auto_cancel_crossed: v.auto_cancel_crossed !== false,
+  };
+}
 
 // ----- timeline ------------------------------------------------------------------
 
@@ -286,12 +367,10 @@ export function followupState(target: Target, followups: Followup[], events: Ema
     const days = rules.reach_back_days ?? 30;
     const sinceDay = since ? new Date(since) : null;
     if (!days || !sinceDay || Number.isNaN(sinceDay.getTime())) return { kind: "idle", reason: "closed", touches };
-    const due = new Date(sinceDay);
-    due.setHours(0, 0, 0, 0);
-    due.setDate(due.getDate() + days);
+    const due = addDays(sinceDay, days, rules.reach_back_unit ?? "calendar", rules);
     if (snoozed) return { kind: "idle", reason: "snoozed", touches, until: snooze! };
     if (now < due) return { kind: "idle", reason: "closed", touches, until: dayKey(due) };
-    return { kind: "reach-back", since, due: dayKey(due), touches, reason: target.record.lost_reason || "" };
+    return { kind: "reach-back", since, due: dayKey(due), touches, reason: target.record.lost_reason || "", wait: waitWords(days, rules.reach_back_unit ?? "calendar") };
   }
   const thread = threadView(target, touches);
   if (NOT_CHASED.includes(status)) {
@@ -337,13 +416,17 @@ export function followupState(target: Target, followups: Followup[], events: Ema
   if (next === "followup" && rules.stop_after > 0 && followupsSent >= rules.stop_after) return { kind: "exhausted", round, sent, last, touches, cancel, thread };
   // A scheduled email hasn't gone out yet: the clock starts once it does.
   const from = last.scheduled && new Date(last.at) < now ? now : new Date(last.at);
-  const gap = target.record.new_thread_gap ?? rules.new_thread_gap ?? 1;
-  const due = next === "new-thread" ? addBusinessDays(from, gap + 1, rules) : dueDate(from, round, rules);
-  if (last.scheduled) return { kind: "waiting", round, sent, due: dayKey(due), last, touches, cancel, next, thread };
+  // A new thread has a window ("2 to 3 weeks after the 4th follow-up"): due from its start, late only after its end.
+  const win = threadWindow(rules, target.record.new_thread_gap);
+  const unit = next === "new-thread" ? win.unit : rules.gap_unit ?? "business";
+  const due = next === "new-thread" ? addDays(from, win.start, win.unit, rules) : dueDate(from, round, rules);
+  const by = next === "new-thread" ? addDays(from, win.late, win.unit, rules) : due;
+  const window = next === "new-thread" ? { by: dayKey(by) } : {};
+  if (last.scheduled) return { kind: "waiting", round, sent, due: dayKey(due), ...window, last, touches, cancel, next, thread, unit };
   const today = new Date(now);
   today.setHours(0, 0, 0, 0);
-  if (today >= due) return { kind: "due", round, sent, due: dayKey(due), overdueDays: businessDaysBetween(due, today, rules), last, touches, cancel, next, thread };
-  return { kind: "waiting", round, sent, due: dayKey(due), last, touches, cancel, next, thread };
+  if (today >= due) return { kind: "due", round, sent, due: dayKey(due), ...window, overdueDays: daysBetween(by, today, unit, rules), last, touches, cancel, next, thread, unit };
+  return { kind: "waiting", round, sent, due: dayKey(due), ...window, last, touches, cancel, next, thread, unit };
 }
 
 // ----- words ---------------------------------------------------------------------
@@ -403,6 +486,9 @@ const agoWords = (iso: string) => {
   return days === 0 ? "today" : days === 1 ? "yesterday" : days < 14 ? `${days} days ago` : days < 60 ? `${Math.round(days / 7)} weeks ago` : `${Math.round(days / 30)} months ago`;
 };
 
+/** "3 business days" / "3 days". */
+export const lateWords = (n: number, unit?: DayUnit) => `${n} ${unit === "calendar" ? "" : "business "}day${n === 1 ? "" : "s"}`;
+
 export function flagFor(state: FollowupState): Flag | null {
   if (state.cancel) {
     const when = sendsAt(state.cancel.at);
@@ -413,10 +499,10 @@ export function flagFor(state: FollowupState): Flag | null {
     case "managed":
       return { tone: "managed", short: "Managed · DM them", long: `Their management turned this down by email ${agoWords(state.since)}${state.last.counterpart ? ` (${state.last.counterpart})` : ""} — it looks automatic, so they may never have seen it. Reach them on Instagram, TikTok or WhatsApp instead.` };
     case "reach-back":
-      return { tone: "reach", short: "Reach back", long: `They passed ${agoWords(state.since)}${state.reason ? ` — ${state.reason.toLowerCase()}` : ""}. Their calendar may have room again: try them at the same price or better.` };
+      return { tone: "reach", short: "New thread · said no", long: `They said no ${agoWords(state.since)}${state.reason ? ` — ${state.reason.toLowerCase()}` : ""}. ${state.wait ? `It's been ${state.wait}` : "Time has passed"}: start a fresh email with a new subject. Plans and budgets change.` };
     case "due":
-      if (state.next === "new-thread") return { tone: "thread", short: state.overdueDays > 0 ? `New thread · ${state.overdueDays}d late` : "Start a new thread", long: `${state.round - 1} follow-ups and no reply in this thread — start a fresh email with a new subject instead of another follow-up` };
-      return { tone: "due", short: state.overdueDays > 0 ? `Follow up · ${state.overdueDays}d late` : "Follow up today", long: `No reply to ${lastLabel(state)} — send your ${nextFollowupLabel(state.sent ?? state.round)}${state.overdueDays > 0 ? ` (due ${state.overdueDays} business day${state.overdueDays === 1 ? "" : "s"} ago)` : " today"}` };
+      if (state.next === "new-thread") return { tone: "thread", short: state.overdueDays > 0 ? `New thread · ${state.overdueDays}d late` : "Start a new thread", long: `${state.round - 1} follow-ups and no reply in this thread — start a fresh email with a new subject instead of another follow-up${state.overdueDays > 0 ? ` (the window closed ${lateWords(state.overdueDays, state.unit)} ago)` : state.by && state.by !== state.due ? `, best by ${weekday(state.by)}` : ""}` };
+      return { tone: "due", short: state.overdueDays > 0 ? `Follow up · ${state.overdueDays}d late` : "Follow up today", long: `No reply to ${lastLabel(state)} — send your ${nextFollowupLabel(state.sent ?? state.round)}${state.overdueDays > 0 ? ` (due ${lateWords(state.overdueDays, state.unit)} ago)` : " today"}` };
     case "reply-needed":
       if (state.thread && (state.thread.otherReply || state.last.threadId !== state.thread.newest) && state.last.source === "gmail") return { tone: "reply", short: state.days > 0 ? `Old thread reply · ${state.days}d` : "Replied in old thread", long: `They answered in an older email thread${state.days > 0 ? ` ${state.days} business day${state.days === 1 ? "" : "s"} ago` : " today"}, not in your newest one — reply there, then choose which thread to continue in` };
       if (state.won && state.agreed) return { tone: "reply", short: state.days > 0 ? `Confirm deal · ${state.days}d` : "Confirm the deal", long: `They agreed the price by email ${state.days > 0 ? `${state.days} business day${state.days === 1 ? "" : "s"} ago` : "today"} and you haven't answered — confirm it and tell them what happens next` };
@@ -429,7 +515,7 @@ export function flagFor(state: FollowupState): Flag | null {
         const when = sendsAt(state.last.at);
         return { tone: "sched", short: when ? `Scheduled · ${when}` : "Scheduled", long: `${roundLabel(state.sent ?? state.round, state.last.channel).replace(/^your/, "Your")} is scheduled in Gmail${when ? ` — it sends ${when}` : ""}. It counts as done; cancel it in Gmail and the reminder comes back.` };
       }
-      if (state.next === "new-thread") return { tone: "wait", short: `New thread ${weekday(state.due)}`, long: `That was your ${ordinal(state.round - 1)} follow-up in this thread — no more follow-ups here. If they stay quiet, start a new thread ${weekday(state.due)}` };
+      if (state.next === "new-thread") return { tone: "wait", short: `New thread ${weekday(state.due)}`, long: `That was your ${ordinal(state.round - 1)} follow-up in this thread — no more follow-ups here. If they stay quiet, start a new thread ${state.by && state.by !== state.due ? `between ${weekday(state.due)} and ${weekday(state.by)}` : weekday(state.due)}` };
       return { tone: "wait", short: `Follow up ${weekday(state.due)}`, long: `Waiting for a reply to ${lastLabel(state)} — follow up ${weekday(state.due)} if they stay quiet` };
     }
     case "exhausted":
@@ -441,7 +527,7 @@ export function flagFor(state: FollowupState): Flag | null {
 
 /** Example cadence for the settings preview: "Mon → Wed → Fri → Tue…". */
 export const cadencePreview = (rules: FollowupRules, start = nextWorkday(new Date(), rules), steps = 5) => {
-  const out: { label: string; date: Date }[] = [{ label: "First email", date: start }];
+  const out: { label: string; date: Date; until?: Date }[] = [{ label: "First email", date: start }];
   let sent = start;
   const cap = rules.thread_cap ?? 4;
   const last = cap > 0 ? cap : steps;
@@ -450,7 +536,10 @@ export const cadencePreview = (rules: FollowupRules, start = nextWorkday(new Dat
     sent = dueDate(sent, round, rules);
     out.push({ label: `${ordinal(round)} follow-up`, date: sent });
   }
-  if (cap > 0 && out.length === cap + 1) out.push({ label: "Start a new thread", date: addBusinessDays(sent, (rules.new_thread_gap ?? 1) + 1, rules) });
+  if (cap > 0 && out.length === cap + 1) {
+    const win = threadWindow(rules);
+    out.push({ label: "Start a new thread", date: addDays(sent, win.start, win.unit, rules), until: addDays(sent, win.late, win.unit, rules) });
+  }
   return out;
 };
 

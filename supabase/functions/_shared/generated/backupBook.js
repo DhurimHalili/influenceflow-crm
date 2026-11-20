@@ -71,6 +71,50 @@ function quotedOwnDate(text, own) {
 var silent = (kind) => kind === "auto" || kind === "reaction";
 /** A manual log within this window of a Gmail email in the same direction is the same touch. */
 var SAME_TOUCH_MS = 6 * 3600 * 1e3;
+var UNITS = /* @__PURE__ */ new Set(["business", "calendar"]);
+var int = (v, lo, hi, fallback) => {
+	const n = Math.round(Number(v));
+	return v === void 0 || v === null || v === "" || !Number.isFinite(n) ? fallback : Math.max(lo, Math.min(hi, n));
+};
+/**
+* Follow-up rules from whatever was saved (app + server use this one reader).
+* Rules saved before day types existed counted the new-thread wait in business days with a 1-day default;
+* the owner's rule (Nov 2026) is 2 to 3 weeks, so those come back as the new default window.
+*/
+function rulesFrom(value) {
+	const v = value && typeof value === "object" ? value : {};
+	const gaps = Array.isArray(v.gaps) ? v.gaps.slice(0, 12).map((g) => int(g, 0, 60, 1)) : [];
+	const workdays = Array.isArray(v.workdays) ? Array.from(new Set(v.workdays.map(Number).filter((d) => Number.isInteger(d) && d >= 0 && d <= 6))).sort() : [];
+	const holidays = Array.isArray(v.holidays) ? v.holidays.filter((d) => typeof d === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d)).slice(0, 200) : [];
+	const unit = (x, fallback) => UNITS.has(String(x)) ? x : fallback;
+	const known = UNITS.has(String(v.new_thread_unit));
+	const start = known ? int(v.new_thread_gap, 0, 120, 14) : 14;
+	return {
+		gaps: gaps.length ? gaps : [
+			1,
+			1,
+			1
+		],
+		then: int(v.then, 1, 60, 2),
+		stop_after: int(v.stop_after, 0, 60, 0),
+		workdays: workdays.length ? workdays : [
+			1,
+			2,
+			3,
+			4,
+			5
+		],
+		holidays,
+		gap_unit: unit(v.gap_unit, "business"),
+		reach_back_days: int(v.reach_back_days, 0, 365, 30),
+		reach_back_unit: unit(v.reach_back_unit, "calendar"),
+		thread_cap: int(v.thread_cap, 0, 12, 4),
+		new_thread_gap: start,
+		new_thread_late: known ? Math.max(start, int(v.new_thread_late, 0, 180, start + 7)) : 21,
+		new_thread_unit: known ? v.new_thread_unit : "calendar",
+		auto_cancel_crossed: v.auto_cancel_crossed !== false
+	};
+}
 var CHANNEL_LABELS = {
 	email: "Email",
 	dm: "Instagram DM",
@@ -421,8 +465,7 @@ function offsetMin(zone, ms) {
 	return off;
 }
 new Set("a an the and or but so to of in on for with at by from this that these those it its is are was were be been am i you we they he she my your our their me us them just still any some do does did would could should will can may might there here what which who how about if then than as".split(" "));
-//#endregion
-//#region src/lib/prefs.ts
+rulesFrom({});
 var RATE_FIELDS = [
 	{
 		key: "video",
@@ -1262,6 +1305,9 @@ var titleRows = (title, note) => [[{
 	v: note,
 	s: S.note
 }]];
+var unitName = (u) => u === "calendar" ? "Every day" : "Business days";
+/** A wait after `last`, counted the way Settings says (same as the app's addDays). */
+var after = (last, wait, unit) => `IF(${unit}="Every day",WORKDAY(${last}+${wait}-1,1),WORKDAY(${last},${wait}+1))`;
 function crmWorkbook(input) {
 	const { sheets, names, active } = crmWorkbookSheets(input);
 	return buildRichXlsx(sheets, names, { active });
@@ -1360,28 +1406,28 @@ function crmWorkbookSheets(input) {
 			s: S.inputInt
 		}],
 		[{
-			v: "Business days before the 1st follow-up",
+			v: "Wait before the 1st follow-up",
 			s: S.label
 		}, {
 			v: gaps[0] ?? 1,
 			s: S.inputInt
 		}],
 		[{
-			v: "Business days before the 2nd follow-up",
+			v: "Wait before the 2nd follow-up",
 			s: S.label
 		}, {
 			v: gaps[1] ?? gaps[0] ?? 1,
 			s: S.inputInt
 		}],
 		[{
-			v: "Business days before the 3rd follow-up",
+			v: "Wait before the 3rd follow-up",
 			s: S.label
 		}, {
 			v: gaps[2] ?? gaps[1] ?? 1,
 			s: S.inputInt
 		}],
 		[{
-			v: "Business days between later follow-ups",
+			v: "Wait between later follow-ups",
 			s: S.label
 		}, {
 			v: input.rules.then ?? 2,
@@ -1395,14 +1441,28 @@ function crmWorkbookSheets(input) {
 			s: S.inputInt
 		}],
 		[{
-			v: "Business days before the new thread",
+			v: "Wait before the new thread",
 			s: S.label
 		}, {
-			v: input.rules.new_thread_gap ?? 1,
+			v: input.rules.new_thread_gap ?? 14,
 			s: S.inputInt
 		}],
 		[{
-			v: "Weekends are skipped (Mon–Fri). A follow-up is due on the business day after the wait.",
+			v: "Follow-up waits count",
+			s: S.label
+		}, {
+			v: unitName(input.rules.gap_unit ?? "business"),
+			s: S.input
+		}],
+		[{
+			v: "New-thread wait counts",
+			s: S.label
+		}, {
+			v: unitName(input.rules.new_thread_unit ?? "calendar"),
+			s: S.input
+		}],
+		[{
+			v: "Business days: Mon–Fri. With business days a follow-up is due on the business day after the wait; with every day, that many days later (moved to Monday when it lands on a weekend).",
 			s: S.note
 		}]
 	];
@@ -1413,7 +1473,9 @@ function crmWorkbookSheets(input) {
 		["WaitThird", 7],
 		["WaitLater", 8],
 		["ThreadCap", 9],
-		["ThreadWait", 10]
+		["ThreadWait", 10],
+		["WaitCount", 11],
+		["ThreadCount", 12]
 	].forEach(([n, r]) => names.push({
 		name: n,
 		ref: `Settings!$B$${r}`
@@ -1484,9 +1546,15 @@ function crmWorkbookSheets(input) {
 			"Waiting",
 			["Scheduled"],
 			1
+		],
+		[
+			"UnitList",
+			"Days count as",
+			["Business days", "Every day"],
+			2
 		]
 	];
-	const LIST_ROW = 13;
+	const LIST_ROW = 15;
 	const listCol0 = 3;
 	lists.forEach(([n, head, values, len], i) => {
 		const c = listCol0 + i;
@@ -1497,7 +1565,7 @@ function crmWorkbookSheets(input) {
 		values.forEach((v, j) => {
 			(settings[LIST_ROW + j] ||= [])[c] = v;
 		});
-		nameRange(n, "Settings", c, LIST_ROW + len, 14);
+		nameRange(n, "Settings", c, LIST_ROW + len, 16);
 	});
 	for (let r = 0; r < settings.length; r++) settings[r] ||= [];
 	const LOG = "Email log";
@@ -1645,7 +1713,7 @@ function crmWorkbookSheets(input) {
 			lastNT: `IF(${A}="","",_xlfn.MAXIFS(LogDate,LogWho,${A},LogDir,"Sent",LogKind,"New thread",LogWait,"<>Scheduled"))`,
 			round: `IF(${A}="","",COUNTIFS(LogWho,${A},LogDir,"Sent",LogWait,"<>Scheduled",LogDate,">"&MAX(N(${lin}),N(${lnt})))+IF(AND(N(${lnt})>0,N(${lnt})>=N(${lin})),1,0))`,
 			fu: `IF(${A}="","",MAX(0,N(${rd})-1))`,
-			next: `IF(OR(${A}="",${arch}="yes",${st}="Denied",${st}="Signed",${st}="Roster"),"",IF(N(${wq})>0,${nw},IF(OR(${last}="",AND(${lin}<>"",N(${lin})>N(${last}))),"",IF(N(${fu})>=ThreadCap,WORKDAY(${last},ThreadWait+1),WORKDAY(${last},CHOOSE(MAX(1,MIN(N(${rd}),4)),WaitFirst,WaitSecond,WaitThird,WaitLater)+1)))))`,
+			next: `IF(OR(${A}="",${arch}="yes",${st}="Denied",${st}="Signed",${st}="Roster"),"",IF(N(${wq})>0,${nw},IF(OR(${last}="",AND(${lin}<>"",N(${lin})>N(${last}))),"",IF(N(${fu})>=ThreadCap,${after(last, "ThreadWait", "ThreadCount")},${after(last, `CHOOSE(MAX(1,MIN(N(${rd}),4)),WaitFirst,WaitSecond,WaitThird,WaitLater)`, "WaitCount")}))))`,
 			step: `IF(${A}="","",IF(OR(${arch}="yes",${st}="Denied",${st}="Signed",${st}="Roster"),"—",IF(N(${wq})>0,"Scheduled",IF(${last}="",IF(${lin}<>"","Reply needed",IF(OR(${st}="New",${st}=""),"Write first email","—")),IF(AND(${lin}<>"",N(${lin})>N(${last})),"Reply needed",IF(N(${nx})<=TODAY(),IF(N(${fu})>=ThreadCap,"Start new thread","Follow up now"),"Waiting"))))))`
 		};
 	};
@@ -3355,7 +3423,12 @@ function crmWorkbookSheets(input) {
 		rows: settings,
 		grid: false,
 		heights: { 1: 30 },
-		merges: ["A2:B2"]
+		merges: ["A2:B2"],
+		validations: [{
+			sqref: "B11:B12",
+			list: "UnitList",
+			error: "Pick Business days or Every day"
+		}]
 	};
 	const importSheet = (name, headers, rows) => {
 		const keys = Object.keys(headers);

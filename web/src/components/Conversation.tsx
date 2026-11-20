@@ -5,7 +5,7 @@ import { useData } from "../contexts/DataContext";
 import { useGmail } from "../contexts/GmailContext";
 import { useToast } from "../contexts/ToastContext";
 import { useChase, useDayMode, type DayInfo } from "../hooks/useChase";
-import { businessDaysBetween, CHANNEL_LABELS, flagFor, lastLabel, nextFollowupLabel, type Flag, sendsAt, SNOOZE_OFF, type FollowupState, type Touch } from "../lib/followupEngine";
+import { businessDaysBetween, CHANNEL_LABELS, flagFor, lastLabel, lateWords, nextFollowupLabel, type Flag, sendsAt, SNOOZE_OFF, threadWindow, type FollowupState, type Touch, waitWords } from "../lib/followupEngine";
 import { dateLabel, daysAgoLabel, dayKey, stampLabel } from "../lib/utils";
 import type { Brand, Creator } from "../types";
 import { Button, Modal } from "./ui";
@@ -63,7 +63,9 @@ export function ConversationSection({ type, record }: { type: "creator" | "brand
   const data = useData();
   const gmail = useGmail();
   const { toast } = useToast();
-  const chase = useChase().byId.get(record.id);
+  const chaseAll = useChase();
+  const chase = chaseAll.byId.get(record.id);
+  const threadRule = threadWindow(chaseAll.rules);
   const today = useDayMode();
   const state = chase?.state;
   const flag = state ? dayFlag(state, today) : null;
@@ -245,14 +247,14 @@ export function ConversationSection({ type, record }: { type: "creator" | "brand
     <div className={`chase-banner tone-${flag?.tone || (paused ? "muted" : "idle")}`}>
       <span className="chase-icon"><BannerIcon size={18} /></span>
       <div>
-        <strong>{flag ? flag.long : paused ? state.kind === "idle" && state.until === SNOOZE_OFF ? "Follow-up reminders are off for this one" : `Reminders snoozed until ${dateLabel(state.kind === "idle" ? state.until : "")}` : closed ? record.pipeline_status === "denied" ? reachOn ? `They passed — you'll get a reminder to reach back on ${dateLabel(reachOn)}` : "Closed — denied, so no follow-ups" : `${record.pipeline_status === "signed" ? "Signed" : "On your roster"} — not chased for follow-ups` : "No conversation yet"}</strong>
-        <small>{cancel ? canCancel ? `“${cancel.detail.split(" — ")[0]}” is still scheduled in ${cancel.mailbox || "Gmail"}. Cancel it here and it never goes out.` : `Open the Scheduled folder${cancel.mailbox ? ` of ${cancel.mailbox}` : ""} and cancel “${cancel.detail.split(" — ")[0]}”. Once it's gone, this clears by itself.` : state?.kind === "managed" ? "This isn't a no from them, so they stay in your pipeline. Log the DM here and the follow-ups restart on that channel." : state?.kind === "reach-back" ? "Email them and they move back to Contacted by themselves — or log a DM and press Reached out again." : state?.kind === "waiting" && state.last.scheduled ? `Waiting in Gmail's Scheduled folder${state.last.mailbox ? ` (${state.last.mailbox})` : ""}. Once it goes out, the next follow-up is due ${dateLabel(state.due)} if they stay quiet.` : state?.kind === "due" || state?.kind === "waiting" ? lastWords(state) : state?.kind === "reply-needed" ? `Their message: ${state.last.detail || state.last.label}` : !touches.length ? gmail.connected ? "Email them and it shows up here by itself." : "Log a follow-up below, or connect Gmail so emails fill this in by themselves." : `Last touch ${daysAgoLabel(touches[touches.length - 1].at)}.`}</small>
+        <strong>{flag ? flag.long : paused ? state.kind === "idle" && state.until === SNOOZE_OFF ? "Follow-up reminders are off for this one" : `Reminders snoozed until ${dateLabel(state.kind === "idle" ? state.until : "")}` : closed ? record.pipeline_status === "denied" ? reachOn ? `They said no — a new-thread reminder comes ${dateLabel(reachOn)}` : "Closed — denied, so no follow-ups" : `${record.pipeline_status === "signed" ? "Signed" : "On your roster"} — not chased for follow-ups` : "No conversation yet"}</strong>
+        <small>{cancel ? canCancel ? `“${cancel.detail.split(" — ")[0]}” is still scheduled in ${cancel.mailbox || "Gmail"}. Cancel it here and it never goes out.` : `Open the Scheduled folder${cancel.mailbox ? ` of ${cancel.mailbox}` : ""} and cancel “${cancel.detail.split(" — ")[0]}”. Once it's gone, this clears by itself.` : state?.kind === "managed" ? "This isn't a no from them, so they stay in your pipeline. Log the DM here and the follow-ups restart on that channel." : state?.kind === "reach-back" ? `They said no ${daysAgoLabel(state.since)}${state.wait ? ` (your rule: a new thread after ${state.wait})` : ""}. Start a new thread: a fresh email with a new subject, not a reply to the old one. They move back to Contacted by themselves.` : state?.kind === "waiting" && state.last.scheduled ? `Waiting in Gmail's Scheduled folder${state.last.mailbox ? ` (${state.last.mailbox})` : ""}. Once it goes out, the next follow-up is due ${dateLabel(state.due)} if they stay quiet.` : state?.kind === "due" || state?.kind === "waiting" ? lastWords(state) : state?.kind === "reply-needed" ? `Their message: ${state.last.detail || state.last.label}` : !touches.length ? gmail.connected ? "Email them and it shows up here by itself." : "Log a follow-up below, or connect Gmail so emails fill this in by themselves." : `Last touch ${daysAgoLabel(touches[touches.length - 1].at)}.`}</small>
       </div>
     </div>
 
     {nextStep === "new-thread" && <div className="chase-cta">
       {state?.kind === "due" && <a className={`btn ${parkedHere ? "btn-secondary" : "btn-primary"} btn-sm`} href={composeUrl()} target="_blank" rel="noopener noreferrer"><MailPlus size={14} /> {parkedHere ? `Write it now, schedule for ${today.resume}` : "Start a new thread in Gmail"} <ExternalLink size={12} /></a>}
-      <span className="gap-pick" role="group" aria-label="Wait before the new-thread reminder">New thread after{[1, 2, 3, 5].map((d) => <button type="button" key={d} className={(record.new_thread_gap ?? data.profile.preferences?.followup_rules?.new_thread_gap ?? 1) === d ? "on" : ""} aria-pressed={(record.new_thread_gap ?? data.profile.preferences?.followup_rules?.new_thread_gap ?? 1) === d} onClick={() => { update({ new_thread_gap: d }); toast(`New-thread reminder for ${record.name}: ${d} business day${d === 1 ? "" : "s"} after the last follow-up`); }}>{d}d</button>)}</span>
+      <span className="gap-pick" role="group" aria-label={`When to start the new thread with ${record.name}`}>New thread from{([[null, `Your rule · ${waitWords(threadRule.start, threadRule.unit)}`], [7, "1 wk"], [14, "2 wk"], [21, "3 wk"], [30, "1 mo"]] as const).map(([d, label]) => <button type="button" key={label} className={(record.new_thread_gap ?? null) === d ? "on" : ""} aria-pressed={(record.new_thread_gap ?? null) === d} onClick={() => { update({ new_thread_gap: d }); toast(d === null ? `${record.name} follows your new-thread rule again` : `New thread for ${record.name}: from ${waitWords(d, "calendar")} after the last follow-up`); }}>{label}</button>)}</span>
     </div>}
 
     {(cancel || state?.kind === "reach-back") && <div className="chase-cta">
@@ -260,7 +262,8 @@ export function ConversationSection({ type, record }: { type: "creator" | "brand
       {cancel && <a className={`btn ${canCancel ? "btn-ghost" : "btn-primary"} btn-sm`} href={scheduledUrl(cancel.mailbox)} target="_blank" rel="noopener noreferrer">{!canCancel && <CalendarX size={14} />} Open Gmail's Scheduled folder <ExternalLink size={12} /></a>}
       {cancel && !canCancel && <Link className="chase-cta-note" to="/app/settings#gmail">Reconnect this mailbox to cancel from here</Link>}
       {state?.kind === "reach-back" && <>
-        <Button size="sm" onClick={reachAgain}><RotateCcw size={14} /> Reached out again</Button>
+        <a className={`btn ${parkedHere ? "btn-secondary" : "btn-primary"} btn-sm`} href={composeUrl()} target="_blank" rel="noopener noreferrer"><MailPlus size={14} /> Start a new thread in Gmail <ExternalLink size={12} /></a>
+        <Button size="sm" variant="secondary" onClick={reachAgain}><RotateCcw size={14} /> Reached out another way</Button>
         <Button size="sm" variant="ghost" onClick={() => snooze(plusDays(30), "Reach-back reminder moved a month on")}><Clock3 size={14} /> Remind me next month</Button>
       </>}
     </div>}
@@ -280,7 +283,7 @@ export function ConversationSection({ type, record }: { type: "creator" | "brand
     <div className="fu-summary">
       <div className="fu-stat"><small>Last from you</small><strong>{lastOut ? dateLabel(lastOut.at) : "—"}</strong><em>{lastOut?.scheduled ? sendsAt(lastOut.at) ? `scheduled · sends ${sendsAt(lastOut.at)}` : "scheduled in Gmail" : lastOut ? daysAgoLabel(lastOut.at) : "nothing sent"}</em></div>
       <div className="fu-stat"><small>Last from them</small><strong>{lastIn ? dateLabel(lastIn.at) : "—"}</strong><em>{lastIn ? daysAgoLabel(lastIn.at) : "no reply yet"}</em></div>
-      <div className={`fu-stat${state?.kind === "due" ? parkedHere ? " is-parked" : " is-due" : ""}`}><small>{nextStep === "new-thread" ? "Next step" : state?.kind === "due" || state?.kind === "waiting" ? "Next follow-up" : "Follow-ups sent"}</small><strong>{state?.kind === "due" ? parkedHere ? today.resume[0].toUpperCase() + today.resume.slice(1) : "Today" : state?.kind === "waiting" ? dateLabel(state.due) : `${touches.filter((t) => t.dir === "out").length ? Math.max(0, touches.filter((t) => t.dir === "out").length - 1) : 0}`}</strong><em>{nextStep === "new-thread" && (state?.kind === "due" || state?.kind === "waiting") ? `new thread${state.kind === "due" && state.overdueDays ? ` · ${state.overdueDays} business day${state.overdueDays === 1 ? "" : "s"} late` : ` · after ${state.round - 1} follow-ups`}` : state?.kind === "due" ? `${nextLabel}${state.overdueDays ? ` · ${state.overdueDays} business day${state.overdueDays === 1 ? "" : "s"} late` : ""}` : state?.kind === "waiting" ? nextLabel : "in total"}</em></div>
+      <div className={`fu-stat${state?.kind === "due" ? parkedHere ? " is-parked" : " is-due" : ""}`}><small>{nextStep === "new-thread" ? "Next step" : state?.kind === "due" || state?.kind === "waiting" ? "Next follow-up" : "Follow-ups sent"}</small><strong>{state?.kind === "due" ? parkedHere ? today.resume[0].toUpperCase() + today.resume.slice(1) : "Today" : state?.kind === "waiting" ? dateLabel(state.due) : `${touches.filter((t) => t.dir === "out").length ? Math.max(0, touches.filter((t) => t.dir === "out").length - 1) : 0}`}</strong><em>{nextStep === "new-thread" && (state?.kind === "due" || state?.kind === "waiting") ? `new thread${state.kind === "due" && state.overdueDays ? ` · ${lateWords(state.overdueDays, state.unit)} late` : state.by && state.by !== state.due ? ` · window till ${dateLabel(state.by)}` : ` · after ${state.round - 1} follow-ups`}` : state?.kind === "due" ? `${nextLabel}${state.overdueDays ? ` · ${lateWords(state.overdueDays, state.unit)} late` : ""}` : state?.kind === "waiting" ? nextLabel : "in total"}</em></div>
     </div>
 
     <div className="fu-channel">

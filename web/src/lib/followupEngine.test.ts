@@ -1,7 +1,7 @@
 // Run (from web/): node --experimental-strip-types --import ./scripts/ts-hooks.mjs src/lib/followupEngine.test.ts
 import type { EmailEvent, Followup } from "../types";
 import { DEFAULT_FOLLOWUP_RULES } from "./prefs";
-import { flagFor, followupState } from "./followupEngine";
+import { flagFor, followupState, rulesFrom, waitWords } from "./followupEngine";
 import { outreachLog, emailsIn, sentIn, withAutopilot } from "./outreach";
 
 let fail = 0;
@@ -70,6 +70,28 @@ const record = (extra: Record<string, unknown> = {}) => ({ type: "creator" as co
   check("denied recently → closed", followupState(rec, [], [], rules, new Date("2026-10-20T10:00:00")).kind, "idle");
   const s = followupState(rec, [], [], rules, new Date("2026-11-02T10:00:00"));
   check("denied a month ago → reach back", s.kind, "reach-back");
+  check("…as a new thread", flagFor(s)?.short, "New thread · said no");
+  // 30 days after Fri Oct 2 is Sun Nov 1 → the next business day.
+  const sun = record({ pipeline_status: "denied", lost_at: "2026-10-02T10:00:00" });
+  check("30 days landing on a Sunday waits for Monday", [followupState(sun, [], [], rules, new Date("2026-11-01T10:00:00")).kind, followupState(sun, [], [], rules, new Date("2026-11-02T10:00:00")).kind], ["idle", "reach-back"]);
+  const bizNo = rulesFrom({ reach_back_days: 20, reach_back_unit: "business" });
+  const sb = followupState(sun, [], [], bizNo, new Date("2026-10-20T10:00:00"));
+  check("wait 20 business days after a no, then the day", sb.kind === "idle" ? sb.until : sb.kind, "2026-11-02");
+  check("never after a no", followupState(sun, [], [], rulesFrom({ reach_back_days: 0 }), new Date("2027-01-01T10:00:00")).kind, "idle");
+}
+
+// 5b. Day types and old saved rules.
+{
+  check("old rules (1-day business wait) → 2 to 3 weeks", (({ new_thread_gap, new_thread_late, new_thread_unit }) => [new_thread_gap, new_thread_late, new_thread_unit])(rulesFrom({ new_thread_gap: 2, thread_cap: 4 })), [14, 21, "calendar"]);
+  check("rules with a day type keep their wait", (({ new_thread_gap, new_thread_late, new_thread_unit }) => [new_thread_gap, new_thread_late, new_thread_unit])(rulesFrom({ new_thread_gap: 10, new_thread_late: 4, new_thread_unit: "business" })), [10, 10, "business"]);
+  check("follow-ups default to business days", rulesFrom({}).gap_unit, "business");
+  const cal = rulesFrom({ gaps: [3], gap_unit: "calendar" });
+  const first = ev("out", "2026-10-19T10:00:00");
+  const w = followupState(record(), [], [first], cal, new Date("2026-10-20T10:00:00"));
+  check("3 days (every day counts) after Mon → Thu", w.kind === "waiting" ? w.due : w.kind, "2026-10-22");
+  const sat = followupState(record(), [], [ev("out", "2026-10-21T10:00:00")], cal, new Date("2026-10-22T10:00:00"));
+  check("…a Saturday moves to Monday", sat.kind === "waiting" ? sat.due : sat.kind, "2026-10-26");
+  check("waitWords", [waitWords(30, "calendar"), waitWords(14, "calendar"), waitWords(10, "calendar"), waitWords(3, "business")], ["1 month", "2 weeks", "10 days", "3 business days"]);
 }
 
 // 6. Counting: emails = every email, follow-ups = only chasers; DMs aren't emails.
@@ -90,10 +112,23 @@ const record = (extra: Record<string, unknown> = {}) => ({ type: "creator" as co
   const events = [t("2026-10-19T10:00:00"), t("2026-10-21T10:00:00"), t("2026-10-23T10:00:00"), t("2026-10-27T10:00:00"), t("2026-10-30T10:00:00")];
   const s1 = followupState(record(), [], events, rules, new Date("2026-11-02T09:00:00"));
   check("after 4 follow-ups the next step is a new thread", s1.kind === "waiting" || s1.kind === "due" ? s1.next : s1.kind, "new-thread");
-  const s2 = followupState(record(), [], events, rules, new Date("2026-11-03T09:00:00"));
-  check("…due after 1 business day of waiting", [s2.kind, flagFor(s2)?.short], ["due", "Start a new thread"]);
-  const s3 = followupState(record({ new_thread_gap: 3 }), [], events, rules, new Date("2026-11-03T09:00:00"));
-  check("per-influencer wait for the new thread", s3.kind, "waiting");
+  // Default window: 2 to 3 weeks (every day counts) after the 4th follow-up (Fri Oct 30).
+  const early = followupState(record(), [], events, rules, new Date("2026-11-12T09:00:00"));
+  check("…not before 2 weeks", early.kind === "waiting" ? [early.kind, early.due, early.by] : early.kind, ["waiting", "2026-11-13", "2026-11-20"]);
+  const s2 = followupState(record(), [], events, rules, new Date("2026-11-13T09:00:00"));
+  check("…due 2 weeks later", [s2.kind, flagFor(s2)?.short], ["due", "Start a new thread"]);
+  const inWin = followupState(record(), [], events, rules, new Date("2026-11-20T09:00:00"));
+  check("…not late inside the window", inWin.kind === "due" ? inWin.overdueDays : inWin.kind, 0);
+  const late = followupState(record(), [], events, rules, new Date("2026-11-25T09:00:00"));
+  check("…late after 3 weeks, in days", [late.kind === "due" ? late.overdueDays : late.kind, flagFor(late)?.short], [5, "New thread · 5d late"]);
+  const s3 = followupState(record({ new_thread_gap: 21 }), [], events, rules, new Date("2026-11-13T09:00:00"));
+  check("per-influencer wait for the new thread", s3.kind === "waiting" ? [s3.kind, s3.due, s3.by] : s3.kind, ["waiting", "2026-11-20", "2026-11-27"]);
+  // Counted in business days instead (Settings): 1 business day of waiting = Tue after a Friday.
+  const biz = rulesFrom({ new_thread_unit: "business", new_thread_gap: 1, new_thread_late: 3 });
+  const b1 = followupState(record(), [], events, biz, new Date("2026-11-03T09:00:00"));
+  check("business-day window", b1.kind === "due" ? [b1.due, b1.by, b1.overdueDays] : b1.kind, ["2026-11-03", "2026-11-05", 0]);
+  const b2 = followupState(record(), [], events, biz, new Date("2026-11-09T09:00:00"));
+  check("…late counted in business days", b2.kind === "due" ? b2.overdueDays : b2.kind, 2);
   // New thread started → follow-ups start over there; the old thread goes quiet.
   const fresh = ev("out", "2026-11-03T10:00:00", { thread_id: "B" });
   const s4 = followupState(record(), [], [...events, fresh], rules, new Date("2026-11-03T12:00:00"));

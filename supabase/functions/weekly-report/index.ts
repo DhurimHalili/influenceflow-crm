@@ -3,6 +3,7 @@ import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 import nodemailer from "npm:nodemailer@6.9.16";
 import { safeZone, tzParts, weekStart, weeklyReport, type WeeklyReport } from "../../../web/src/lib/weekly.ts";
 import { renderWeeklyEmail, type BackupNote } from "../../../web/src/lib/weeklyEmail.ts";
+import { rulesFrom } from "../../../web/src/lib/followupEngine.ts";
 import { Buffer } from "node:buffer";
 // Compiled from web/src/lib/backupBook.ts by `npm run build`: the whole CRM as one workbook (the app's "Work in Excel" file).
 import { backupFiles } from "../_shared/generated/backupBook.js";
@@ -66,18 +67,12 @@ async function reportFor(admin: SupabaseClient, userId: string, which: "last" | 
     all(admin, "email_events", userId, { order: "at", max: 6000, columns: EVENT_COLS }),
   ]);
   const prefs = ((profile?.preferences || {}) as Prefs);
-  const rules = prefs.followup_rules && typeof prefs.followup_rules === "object" ? prefs.followup_rules : {};
   const goal = Number(prefs.daily_email_goal) >= 5 && Number(prefs.daily_email_goal) <= 500 ? Math.round(Number(prefs.daily_email_goal)) : 50;
   const mailEvents = events.filter((e) => !e.bounced_at).map(event);
   const followupRows = followups.map(followup);
   const activityRows = activities.map((a) => ({ ...a, text: text(a.text) }));
-  const ruleSet = {
-    gaps: Array.isArray(rules.gaps) ? rules.gaps.map(Number) : [1, 1, 1], then: Number(rules.then) || 2, stop_after: Number(rules.stop_after) || 0,
-    workdays: Array.isArray(rules.workdays) && rules.workdays.length ? rules.workdays.map(Number) : [1, 2, 3, 4, 5],
-    holidays: Array.isArray(rules.holidays) ? rules.holidays.filter((d) => typeof d === "string") as string[] : [],
-    reach_back_days: rules.reach_back_days === undefined ? 30 : Number(rules.reach_back_days) || 0,
-    thread_cap: rules.thread_cap === undefined ? 4 : Number(rules.thread_cap) || 0, new_thread_gap: rules.new_thread_gap === undefined ? 1 : Number(rules.new_thread_gap) || 0,
-  };
+  const ruleSet = rulesFrom(prefs.followup_rules);
+
   const report = weeklyReport({
     creators: creators.filter((c) => !c.archived_at).map(record) as never[],
     brands: brands.filter((b) => !b.archived_at).map(record) as never[],

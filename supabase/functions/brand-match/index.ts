@@ -10,7 +10,8 @@ import { fetchTranscript, txConfigured, txLeft, txProviders } from "../_shared/t
 import { askBrand, brandAskConfigured, searchSite, useBrandAskBudget } from "../_shared/brandAsk.ts";
 import { asMember, cred, forgetRing, ringFor, runInRing, scoped, type Ring } from "../_shared/keyring.ts";
 import { companyCountry, duckSite, officialSite } from "../_shared/officialSite.ts";
-import { clayCompany, clayPeople, hunterCompany, hunterEmail, hunterPeople, mergePeople, siteLinkedin, wikidataLinkedin, type CompanyFacts, type People, type Person } from "../_shared/companyInfo.ts";
+import { clayCompany, clayPeople, hunterCompany, hunterEmail, hunterPeople, mergePeople, siteLinkedin, wikidataFacts, wikidataLinkedin, type CompanyFacts, type People, type Person } from "../_shared/companyInfo.ts";
+import { withSite, type SiteOrg } from "../../../web/src/lib/companyFacts.ts";
 import { apolloCompany, apolloPeople, apolloUnlock, type FoundPerson } from "../_shared/apollo.ts";
 import { readFinder, seniorityOf } from "../../../web/src/lib/peopleFinder.ts";
 import { checkKey, cleanAccount, cleanKey, hintOf, keyFor, openKey, sealKey, SERVICE_NAME, SERVICES, SLOTS, vaultKey, type KeyChoice, type Lookup, type Service } from "../_shared/memberKeys.ts";
@@ -711,12 +712,27 @@ async function apolloFill(admin: SupabaseClient, ch: Choice, co: CompanyFacts, n
   return { co: next };
 }
 
-/** LinkedIn from the site (or kept), Wikidata once per domain when the site has none. */
-async function companyOf(name: string, domain: string, socials: { platform: string; url: string }[] | undefined, kept: CompanyFacts | null | undefined): Promise<CompanyFacts> {
+/**
+ * LinkedIn from the site (or kept), and the free facts once per domain: Wikidata's record for the item whose
+ * website IS theirs (employees, revenue, founded, home, industry, listing, parent — dated, cited), with what
+ * their own site's Organization block says filling the gaps. No credits. Wikidata busy → asked again later.
+ */
+const wdMemo = new Map<string, Promise<Awaited<ReturnType<typeof wikidataFacts>>>>();
+async function companyOf(name: string, domain: string, socials: { platform: string; url: string }[] | undefined, kept: CompanyFacts | null | undefined, org?: SiteOrg): Promise<CompanyFacts> {
   const now = new Date().toISOString();
   const co: CompanyFacts = { ...(kept && kept.domain === domain ? kept : {}), domain, at: now };
   const site = siteLinkedin(socials);
   if (site) { co.linkedin = site; co.linkedin_via = "site"; }
+  if (!co.wdf_at) {
+    // Two members with the same brand in one run: Wikidata is asked once.
+    if (!wdMemo.has(domain)) wdMemo.set(domain, wikidataFacts(name, domain));
+    const wd = await wdMemo.get(domain)!.catch(() => undefined);
+    if (wd !== undefined) {
+      co.wdf_at = now;
+      co.verified = withSite(wd?.facts || { at: now }, org);
+      if (!co.linkedin && wd?.linkedin) { co.linkedin = wd.linkedin; co.linkedin_via = "wikidata"; co.wd_at = now; }
+    } else if (org) co.verified = withSite(co.verified || { at: now }, org);
+  } else if (org) co.verified = withSite(co.verified || { at: now }, org);
   if (!co.linkedin && !co.wd_at) {
     co.wd_at = now;
     const wd = await wikidataLinkedin(name, domain).catch(() => "");
@@ -858,7 +874,7 @@ async function researchBrand(admin: SupabaseClient, b: BrandRow): Promise<Intel 
     wiki: wiki?.extract || "", works_with_creators: asked?.isBrand ? asked.creators : null, pages: pages.slice(0, 6), verified: facts ? siteIsBrand(b.name, domain, facts) || !!wiki?.verified : !!wiki?.verified,
     // Where the shop is doesn't change: looked up once per website and kept on every later read.
     geo: keptGeo || await brandGeo(b.name, domain, origin || `https://${domain}`).catch(() => ({ at: now.toISOString() })),
-    company: await companyOf(b.name, domain, facts && !facts.blocked ? facts.socials : prev?.socials, prev?.company).catch(() => prev?.company && prev.company.domain === domain ? prev.company : undefined),
+    company: await companyOf(b.name, domain, facts && !facts.blocked ? facts.socials : prev?.socials, prev?.company, facts && !facts.blocked ? facts.org : undefined).catch(() => prev?.company && prev.company.domain === domain ? prev.company : undefined),
     people: keptPeople,
   };
   const status = facts && !facts.blocked ? "ok" : blocked && (wiki || by === "gemini") ? "ok" : facts?.blocked ? "blocked" : "unreachable";
@@ -1144,6 +1160,19 @@ async function cron(admin: SupabaseClient) {
       const company = await companyOf(b?.name || r.intel.name, r.intel.domain, r.intel.socials, null).catch(() => null);
       if (company) await admin.from("brand_intel").update({ intel: { ...r.intel, company } }).eq("brand_id", r.brand_id).eq("user_id", r.user_id);
       log.linkedin = Number(log.linkedin || 0) + 1;
+    }
+  }
+  // 4f. Free company facts for brands read before they existed: Wikidata once per domain (size, revenue, founded,
+  //     home, industry, listing, parent — dated and cited). No credits, no key. A few a run until every brand has them.
+  if (Date.now() < deadline - 45_000) {
+    const { data: rows } = await admin.from("brand_intel").select("brand_id, user_id, intel").in("user_id", ids).not("intel->company", "is", null).is("intel->company->>wdf_at", null).limit(12);
+    const names = new Map(((await admin.from("brands").select("id, name").in("id", ((rows || []) as { brand_id: string }[]).map((r) => r.brand_id))).data || [] as { id: string; name: string }[]).map((b: { id: string; name: string }) => [b.id, b.name]));
+    for (const r of (rows || []) as { brand_id: string; user_id: string; intel: Intel | null }[]) {
+      if (Date.now() > deadline - 35_000 || !r.intel?.domain || !r.intel.company) continue;
+      const company = await companyOf(names.get(r.brand_id) || r.intel.name, r.intel.domain, r.intel.socials, r.intel.company).catch(() => null);
+      if (!company?.wdf_at) continue;
+      await admin.from("brand_intel").update({ intel: { ...r.intel, company } }).eq("brand_id", r.brand_id).eq("user_id", r.user_id);
+      log.facts = Number(log.facts || 0) + 1;
     }
   }
   // 4d. Clay / Hunter, each member with their own key (the owner also with the workspace key): a few brands a

@@ -24,6 +24,8 @@ import { overlap, scoreText, topicFit, topicLabel, TOPIC, type ContentProfile } 
 
 // ---- what the server writes ---------------------------------------------------------------
 
+import type { VerifiedFacts } from "./companyFacts";
+
 export type BrandIntel = {
   v: number; at: string; domain: string; url: string; name: string; summary: string; sells: { key: string; weight: number }[]; by: string;
   products: number; examples: string[]; price: { min: number; median: number; max: number; currency: string } | null; platform: string;
@@ -39,6 +41,8 @@ export type BrandIntel = {
 export type CompanyFacts = {
   domain: string; at: string; linkedin?: string; linkedin_via?: "site" | "wikidata" | "hunter" | "clay" | "apollo"; wd_at?: string; hunter_at?: string; clay_at?: string; apollo_at?: string; facts_via?: "hunter" | "clay" | "apollo";
   size?: string; employees?: number; revenue?: string; industry?: string; country?: string; founded?: number; name?: string;
+  /** Free, from Wikidata (the item whose website IS theirs) + their own site — dated, cited (lib/companyFacts.ts). */
+  verified?: VerifiedFacts | null; wdf_at?: string;
 };
 export type HunterPerson = { first: string; last: string; title: string; email: string; linkedin: string; confidence: number; department: string; seniority: string; via?: "hunter" | "clay" };
 export type IntelRow = { brand_id: string; intel: BrandIntel | null; status: string; researched_at: string | null };

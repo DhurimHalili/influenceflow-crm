@@ -239,3 +239,78 @@
 .reach-connect { display: flex; align-items: flex-start; gap: 8px; margin: 0; padding: 10px 12px; border: 1px dashed var(--line); border-radius: 12px; color: var(--text-soft); font-size: 12.5px; line-height: 1.5; }
 .reach-connect svg { flex: none; margin-top: 2px; color: var(--accent); }
 .reach-connect a { color: var(--accent); font-weight: 650; }
+
+/* ---------- Company lens (Brands list) ---------- */
+.clens { --cl: var(--accent); margin: 0 0 12px; padding: 14px; border: 1px solid color-mix(in srgb, var(--cl) 24%, var(--line)); border-radius: 16px; background: radial-gradient(120% 140% at 0% 0%, color-mix(in srgb, var(--cl) 9%, var(--surface-solid)), var(--surface-solid) 55%); animation: clens-in .16s ease-out; }
+@keyframes clens-in { from { opacity: 0; transform: translateY(-4px); } }
+.clens-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.clens-head b { display: inline-flex; align-items: center; gap: 7px; font: 750 14px "Manrope", sans-serif; color: var(--text); }
+.clens-head b svg { color: var(--cl); }
+.clens-head small { display: block; margin-top: 3px; color: var(--muted); font-size: 12px; line-height: 1.45; max-width: 640px; }
+.clens-clear { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 12px; border: 1px solid var(--line-strong); border-radius: 999px; background: var(--surface-solid); color: var(--text); font: 650 12px "Manrope", sans-serif; cursor: pointer; }
+.clens-clear:hover { border-color: var(--cl); color: var(--cl); }
+.clens-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.cl-bars { display: grid; gap: 6px; padding: 10px 10px 8px; border: 1px solid var(--line); border-radius: 13px; background: var(--surface-solid); min-width: 0; }
+.cl-bars header { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.cl-bars header span { align-self: center; display: inline-grid; color: var(--cl); }
+.cl-bars header b { font: 700 13px "Manrope", sans-serif; color: var(--text); }
+.cl-bars header small { color: var(--muted); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cl-cols { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 2px; height: 112px; }
+.cl-col { position: relative; display: grid; grid-template-rows: 16px 1fr auto; align-items: end; justify-items: center; gap: 3px; min-width: 0; padding: 0 0 2px; border: 0; border-radius: 9px; background: transparent; color: var(--text-soft); cursor: pointer; transition: background .15s ease-out; }
+.cl-col:hover:not(:disabled) { background: color-mix(in srgb, var(--cl) 7%, transparent); }
+.cl-col:disabled { cursor: default; }
+.cl-col:focus-visible { outline: 2px solid var(--cl); outline-offset: 1px; }
+.cl-col em { font: 750 11px "Manrope", sans-serif; font-style: normal; color: var(--text); }
+.cl-bar { position: relative; align-self: end; width: min(26px, 70%); border-radius: 7px 7px 3px 3px; background: color-mix(in srgb, var(--cl) 26%, var(--surface-alt)); overflow: hidden; transition: height .15s ease-out, background .15s ease-out; }
+.cl-bar i { position: absolute; inset: auto 0 0 0; background: var(--cl); }
+.cl-col.empty .cl-bar { background: var(--surface-alt); }
+.cl-col small { max-width: 100%; min-height: 24px; font-size: 10px; font-weight: 650; line-height: 1.15; text-align: center; overflow-wrap: anywhere; letter-spacing: -.01em; }
+.cl-col.on { background: color-mix(in srgb, var(--cl) 13%, transparent); box-shadow: inset 0 0 0 1.5px var(--cl); }
+.cl-col.on small, .cl-col.on em { color: var(--cl); }
+.cl-unknown { margin: 0; color: var(--muted); font-size: 11px; }
+.clens-flags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.clens-flag { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 11px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface-solid); color: var(--text-soft); font: 650 12px "Manrope", sans-serif; cursor: pointer; transition: border-color .15s ease-out, background .15s ease-out, color .15s ease-out; }
+.clens-flag svg { color: var(--cl); }
+.clens-flag b { padding: 1px 7px; border-radius: 999px; background: var(--surface-alt); color: var(--text); font-size: 11px; }
+.clens-flag:hover { border-color: var(--cl); color: var(--text); }
+.clens-flag.on { border-color: var(--cl); background: var(--cl); color: #fff; }
+.clens-flag.on svg { color: #fff; }
+.clens-flag.on b { background: rgba(255,255,255,.22); color: #fff; }
+.clens-flag.f-verified svg { color: var(--success); }
+.clens-flag.f-verified.on { background: var(--success); border-color: var(--success); }
+.clens-flag.f-verified.on svg { color: #fff; }
+.clens-sep { width: 1px; align-self: stretch; margin: 4px 2px; background: var(--line); }
+.toolbar-filters .lens-toggle.active { border-color: var(--accent); color: var(--accent); }
+@media (max-width: 1100px) { .clens-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 560px) { .clens { padding: 12px; } .clens-grid { grid-template-columns: minmax(0, 1fr); } .cl-cols { height: 92px; } }
+@media (prefers-reduced-motion: reduce) { .clens { animation: none; } .cl-bar, .cl-col, .clens-flag { transition: none; } }
+
+/* One line in rows / cards: "7.3K people ✓ · $4.6B ✓ · since 1981" */
+.cline { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
+.cline > span { display: inline-flex; align-items: center; gap: 3px; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 650; line-height: 18px; white-space: nowrap; }
+.cline > span.ok { color: color-mix(in srgb, var(--success) 70%, var(--text)); background: color-mix(in srgb, var(--success) 11%, var(--surface-solid)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--success) 25%, transparent); }
+.cline > span.ok svg { color: var(--success); }
+.cline > span.est { color: var(--text-soft); background: var(--surface-alt); border: 1px dashed var(--line-strong); line-height: 16px; }
+.cline > span i { font-style: normal; font-weight: 600; font-size: 10px; color: var(--muted); }
+
+/* Brand profile: the company card */
+.ccard { display: grid; gap: 10px; margin: 10px 0 12px; padding: 12px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface-solid); }
+.ccard.is-verified { border-color: color-mix(in srgb, var(--success) 30%, var(--line)); background: linear-gradient(165deg, color-mix(in srgb, var(--success) 7%, var(--surface-solid)), var(--surface-solid) 60%); }
+.ccard header { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.ccard header b { font: 750 14px "Manrope", sans-serif; color: var(--text); overflow-wrap: anywhere; }
+.ccard-badge { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border-radius: 999px; background: var(--surface-alt); color: var(--text-soft); font-size: 11.5px; font-weight: 700; }
+.ccard-badge.ok { background: color-mix(in srgb, var(--success) 14%, var(--surface-solid)); color: color-mix(in srgb, var(--success) 75%, var(--text)); }
+.ccard-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+.ccard-tile { display: grid; gap: 2px; padding: 9px 10px; border-radius: 11px; background: var(--surface-alt); min-width: 0; }
+.ccard-tile small { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); font-size: 11px; font-weight: 650; }
+.ccard-tile small span { display: inline-grid; color: var(--accent); }
+.ccard-tile strong { font: 780 17px "Manrope", sans-serif; color: var(--text); overflow-wrap: anywhere; }
+.ccard-tile em { font-style: normal; color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
+.ccard-tile em a { color: var(--accent); }
+.ccard-tile.est { background: transparent; border: 1px dashed var(--line-strong); }
+.ccard-tile.est strong { color: var(--text-soft); }
+.ccard-ind { display: flex; flex-wrap: wrap; gap: 5px; }
+.ccard-ind span { padding: 3px 9px; border-radius: 999px; border: 1px solid var(--line); color: var(--text-soft); font-size: 11.5px; }
+.ccard.empty { grid-template-columns: auto 1fr; align-items: start; color: var(--muted); border-style: dashed; }
+.ccard.empty p { margin: 0; font-size: 12.5px; line-height: 1.5; }
+.ccard.empty svg { color: var(--muted); margin-top: 2px; }

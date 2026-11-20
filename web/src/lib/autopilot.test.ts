@@ -184,4 +184,12 @@ if (fail) { console.log(`\n${fail} failed`); process.exit(1); }
   check("marked Replied with no reply on file = by hand, why 'marked'", p.byHand.map((b) => b.why), ["marked"]);
 }
 
+// They answered once (by hand), then 4 follow-ups with no answer → the next step is a new thread, not "by hand".
+{
+  const st = new Map([["h1", { kind: "due", round: 5, sent: 5, due: "2026-11-17", overdueDays: 0, next: "new-thread", last: { id: "x", at: "2026-11-01T10:00:00Z", dir: "out", source: "gmail", channel: "email", threadId: "t1" }, touches: [] } as unknown as FollowupState]]);
+  const ev = [{ id: "e1", gmail_id: "g1", thread_id: "t1", direction: "in", entity_type: "creator", entity_id: "h1", at: "2026-10-10T10:00:00Z", reply_kind: "" } as never];
+  const p = autopilotPool({ creators: [{ id: "h1", name: "Ohio", country: "", pipeline_status: "replied", archived_at: null, contact_channel: "email", email_followups: true } as never], followups: [], events: ev, states: st, mailboxes: ["g@x.com"], templates: { 1: [], 2: [], 3: [], 4: [] } });
+  check("by hand after 4 follow-ups → held for a new thread", [p.byHand.length, p.held.map((h) => h.why)], [0, ["new-thread"]]);
+}
+
 console.log("\nall autopilot tests passed");

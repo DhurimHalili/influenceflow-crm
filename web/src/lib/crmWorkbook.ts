@@ -30,7 +30,7 @@ export type WorkbookInput = {
   activities: Activity[];
   autopilot?: QueuedSend[];
   goal: number;
-  rules: Pick<FollowupRules, "gaps" | "then" | "thread_cap" | "new_thread_gap">;
+  rules: Pick<FollowupRules, "gaps" | "then" | "thread_cap" | "new_thread_gap" | "gap_unit" | "new_thread_unit">;
   mailboxes: string[];
   /** The app's star rating (weights included); falls back to the stored stars. */
   score?: (c: Creator) => number;
@@ -85,6 +85,10 @@ const clean = (s: unknown) => String(s ?? "").replace(/\s+/g, " ").trim();
 type ColDef = { key: string; header: string; w: number; auto?: boolean; style?: number; hidden?: boolean };
 
 const titleRows = (title: string, note: string): XCell[][] => [[{ v: title, s: S.title }], [{ v: note, s: S.note }]];
+
+const unitName = (u: string) => (u === "calendar" ? "Every day" : "Business days");
+/** A wait after `last`, counted the way Settings says (same as the app's addDays). */
+const after = (last: string, wait: string, unit: string) => `IF(${unit}="Every day",WORKDAY(${last}+${wait}-1,1),WORKDAY(${last},${wait}+1))`;
 
 export function crmWorkbookParts(input: WorkbookInput): [string, string][] {
   const { sheets, names, active } = crmWorkbookSheets(input);
@@ -151,21 +155,23 @@ export function crmWorkbookSheets(input: WorkbookInput): { sheets: XSheet[]; nam
     ...titleRows("Settings & lists", "Your follow-up rules from the CRM. Change a number and every 'Next follow-up' date recalculates. Lists on the right feed the dropdowns — add a mailbox or a channel at the bottom of its list."),
     [],
     [{ v: "Daily email goal", s: S.label }, { v: input.goal || 50, s: S.inputInt }],
-    [{ v: "Business days before the 1st follow-up", s: S.label }, { v: gaps[0] ?? 1, s: S.inputInt }],
-    [{ v: "Business days before the 2nd follow-up", s: S.label }, { v: gaps[1] ?? gaps[0] ?? 1, s: S.inputInt }],
-    [{ v: "Business days before the 3rd follow-up", s: S.label }, { v: gaps[2] ?? gaps[1] ?? 1, s: S.inputInt }],
-    [{ v: "Business days between later follow-ups", s: S.label }, { v: input.rules.then ?? 2, s: S.inputInt }],
+    [{ v: "Wait before the 1st follow-up", s: S.label }, { v: gaps[0] ?? 1, s: S.inputInt }],
+    [{ v: "Wait before the 2nd follow-up", s: S.label }, { v: gaps[1] ?? gaps[0] ?? 1, s: S.inputInt }],
+    [{ v: "Wait before the 3rd follow-up", s: S.label }, { v: gaps[2] ?? gaps[1] ?? 1, s: S.inputInt }],
+    [{ v: "Wait between later follow-ups", s: S.label }, { v: input.rules.then ?? 2, s: S.inputInt }],
     [{ v: "Follow-ups per thread, then a new thread", s: S.label }, { v: input.rules.thread_cap ?? 4, s: S.inputInt }],
-    [{ v: "Business days before the new thread", s: S.label }, { v: input.rules.new_thread_gap ?? 1, s: S.inputInt }],
-    [{ v: "Weekends are skipped (Mon–Fri). A follow-up is due on the business day after the wait.", s: S.note }],
+    [{ v: "Wait before the new thread", s: S.label }, { v: input.rules.new_thread_gap ?? 14, s: S.inputInt }],
+    [{ v: "Follow-up waits count", s: S.label }, { v: unitName(input.rules.gap_unit ?? "business"), s: S.input }],
+    [{ v: "New-thread wait counts", s: S.label }, { v: unitName(input.rules.new_thread_unit ?? "calendar"), s: S.input }],
+    [{ v: "Business days: Mon–Fri. With business days a follow-up is due on the business day after the wait; with every day, that many days later (moved to Monday when it lands on a weekend).", s: S.note }],
   ];
-  [["Goal", 4], ["WaitFirst", 5], ["WaitSecond", 6], ["WaitThird", 7], ["WaitLater", 8], ["ThreadCap", 9], ["ThreadWait", 10]].forEach(([n, r]) => names.push({ name: n as string, ref: `Settings!$B$${r}` }));
+  [["Goal", 4], ["WaitFirst", 5], ["WaitSecond", 6], ["WaitThird", 7], ["WaitLater", 8], ["ThreadCap", 9], ["ThreadWait", 10], ["WaitCount", 11], ["ThreadCount", 12]].forEach(([n, r]) => names.push({ name: n as string, ref: `Settings!$B$${r}` }));
   const lists: [string, string, string[], number][] = [
     ["StatusList", "Statuses", ENTITY, 9], ["DealStatusList", "Deal statuses", DEAL, 4], ["PayList", "Payment", PAY, 3], ["PriorityList", "Priority", PRIORITY, 2],
     ["DirList", "Direction", DIR, 2], ["KindList", "Kind", KIND, 6], ["ChannelList", "Channel", [...CHANNELS], 12], ["TypeList", "Type", TYPES, 2],
-    ["MailboxList", "Mailboxes", mailboxes, Math.max(12, mailboxes.length + 6)], ["PlatformList", "Platforms", PLATFORMS, 16], ["WaitList", "Waiting", ["Scheduled"], 1],
+    ["MailboxList", "Mailboxes", mailboxes, Math.max(12, mailboxes.length + 6)], ["PlatformList", "Platforms", PLATFORMS, 16], ["WaitList", "Waiting", ["Scheduled"], 1], ["UnitList", "Days count as", ["Business days", "Every day"], 2],
   ];
-  const LIST_ROW = 13; // header row of the lists
+  const LIST_ROW = 15; // header row of the lists
   const listCol0 = 3; // column D
   lists.forEach(([n, head, values, len], i) => {
     const c = listCol0 + i;
@@ -214,7 +220,7 @@ export function crmWorkbookSheets(input: WorkbookInput): { sheets: XSheet[]; nam
       // Messages since their last reply, counted from your newest thread (a new thread starts the count over).
       round: `IF(${A}="","",COUNTIFS(LogWho,${A},LogDir,"Sent",LogWait,"<>Scheduled",LogDate,">"&MAX(N(${lin}),N(${lnt})))+IF(AND(N(${lnt})>0,N(${lnt})>=N(${lin})),1,0))`,
       fu: `IF(${A}="","",MAX(0,N(${rd})-1))`,
-      next: `IF(OR(${A}="",${arch}="yes",${st}="Denied",${st}="Signed",${st}="Roster"),"",IF(N(${wq})>0,${nw},IF(OR(${last}="",AND(${lin}<>"",N(${lin})>N(${last}))),"",IF(N(${fu})>=ThreadCap,WORKDAY(${last},ThreadWait+1),WORKDAY(${last},CHOOSE(MAX(1,MIN(N(${rd}),4)),WaitFirst,WaitSecond,WaitThird,WaitLater)+1)))))`,
+      next: `IF(OR(${A}="",${arch}="yes",${st}="Denied",${st}="Signed",${st}="Roster"),"",IF(N(${wq})>0,${nw},IF(OR(${last}="",AND(${lin}<>"",N(${lin})>N(${last}))),"",IF(N(${fu})>=ThreadCap,${after(last, "ThreadWait", "ThreadCount")},${after(last, `CHOOSE(MAX(1,MIN(N(${rd}),4)),WaitFirst,WaitSecond,WaitThird,WaitLater)`, "WaitCount")}))))`,
       step: `IF(${A}="","",IF(OR(${arch}="yes",${st}="Denied",${st}="Signed",${st}="Roster"),"—",IF(N(${wq})>0,"Scheduled",IF(${last}="",IF(${lin}<>"","Reply needed",IF(OR(${st}="New",${st}=""),"Write first email","—")),IF(AND(${lin}<>"",N(${lin})>N(${last})),"Reply needed",IF(N(${nx})<=TODAY(),IF(N(${fu})>=ThreadCap,"Start new thread","Follow up now"),"Waiting"))))))`,
     };
   };
@@ -538,7 +544,7 @@ export function crmWorkbookSheets(input: WorkbookInput): { sheets: XSheet[]; nam
   const helpSheet: XSheet = { name: "Start here", tab: "FF2E2A38", cols: [30, 96], rows: help, grid: false, heights: { 1: 30 }, merges: ["A2:B2"] };
   help.forEach((r, i) => { if (r[1] && typeof r[1] === "object" && (r[1] as { s?: number }).s === S.wrap) (helpSheet.heights ||= {})[i + 1] = 30; });
 
-  const settingsSheet: XSheet = { name: "Settings", tab: "FF6B7280", cols: [44, 10, 4, 14, 14, 12, 12, 12, 14, 14, 12, 28, 12, 12], rows: settings, grid: false, heights: { 1: 30 }, merges: ["A2:B2"] };
+  const settingsSheet: XSheet = { name: "Settings", tab: "FF6B7280", cols: [44, 10, 4, 14, 14, 12, 12, 12, 14, 14, 12, 28, 12, 12], rows: settings, grid: false, heights: { 1: 30 }, merges: ["A2:B2"], validations: [{ sqref: "B11:B12", list: "UnitList", error: "Pick Business days or Every day" }] };
 
   // ---- Import tabs: the same columns as Export, so the CRM can read this file straight back -----------------
   const importSheet = (name: string, headers: Record<string, string>, rows: Record<string, unknown>[]): XSheet => {

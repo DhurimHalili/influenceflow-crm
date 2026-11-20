@@ -1,18 +1,18 @@
-import { AlertTriangle, CalendarDays, CirclePause, Target, Check, LoaderCircle, Mail, Plus, Radar, RefreshCcw, Send, ShieldCheck, Sparkles, Trophy, Unplug } from "lucide-react";
+import { AlertTriangle, CalendarDays, CirclePause, Target, Check, LoaderCircle, Mail, MailPlus, Plus, Radar, RefreshCcw, RotateCcw, Send, ShieldCheck, Sparkles, Trophy, Unplug } from "lucide-react";
 import { GoalRampSettings } from "./GoalRamp";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useData } from "../contexts/DataContext";
 import { useGmail } from "../contexts/GmailContext";
 import { useToast } from "../contexts/ToastContext";
-import { cadencePreview } from "../lib/followupEngine";
+import { addDays, cadencePreview, rulesFrom, waitWords } from "../lib/followupEngine";
 import { mailboxStats } from "../lib/mailboxStats";
 import { DEFAULT_FOLLOWUP_RULES } from "../lib/prefs";
 import { normalizeWeekend, type DayMode, type WeekendPrefs } from "../lib/dayMode";
 import { openDayBrief } from "./DayBrief";
 import { relativeTime } from "../lib/utils";
 import { supabase } from "../lib/supabase";
-import type { FollowupRules } from "../types";
+import type { DayUnit, FollowupRules } from "../types";
 import { Button, Tabs } from "./ui";
 
 const RESULT: Record<string, { ok: boolean; text: string }> = {
@@ -117,11 +117,21 @@ export function GmailSettings() {
 const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const ORD = (n: number) => `${n}${n % 100 >= 11 && n % 100 <= 13 ? "th" : ({ 1: "st", 2: "nd", 3: "rd" } as Record<number, string>)[n % 10] || "th"}`;
 
+/** Business days or every day — one switch per wait. */
+function UnitSwitch({ value, onChange, label }: { value: DayUnit; onChange: (u: DayUnit) => void; label: string }) {
+  return <span className="unit-switch" role="radiogroup" aria-label={label}>
+    {([["business", "Business days"], ["calendar", "Every day"]] as const).map(([u, text]) => <button type="button" key={u} role="radio" aria-checked={value === u} className={value === u ? "on" : ""} onClick={() => onChange(u)}>{text}</button>)}
+  </span>;
+}
+
+const THREAD_PRESETS: [number, number, string][] = [[7, 14, "1 to 2 weeks"], [14, 21, "2 to 3 weeks"], [21, 28, "3 to 4 weeks"], [30, 45, "1 month+"]];
+const NO_PRESETS: [number, string][] = [[0, "Never"], [14, "2 weeks"], [30, "1 month"], [60, "2 months"], [90, "3 months"]];
+
 export function FollowupRulesSettings() {
   const data = useData();
   const { toast } = useToast();
   const prefs = data.profile.preferences;
-  const saved = prefs.followup_rules || DEFAULT_FOLLOWUP_RULES;
+  const saved = useMemo(() => rulesFrom(prefs.followup_rules), [prefs.followup_rules]);
   const [rules, setRules] = useState<FollowupRules>(saved);
   const [holiday, setHoliday] = useState("");
   useEffect(() => setRules(saved), [saved]);
@@ -130,28 +140,70 @@ export function FollowupRulesSettings() {
     data.updateProfile({ preferences: { ...prefs, followup_rules: rules } });
     toast("Follow-up rules saved — every flag is recalculated");
   };
-  const setGap = (index: number, value: number) => setRules({ ...rules, gaps: rules.gaps.map((g, i) => (i === index ? value : g)) });
+  const set = (patch: Partial<FollowupRules>) => setRules({ ...rules, ...patch });
+  const setGap = (index: number, value: number) => set({ gaps: rules.gaps.map((g, i) => (i === index ? value : g)) });
   const preview = cadencePreview(rules);
   const fmt = (d: Date) => new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric" }).format(d);
-  const dayStepper = (value: number, onChange: (v: number) => void, label: string) => <span className="day-stepper" role="group" aria-label={label}><button type="button" onClick={() => onChange(Math.max(0, value - 1))} aria-label={`Fewer days: ${label}`}>−</button><b>{value}</b><button type="button" onClick={() => onChange(Math.min(30, value + 1))} aria-label={`More days: ${label}`}>+</button></span>;
+  const dayStepper = (value: number, onChange: (v: number) => void, label: string, max = 30, min = 0) => <span className="day-stepper" role="group" aria-label={label}><button type="button" onClick={() => onChange(Math.max(min, value - 1))} disabled={value <= min} aria-label={`Fewer days: ${label}`}>−</button><b>{value}</b><button type="button" onClick={() => onChange(Math.min(max, value + 1))} disabled={value >= max} aria-label={`More days: ${label}`}>+</button></span>;
+  const gapUnit = rules.gap_unit ?? "business";
+  const cap = rules.thread_cap ?? 4;
+  const tStart = rules.new_thread_gap ?? 14, tLate = Math.max(tStart, rules.new_thread_late ?? 21), tUnit = rules.new_thread_unit ?? "calendar";
+  const noDays = rules.reach_back_days ?? 30, noUnit = rules.reach_back_unit ?? "calendar";
+  const dayWord = (n: number, u: DayUnit) => (u === "calendar" ? `day${n === 1 ? "" : "s"}` : `business day${n === 1 ? "" : "s"}`);
+  // The window drawn to scale: 0 = the last follow-up, a week of air after the late day.
+  const span = Math.max(tLate + 7, 14);
+  const pct = (n: number) => `${Math.round((n / span) * 1000) / 10}%`;
+  const ticks = Array.from({ length: Math.floor(span / 7) + 1 }, (_, i) => i * 7).filter((t) => t <= span);
+  const thread = preview.find((p) => p.until);
+  const lastFollow = [...preview].reverse().find((p) => !p.until);
+  const noOn = (() => { const d = new Date(); d.setHours(0, 0, 0, 0); return noDays ? addDays(d, noDays, noUnit, rules) : null; })();
+  // Gmail reopens a Denied record when you email them 14+ days after the no, so the wait never goes below that.
+  const noMin = noUnit === "calendar" ? 14 : 10;
 
-  return <section id="followups" className="settings-section"><div className="settings-heading"><span><CalendarDays /></span><div><h2>Follow-up rules</h2><p>When someone hasn't replied, how many business days to wait before each follow-up.</p></div></div><div className="settings-body">
+  return <section id="followups" className="settings-section"><div className="settings-heading"><span><CalendarDays /></span><div><h2>Follow-up rules</h2><p>When to follow up, when a thread is done and a new one starts, and when to write again after a no. Pick for each wait whether only business days count or every day.</p></div></div><div className="settings-body">
     <div className="rules-grid">
       <div className="rules-steps">
-        {rules.gaps.map((gap, i) => <div className="rule-step" key={i}><span className="rule-label">{i === 0 ? "After your first email" : `After your ${ORD(i)} follow-up`}</span>{dayStepper(gap, (v) => setGap(i, v), `wait before ${ORD(i + 1)} follow-up`)}<small>business day{gap === 1 ? "" : "s"} of waiting</small>{rules.gaps.length > 1 && <button type="button" className="rule-remove" onClick={() => setRules({ ...rules, gaps: rules.gaps.filter((_, j) => j !== i) })} aria-label="Remove this step">×</button>}</div>)}
-        <button type="button" className="rule-add" onClick={() => setRules({ ...rules, gaps: [...rules.gaps, rules.then] })} disabled={rules.gaps.length >= 12}>+ Add a step</button>
-        <div className="rule-step then"><span className="rule-label">Every follow-up after that</span>{dayStepper(rules.then, (v) => setRules({ ...rules, then: Math.max(1, v) }), "wait for later follow-ups")}<small>business days</small></div>
-        <div className="rule-step then"><span className="rule-label">New thread after</span>{dayStepper(rules.thread_cap ?? 4, (v) => setRules({ ...rules, thread_cap: Math.min(12, v) }), "follow-ups before a new thread")}<small>{(rules.thread_cap ?? 4) === 0 ? "never — keep following up" : `follow-up${(rules.thread_cap ?? 4) === 1 ? "" : "s"} in one thread`}</small></div>
-        {(rules.thread_cap ?? 4) > 0 && <div className="rule-step then"><span className="rule-label">Then wait</span>{dayStepper(rules.new_thread_gap ?? 1, (v) => setRules({ ...rules, new_thread_gap: v }), "wait before the new-thread reminder")}<small>business day{(rules.new_thread_gap ?? 1) === 1 ? "" : "s"}, then “start a new thread”</small></div>}
-        <div className="rule-days"><span className="rule-label">Reach back after a no <small>· one reminder to try Denied ones again</small></span><div className="chip-row">{[[0, "Never"], [14, "2 weeks"], [30, "1 month"], [60, "2 months"], [90, "3 months"]].map(([days, label]) => <button type="button" key={days} className={`pick-chip${(rules.reach_back_days ?? 30) === days ? " on" : ""}`} aria-pressed={(rules.reach_back_days ?? 30) === days} onClick={() => setRules({ ...rules, reach_back_days: Number(days) })}>{label}</button>)}</div></div>
-        <label className="switch-row rule-switch"><input type="checkbox" checked={rules.auto_cancel_crossed !== false} onChange={(event) => setRules({ ...rules, auto_cancel_crossed: event.target.checked })} /><span className="switch" aria-hidden="true" /><span>Cancel a scheduled follow-up when they reply first<small>Their answer arrives before your “just checking in” goes out? It's cancelled in Gmail for you (Trash, 30 days). Needs the mailbox's “Manage drafts and send” permission.</small></span></label>
-        <div className="rule-days"><span className="rule-label">Business days</span><div className="chip-row">{DAY_NAMES.map((name, day) => <button type="button" key={name} className={`pick-chip${rules.workdays.includes(day) ? " on" : ""}`} aria-pressed={rules.workdays.includes(day)} onClick={() => setRules({ ...rules, workdays: rules.workdays.includes(day) ? rules.workdays.filter((d) => d !== day) : [...rules.workdays, day].sort() })}>{name}</button>)}</div></div>
-        <div className="rule-days"><span className="rule-label">Days off <small>· holidays don't count</small></span><div className="holiday-row"><input type="date" className="field" value={holiday} onChange={(event) => setHoliday(event.target.value)} aria-label="Add a day off" /><Button size="sm" variant="secondary" disabled={!holiday || rules.holidays.includes(holiday)} onClick={() => { setRules({ ...rules, holidays: [...rules.holidays, holiday].sort() }); setHoliday(""); }}>Add</Button></div>{rules.holidays.length > 0 && <div className="chip-row">{rules.holidays.map((h) => <button type="button" key={h} className="pick-chip on" onClick={() => setRules({ ...rules, holidays: rules.holidays.filter((x) => x !== h) })} title="Remove">{h} ×</button>)}</div>}</div>
+        <div className="rule-card">
+          <header><span className="rule-ico" aria-hidden="true"><Send size={15} /></span><div><b>Follow-ups</b><small>While they haven't answered, in one email thread</small></div><UnitSwitch value={gapUnit} onChange={(u) => set({ gap_unit: u })} label="How follow-up waits count" /></header>
+          {rules.gaps.map((gap, i) => <div className="rule-step" key={i}><span className="rule-label">{i === 0 ? "After your first email" : `After your ${ORD(i)} follow-up`}</span>{dayStepper(gap, (v) => setGap(i, v), `wait before ${ORD(i + 1)} follow-up`)}<small>{gapUnit === "calendar" ? `${dayWord(gap, gapUnit)} later` : `${dayWord(gap, gapUnit)} of waiting`}</small>{rules.gaps.length > 1 && <button type="button" className="rule-remove" onClick={() => set({ gaps: rules.gaps.filter((_, j) => j !== i) })} aria-label="Remove this step">×</button>}</div>)}
+          <button type="button" className="rule-add" onClick={() => set({ gaps: [...rules.gaps, rules.then] })} disabled={rules.gaps.length >= 12}>+ Add a step</button>
+          <div className="rule-step then"><span className="rule-label">Every follow-up after that</span>{dayStepper(rules.then, (v) => set({ then: Math.max(1, v) }), "wait for later follow-ups", 30, 1)}<small>{dayWord(rules.then, gapUnit)}</small></div>
+          <div className="rule-step then"><span className="rule-label">Follow-ups in one thread</span>{dayStepper(cap, (v) => set({ thread_cap: Math.min(12, v) }), "follow-ups before a new thread", 12)}<small>{cap === 0 ? "no limit — never a new thread" : `then the next email is a new thread`}</small></div>
+        </div>
+
+        {cap > 0 && <div className="rule-card is-thread">
+          <header><span className="rule-ico" aria-hidden="true"><MailPlus size={15} /></span><div><b>New thread</b><small>After your {ORD(cap)} follow-up with no answer. People you follow up by hand too.</small></div><UnitSwitch value={tUnit} onChange={(u) => set({ new_thread_unit: u })} label="How the new-thread wait counts" /></header>
+          <div className="rule-presets" role="group" aria-label="Quick picks">{THREAD_PRESETS.map(([a, z, label]) => <button type="button" key={label} className={`pick-chip${tUnit === "calendar" && tStart === a && tLate === z ? " on" : ""}`} aria-pressed={tUnit === "calendar" && tStart === a && tLate === z} onClick={() => set({ new_thread_gap: a, new_thread_late: z, new_thread_unit: "calendar" })}>{label}</button>)}</div>
+          <div className="thread-window">
+            <div className="tw-track" aria-hidden="true">
+              <span className="tw-wait" style={{ width: pct(tStart) }} />
+              <span className="tw-win" style={{ left: pct(tStart), width: pct(Math.max(tLate - tStart, 0.4)) }}><em>Best time</em></span>
+              <span className="tw-late" style={{ left: pct(tLate) }}><em>Late</em></span>
+              {ticks.map((t) => <i key={t} style={{ left: pct(t) }}><small>{t === 0 ? "0" : tUnit === "calendar" && t % 7 === 0 ? `${t / 7} wk` : t}</small></i>)}
+            </div>
+            <div className="tw-steps">
+              <label><span>Start from</span>{dayStepper(tStart, (v) => set({ new_thread_gap: v, new_thread_late: Math.max(v, tLate) }), "new thread due from", 120)}<small>{dayWord(tStart, tUnit)} later</small></label>
+              <label><span>Late after</span>{dayStepper(tLate, (v) => set({ new_thread_late: Math.max(v, tStart) }), "new thread late after", 180, tStart)}<small>{dayWord(tLate, tUnit)}</small></label>
+            </div>
+          </div>
+        </div>}
+
+        <div className="rule-card is-no">
+          <header><span className="rule-ico" aria-hidden="true"><RotateCcw size={15} /></span><div><b>After a no</b><small>One new thread with someone who said no, once their answer is this old</small></div>{noDays > 0 && <UnitSwitch value={noUnit} onChange={(u) => set({ reach_back_unit: u, reach_back_days: Math.max(u === "calendar" ? 14 : 10, noDays) })} label="How the wait after a no counts" />}</header>
+          <div className="rule-presets" role="group" aria-label="Quick picks">{NO_PRESETS.map(([d, label]) => <button type="button" key={label} className={`pick-chip${noDays === d && (d === 0 || noUnit === "calendar") ? " on" : ""}`} aria-pressed={noDays === d && (d === 0 || noUnit === "calendar")} onClick={() => set({ reach_back_days: d, ...(d ? { reach_back_unit: "calendar" as DayUnit } : {}) })}>{label}</button>)}</div>
+          {noDays > 0 && <div className="rule-step then"><span className="rule-label">Or exactly</span>{dayStepper(noDays, (v) => set({ reach_back_days: v }), "wait after a no", 365, noMin)}<small>{dayWord(noDays, noUnit)}{noOn ? ` · a no today → ${fmt(noOn)}` : ""}</small></div>}
+        </div>
+
+        <label className="switch-row rule-switch"><input type="checkbox" checked={rules.auto_cancel_crossed !== false} onChange={(event) => set({ auto_cancel_crossed: event.target.checked })} /><span className="switch" aria-hidden="true" /><span>Cancel a scheduled follow-up when they reply first<small>Their answer arrives before your “just checking in” goes out? It's cancelled in Gmail for you (Trash, 30 days). Needs the mailbox's “Manage drafts and send” permission.</small></span></label>
+        <div className="rule-days"><span className="rule-label">Business days <small>· an “every day” wait that ends on another day moves to the next of these</small></span><div className="chip-row">{DAY_NAMES.map((name, day) => <button type="button" key={name} className={`pick-chip${rules.workdays.includes(day) ? " on" : ""}`} aria-pressed={rules.workdays.includes(day)} onClick={() => set({ workdays: rules.workdays.includes(day) ? rules.workdays.filter((d) => d !== day) : [...rules.workdays, day].sort() })}>{name}</button>)}</div></div>
+        <div className="rule-days"><span className="rule-label">Days off <small>· holidays don't count</small></span><div className="holiday-row"><input type="date" className="field" value={holiday} onChange={(event) => setHoliday(event.target.value)} aria-label="Add a day off" /><Button size="sm" variant="secondary" disabled={!holiday || rules.holidays.includes(holiday)} onClick={() => { set({ holidays: [...rules.holidays, holiday].sort() }); setHoliday(""); }}>Add</Button></div>{rules.holidays.length > 0 && <div className="chip-row">{rules.holidays.map((h) => <button type="button" key={h} className="pick-chip on" onClick={() => set({ holidays: rules.holidays.filter((x) => x !== h) })} title="Remove">{h} ×</button>)}</div>}</div>
       </div>
       <div className="rules-preview" aria-live="polite">
         <span className="rule-label">How it plays out</span>
-        <ol>{preview.map((step, i) => <li key={i}><i>{i === 0 ? "✉" : i}</i><span><strong>{step.label}</strong><small>{fmt(step.date)}</small></span></li>)}</ol>
-        <p>A yellow flag appears on the follow-up day and stays until you follow up or they reply. After the last follow-up in a thread, an orange flag says to start a fresh thread instead. Signed and Roster are never chased; Denied ones get a single reach-back reminder.</p>
+        <ol>{preview.map((step, i) => <li key={i} className={step.until ? "is-thread" : ""}><i>{i === 0 ? "✉" : step.until ? <MailPlus size={13} /> : i}</i><span><strong>{step.label}</strong><small>{step.until ? `${fmt(step.date)} to ${fmt(step.until)}` : fmt(step.date)}</small></span></li>)}</ol>
+        {thread && lastFollow && <p className="rp-note"><MailPlus size={13} aria-hidden="true" /> No answer after the {ORD(cap)} follow-up ({fmt(lastFollow.date)})? The new thread shows up {fmt(thread.date)} and turns late after {fmt(thread.until!)}.</p>}
+        <p className="rp-note is-no"><RotateCcw size={13} aria-hidden="true" /> {noDays ? `They say no today? A new thread with them ${fmt(noOn!)}, ${waitWords(noDays, noUnit)} later.` : "Someone who says no is never reminded again."}</p>
+        <p>A yellow flag appears on the follow-up day and stays until you follow up or they reply. Signed and Roster are never chased. Both new threads show in the “New thread” chip on Influencers.</p>
       </div>
     </div>
     <div className="modal-actions rules-actions"><Button variant="ghost" onClick={() => setRules(DEFAULT_FOLLOWUP_RULES)} disabled={JSON.stringify(rules) === JSON.stringify(DEFAULT_FOLLOWUP_RULES)}>Agency default</Button><Button variant="ghost" onClick={() => setRules(saved)} disabled={!dirty}>Cancel</Button><Button onClick={save} disabled={!dirty || !rules.workdays.length}>Save rules</Button></div>

@@ -160,6 +160,9 @@ export function autopilotPool(input: PoolInput): Pool {
     const s = input.states.get(c.id);
     if (!s || s.kind !== "due") continue;
     const round = s.sent ?? s.round;
+    // Past the thread's follow-ups, the next step is a new thread — for everyone, also people you write by hand
+    // (they answered once, then you sent 4 follow-ups with no answer): never "follow up by hand" again in that thread.
+    if (s.next === "new-thread") { out.held.push({ id: c.id, name: c.name, round, why: "new-thread" }); continue; }
     // Anyone who ever answered — or whose conversation went past outreach — is yours to write.
     if (answered.has(c.id)) { out.byHand.push({ id: c.id, name: c.name, round, why: "replied" }); continue; }
     // Status "Replied" with no reply anywhere (no email from their side, nothing logged): probably a click by mistake.
@@ -168,7 +171,6 @@ export function autopilotPool(input: PoolInput): Pool {
     if (input.queued?.has(c.id)) { out.queued.push(c.id); continue; }
     const hold = (why: HoldWhy, mailbox?: string) => out.held.push({ id: c.id, name: c.name, round, why, ...(mailbox ? { mailbox } : {}) });
     if (input.paused) { hold("paused"); continue; }
-    if (s.next === "new-thread") { hold("new-thread"); continue; }
     if (round < 1 || round > 4) { hold("past-4"); continue; }
     if (c.contact_channel && c.contact_channel !== "email") { hold("other-channel"); continue; }
     if (c.email_followups === false || s.last.source !== "gmail" || s.last.channel !== "email" || s.last.dir !== "out") { hold("other-channel"); continue; }
