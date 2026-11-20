@@ -415,6 +415,8 @@ export interface Brand {
   match_topics?: string[];
   /** Set when the brand came from a creator's video (Match → found in videos). */
   discovered?: { creator_id: string; creator: string; kind: string; at: string; auto?: boolean; cleanup?: boolean; why?: string } | null;
+  /** What YOU confirmed on the company's LinkedIn page (company size band + when) — the final say on size. */
+  company_check?: { linkedin_size?: string; at?: string } | null;
   pipeline_status: EntityStatus;
   date_contacted: string | null;
   status_updated_at: string;

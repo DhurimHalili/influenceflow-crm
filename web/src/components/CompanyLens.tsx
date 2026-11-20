@@ -1,7 +1,10 @@
-import { BadgeCheck, Banknote, Building2, CalendarDays, Handshake, Landmark, MapPin, Network, ShoppingBag, Sparkles, Tag, UsersRound, X } from "lucide-react";
-import { useMemo, type ReactNode } from "react";
+import { BadgeCheck, Banknote, Building2, CalendarDays, ExternalLink, Handshake, Landmark, Linkedin, MapPin, Network, ShoppingBag, Sparkles, Tag, UsersRound, X } from "lucide-react";
+import { useMemo, useState, type ReactNode } from "react";
+import { useData } from "../contexts/DataContext";
+import { useToast } from "../contexts/ToastContext";
+import { dateLabel } from "../lib/utils";
 import { useMatch } from "../contexts/MatchContext";
-import { AGE_BANDS, companyView, PRICE_LABEL, priceLevel, REVENUE_BANDS, SIZE_BANDS, viaName, type CompanyView, type Shown } from "../lib/companyFacts";
+import { AGE_BANDS, companyView, LINKEDIN_SIZES, PRICE_LABEL, priceLevel, REVENUE_BANDS, SIZE_BANDS, viaName, type CompanyView, type Shown } from "../lib/companyFacts";
 import { brandDomain, countryName } from "../lib/match";
 import type { Brand } from "../types";
 
@@ -15,7 +18,7 @@ export const NO_LENS: LensPick = { size: [], rev: [], age: [], price: [], flags:
 export const lensCount = (p: LensPick) => p.size.length + p.rev.length + p.age.length + p.price.length + p.flags.length + (p.hq ? 1 : 0);
 
 const FLAGS: { key: string; label: string; icon: ReactNode; test: (v: CompanyView) => boolean; tip: string }[] = [
-  { key: "verified", label: "Verified facts", icon: <BadgeCheck size={13} />, test: (v) => v.quality === "verified", tip: "At least one fact from the company's own record: Wikidata (by their website), their site or their store" },
+  { key: "verified", label: "Verified facts", icon: <BadgeCheck size={13} />, test: (v) => v.quality === "verified", tip: "At least one fact you can stand behind: your LinkedIn check, their own website, or an official record (a filing, a register, a stock exchange)" },
   { key: "listed", label: "Public company", icon: <Landmark size={13} />, test: (v) => !!v.listed, tip: "Listed on a stock exchange (Wikidata)" },
   { key: "group", label: "Part of a group", icon: <Network size={13} />, test: (v) => !!v.parent, tip: "Owned by a parent company (Wikidata) — the deal may sit with the group" },
   { key: "program", label: "Creator program", icon: <Handshake size={13} />, test: (v) => v.program, tip: "Their site runs an affiliate, creator or ambassador program — they already pay creators" },
@@ -32,7 +35,7 @@ export function useCompanies(brands: Brand[]) {
       const intel = m.intel.get(b.id)?.intel || null;
       const domain = brandDomain(b);
       const fits = intel && (!domain || !intel.company || intel.company.domain === domain);
-      out.set(b.id, companyView(fits ? intel : null));
+      out.set(b.id, companyView(fits ? intel : null, b.company_check));
     }
     return out;
   }, [brands, m.intel]);
@@ -61,7 +64,7 @@ function Bars({ title, icon, bands, counts, picked, onPick, unknown, note }: { t
       {bands.map((b) => {
         const c = counts.get(b.key) || { n: 0, verified: 0 };
         const on = picked.includes(b.key);
-        return <button type="button" key={b.key} className={`cl-col${on ? " on" : ""}${c.n ? "" : " empty"}`} aria-pressed={on} onClick={() => onPick(b.key)} disabled={!c.n && !on} title={`${b.label}${b.hint ? ` · ${b.hint}` : ""}: ${c.n} brand${c.n === 1 ? "" : "s"}${c.n ? ` (${c.verified} verified, ${c.n - c.verified} estimate${c.n - c.verified === 1 ? "" : "s"})` : ""}`}>
+        return <button type="button" key={b.key} className={`cl-col${on ? " on" : ""}${c.n ? "" : " empty"}`} aria-pressed={on} onClick={() => onPick(b.key)} disabled={!c.n && !on} title={`${b.label}${b.hint ? ` · ${b.hint}` : ""}: ${c.n} brand${c.n === 1 ? "" : "s"}${c.n ? ` (${c.verified} verified, ${c.n - c.verified} not verified yet)` : ""}`}>
           <em>{c.n || ""}</em>
           <span className="cl-bar" style={{ height: `${Math.max(c.n ? 10 : 3, Math.round((c.n / max) * 100))}%` }}><i style={{ height: c.n ? `${Math.round((c.verified / c.n) * 100)}%` : 0 }} /></span>
           <small>{b.label}</small>
@@ -93,7 +96,7 @@ export function CompanyLens({ brands, views, pick, onChange, shown }: { brands: 
   const n = lensCount(pick);
   return <section className="clens" aria-label="Company lens">
     <div className="clens-head">
-      <div><b><Building2 size={15} aria-hidden="true" /> Company lens</b><small>{stats.verified} of {brands.length} brands have verified facts · the rest are checked by themselves, a few every few minutes. Solid bar = verified, light = estimate.</small></div>
+      <div><b><Building2 size={15} aria-hidden="true" /> Company lens</b><small>{stats.verified} of {brands.length} brands have verified facts · verified = your LinkedIn check, their own website or an official record. Solid bar = verified, light = only a service's number (Apollo, Clay, Hunter).</small></div>
       {n > 0 && <button type="button" className="clens-clear" onClick={() => onChange(NO_LENS)}><X size={13} aria-hidden="true" /> Clear {n} · showing {shown}</button>}
     </div>
     <div className="clens-grid">
@@ -110,7 +113,7 @@ export function CompanyLens({ brands, views, pick, onChange, shown }: { brands: 
   </section>;
 }
 
-const tip = (s: Shown<unknown>, what: string) => `${what}: ${s.label}${s.verified ? ` · from ${viaName(s.via)}${s.as_of ? `, as of ${s.as_of}` : ""}${s.ref ? ` · source: ${hostOf(s.ref)}` : ""}` : ` · estimate from ${viaName(s.via)} (it costs a credit and isn't the company's own number)`}`;
+const tip = (s: Shown<unknown>, what: string) => `${what}: ${s.label}${s.verified ? ` · ${viaName(s.via)}${s.as_of ? `, ${s.as_of}` : ""}${s.ref ? ` · source: ${hostOf(s.ref)}` : ""}` : ` · what ${viaName(s.via)} says — not verified; confirm it on their LinkedIn page`}`;
 const hostOf = (u: string) => { try { return new URL(u).hostname.replace(/^www\./, ""); } catch { return u; } };
 
 /** The company in one line, for rows and cards: "7.3K people ✓ · $4.6B ✓ · since 1981". */
@@ -121,38 +124,75 @@ export function CompanyLine({ view }: { view: CompanyView | undefined }) {
   const parts = bits.filter(([, s]) => !!s);
   if (!parts.length && !view.listed) return null;
   return <span className="cline">
-    {parts.map(([k, s, what]) => <span key={k} className={s!.verified ? "ok" : "est"} title={tip(s!, what)}>{short(s!, k)}{s!.verified ? <BadgeCheck size={10} aria-label="verified" /> : <i>est.</i>}</span>)}
-    {view.listed && <span className="ok" title={`Listed on ${view.listed.exchange}${view.listed.ticker ? ` as ${view.listed.ticker}` : ""} · Wikidata`}>{view.listed.ticker || "Public"}</span>}
+    {parts.map(([k, s, what]) => <span key={k} className={s!.verified ? "ok" : "est"} title={tip(s!, what)}>{short(s!, k)}{s!.verified ? <BadgeCheck size={10} aria-label="verified" /> : <i>{viaName(s!.via)}?</i>}</span>)}
+    {view.listed && <span className="ok" title={`Listed on ${view.listed.exchange}${view.listed.ticker ? ` as ${view.listed.ticker}` : ""} · official record`}>{view.listed.ticker || "Public"}</span>}
   </span>;
 }
 const compact = (n: number) => (!Number.isFinite(n) || n <= 0 ? "" : n >= 1e6 ? `${(n / 1e6).toFixed(1).replace(/\.0$/, "")}M` : n >= 1e4 ? `${Math.round(n / 1e3)}K` : n >= 1e3 ? `${(n / 1e3).toFixed(1).replace(/\.0$/, "")}K` : String(n));
 
-/** The brand profile's company card: every fact with where it came from and when it was true. */
-export function CompanyCard({ view, checked, paidNote }: { view: CompanyView; checked: boolean; paidNote?: string }) {
+/** The brand profile's company card: every fact with where it came from and when it was true, and the LinkedIn
+ *  size check — the final say on how many people work there. */
+export function CompanyCard({ view, checked, paidNote, brand, linkedin }: { view: CompanyView; checked: boolean; paidNote?: string; brand: Brand; linkedin: string }) {
   const year = new Date().getFullYear();
   const tiles: { key: string; icon: ReactNode; label: string; value: string; s?: Shown<unknown>; extra?: string }[] = [];
-  if (view.employees) tiles.push({ key: "people", icon: <UsersRound size={14} />, label: "People", value: view.employees.verified ? view.employees.v.toLocaleString("en-US") : view.employees.label, s: view.employees });
+  if (view.employees) tiles.push({ key: "people", icon: <UsersRound size={14} />, label: "People", value: view.employees.via === "linkedin" ? view.employees.label : view.employees.verified ? view.employees.v.toLocaleString("en-US") : view.employees.label, s: view.employees });
   if (view.revenue) tiles.push({ key: "rev", icon: <Banknote size={14} />, label: "Revenue a year", value: view.revenue.label, s: view.revenue });
   if (view.founded) tiles.push({ key: "since", icon: <CalendarDays size={14} />, label: "Founded", value: String(view.founded.v), s: view.founded, extra: `${year - view.founded.v} years` });
   if (view.country || view.hq) tiles.push({ key: "home", icon: <MapPin size={14} />, label: "Based in", value: [view.hq, view.country ? countryName(view.country.v) : ""].filter(Boolean).join(", "), s: view.country });
   if (view.listed) tiles.push({ key: "listed", icon: <Landmark size={14} />, label: "Listed", value: `${view.listed.exchange}${view.listed.ticker ? `: ${view.listed.ticker}` : ""}` });
   if (view.parent) tiles.push({ key: "group", icon: <Network size={14} />, label: "Part of", value: view.parent });
   const verified = view.quality === "verified";
-  if (!tiles.length && !view.industry?.length) {
-    return <div className="ccard empty"><Building2 size={16} aria-hidden="true" /><p>{checked ? "Wikidata has no record for this website and their site doesn't say. Small brands often aren't listed anywhere free." : "Checking Wikidata and their website for free facts…"}{paidNote ? ` ${paidNote}` : ""}</p></div>;
-  }
-  return <div className={`ccard${verified ? " is-verified" : ""}`}>
+  return <div className={`ccard${verified ? " is-verified" : ""}${!tiles.length ? " is-bare" : ""}`}>
     <header>
       <b>{view.legal || "Company"}</b>
-      <span className={`ccard-badge${verified ? " ok" : ""}`}>{verified ? <><BadgeCheck size={12} aria-hidden="true" /> Verified · their own record</> : "Estimates only"}</span>
+      <span className={`ccard-badge${verified ? " ok" : ""}`}>{verified ? <><BadgeCheck size={12} aria-hidden="true" /> Verified</> : view.quality === "estimate" ? "Not verified yet" : "Nothing verified yet"}</span>
     </header>
-    <div className="ccard-tiles">
+    {tiles.length ? <div className="ccard-tiles">
       {tiles.map((t) => <div key={t.key} className={`ccard-tile${t.s && !t.s.verified ? " est" : ""}`}>
         <small><span aria-hidden="true">{t.icon}</span>{t.label}</small>
         <strong>{t.value}</strong>
-        <em>{t.extra ? `${t.extra} · ` : ""}{t.s ? t.s.verified ? <>{viaName(t.s.via)}{t.s.as_of ? `, ${t.s.as_of}` : ""}{t.s.ref ? <> · <a href={t.s.ref} target="_blank" rel="noopener noreferrer">{hostOf(t.s.ref)}</a></> : ""}</> : `Estimate · ${viaName(t.s.via)}` : "Wikidata"}</em>
+        <em>{t.extra ? `${t.extra} · ` : ""}{t.s ? t.s.verified ? <>{viaName(t.s.via)}{t.s.as_of ? `, ${/^\d{4}-\d{2}-\d{2}$/.test(t.s.as_of) ? dateLabel(t.s.as_of) : t.s.as_of}` : ""}{t.s.ref ? <> · <a href={t.s.ref} target="_blank" rel="noopener noreferrer">{hostOf(t.s.ref)}</a></> : ""}</> : `${viaName(t.s.via)} says · not verified` : "Official record"}</em>
       </div>)}
-    </div>
+    </div> : <p className="ccard-none">{checked ? "No official record or company page states these for this website — nothing is shown rather than a guess." : "Looking for an official record on their website…"}{paidNote ? ` ${paidNote}` : ""}</p>}
     {view.industry?.length ? <div className="ccard-ind">{view.industry.map((i) => <span key={i}>{i}</span>)}</div> : null}
+    <LinkedinCheck view={view} brand={brand} linkedin={linkedin} />
+  </div>;
+}
+
+/** You read the size off their LinkedIn page and tap it: the only company-size source that is always current. */
+function LinkedinCheck({ view, brand, linkedin }: { view: CompanyView; brand: Brand; linkedin: string }) {
+  const data = useData();
+  const { toast } = useToast();
+  const [open, setOpen] = useState(false);
+  const about = linkedin ? `${linkedin.replace(/\/$/, "")}/about/` : `https://www.linkedin.com/search/results/companies/?keywords=${encodeURIComponent(brand.name)}`;
+  const save = (key: string | null) => {
+    const before = brand.company_check || null;
+    data.updateBrand(brand.id, { company_check: key ? { linkedin_size: key, at: new Date().toISOString() } : null }, { activity: key ? `${brand.name}: company size confirmed on LinkedIn (${LINKEDIN_SIZES.find((x) => x.key === key)?.label} employees)` : undefined, quiet: !key });
+    setOpen(false);
+    toast(key ? `Saved: ${LINKEDIN_SIZES.find((x) => x.key === key)?.label} employees, as LinkedIn shows` : "LinkedIn check removed", "success", { label: "Undo", run: () => data.updateBrand(brand.id, { company_check: before }, { quiet: true }) });
+  };
+  const li = view.linkedin;
+  const est = view.estimate || (view.employees && !view.employees.verified ? view.employees : undefined);
+  // An official record already gives a number (e.g. a 10-K): LinkedIn shows today's size next to it.
+  const official = !li && view.employees?.verified ? view.employees : undefined;
+  return <div className={`licheck${li ? " done" : ""}`}>
+    <span className="licheck-mark" aria-hidden="true"><Linkedin size={15} /></span>
+    <div className="licheck-main">
+      {li && !open ? <>
+        <b>{li.label} employees on LinkedIn</b>
+        <small>Checked by you{li.at ? ` ${dateLabel(li.at.slice(0, 10))}` : ""}{est && est.via !== "linkedin" ? est.agrees ? ` · ${viaName(est.via)}'s ${est.label} matches` : ` · ${viaName(est.via)} says ${est.label} — LinkedIn wins` : ""}</small>
+      </> : <>
+        <b>{official ? `Official record: ${official.v.toLocaleString("en-US")}${official.as_of ? ` (${official.as_of.slice(0, 4)})` : ""} — today's size on LinkedIn?` : est ? `${viaName(est.via)} says ${est.label} — is that right?` : "How many people work there?"}</b>
+        <small>Open their LinkedIn page, find “Company size”, tap the same range here. It becomes the verified size.</small>
+        <div className="licheck-sizes" role="group" aria-label="Company size as LinkedIn shows it">
+          {LINKEDIN_SIZES.map((x) => <button type="button" key={x.key} className={li?.key === x.key ? "on" : ""} aria-pressed={li?.key === x.key} onClick={() => save(x.key)}>{x.label}</button>)}
+        </div>
+      </>}
+    </div>
+    <div className="licheck-actions">
+      <a className="btn btn-secondary btn-sm" href={about} target="_blank" rel="noopener noreferrer">{linkedin ? "Open LinkedIn" : "Find on LinkedIn"} <ExternalLink size={12} aria-hidden="true" /></a>
+      {li && !open && <button type="button" className="btn btn-ghost btn-sm" onClick={() => setOpen(true)}>Change</button>}
+      {li && open && <button type="button" className="btn btn-ghost btn-sm" onClick={() => save(null)}>Remove check</button>}
+    </div>
   </div>;
 }

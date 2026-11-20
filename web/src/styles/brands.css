@@ -314,3 +314,22 @@
 .ccard.empty { grid-template-columns: auto 1fr; align-items: start; color: var(--muted); border-style: dashed; }
 .ccard.empty p { margin: 0; font-size: 12.5px; line-height: 1.5; }
 .ccard.empty svg { color: var(--muted); margin-top: 2px; }
+
+/* LinkedIn size check (brand profile): the final say on company size */
+.ccard.is-bare { gap: 8px; }
+.ccard-none { margin: 0; color: var(--muted); font-size: 12.5px; line-height: 1.5; }
+.licheck { --li: #0a66c2; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: start; padding: 10px 12px; border: 1px dashed color-mix(in srgb, var(--li) 45%, var(--line)); border-radius: 12px; background: color-mix(in srgb, var(--li) 6%, var(--surface-solid)); }
+.licheck.done { border-style: solid; }
+.licheck-mark { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 8px; background: var(--li); color: #fff; }
+.licheck-main { display: grid; gap: 3px; min-width: 0; }
+.licheck-main b { font: 700 13.5px "Manrope", sans-serif; color: var(--text); overflow-wrap: anywhere; }
+.licheck-main small { color: var(--muted); font-size: 12px; line-height: 1.45; }
+.licheck-sizes { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 5px; }
+.licheck-sizes button { min-height: 30px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: 999px; background: var(--surface-solid); color: var(--text); font: 650 12px "Manrope", sans-serif; cursor: pointer; transition: border-color .15s ease-out, background .15s ease-out; }
+.licheck-sizes button:hover { border-color: var(--li); }
+.licheck-sizes button.on { background: var(--li); border-color: var(--li); color: #fff; }
+.licheck-sizes button:focus-visible { outline: 2px solid var(--li); outline-offset: 1px; }
+.licheck-actions { display: flex; flex-direction: column; gap: 6px; align-items: stretch; }
+[data-theme="dark"] .licheck { --li: #4c9be8; }
+@media (max-width: 560px) { .licheck { grid-template-columns: auto minmax(0, 1fr); } .licheck-actions { grid-column: 1 / -1; flex-direction: row; } }
+@media (prefers-reduced-motion: reduce) { .licheck-sizes button { transition: none; } }

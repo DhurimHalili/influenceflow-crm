@@ -1,14 +1,19 @@
-// Company facts you can trust (owner's rule, Nov 2026): size, revenue, age, home, industry, listing, parent —
-// taken ONLY from a source that is about this very company, never guessed, never a credit spent:
-//   • Wikidata — the item whose official website (P856) IS the brand's domain; every value keeps its date
-//     ("as of 2024") and the reference it cites (annual report, filing) when Wikidata has one;
+// Company facts you can trust (owner's rule, Nov 2026): only what the company itself or an official record says,
+// or what YOU confirmed on its LinkedIn page — never guessed, never a crowd edit without a source:
+//   • LinkedIn, checked by you: LinkedIn can't be read by a server (it blocks automated visits and its terms forbid
+//     it), so the brand profile opens the company's LinkedIn page and you tap the size it shows ("51–200") — the
+//     final say on company size;
+//   • Wikidata ONLY where the value cites an official source: the brand's own website, a regulator filing (sec.gov,
+//     any .gov, Companies House), or a stock exchange — e.g. Logitech's 7,300 people from its SEC 10-K. A Wikidata
+//     value with no such source is anyone's edit and is NOT shown;
 //   • their own website — the Organization block it publishes (JSON-LD: founding date, employees, country);
 //   • their own store — Shopify's public shop file (country, base currency) and the products the site lists.
-// Paid lookups (Apollo, Clay, Hunter) cost credits and their size / revenue are ESTIMATES: shown apart,
-// labelled "estimate", and never mixed into a verified value.
+// Paid lookups (Apollo, Clay, Hunter) cost credits and their size / revenue are the service's own numbers (mostly
+// from LinkedIn, possibly stale): shown as "Apollo says…", never as verified — your LinkedIn check confirms or
+// overrides them.
 // Shared by the app and brand-match (explicit `.ts` imports, no npm packages).
 
-export type FactSource = "wikidata" | "site" | "store";
+export type FactSource = "wikidata" | "site" | "store" | "linkedin";
 export type Fact<T> = { v: T; via: FactSource; /** When it was true ("2024", "2023-06-30"). */ as_of?: string; /** Where Wikidata got it (a report / filing URL). */ ref?: string };
 
 export type VerifiedFacts = {
@@ -30,6 +35,35 @@ export type VerifiedFacts = {
   /** The registered / legal name. */
   legal?: Fact<string>;
 };
+
+// ----- which sources count ------------------------------------------------------------------------------------
+
+const OFFICIAL_HOSTS = ["sec.gov", "companieshouse.gov.uk", "find-and-update.company-information.service.gov.uk", "nasdaq.com", "nyse.com", "londonstockexchange.com", "six-group.com", "deutsche-boerse.com", "boerse-frankfurt.de", "euronext.com", "jpx.co.jp", "hkexnews.hk", "hkex.com.hk", "sedarplus.ca", "asx.com.au", "nasdaqomxnordic.com", "krx.co.kr", "twse.com.tw", "sgx.com", "bseindia.com", "nseindia.com", "unternehmensregister.de", "bundesanzeiger.de", "infogreffe.fr", "kvk.nl", "annualreports.com"];
+/** Is this a source the company itself or an official register / regulator / exchange publishes? */
+export function officialSource(url: string | undefined, domain: string): boolean {
+  if (!url) return false;
+  let host = "";
+  try { host = new URL(url).hostname.toLowerCase().replace(/^www\./, ""); } catch { return false; }
+  const d = String(domain || "").toLowerCase().replace(/^www\./, "");
+  if (d && (host === d || host.endsWith(`.${d}`))) return true;
+  if (/(^|\.)gov(\.[a-z]{2})?$|\.gov\.[a-z]{2}$|(^|\.)gouv\.fr$|(^|\.)europa\.eu$/.test(host)) return true;
+  return OFFICIAL_HOSTS.some((h) => host === h || host.endsWith(`.${h}`));
+}
+/** Their own website / their own store: the company's own words. */
+const ownWords = (via: string) => via === "site" || via === "store" || via === "linkedin";
+/** A fact we may show as verified: their own words, your LinkedIn check, or Wikidata citing an official source. */
+export const trusted = (f: { via: string; ref?: string } | undefined, domain: string) => !!f && (ownWords(f.via) || (f.via === "wikidata" && officialSource(f.ref, domain)));
+
+/** LinkedIn's own company-size bands, as its "About" page shows them. */
+export const LINKEDIN_SIZES = [
+  { key: "1", label: "1", n: 1 }, { key: "2-10", label: "2–10", n: 6 }, { key: "11-50", label: "11–50", n: 30 }, { key: "51-200", label: "51–200", n: 120 },
+  { key: "201-500", label: "201–500", n: 350 }, { key: "501-1000", label: "501–1,000", n: 750 }, { key: "1001-5000", label: "1,001–5,000", n: 3000 },
+  { key: "5001-10000", label: "5,001–10,000", n: 7500 }, { key: "10001+", label: "10,001+", n: 15000 },
+] as const;
+export type CompanyCheck = { linkedin_size?: string; at?: string };
+const sizeRange = (key: string) => { const m = /^(\d+)(?:-(\d+))?(\+)?$/.exec(key); if (!m) return null; const lo = Number(m[1]); return { lo, hi: m[3] ? Infinity : Number(m[2] || m[1]) }; };
+/** Does a service's number fall inside the band LinkedIn shows? */
+export const agreesWithLinkedin = (n: number | undefined, key: string | undefined) => { const r = key ? sizeRange(key) : null; return !!r && !!n && n >= r.lo && n <= r.hi; };
 
 // ----- Wikidata entity JSON → facts ------------------------------------------------------------------------
 
@@ -103,7 +137,7 @@ export const qidsToName = (r: RawFacts) => Array.from(new Set([r.revenue?.unit, 
 export type QidInfo = { label?: string; iso2?: string; currency?: string };
 
 /** The finished facts: names filled in, anything we couldn't name left out (never a bare "Q123"). */
-export function buildFacts(r: RawFacts, info: Map<string, QidInfo>, at: string): VerifiedFacts {
+export function buildFacts(r: RawFacts, info: Map<string, QidInfo>, at: string, domain = ""): VerifiedFacts {
   const w = (extra: { as_of?: string; ref?: string } = {}) => ({ via: "wikidata" as const, ...(extra.as_of ? { as_of: extra.as_of } : {}), ...(extra.ref ? { ref: extra.ref } : {}) });
   const out: VerifiedFacts = { at, qid: r.qid || undefined };
   if (r.employees) out.employees = { v: r.employees.n, ...w({ as_of: r.employees.at, ref: r.employees.ref }) };
@@ -121,6 +155,11 @@ export function buildFacts(r: RawFacts, info: Map<string, QidInfo>, at: string):
   const parent = r.parent ? info.get(r.parent)?.label : "";
   if (parent) out.parent = { v: parent, ...w() };
   if (r.legal) out.legal = { v: r.legal, ...w() };
+  // Only values that cite an official source are kept (owner's rule): a Wikidata value without one is anyone's edit.
+  if (domain) for (const k of Object.keys(out) as (keyof VerifiedFacts)[]) {
+    const f = out[k] as Fact<unknown> | undefined;
+    if (f && typeof f === "object" && "via" in f && !trusted(f, domain)) delete out[k];
+  }
   return out;
 }
 
@@ -209,46 +248,63 @@ export function sizeFromText(text: string | undefined): number | undefined {
   return nums.length >= 2 ? Math.round((nums[0] + nums[1]) / 2) : nums[0];
 }
 
-type Estimates = { employees?: number; size?: string; revenue?: string; industry?: string; country?: string; founded?: number; facts_via?: string };
+type Estimates = { employees?: number; size?: string; revenue?: string; industry?: string; country?: string; founded?: number; facts_via?: string; domain?: string };
 type StoreBits = { platform?: string; products?: number; price?: { median: number; currency: string } | null; programs?: unknown[]; geo?: { shop?: string; cur?: string; hq?: string } | null };
 
-export type Shown<T> = { v: T; label: string; verified: boolean; via: string; as_of?: string; ref?: string };
+export type Shown<T> = { v: T; label: string; verified: boolean; via: string; as_of?: string; ref?: string; agrees?: boolean };
 /** One brand's company, ready for chips, filters and the profile. */
 export type CompanyView = {
   employees?: Shown<number>; revenue?: Shown<number /* USD for bands */>; founded?: Shown<number>; country?: Shown<string>;
   hq?: string; industry?: string[]; listed?: { exchange: string; ticker: string }; parent?: string; legal?: string;
+  /** What a paid service said about size when your LinkedIn check (or an official record) already decides it. */
+  estimate?: Shown<number>;
+  /** Your LinkedIn check, when there is one. */
+  linkedin?: { key: string; label: string; at?: string };
   size?: string; rev?: string; age?: string;
   shop?: string; products: number; price?: { median: number; currency: string }; program: boolean;
-  /** "verified" = at least one fact from the company / Wikidata; "estimate" = only a paid service's numbers; "none". */
+  /** "verified" = at least one fact from the company's own words, an official record or your LinkedIn check;
+   *  "estimate" = only a paid service's numbers; "none". */
   quality: "verified" | "estimate" | "none";
 };
 
-const VIA_NAME: Record<string, string> = { wikidata: "Wikidata", site: "Their website", store: "Their store", apollo: "Apollo", clay: "Clay", hunter: "Hunter" };
+const VIA_NAME: Record<string, string> = { wikidata: "Official record", site: "Their website", store: "Their store", linkedin: "LinkedIn, checked by you", apollo: "Apollo", clay: "Clay", hunter: "Hunter" };
 export const viaName = (via: string) => VIA_NAME[via] || via;
 
-export function companyView(intel: ({ company?: (Estimates & { verified?: VerifiedFacts | null }) | null } & StoreBits) | null | undefined): CompanyView {
+export function companyView(intel: ({ company?: (Estimates & { verified?: VerifiedFacts | null }) | null } & StoreBits) | null | undefined, check?: CompanyCheck | null): CompanyView {
   const co = intel?.company || null;
-  const v = co?.verified || null;
+  const domain = co?.domain || "";
+  // Only facts we can stand behind: their own words or an official source (older rows were saved before this rule).
+  const raw = co?.verified || null;
+  const ok = <K extends keyof VerifiedFacts>(k: K) => { const f = raw?.[k] as (Fact<unknown> & { via: string; ref?: string }) | undefined; return f && trusted(f, domain) ? raw![k] : undefined; };
   const est = co || {};
   const paid = est.facts_via || "";
   const out: CompanyView = { products: Math.max(0, Number(intel?.products) || 0), program: !!intel?.programs?.length, quality: "none" };
   const fact = <T,>(f: Fact<T> | undefined, label: (x: T) => string): Shown<T> | undefined => (f ? { v: f.v, label: label(f.v), verified: true, via: f.via, as_of: f.as_of, ref: f.ref } : undefined);
-  out.employees = fact(v?.employees, (n) => n.toLocaleString("en-US"));
-  if (!out.employees) {
-    const n = est.employees || sizeFromText(est.size);
-    if (n && paid) out.employees = { v: n, label: est.size ? est.size.replace(/\s*-\s*/, "–") : `≈ ${n.toLocaleString("en-US")}`, verified: false, via: paid };
-  }
-  if (v?.revenue) out.revenue = { v: toUsd(v.revenue.v.amount, v.revenue.v.currency), label: moneyShort(v.revenue.v.amount, v.revenue.v.currency), verified: true, via: "wikidata", as_of: v.revenue.as_of, ref: v.revenue.ref };
+  // People: your LinkedIn check decides; then an official record / their own site; a paid service's number is only "what Apollo says".
+  const li = check?.linkedin_size ? LINKEDIN_SIZES.find((x) => x.key === check.linkedin_size) : undefined;
+  const official = fact(ok("employees") as Fact<number> | undefined, (n) => n.toLocaleString("en-US"));
+  const paidN = paid ? est.employees || sizeFromText(est.size) : undefined;
+  const paidShown: Shown<number> | undefined = paidN ? { v: paidN, label: est.size ? est.size.replace(/\s*-\s*/, "–") : `≈ ${paidN.toLocaleString("en-US")}`, verified: false, via: paid, agrees: li ? agreesWithLinkedin(paidN, li.key) : undefined } : undefined;
+  if (li) {
+    out.linkedin = { key: li.key, label: li.label, at: check?.at };
+    out.employees = { v: li.n, label: li.label, verified: true, via: "linkedin", as_of: check?.at?.slice(0, 10) };
+    out.estimate = paidShown;
+  } else if (official) { out.employees = official; out.estimate = paidShown; }
+  else out.employees = paidShown;
+  const rev = ok("revenue") as Fact<{ amount: number; currency: string }> | undefined;
+  if (rev) out.revenue = { v: toUsd(rev.v.amount, rev.v.currency), label: moneyShort(rev.v.amount, rev.v.currency), verified: true, via: rev.via, as_of: rev.as_of, ref: rev.ref };
   else if (est.revenue && paid) { const usd = estimateUsd(est.revenue); if (usd) out.revenue = { v: usd, label: est.revenue.replace(/^(\d)/, "$$$1").replace(/\s*-\s*/, "–"), verified: false, via: paid }; }
-  out.founded = fact(v?.founded, String) || (est.founded && paid ? { v: est.founded, label: String(est.founded), verified: false, via: paid } : undefined);
-  out.country = fact(v?.country, String) || (intel?.geo?.hq ? { v: intel.geo.hq, label: intel.geo.hq, verified: true, via: "wikidata" } : est.country && paid ? { v: est.country, label: est.country, verified: false, via: paid } : undefined);
-  out.hq = v?.hq?.v;
-  out.industry = v?.industry?.v || (est.industry ? [est.industry] : undefined);
-  out.listed = v?.listed?.v; out.parent = v?.parent?.v; out.legal = v?.legal?.v;
+  out.founded = fact(ok("founded") as Fact<number> | undefined, String) || (est.founded && paid ? { v: est.founded, label: String(est.founded), verified: false, via: paid } : undefined);
+  out.country = fact(ok("country") as Fact<string> | undefined, String) || (est.country && paid ? { v: est.country, label: est.country, verified: false, via: paid } : undefined);
+  out.hq = (ok("hq") as Fact<string> | undefined)?.v;
+  out.industry = (ok("industry") as Fact<string[]> | undefined)?.v || (est.industry ? [est.industry] : undefined);
+  out.listed = (ok("listed") as Fact<{ exchange: string; ticker: string }> | undefined)?.v;
+  out.parent = (ok("parent") as Fact<string> | undefined)?.v;
+  out.legal = (ok("legal") as Fact<string> | undefined)?.v;
   out.size = sizeBand(out.employees?.v); out.rev = revenueBand(out.revenue?.v); out.age = ageBand(out.founded?.v);
   out.shop = intel?.geo?.shop || undefined;
   if (intel?.price && intel.price.median > 0) out.price = { median: intel.price.median, currency: intel.price.currency };
-  const anyVerified = [out.employees, out.revenue, out.founded].some((x) => x?.verified) || !!(v?.listed || v?.parent || v?.industry || v?.hq || v?.country);
+  const anyVerified = [out.employees, out.revenue, out.founded, out.country].some((x) => x?.verified) || !!(out.listed || out.parent || out.legal || out.hq);
   out.quality = anyVerified ? "verified" : out.employees || out.revenue || out.founded ? "estimate" : "none";
   return out;
 }
