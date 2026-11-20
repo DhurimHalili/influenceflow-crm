@@ -137,3 +137,4 @@ NOT moved) and every public table, then verifies row count + checksum per table.
   Fixed (ids first, server-side filters, relink only when brands/links changed, rebuild only when a
   transcript changed something). Lesson: before a move, rank edge_logs GET requests by count ×
   (row size × rows) — `request.search` per path — and kill whole-table reads on timers.
+- 2026-11-21 · Supabase warned "depleting Disk IO budget" (free compute). Causes were WRITES: every deal-link rebuild rewrote every link (~117k row updates), unchanged videos re-saved whole, pg_cron run log never pruned. Fixed (link fingerprints, stamp-only updates, nightly log prune, timers 5/10 min). Lesson: check `pg_stat_all_tables` n_tup_upd/ins per table, not only reads, after a move.

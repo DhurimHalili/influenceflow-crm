@@ -36,7 +36,9 @@ const ALLOWED_ORIGINS = new Set([new URL(APP_URL).origin, "http://localhost:5173
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 // How often a creator's stats are refreshed. Every 6 hours keeps 130+ creators well inside ONE free key
 // (10,000 units a day; a refresh costs ~3): hourly would spend ~10,000 on refreshes alone. YT_REFRESH_HOURS overrides.
-const FRESH_MS = Math.max(1, Math.min(48, Number(Deno.env.get("YT_REFRESH_HOURS")) || 6)) * 3600_000 - 5 * 60_000;
+// Owner's rule (Nov 2026): background refreshes are rare — once a day at most for people you're talking to;
+// the Refresh buttons (all / one profile) fetch the latest any time.
+const FRESH_MS = Math.max(1, Math.min(72, Number(Deno.env.get("YT_REFRESH_HOURS")) || 24)) * 3600_000 - 5 * 60_000;
 // The people you're talking to are refreshed most often; parked and closed ones far less (their numbers
 // matter less and every refresh costs ~3 units of the key's 10,000 a day).
 const CADENCE: Record<string, number> = { negotiating: 1, replied: 1, inbound: 1, roster: 1, signed: 1, contacted: 2, new: 2, no_reply: 4, denied: 12 };
@@ -183,12 +185,17 @@ Deno.serve(async (req) => {
     for (const id of on) { const r = await ringFor(admin, id).catch(() => null); if (r && await runInRing(r, async () => youtubeConfigured())) rings.set(id, r); }
     if (!rings.size) return json({ refreshed: 0, skipped: 0, keyless: on.size });
     const quota = new Set<string>();
-    const { data: rows } = await admin.from("creators").select("id, user_id, name, country, contact_email, niche, avg_views, engagement_rate, socials, youtube, youtube_synced_at, stars_engagement, stars_consistency, stars_demographics, pipeline_status").in("user_id", [...rings.keys()]).is("archived_at", null).or(`youtube_synced_at.is.null,youtube_synced_at.lt.${stale}`).order("youtube_synced_at", { ascending: true, nullsFirst: true }).limit(1000);
+    // Who is due: ids + dates only (the full rows — YouTube data included — only for the ones this run refreshes).
+    const { data: heads } = await admin.from("creators").select("id, youtube_synced_at, pipeline_status").in("user_id", [...rings.keys()]).is("archived_at", null).or(`youtube_synced_at.is.null,youtube_synced_at.lt.${stale}`).order("youtube_synced_at", { ascending: true, nullsFirst: true }).limit(1000);
     // Due by their stage's cadence; never-read first, then the hottest stages, then the oldest.
     const now = Date.now();
-    const due = ((rows || []) as (CreatorRow & { pipeline_status?: string })[])
+    const order = ((heads || []) as { id: string; youtube_synced_at: string | null; pipeline_status: string | null }[])
       .filter((c) => !c.youtube_synced_at || now - new Date(c.youtube_synced_at).getTime() >= dueAfter(c.pipeline_status || ""))
-      .sort((a, b) => Number(!!a.youtube_synced_at) - Number(!!b.youtube_synced_at) || (CADENCE[a.pipeline_status || ""] ?? 2) - (CADENCE[b.pipeline_status || ""] ?? 2) || String(a.youtube_synced_at).localeCompare(String(b.youtube_synced_at)));
+      .sort((a, b) => Number(!!a.youtube_synced_at) - Number(!!b.youtube_synced_at) || (CADENCE[a.pipeline_status || ""] ?? 2) - (CADENCE[b.pipeline_status || ""] ?? 2) || String(a.youtube_synced_at).localeCompare(String(b.youtube_synced_at)))
+      .slice(0, 60).map((c) => c.id);
+    const { data: rows } = order.length ? await admin.from("creators").select("id, user_id, name, country, contact_email, niche, avg_views, engagement_rate, socials, youtube, youtube_synced_at, stars_engagement, stars_consistency, stars_demographics, pipeline_status").in("id", order) : { data: [] };
+    const byId = new Map(((rows || []) as (CreatorRow & { pipeline_status?: string })[]).map((c) => [c.id, c]));
+    const due = order.map((id) => byId.get(id)).filter((c): c is CreatorRow & { pipeline_status?: string } => !!c);
     let done = 0, skipped = 0, saved = 0;
     for (const c of due) {
       if (Date.now() > deadline) break;
@@ -215,12 +222,15 @@ Deno.serve(async (req) => {
     let searched = 0;
     if (Date.now() < deadline - 20_000) {
       const since = new Date(Date.now() - CHANNELS_DAYS * 86_400_000).toISOString();
-      const { data: rows2 } = await admin.from("creators").select("id, user_id, socials, youtube, channels, pipeline_status").in("user_id", [...rings.keys()]).is("archived_at", null)
+      // Ids first, the full rows only for this run's few.
+      const { data: heads2 } = await admin.from("creators").select("id, pipeline_status, at:channels->>at").in("user_id", [...rings.keys()]).is("archived_at", null)
         .or(`channels->>at.is.null,channels->>at.lt.${since}`).limit(1000);
-      const due2 = ((rows2 || []) as { id: string; user_id: string; socials: Social[] | null; youtube: Record<string, unknown> | null; channels: Record<string, unknown> | null; pipeline_status: string | null }[])
-        .filter((c) => youtubeOf(c.socials))
-        .sort((a, b) => Number(!!a.channels?.at) - Number(!!b.channels?.at) || (CADENCE[a.pipeline_status || ""] ?? 2) - (CADENCE[b.pipeline_status || ""] ?? 2))
-        .slice(0, CHANNELS_PER_RUN);
+      const pick = ((heads2 || []) as { id: string; pipeline_status: string | null; at: string | null }[])
+        .sort((a, b) => Number(!!a.at) - Number(!!b.at) || (CADENCE[a.pipeline_status || ""] ?? 2) - (CADENCE[b.pipeline_status || ""] ?? 2))
+        .slice(0, CHANNELS_PER_RUN * 3).map((c) => c.id);
+      const { data: rows2 } = pick.length ? await admin.from("creators").select("id, user_id, socials, youtube, channels, pipeline_status").in("id", pick) : { data: [] };
+      const full2 = new Map(((rows2 || []) as { id: string; user_id: string; socials: Social[] | null; youtube: Record<string, unknown> | null; channels: Record<string, unknown> | null; pipeline_status: string | null }[]).map((c) => [c.id, c]));
+      const due2 = pick.map((id) => full2.get(id)).filter((c): c is NonNullable<typeof c> => !!c && !!youtubeOf(c.socials)).slice(0, CHANNELS_PER_RUN);
       for (const c of due2) {
         if (Date.now() > deadline - 10_000) break;
         const ring = rings.get(c.user_id);

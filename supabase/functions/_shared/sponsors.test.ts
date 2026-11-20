@@ -1,4 +1,5 @@
 // Run: node --experimental-strip-types supabase/functions/_shared/sponsors.test.ts
+import { everyday } from "./commonWords.ts";
 import { brandish, cleanName, combine, dealProof, domainFits, nameAsDomain, readTranscript, hostKind, linksToFollow, normalizeDomain, readVideo, sureness, type Known, type VideoIn } from "./sponsors.ts";
 
 let fail = 0;
@@ -205,6 +206,19 @@ const trBrands = (r: ReturnType<typeof readTranscript>) => r.mentions.map((m) =>
 eq("spoken: known brand after 'sponsored by'", trBrands(tr("hey guys welcome back. this video is sponsored by keychron. their new q1 keyboard is great")), ["Keychron|sponsored"]);
 yes("spoken: known brand is sure + has a time", (() => { const m = tr("ok so today's video is sponsored by keychron and i love it").mentions[0]; return m.confidence >= 0.85 && m.t === 30 && m.signals.includes("transcript"); })());
 eq("spoken: the brand the description links (everyday word)", trBrands(readTranscript(capsOf("before we start a huge thank you to ridge for sponsoring this video"), { ...ctx, local: [{ key: "ridge.com", name: "Ridge", domain: "ridge.com", domainFrom: "link", kind: "affiliate", confidence: 0.6, signals: ["description"], quote: "Ridge: https://ridge.com/x" }] } as never)), ["Ridge|sponsored"]);
+// Nov 2026 (Toasty Bros): "Hours" — a found brand that is an everyday word — was linked from "spend hours at your desk".
+{
+  const withHours = { ...ctx, known: [...known, { key: "hourscollection.com", name: "Hours", domain: "hourscollection.com" }], everyday };
+  const hbada = [{ key: "hbada.com", name: "HBADA", domain: "hbada.com", domainFrom: "link", kind: "sponsored", confidence: 0.82, signals: ["description", "paid_label"], quote: "HBADA Official Website" }];
+  eq("spoken: an everyday-word brand is not the sponsor", trBrands(readTranscript(capsOf("into this gta 6 gaming setup afterward from today's sponsor. when you spend hours at your desk every day like we do, it's important to have a good chair that"), withHours as never)).filter((x) => x.startsWith("Hours")), []);
+  eq("spoken: …the description's sponsor is", trBrands(readTranscript(capsOf("into this gta 6 gaming setup afterward from today's sponsor. when you spend hours at your desk every day like we do, it's important to have a good chair that habata makes"), { ...withHours, local: hbada } as never)), ["HBADA|sponsored"]);
+  eq("spoken: the description's brand named a minute into the read", trBrands(readTranscript(capsOf(`but first a word from today's sponsor. if you're anything like me after a lengthy gaming session or even hours of working my back ${"really starts to hurt and i needed something better for it ".repeat(4)}so we tried the protoarc flexer pro`), { ...withHours, local: [{ key: "protoarc.com", name: "ProtoArc", domain: "protoarc.com", domainFrom: "link", kind: "affiliate", confidence: 0.7, signals: ["description"], quote: "Check ProtoArc" }, { key: "newegg.com", name: "Newegg", domain: "newegg.com", domainFrom: "link", kind: "affiliate", confidence: 0.7, signals: ["description"], quote: "Newegg" }] } as never)), ["ProtoArc|sponsored"]);
+  eq("spoken: an everyday-word brand right after 'sponsored by' still counts", trBrands(readTranscript(capsOf("this video is sponsored by hours and their new watch"), withHours as never)), ["Hours|sponsored"]);
+  const glued = readVideo({ id: "x", title: "GPU", description: "Check ProtoArc Flexer series ergonomic chairs and use “50ToastyBros” to get $50 off athttps://www.protoarc.com/pages/flexer?utm_source=KOL&utm_term=ToastyBros", tags: [], paid: true, segments: [], at: "", secs: 900 } as VideoIn, ctx as never);
+  eq("description: a link glued to a word is still read", glued.mentions.map((m) => m.name).includes("ProtoArc") || glued.mentions.some((m) => m.domain === "protoarc.com"), true);
+}
+yes("spoken: a known name merely near the cue stays below what is shown", (() => { const m = tr("today's video is sponsored by our friends who make great stuff. later we will also compare the keychron q1").mentions.find((x) => x.name === "Keychron"); return !m || m.confidence < 0.65; })());
+eq("spoken: platforms are never the sponsor", trBrands(readTranscript(capsOf("this video is sponsored by youtube premium? no. join the discord"), { ...ctx, known: [...known, { key: "youtube.com", name: "YouTube", domain: "youtube.com" }, { key: "discord.com", name: "Discord", domain: "discord.com" }] } as never)).filter((x) => /YouTube|Discord/.test(x)), []);
 eq("spoken: TRYX sent me this", trBrands(tr("so tryx sent me this case to check out and honestly")), ["TRYX|seeded"]);
 eq("spoken: a domain said out loud", trBrands(tr("this episode is brought to you by fluxlamp go to fluxlamp dot com slash zac")).map((x) => x.split("|")[0]), ["Fluxlamp"]);
 yes("spoken: unknown name stays unsure", (() => { const m = tr("this video is sponsored by zentrovia the app that").mentions[0]; return !!m && m.confidence < 0.6 && m.unsure === true; })());

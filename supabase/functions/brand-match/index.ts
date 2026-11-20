@@ -1,7 +1,8 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { channelIdOf, flushYoutubeMeter, uploadsPage, useYoutubeMeter, videoDetails, youtubeBackgroundOk, youtubeConfigured, youtubeUsage, YouTubeQuota, type FullVideo } from "../_shared/youtube.ts";
-import { brandish, cleanName, combine, dealProof, DIRECTORY, domainFits, nameAsDomain, shortLinkDomain, hostKind, hostOf, knownIndex, linksToFollow, nameKey, namesIn, normalizeDomain, prettyName, readTranscript, readVideo, type Caption, type DealKind, type Known, type Mention, type Segment } from "../_shared/sponsors.ts";
+import { everyday } from "../_shared/commonWords.ts";
+import { brandish, cleanName, combine, dealProof, DIRECTORY, domainFits, nameAsDomain, shortLinkDomain, hostKind, hostOf, knownIndex, linksToFollow, nameKey, namesIn, normalizeDomain, prettyName, readTranscript, readVideo, type Caption, type DealKind, type Known, type Mention, type Segment, type TranscriptRead } from "../_shared/sponsors.ts";
 import { brandTopics, contentProfile, TOPIC, TOPICS, topicLabel, videoTopics, type ContentVideo } from "../_shared/taxonomy.ts";
 import { marketsOf, parseHtml, parseShopify, parseShopifyCollections, parseWoo, priceStats, readProgram, siteIsBrand, siteName, type Product, type SiteFacts } from "../_shared/brandSite.ts";
 import { clefStatus, decide, useClefBudget, type ClefQuestion } from "../_shared/clef.ts";
@@ -44,7 +45,10 @@ import { checkKey, cleanAccount, cleanKey, hintOf, keyFor, openKey, sealKey, SER
 const APP_URL = (Deno.env.get("APP_URL") || "https://dhurimhalili.github.io/influenceflow-crm").replace(/\/$/, "");
 const ALLOWED_ORIGINS = new Set([new URL(APP_URL).origin, "http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:4173", "http://localhost:5199"]);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const READER_V = 7;
+const READER_V = 8;
+/** Rules for what was heard in a video (readTranscript). Rows read by older rules are judged again from the
+ *  matching lines kept in transcript_hits (cron step 3c) — v2: everyday-word brands, sponsor binding (Nov 2026). */
+const TX_V = 2;
 // Brand research version: 2 = Gemini reads sites that block robots or say too little.
 const INTEL_V = 2;
 const DAY = 86400_000;
@@ -64,7 +68,7 @@ type VideoRow = {
   user_id: string; creator_id: string; video_id: string; title: string; published_at: string | null; secs: number; views: number; paid: boolean; tags: string[];
   description: string; topics: { key: string; share: number }[]; topics_by: string; mentions: Mention[]; segments: Segment[]; listen: { start: number; end: number; why: string } | null;
   listened_at: string | null; sb_at: string | null; reader_v: number; judged_at: string | null; updated_at?: string;
-  transcript_status?: string; transcript_lang?: string; transcript_kind?: string; transcript_at?: string | null; transcript_hits?: { t: number; text: string }[]; transcript_tries?: number;
+  transcript_status?: string; transcript_lang?: string; transcript_kind?: string; transcript_at?: string | null; transcript_hits?: { t: number; text: string }[]; transcript_tries?: number; tx_v?: number;
 };
 
 const sleep = (ms: number) => new Promise((ok) => setTimeout(ok, ms));
@@ -78,7 +82,7 @@ const videoRow = (r: VideoRow) => ({
 });
 
 // creator_videos without the two big text columns (description, tags): what every read needs.
-const VIDEO_LIGHT = "user_id,creator_id,video_id,title,published_at,secs,views,paid,topics,topics_by,mentions,segments,listen,listened_at,sb_at,reader_v,judged_at,updated_at,transcript_status,transcript_lang,transcript_kind,transcript_at,transcript_hits,transcript_tries";
+const VIDEO_LIGHT = "user_id,creator_id,video_id,title,published_at,secs,views,paid,topics,topics_by,mentions,segments,listen,listened_at,sb_at,reader_v,judged_at,updated_at,transcript_status,transcript_lang,transcript_kind,transcript_at,transcript_hits,transcript_tries,tx_v";
 // What rebuilding who-works-with-whom reads.
 const LINK_COLS = "user_id,creator_id,video_id,title,published_at,paid,mentions";
 
@@ -404,6 +408,7 @@ async function scanCreator(admin: SupabaseClient, c: CreatorRow, deadline: numbe
 
   // 4. Read every new video; re-read old ones whose SponsorBlock segments changed.
   const touched: VideoRow[] = [];
+  const stampOnly: string[] = [];
   for (const v of fresh) {
     const segments = sb.get(v.id) || rows.get(v.id)?.segments || [];
     const reading = readVideo({ id: v.id, title: v.title, description: v.description, tags: v.tags, paid: v.paid, segments, at: v.at, secs: v.secs }, ctx);
@@ -416,6 +421,9 @@ async function scanCreator(admin: SupabaseClient, c: CreatorRow, deadline: numbe
       mentions: reading.mentions, segments, listen: old?.listened_at ? null : reading.listen || null, listened_at: old?.listened_at || null,
       sb_at: sb.has(v.id) ? now.toISOString() : old?.sb_at || null, reader_v: READER_V, judged_at: null,
     };
+    // A video read again keeps what was learned from its captions (status, hits, version): without these the
+    // save reset them and the helper would read the captions all over again.
+    if (old) Object.assign(row, { transcript_status: old.transcript_status ?? "", transcript_lang: old.transcript_lang ?? "", transcript_kind: old.transcript_kind ?? "", transcript_at: old.transcript_at ?? null, transcript_hits: old.transcript_hits ?? [], transcript_tries: old.transcript_tries ?? 0, ...(old.tx_v !== undefined ? { tx_v: old.tx_v } : {}) });
     // What was heard in an earlier listen stays.
     if (old?.listened_at || old?.transcript_status === "ok") row.mentions = [...row.mentions, ...old.mentions.filter((m) => (m.signals.includes("voice") || m.signals.includes("transcript")) && !row.mentions.some((x) => x.key === m.key))];
     rows.set(v.id, row);
@@ -433,7 +441,8 @@ async function scanCreator(admin: SupabaseClient, c: CreatorRow, deadline: numbe
     const r = rows.get(id);
     if (!r || touched.includes(r)) continue;
     r.sb_at = now.toISOString();
-    if (JSON.stringify(segs) === JSON.stringify(r.segments)) { touched.push(r); continue; }
+    // Same segments as before: only the "checked at" stamp changes — a light update, never a whole-row rewrite.
+    if (JSON.stringify(segs) === JSON.stringify(r.segments)) { stampOnly.push(r.video_id); continue; }
     r.segments = segs;
     const reading = readVideo({ id, title: r.title, description: r.description, tags: r.tags, paid: r.paid, segments: segs, at: r.published_at || "", secs: r.secs }, ctx);
     r.mentions = [...reading.mentions, ...r.mentions.filter((m) => (m.signals.includes("voice") || m.signals.includes("transcript")) && !reading.mentions.some((x) => x.key === m.key))];
@@ -453,6 +462,7 @@ async function scanCreator(admin: SupabaseClient, c: CreatorRow, deadline: numbe
 
   // 6. Save the videos.
   await saveVideos(admin, touched, now.toISOString());
+  for (let i = 0; i < stampOnly.length; i += 200) await admin.from("creator_videos").update({ sb_at: now.toISOString() }).eq("user_id", c.user_id).eq("creator_id", c.id).in("video_id", stampOnly.slice(i, i + 200));
 
   // 7. One row per brand, and the content mix.
   const links = await rebuildLinks(admin, c, [...rows.values()]);
@@ -475,15 +485,20 @@ async function rebuildLinks(admin: SupabaseClient, c: CreatorRow, rows: VideoRow
     const n = b.name.toLowerCase().replace(/[^a-z0-9]+/g, "");
     if (n.length >= 3 && !byName.has(n)) byName.set(n, b.id);
   }
-  const { data: existing } = await admin.from("creator_brands").select("id, brand_key, verdict, manual").eq("user_id", c.user_id).eq("creator_id", c.id);
+  const { data: existing } = await admin.from("creator_brands").select("id, brand_key, verdict, manual, sig").eq("user_id", c.user_id).eq("creator_id", c.id);
   const keep = new Set(links.map((l) => l.key));
   const now = new Date().toISOString();
-  const payload = links.map((l) => ({
+  const payload0 = links.map((l) => ({
     user_id: c.user_id, creator_id: c.id, brand_key: l.key, brand_name: l.name.slice(0, 80), domain: l.domain,
     brand_id: (l.domain && byDomain.get(l.domain)) || byName.get(l.name.toLowerCase().replace(/[^a-z0-9]+/g, "")) || null,
     kind: l.kind, confidence: l.confidence, store: l.store, videos: l.videos, first_at: l.first || null, last_at: l.last || null, evidence: l.evidence,
-    by_ai: l.evidence.some((e) => e.signals.includes("ai") || e.signals.includes("voice")), video_ids: l.videoIds, updated_at: now,
+    by_ai: l.evidence.some((e) => e.signals.includes("ai") || e.signals.includes("voice")), video_ids: l.videoIds,
   }));
+  // Each link's fingerprint: a link that reads the same as before is NOT written again (every rebuild used to
+  // rewrite every link — over 100,000 needless row writes a day, most of the database's disk I/O).
+  const sigOf = new Map(((existing || []) as { brand_key: string; sig: string | null }[]).map((e) => [e.brand_key, e.sig || ""]));
+  const signed = await Promise.all(payload0.map(async (p) => ({ ...p, sig: (await sha(JSON.stringify(wellFormed(p)))).slice(0, 32) })));
+  const payload = signed.filter((p) => sigOf.get(p.brand_key) !== p.sig).map((p) => ({ ...p, updated_at: now }));
   for (let i = 0; i < payload.length; i += 100) {
     const { error } = await admin.from("creator_brands").upsert(wellFormed(payload.slice(i, i + 100)), { onConflict: "user_id,creator_id,brand_key" });
     if (error) throw new Error(`save links: ${error.message}`);
@@ -538,6 +553,91 @@ type TxItem = { id: string; status: "ok" | "none" | "error"; lang: string; kind:
  * Captions read for a member's videos — by the helper in their browser or by a transcript service — are
  * read for spoken sponsors, saved, and who-works-with-whom is rebuilt. One path for both sources.
  */
+/** The same brand from the description and from their words: one finding with both signals. */
+function mergeHeard(base: Mention[], heard: TranscriptRead): Mention[] {
+  const merged = [...base];
+  for (const m of heard.mentions) {
+    const i = merged.findIndex((x) => x.key === m.key);
+    if (i < 0) { merged.push(m); continue; }
+    const x = merged[i];
+    const spokenWins = m.confidence >= x.confidence || (x.kind === "affiliate" && m.kind !== "affiliate");
+    merged[i] = { ...(spokenWins ? m : x), domain: x.domain || m.domain, domainFrom: x.domain ? x.domainFrom : m.domainFrom, signals: Array.from(new Set([...x.signals, ...m.signals])), confidence: Math.min(0.97, Math.max(x.confidence, m.confidence) + (x.kind === m.kind ? 0.04 : 0)), t: m.t ?? x.t };
+  }
+  if (heard.notSponsored) for (const m of merged) if (m.kind === "sponsored" && !/sponsor/i.test(m.quote)) m.confidence = Math.min(m.confidence, 0.35);
+  return merged;
+}
+/** Only heard (no description / label / link behind it): what an older reading of the captions added. */
+const heardOnly = (m: Mention) => m.signals.includes("transcript") && m.signals.every((s) => s === "transcript" || s === "paid_label");
+
+/**
+ * Cron step 3c: videos read by older rules are judged again from what is STORED — the description (READER_V)
+ * and the matching caption lines kept in transcript_hits (TX_V) — no YouTube call, no helper. Short links use
+ * only the link cache. A few hundred rows a run until none are left; deals rebuilt for creators that changed.
+ */
+async function rereadStored(admin: SupabaseClient, deadline: number, ids: string[]): Promise<number> {
+  const cols = "user_id,creator_id,video_id,title,description,tags,paid,segments,published_at,secs,mentions,listen,listened_at,reader_v,transcript_status,transcript_hits,tx_v";
+  // Two index lookups (user_id + version), never a scan: when nothing is left they cost next to nothing.
+  const [a, b] = await Promise.all([
+    admin.from("creator_videos").select(cols).in("user_id", ids).lt("reader_v", READER_V).limit(200),
+    admin.from("creator_videos").select(cols).in("user_id", ids).lt("tx_v", TX_V).eq("transcript_status", "ok").limit(200),
+  ]);
+  const seenIds = new Set<string>();
+  const rows = ([...(a.data || []), ...(b.data || [])] as VideoRow[]).filter((r) => { const k = `${r.creator_id}|${r.video_id}`; if (seenIds.has(k)) return false; seenIds.add(k); return true; });
+  if (!rows.length) return 0;
+  const byCreator = new Map<string, VideoRow[]>();
+  for (const r of rows) byCreator.set(r.creator_id, [...(byCreator.get(r.creator_id) || []), r]);
+  const { data: people } = await admin.from("creators").select("id, user_id, name, socials, youtube, created_at, archived_at").in("id", [...byCreator.keys()]);
+  const creators = new Map(((people || []) as CreatorRow[]).map((c) => [c.id, c]));
+  // Short links → where they go, from the cache only (each was followed once when first read).
+  const links = Array.from(new Set(rows.flatMap((r) => linksToFollow(r.description || "")))).slice(0, 400);
+  const hashes = await Promise.all(links.map(async (u) => [u, (await sha(u)).slice(0, 40)] as const));
+  const resolved: Record<string, string> = {};
+  for (let i = 0; i < hashes.length; i += 150) {
+    const part = hashes.slice(i, i + 150);
+    const { data: hit } = await admin.from("link_cache").select("url_hash, final").in("url_hash", part.map((h) => h[1]));
+    const finals = new Map(((hit || []) as { url_hash: string; final: string }[]).map((h) => [h.url_hash, h.final]));
+    for (const [u, h] of part) if (finals.get(h)) resolved[u] = finals.get(h)!;
+  }
+  const changed: VideoRow[] = [], done: VideoRow[] = [], relinkFor = new Set<string>();
+  for (const [cid, list] of byCreator) {
+    if (Date.now() > deadline - 25_000) break;
+    const c = creators.get(cid);
+    if (!c) continue;
+    const { known } = await knownFor(admin, c.user_id);
+    const handle = typeof c.youtube?.handle === "string" ? c.youtube.handle : "";
+    const ownDomains = (c.socials || []).filter((x) => x && !["YouTube", "Instagram", "TikTok", "X", "Twitch", "Kick", "Facebook", "LinkedIn", "Snapchat", "Pinterest", "Threads", "WhatsApp"].includes(x.platform)).map((x) => normalizeDomain(x.url)).filter(Boolean);
+    const ctx = { creator: c.name, handle, ownDomains, known, resolved };
+    for (const r of list) {
+      let ms = r.mentions || [];
+      if ((r.reader_v || 0) < READER_V) {
+        const reading = readVideo({ id: r.video_id, title: r.title, description: r.description || "", tags: r.tags || [], paid: r.paid, segments: r.segments || [], at: r.published_at || "", secs: r.secs }, ctx);
+        ms = [...reading.mentions, ...ms.filter((m) => (m.signals.includes("voice") || m.signals.includes("transcript")) && !reading.mentions.some((x) => x.key === m.key))];
+      }
+      const hits = r.transcript_status === "ok" ? r.transcript_hits || [] : [];
+      if (hits.length) {
+        const base = ms.filter((m) => !heardOnly(m));
+        const heard = readTranscript(hits.map((h) => [Math.max(0, Number(h.t) || 0) * 1000, h.text] as Caption), { ...ctx, local: base, paid: r.paid, everyday });
+        ms = mergeHeard(base, heard);
+      }
+      const was = JSON.stringify(r.mentions || []);
+      const next = { ...r, mentions: ms, reader_v: READER_V, ...(r.transcript_status === "ok" ? { tx_v: TX_V } : {}) };
+      if (JSON.stringify(ms) !== was) { changed.push({ ...next, judged_at: null }); relinkFor.add(cid); } else done.push(next);
+    }
+  }
+  const now = new Date().toISOString();
+  // Only the findings and the version marks are written (never a whole row: it would need every column).
+  await pool(changed, 6, async (r) => { await admin.from("creator_videos").update({ mentions: wellFormed(r.mentions), reader_v: READER_V, ...(r.transcript_status === "ok" ? { tx_v: TX_V } : {}), judged_at: null, updated_at: now }).eq("user_id", r.user_id).eq("creator_id", r.creator_id).eq("video_id", r.video_id); });
+  const plain = done.filter((r) => r.transcript_status !== "ok").map((r) => r.video_id);
+  const spoken = done.filter((r) => r.transcript_status === "ok").map((r) => r.video_id);
+  for (let i = 0; i < plain.length; i += 200) await admin.from("creator_videos").update({ reader_v: READER_V }).in("user_id", ids).in("video_id", plain.slice(i, i + 200));
+  for (let i = 0; i < spoken.length; i += 200) await admin.from("creator_videos").update({ reader_v: READER_V, tx_v: TX_V }).in("user_id", ids).in("video_id", spoken.slice(i, i + 200));
+  for (const cid of relinkFor) {
+    const c = creators.get(cid);
+    if (c && Date.now() < deadline - 15_000) await rebuildLinks(admin, c, await linkRows(admin, c.user_id, c.id)).catch(() => 0);
+  }
+  return changed.length + done.length;
+}
+
 async function applyTranscripts(admin: SupabaseClient, userId: string, items: TxItem[]): Promise<{ saved: number; found: number }> {
   if (!items.length) return { saved: 0, found: 0 };
   // Only this member's own videos.
@@ -559,21 +659,12 @@ async function applyTranscripts(admin: SupabaseClient, userId: string, items: Tx
     const c = byCreator.get(r.creator_id);
     const ownDomains = (c?.socials || []).filter((x) => x && !["YouTube", "Instagram", "TikTok", "X", "Twitch", "Kick", "Facebook", "LinkedIn", "Snapchat", "Pinterest", "Threads", "WhatsApp"].includes(x.platform)).map((x) => normalizeDomain(x.url)).filter(Boolean);
     const base = r.mentions.filter((m) => !m.signals.includes("transcript"));
-    const heard = readTranscript(it.caps, { creator: c?.name || "", handle: typeof c?.youtube?.handle === "string" ? c.youtube.handle : "", ownDomains, known, resolved: {}, local: base, paid: r.paid });
-    // The same brand from the description and from their words: one finding with both signals.
-    const merged = [...base];
-    for (const m of heard.mentions) {
-      const i = merged.findIndex((x) => x.key === m.key);
-      if (i < 0) { merged.push(m); continue; }
-      const x = merged[i];
-      const spokenWins = m.confidence >= x.confidence || (x.kind === "affiliate" && m.kind !== "affiliate");
-      merged[i] = { ...(spokenWins ? m : x), domain: x.domain || m.domain, domainFrom: x.domain ? x.domainFrom : m.domainFrom, signals: Array.from(new Set([...x.signals, ...m.signals])), confidence: Math.min(0.97, Math.max(x.confidence, m.confidence) + (x.kind === m.kind ? 0.04 : 0)), t: m.t ?? x.t };
-    }
-    if (heard.notSponsored) for (const m of merged) if (m.kind === "sponsored" && !/sponsor/i.test(m.quote)) m.confidence = Math.min(m.confidence, 0.35);
+    const heard = readTranscript(it.caps, { creator: c?.name || "", handle: typeof c?.youtube?.handle === "string" ? c.youtube.handle : "", ownDomains, known, resolved: {}, local: base, paid: r.paid, everyday });
+    const merged = mergeHeard(base, heard);
     const deal = heard.mentions.some((m) => m.kind !== "affiliate" && m.confidence >= 0.8);
     found += heard.mentions.filter((m) => m.kind !== "affiliate").length;
     if (JSON.stringify(merged) !== JSON.stringify(r.mentions)) relinkFor.add(r.creator_id);
-    changed.push({ ...r, mentions: merged, listen: deal ? null : r.listen, transcript_status: "ok", transcript_lang: it.lang, transcript_kind: it.kind, transcript_at: now, transcript_hits: heard.hits, judged_at: null });
+    changed.push({ ...r, mentions: merged, listen: deal ? null : r.listen, transcript_status: "ok", transcript_lang: it.lang, transcript_kind: it.kind, transcript_at: now, transcript_hits: heard.hits, judged_at: null, tx_v: TX_V });
   }
   if (changed.length) {
     await saveVideos(admin, changed, now);
@@ -1131,6 +1222,8 @@ async function cron(admin: SupabaseClient) {
       if (await readCreator(c)) log.backfill = Number(log.backfill || 0) + 1;
     }
   }
+  // 3c. Videos read by older rules: judged again from what is stored (no YouTube call), a few hundred a run.
+  if (Date.now() < deadline - 50_000) log.reread = await rereadStored(admin, deadline, ids).catch(() => 0);
   // 4. Creators not read for a week.
   if (ytLeft().length && Date.now() < deadline - 50_000) {
     const { data: stale } = await admin.from("creator_content").select("creator_id, scanned_at").in("user_id", ytLeft()).lt("scanned_at", new Date(Date.now() - RESCAN_DAYS * DAY).toISOString()).order("scanned_at", { ascending: true }).limit(6);

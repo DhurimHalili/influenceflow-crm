@@ -204,7 +204,8 @@ export function namesIn(text: string, idx: ReturnType<typeof knownIndex>): Known
 
 // ---- reading a description ----------------------------------------------------------
 
-const URL_RE = /\bhttps?:\/\/[^\s<>"'()\]　]+/gi;
+// No \b in front: creators glue links to words ("$50 off athttps://www.protoarc.com/…").
+const URL_RE = /https?:\/\/[^\s<>"'()\]　]+/gi;
 export function urlsIn(text: string): string[] {
   return Array.from(String(text || "").matchAll(URL_RE), (m) => m[0].replace(/[.,;:!?)\]]+$/, ""));
 }
@@ -702,7 +703,8 @@ const SAID_ALOUD = new RegExp(`${SPOKEN_SPONSOR.source}|${SPOKEN_SEEDED.source}`
 const SPOKEN_DOMAIN = /\b([a-z0-9][a-z0-9-]{2,30})\s?(?:dot|\.)\s?(com|co|io|net|gg|org|de|tv|app|ai|co\.uk)\b/g;
 
 /** What the creator says about brands, from timed captions. Pure. */
-export function readTranscript(caps: Caption[], ctx: ReadContext & { local?: Mention[]; paid?: boolean }): TranscriptRead {
+const PLATFORM_WORDS = new Set(["youtube", "discord", "twitch", "patreon", "instagram", "tiktok", "twitter", "reddit", "facebook", "kick", "x", "threads", "snapchat", "spotify", "xbox", "playstation", "nintendo", "steam", "google", "whatsapp", "telegram", "linkedin"]);
+export function readTranscript(caps: Caption[], ctx: ReadContext & { local?: Mention[]; paid?: boolean; everyday?: (name: string) => boolean }): TranscriptRead {
   // Words with the time each was said.
   const words: string[] = [], times: number[] = [];
   for (const [ms, text] of caps) {
@@ -731,21 +733,49 @@ export function readTranscript(caps: Caption[], ctx: ReadContext & { local?: Men
     const prev = found.get(m.key);
     if (!prev || m.confidence > prev.confidence) found.set(m.key, prev ? { ...m, signals: Array.from(new Set([...prev.signals, ...m.signals])) } : m);
   };
-  const place = (win: { text: string }, cueAt: number, capture?: string): { key: string; name: string; domain: string; domainFrom: Mention["domainFrom"]; how: "local" | "known" | "domain" | "guess" } | null => {
-    const flat = ` ${win.text.replace(/[^a-z0-9]+/g, " ")} `;
+  // The brands this video's description pushes (sponsor / code / call to action, not a store or a gear list):
+  // when a spoken sponsor read names nothing we can place, it is about one of these.
+  const pushed = (() => {
+    const c = (ctx.local || []).filter((m) => !m.store && m.name && (m.kind === "sponsored" || m.kind === "affiliate") && m.confidence >= 0.6);
+    const keys = Array.from(new Set(c.map((m) => m.key)));
+    if (keys.length === 1) return c.find((m) => m.key === keys[0])!;
+    const paidOnes = c.filter((m) => m.kind === "sponsored");
+    return new Set(paidOnes.map((m) => m.key)).size === 1 ? paidOnes[0] : null;
+  })();
+  // A known name that is also an everyday word ("hours", "honey", "ridge") counts only right next to the cue:
+  // "sponsored by Honey", "Ridge sent us" — never "spend hours at your desk" somewhere near "today's sponsor".
+  const everyday = ctx.everyday || (() => false);
+  const place = (win: { text: string }, wide: { text: string }, cueAt: number, capture: string, near: string, sponsorCue: boolean): { key: string; name: string; domain: string; domainFrom: Mention["domainFrom"]; how: "local" | "known" | "far" | "domain" | "guess" | "pushed" } | null => {
+    const flatOf = (t: string) => ` ${t.replace(/[^a-z0-9]+/g, " ")} `;
+    const flat = flatOf(win.text);
     const squashedWin = flat.replace(/ /g, "");
     // Closest to the cue wins when several are named.
     const dist = (needle: string) => { const i = win.text.indexOf(needle); return i < 0 ? 1e9 : Math.abs(i - cueAt); };
     let best: ReturnType<typeof place> = null, bestD = 1e9;
-    for (const l of local) for (const k of l.keys) {
-      if (!(flat.includes(` ${k} `) || (k.length >= 6 && squashedWin.includes(k)))) continue;
-      const d = dist(k.slice(0, 4));
+    const localIn = (f: string, sq: string, src: string) => { for (const l of local) for (const k of l.keys) {
+      if (!(f.includes(` ${k} `) || (k.length >= 6 && sq.includes(k)))) continue;
+      const i = src.indexOf(k.slice(0, 4));
+      const d = i < 0 ? 1e8 : Math.abs(i - cueAt);
       if (d < bestD) { bestD = d; best = { key: l.m.key, name: l.m.name, domain: l.m.domain, domainFrom: l.m.domainFrom, how: "local" }; }
-    }
+    } };
+    localIn(flat, squashedWin, win.text);
     if (best) return best;
+    // A sponsor read often names the brand a minute in ("…my back hurt, so I tried the ProtoArc Flexer"):
+    // the description's brands are looked for further on.
+    const wf = flatOf(wide.text);
+    localIn(wf, wf.replace(/ /g, ""), wide.text);
+    if (best) return best;
+    const nearFlat = flatOf(near);
     for (const k of namesIn(win.text, idx)) {
-      const d = dist(norm(k.name).slice(0, 4));
-      if (d < bestD) { bestD = d; best = { key: k.domain || nameKey(k.name), name: k.name, domain: k.domain, domainFrom: k.domain ? "known" : "", how: "known" }; }
+      // Platforms are where the video lives, not who paid for it ("subscribe on YouTube", "join the Discord").
+      if (PLATFORM_WORDS.has(norm(k.name))) continue;
+      const spoken = norm(k.name).replace(/[^a-z0-9]+/g, " ").trim();
+      const adjacent = nearFlat.includes(` ${spoken} `) || nearFlat.replace(/ /g, "").includes(spoken.replace(/ /g, ""));
+      if (everyday(k.name) && !adjacent) continue;
+      const d = dist(norm(k.name).slice(0, 4)) + (adjacent ? 0 : 5e5);
+      // A known name somewhere near the cue is weak: it stays below what any screen shows unless it is the
+      // name said right with it ("sponsored by X", "X sent us") or the description backs it (above).
+      if (d < bestD) { bestD = d; best = { key: k.domain || nameKey(k.name), name: k.name, domain: k.domain, domainFrom: k.domain ? "known" : "", how: adjacent ? "known" : "far" }; }
     }
     if (best) return best;
     for (const m of win.text.matchAll(SPOKEN_DOMAIN)) {
@@ -754,8 +784,9 @@ export function readTranscript(caps: Caption[], ctx: ReadContext & { local?: Men
       const k = idx.byDomain.get(domain);
       return { key: domain, name: k?.name || prettyName(domain), domain, domainFrom: "link", how: "domain" };
     }
+    if (pushed && sponsorCue) return { key: pushed.key, name: pushed.name, domain: pushed.domain, domainFrom: pushed.domainFrom, how: "pushed" };
     const guess = cleanName(capture || "");
-    if (guess && guess.split(" ").length <= 3) {
+    if (guess && guess.split(" ").length <= 3 && !everyday(guess)) {
       const k = idx.byName.get(norm(guess));
       if (k) return { key: k.domain || nameKey(k.name), name: k.name, domain: k.domain, domainFrom: k.domain ? "known" : "", how: "known" };
       return { key: nameKey(guess), name: guess.replace(/\b\w/g, (c) => c.toUpperCase()), domain: "", domainFrom: "", how: "guess" };
@@ -774,16 +805,20 @@ export function readTranscript(caps: Caption[], ctx: ReadContext & { local?: Men
     const cueAt = c.at - starts[win.from];
     // The words right after "sponsored by" are the likeliest name.
     const after = c.kind === "sponsored" && !c.capture ? text.slice(c.at + c.len, c.at + c.len + 40).trim().split(/\s+/).slice(0, 2).join(" ") : c.capture;
-    const p = place(win, cueAt, after);
+    // Right next to the cue: the 4 words after it ("sponsored by X"), or for "X sent us" the 4 before it.
+    const near = [c.capture, text.slice(c.at + c.len).trim().split(/\s+/).slice(0, 4).join(" "), c.kind === "seeded" ? text.slice(0, c.at).trim().split(/\s+/).slice(-4).join(" ") : ""].join(" ");
+    const wide = (() => { const w = wordAt(c.at); return { text: words.slice(Math.max(0, w - 10), Math.min(words.length, w + 140)).join(" ") }; })();
+    const p = place(win, wide, cueAt, after, near, c.kind === "sponsored");
     if (!p) continue;
     // A code read inside a sponsor read is the sponsor read.
     let kind = c.kind;
     if (kind === "affiliate" && cues.some((o) => o.kind === "sponsored" && Math.abs(o.at - c.at) < 400)) kind = "sponsored";
     if (notSponsored && kind === "sponsored") continue;
-    const base = p.how === "local" ? 0.9 : p.how === "known" ? 0.86 : p.how === "domain" ? 0.82 : 0.5;
+    // "pushed" = the description's own sponsor, the read didn't say the name we could catch: likely, not sure.
+    const base = p.how === "local" ? 0.9 : p.how === "known" ? 0.86 : p.how === "domain" ? 0.82 : p.how === "pushed" ? 0.78 : p.how === "far" ? 0.58 : 0.5;
     const conf = kind === "affiliate" ? Math.min(base, 0.6) : kind === "seeded" ? base - 0.04 : base + (ctx.paid ? 0.03 : 0);
     const quote = words.slice(Math.max(win.from, wordAt(c.at) - 8), Math.min(win.to, wordAt(c.at) + 22)).join(" ");
-    add({ key: p.key, name: p.name, domain: p.domain, domainFrom: p.domainFrom, kind, confidence: clamp(conf), signals: ["transcript"], quote: `“${quoteOf(quote)}”`, t: win.t, unsure: p.how === "guess" });
+    add({ key: p.key, name: p.name, domain: p.domain, domainFrom: p.domainFrom, kind, confidence: clamp(conf), signals: ["transcript"], quote: `“${quoteOf(quote)}”`, t: win.t, unsure: p.how === "guess" || p.how === "far" });
     if (hits.length < 8 && !hits.some((h) => Math.abs(h.t - win.t) < 20)) hits.push({ t: win.t, text: win.text.slice(0, 320) });
   }
   return { mentions: [...found.values()].filter((m) => m.confidence >= 0.3).sort((a, b) => b.confidence - a.confidence), hits, notSponsored };
