@@ -15,15 +15,17 @@ export type CompanyFacts = {
   domain: string;
   at: string;
   linkedin?: string;
-  linkedin_via?: "site" | "wikidata" | "hunter" | "clay";
+  linkedin_via?: "site" | "wikidata" | "hunter" | "clay" | "apollo";
   /** Wikidata was asked (so it isn't asked again for this domain). */
   wd_at?: string;
   /** Hunter was asked for the company record. */
   hunter_at?: string;
   /** Clay was asked for the company record. */
   clay_at?: string;
+  /** Apollo was asked for the company record. */
+  apollo_at?: string;
   /** Which service the size / revenue / industry came from. */
-  facts_via?: "hunter" | "clay";
+  facts_via?: "hunter" | "clay" | "apollo";
   size?: string; employees?: number; revenue?: string; industry?: string; country?: string; founded?: number; name?: string;
 };
 
@@ -136,6 +138,26 @@ export async function hunterPeople(domain: string, get: Fetcher = defaultFetch, 
   })).filter((p) => p.email && (p.first || p.last))
     .sort((a, b) => roleRank(b.title) - roleRank(a.title) || b.confidence - a.confidence);
   return { ok: true, value: { list, total: Math.max(list.length, Number(body?.meta?.results) || 0) } };
+}
+
+/**
+ * Hunter's Email Finder: the work email of ONE person at this domain by full name (1 credit when one is
+ * found). Only an address at the brand's own domain is kept.
+ */
+export async function hunterEmail(domain: string, first: string, last: string, get: Fetcher = defaultFetch, key = hunterKey()): Promise<HunterAnswer<{ email: string; status: string; linkedin: string }>> {
+  const d = normalizeDomain(domain);
+  if (!key) return { ok: false, why: "no_key" };
+  const f = clip(first, 40), l = clip(last, 40);
+  if (!d || !f || !l) return { ok: false, why: "none" };
+  const r = await get(`https://api.hunter.io/v2/email-finder?domain=${encodeURIComponent(d)}&first_name=${encodeURIComponent(f)}&last_name=${encodeURIComponent(l)}`, { "X-API-KEY": key });
+  if (!r) return { ok: false, why: "error" };
+  const bad = hunterStatus(r.status); if (bad) return bad;
+  const e = (r.body as { data?: { email?: unknown; score?: unknown; verification?: { status?: unknown }; linkedin_url?: unknown } } | null)?.data;
+  const email = String(e?.email || "").toLowerCase().trim();
+  if (!/^[^\s@<>"]{1,64}@[a-z0-9.-]+\.[a-z]{2,}$/.test(email) || (!email.endsWith(`@${d}`) && !email.endsWith(`.${d}`))) return { ok: false, why: "none" };
+  const v = String(e?.verification?.status || "");
+  const linkedin = /^https?:\/\/([a-z]{2,3}\.|www\.)?linkedin\.com\/in\/[\w%-]+/i.test(String(e?.linkedin_url || "")) ? String(e!.linkedin_url).split("?")[0].slice(0, 300) : "";
+  return { ok: true, value: { email: email.slice(0, 160), status: v === "valid" ? "verified" : v === "accept_all" ? "accept_all" : Number(e?.score) >= 80 ? "likely" : "guessed", linkedin } };
 }
 
 // ---- Clay (CLAY_API_KEY, free plan: 100 search results per rolling 30 days) ----------------------------

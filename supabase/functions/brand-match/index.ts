@@ -10,8 +10,10 @@ import { fetchTranscript, txConfigured, txLeft, txProviders } from "../_shared/t
 import { askBrand, brandAskConfigured, searchSite, useBrandAskBudget } from "../_shared/brandAsk.ts";
 import { asMember, cred, forgetRing, ringFor, runInRing, scoped, type Ring } from "../_shared/keyring.ts";
 import { companyCountry, duckSite, officialSite } from "../_shared/officialSite.ts";
-import { clayCompany, clayPeople, hunterCompany, hunterPeople, mergePeople, siteLinkedin, wikidataLinkedin, type CompanyFacts, type People, type Person } from "../_shared/companyInfo.ts";
-import { checkKey, cleanAccount, cleanKey, hintOf, keyFor, openKey, sealKey, SERVICE_NAME, SERVICES, SLOTS, vaultKey, type KeyChoice, type Service } from "../_shared/memberKeys.ts";
+import { clayCompany, clayPeople, hunterCompany, hunterEmail, hunterPeople, mergePeople, siteLinkedin, wikidataLinkedin, type CompanyFacts, type People, type Person } from "../_shared/companyInfo.ts";
+import { apolloCompany, apolloPeople, apolloUnlock, type FoundPerson } from "../_shared/apollo.ts";
+import { readFinder, seniorityOf } from "../../../web/src/lib/peopleFinder.ts";
+import { checkKey, cleanAccount, cleanKey, hintOf, keyFor, openKey, sealKey, SERVICE_NAME, SERVICES, SLOTS, vaultKey, type KeyChoice, type Lookup, type Service } from "../_shared/memberKeys.ts";
 
 // Brand ⇄ creator matching and "who works with whom" (see the migration
 // 20261122000000_brand_match.sql for the tables).
@@ -665,6 +667,7 @@ const hunterUse = (admin: SupabaseClient, ch: Choice) => spend(admin, ch, 1);
 const clayUse = (admin: SupabaseClient, ch: Choice, results: number) => spend(admin, ch, results);
 /** A refusal / limit pauses that key's scope; a member's own key that's refused is marked so Settings says so. */
 async function keyStop(admin: SupabaseClient, ch: Choice, service: Service, why: string) {
+  // A key that's refused pauses only until it's replaced (saving a new key clears every pause of that member).
   const until = why === "quota" ? (service === "hunter" ? nextMonth() : Date.now() + DAY) : why === "bad_key" ? Date.now() + DAY : why === "busy" ? Date.now() + 60_000 : 0;
   if (until) await Promise.resolve(admin.from("ai_budget").upsert({ route: ch.scope, day: utcToday(), paused_until: new Date(until).toISOString(), note: `${service} ${why}` })).catch(() => null);
   if (ch.own && (why === "bad_key" || why === "quota")) {
@@ -680,8 +683,31 @@ async function clayFill(admin: SupabaseClient, ch: Choice, co: CompanyFacts): Pr
   if (!r.ok) { if (r.why !== "none" && r.why !== "no_key") await keyStop(admin, ch, "clay", r.why); return { co: r.why === "none" ? { ...co, clay_at: new Date().toISOString() } : co, why: r.why }; }
   const v = r.value;
   const facts = Object.fromEntries(Object.entries(v).filter(([k, x]) => k !== "linkedin" && x !== undefined && x !== ""));
-  const next: CompanyFacts = { ...co, ...(co.facts_via === "hunter" ? {} : { ...facts, facts_via: "clay" as const }), clay_at: new Date().toISOString() };
+  // Facts another service already gave stay; Clay only fills the gaps then.
+  const gaps = Object.fromEntries(Object.entries(facts).filter(([k]) => co[k as keyof CompanyFacts] === undefined || co[k as keyof CompanyFacts] === ""));
+  const next: CompanyFacts = { ...co, ...(co.facts_via ? gaps : { ...facts, facts_via: "clay" as const }), clay_at: new Date().toISOString() };
   if (!co.linkedin && v.linkedin) { next.linkedin = v.linkedin; next.linkedin_via = "clay"; }
+  return { co: next };
+}
+
+/** Apollo: credits the CRM spent this month (unlocks + company records; searching is free) and any pause. */
+async function apolloState(admin: SupabaseClient, ch: KeyChoice): Promise<Budget> {
+  if (!ch) return { used: 0, today: 0, paused: 0, left: 0 };
+  const rows = await budgetRows(admin, ch.scope, monthStart());
+  const used = rows.reduce((n, r) => n + (Number(r.units) || 0), 0);
+  const today = Number(rows.find((r) => r.day === utcToday())?.units) || 0;
+  const paused = Math.max(0, ...rows.map((r) => (r.paused_until ? new Date(r.paused_until).getTime() : 0)));
+  return { used, today, paused, left: paused > Date.now() ? 0 : 1 };
+}
+/** Apollo's company record first (1 credit): LinkedIn page, size, revenue, industry, country, founded. */
+async function apolloFill(admin: SupabaseClient, ch: Choice, co: CompanyFacts, name: string): Promise<{ co: CompanyFacts; why?: string }> {
+  const r = await apolloCompany(co.domain, { key: ch.key, name });
+  if (!r.ok) { if (r.why !== "none" && r.why !== "no_key" && r.why !== "plan") await keyStop(admin, ch, "apollo", r.why); return { co: r.why === "none" ? { ...co, apollo_at: new Date().toISOString() } : co, why: r.why }; }
+  await spend(admin, ch, 1);
+  const v = r.value;
+  const facts = Object.fromEntries(Object.entries(v).filter(([k, x]) => k !== "linkedin" && x !== undefined && x !== ""));
+  const next: CompanyFacts = { ...co, ...facts, facts_via: "apollo", apollo_at: new Date().toISOString() };
+  if (!co.linkedin && v.linkedin) { next.linkedin = v.linkedin; next.linkedin_via = "apollo"; }
   return { co: next };
 }
 
@@ -705,7 +731,9 @@ async function hunterFill(admin: SupabaseClient, ch: Choice, co: CompanyFacts): 
   if (!r.ok) { if (r.why !== "none" && r.why !== "no_key") await keyStop(admin, ch, "hunter", r.why); if (r.why === "none" || r.why === "error") await hunterUse(admin, ch); return { co: r.why === "none" ? { ...co, hunter_at: new Date().toISOString() } : co, why: r.why }; }
   await hunterUse(admin, ch);
   const v = r.value;
-  const next: CompanyFacts = { ...co, ...Object.fromEntries(Object.entries(v).filter(([k, x]) => k !== "linkedin" && x !== undefined && x !== "")), facts_via: "hunter", hunter_at: new Date().toISOString() };
+  const facts = Object.fromEntries(Object.entries(v).filter(([k, x]) => k !== "linkedin" && x !== undefined && x !== ""));
+  const gaps = Object.fromEntries(Object.entries(facts).filter(([k]) => co[k as keyof CompanyFacts] === undefined || co[k as keyof CompanyFacts] === ""));
+  const next: CompanyFacts = { ...co, ...(co.facts_via ? gaps : { ...facts, facts_via: "hunter" as const }), hunter_at: new Date().toISOString() };
   if (!co.linkedin && v.linkedin) { next.linkedin = v.linkedin; next.linkedin_via = "hunter"; }
   return { co: next };
 }
@@ -1180,9 +1208,12 @@ async function cron(admin: SupabaseClient) {
 /** For the app: which lookup services this member can use, whose key, and what's left. */
 async function lookupStatus(admin: SupabaseClient, userId: string) {
   const memo = new Map<string, KeyChoice>();
-  const [h, c] = await Promise.all([keyFor(admin, userId, "hunter", memo).catch(() => null), keyFor(admin, userId, "clay", memo).catch(() => null)]);
-  const [hs, cs] = await Promise.all([hunterState(admin, h).catch(() => null), clayState(admin, c).catch(() => null)]);
-  return { hunter: { configured: !!h, own: !!h?.own, left: hs?.left ?? 0 }, clay: { configured: !!c, own: !!c?.own, left: cs?.left ?? 0 } };
+  const [h, c, a] = await Promise.all([keyFor(admin, userId, "hunter", memo).catch(() => null), keyFor(admin, userId, "clay", memo).catch(() => null), keyFor(admin, userId, "apollo", memo).catch(() => null)]);
+  const [hs, cs, aps] = await Promise.all([hunterState(admin, h).catch(() => null), clayState(admin, c).catch(() => null), apolloState(admin, a).catch(() => null)]);
+  return {
+    hunter: { configured: !!h, own: !!h?.own, left: hs?.left ?? 0 }, clay: { configured: !!c, own: !!c?.own, left: cs?.left ?? 0 },
+    apollo: { configured: !!a, own: !!a?.own, used: aps?.used ?? 0, paused: !!aps && aps.paused > Date.now() },
+  };
 }
 
 Deno.serve(async (req) => {
@@ -1372,21 +1403,28 @@ Deno.serve(async (req) => {
     const ws: Record<Service, boolean> = {
       youtube: !!(Deno.env.get("YOUTUBE_API_KEYS") || Deno.env.get("YOUTUBE_API_KEY")), gemini: !!(Deno.env.get("GEMINI_API_KEYS") || Deno.env.get("GEMINI_API_KEY")),
       groq: !!(Deno.env.get("GROQ_API_KEYS") || Deno.env.get("GROQ_API_KEY")), cloudflare: !!(Deno.env.get("CLOUDFLARE_ACCOUNT_ID") && (Deno.env.get("CLOUDFLARE_AI_TOKENS") || Deno.env.get("CLOUDFLARE_AI_TOKEN"))),
-      openrouter: !!(Deno.env.get("OPENROUTER_API_KEYS") || Deno.env.get("OPENROUTER_API_KEY")), hunter: !!Deno.env.get("HUNTER_API_KEY"), clay: !!Deno.env.get("CLAY_API_KEY"),
+      openrouter: !!(Deno.env.get("OPENROUTER_API_KEYS") || Deno.env.get("OPENROUTER_API_KEY")), apollo: !!Deno.env.get("APOLLO_API_KEY"), hunter: !!Deno.env.get("HUNTER_API_KEY"), clay: !!Deno.env.get("CLAY_API_KEY"),
+    };
+    // A workspace key the service refused / ran dry: shown on its card so the owner pastes their own instead.
+    const { data: wsRows } = owner ? await admin.from("ai_budget").select("route, paused_until, note").in("route", ["apollo", "hunter", "clay"]).gte("day", new Date(Date.now() - 31 * DAY).toISOString().slice(0, 10)) : { data: [] };
+    const wsState = (service: Service) => {
+      const live = ((wsRows || []) as { route: string; paused_until: string | null; note: string }[]).filter((r) => r.route === service && r.paused_until && new Date(r.paused_until).getTime() > Date.now());
+      return live.some((r) => /bad_key/.test(r.note || "")) ? "refused" : live.some((r) => /quota/.test(r.note || "")) ? "quota" : "";
     };
     const memo = new Map<string, KeyChoice>();
     const extra = async (service: Service) => {
-      if (service !== "hunter" && service !== "clay") return { left: null as number | null, paused_until: null as string | null };
+      if (service !== "hunter" && service !== "clay" && service !== "apollo") return { left: null as number | null, paused_until: null as string | null };
       const ch = await keyFor(admin, userId, service, memo).catch(() => null);
-      const st = service === "hunter" ? await hunterState(admin, ch).catch(() => null) : await clayState(admin, ch).catch(() => null);
-      return { left: ch ? st?.left ?? null : null, paused_until: st && st.paused > Date.now() ? new Date(st.paused).toISOString() : null };
+      const st = service === "hunter" ? await hunterState(admin, ch).catch(() => null) : service === "clay" ? await clayState(admin, ch).catch(() => null) : await apolloState(admin, ch).catch(() => null);
+      return { left: ch ? (service === "apollo" ? null : st?.left ?? null) : null, paused_until: st && st.paused > Date.now() ? new Date(st.paused).toISOString() : null, ...(service === "apollo" && ch ? { used: st?.used ?? 0 } : {}) };
     };
     const keys = await Promise.all(SERVICES.map(async (service) => {
       const mine = saved.filter((r) => r.service === service).map((r) => ({ slot: r.slot, hint: r.hint, label: r.label, status: r.status, checked_at: r.checked_at, saved_at: r.updated_at }));
       const x = await extra(service);
       // YouTube: today's units on this member's own key(s) (or, for the owner, the workspace key).
       const usage = service === "youtube" && youtubeConfigured() ? await youtubeUsage().catch(() => null) : null;
-      return { service, max: SLOTS[service], keys: mine, workspace: owner && ws[service] && !mine.some((k) => k.status !== "refused"), ...x, ...(usage ? { usage } : {}) };
+      const workspace = owner && ws[service] && !mine.some((k) => k.status !== "refused");
+      return { service, max: SLOTS[service], keys: mine, workspace, ...(workspace ? { workspace_status: wsState(service) } : {}), ...x, ...(usage ? { usage } : {}) };
     }));
     return json({ ok: true, owner, keys });
   }
@@ -1476,11 +1514,11 @@ Deno.serve(async (req) => {
     const domain = normalizeDomain((b as BrandRow).domain || "");
     if (!domain) return json({ error: "Add their website first — lookups go by website, never by name." }, 400);
     const memo = new Map<string, KeyChoice>();
-    const [hk, ck] = await Promise.all([keyFor(admin, userId, "hunter", memo), keyFor(admin, userId, "clay", memo)]);
-    if (!hk && !ck) return json({ error: "Connect Clay or Hunter in Settings → Lookup services first.", setup: true }, 400);
-    const [h, c] = await Promise.all([hunterState(admin, hk), clayState(admin, ck)]);
-    const left = () => ({ hunter: { configured: !!hk, own: !!hk?.own, left: h.left }, clay: { configured: !!ck, own: !!ck?.own, left: c.left } });
-    if (h.left <= 0 && c.left <= 0) return json({ error: "No lookups left right now — Hunter refills on its reset date, Clay a little every day.", quota: true }, 429);
+    const [hk, ck, ak] = await Promise.all([keyFor(admin, userId, "hunter", memo), keyFor(admin, userId, "clay", memo), keyFor(admin, userId, "apollo", memo)]);
+    if (!hk && !ck && !ak) return json({ error: "Connect Apollo, Clay or Hunter in Settings → Your API keys first.", setup: true }, 400);
+    const [h, c, a] = await Promise.all([hunterState(admin, hk), clayState(admin, ck), apolloState(admin, ak)]);
+    const left = () => ({ hunter: { configured: !!hk, own: !!hk?.own, left: h.left }, clay: { configured: !!ck, own: !!ck?.own, left: c.left }, apollo: { configured: !!ak, own: !!ak?.own, used: a.used, paused: a.paused > Date.now() } });
+    if (h.left <= 0 && c.left <= 0 && a.left <= 0) return json({ error: "No lookups left right now — Hunter refills on its reset date, Clay a little every day, Apollo with your plan.", quota: true }, 429);
     const { data: row } = await admin.from("brand_intel").select("intel").eq("brand_id", id).eq("user_id", userId).maybeSingle();
     let intel = (row?.intel || null) as Intel | null;
     if (!intel || intel.domain !== domain) intel = await researchBrand(admin, b as BrandRow).catch(() => null);
@@ -1490,8 +1528,11 @@ Deno.serve(async (req) => {
     if (input.action === "company_lookup") {
       const notes: string[] = [];
       let found = false;
-      if (ck && c.left > 0 && !company.clay_at) { const r = await clayFill(admin, ck, company); company = r.co; if (r.why && r.why !== "none") notes.push(`Clay: ${said(r.why)}`); else if (!r.why) { found = true; c.left = Math.max(0, c.left - 1); } }
-      if (hk && h.left > 0 && !company.hunter_at && (!company.linkedin || !company.size)) { const r = await hunterFill(admin, hk, company); company = r.co; if (r.why && r.why !== "none") notes.push(`Hunter: ${said(r.why)}`); else { h.left = Math.max(0, h.left - 1); if (!r.why) found = true; } }
+      // Apollo first; Clay and Hunter only fill what it didn't have.
+      if (ak && a.left > 0 && !company.apollo_at) { const r = await apolloFill(admin, ak, company, (b as BrandRow).name); company = r.co; if (r.why && r.why !== "none") notes.push(`Apollo: ${r.why === "plan" ? "your plan doesn't include company records" : said(r.why)}`); else if (!r.why) { found = true; a.used++; } }
+      const full = !!company.linkedin && !!(company.size || company.employees) && !!company.industry;
+      if (!full && ck && c.left > 0 && !company.clay_at) { const r = await clayFill(admin, ck, company); company = r.co; if (r.why && r.why !== "none") notes.push(`Clay: ${said(r.why)}`); else if (!r.why) { found = true; c.left = Math.max(0, c.left - 1); } }
+      if (!full && hk && h.left > 0 && !company.hunter_at && (!company.linkedin || !(company.size || company.employees))) { const r = await hunterFill(admin, hk, company); company = r.co; if (r.why && r.why !== "none") notes.push(`Hunter: ${said(r.why)}`); else { h.left = Math.max(0, h.left - 1); if (!r.why) found = true; } }
       await admin.from("brand_intel").update({ intel: { ...intel, company } }).eq("brand_id", id).eq("user_id", userId);
       if (!found && notes.length) return json({ error: `No company facts — ${notes.join("; ")}.` }, 502);
       return json({ ok: true, company, found, ...left() });
@@ -1515,6 +1556,165 @@ Deno.serve(async (req) => {
     const people: People = { at: new Date().toISOString(), domain, list, total: Math.max(total, list.length) };
     await admin.from("brand_intel").update({ intel: { ...intel, company, people } }).eq("brand_id", id).eq("user_id", userId);
     return json({ ok: true, people, ...left() });
+  }
+
+  // ---- People finder: who to reach at a brand, by the titles you rank in Settings ----------------------------
+  // people_search: Apollo first (free search: everyone at their website with a matching title), Hunter + Clay
+  //   only when there's no Apollo key or Apollo can't search. Kept per person in brand_people.
+  // people_list: what's on file for one brand (read when its profile opens). people_mark: the contact you made
+  //   from a person. people_unlock: full name, LinkedIn profile and work email — Apollo (1 credit), then
+  //   Hunter's Email Finder (1 credit) when Apollo has no email.
+  if (input.action === "people_search" || input.action === "people_list" || input.action === "people_mark" || input.action === "people_unlock") {
+    const COLS = "id, brand_id, source, ext_id, first_name, last_name, last_hint, title, seniority, has_email, email, email_status, linkedin_url, contact_id, found_at, unlocked_at, unlock_via";
+    type Row = FoundPerson & { id: string; brand_id: string; source: "apollo" | "hunter" | "clay"; contact_id: string | null; found_at: string; unlocked_at: string | null; unlock_via: string };
+    const listOf = async (brandId: string) => {
+      const { data, error } = await admin.from("brand_people").select(COLS).eq("user_id", userId).eq("brand_id", brandId).order("found_at", { ascending: false }).limit(600);
+      if (error) throw new Error("people");
+      return (data || []) as Row[];
+    };
+    const said = (why?: string) => why === "quota" ? "your credits are used up" : why === "bad_key" ? "the key was refused" : why === "plan" ? "your Apollo plan doesn't allow API search" : why === "busy" ? "it's busy — try again in a minute" : "it didn't answer";
+
+    if (input.action === "people_mark") {
+      const person = typeof input.person === "string" && UUID.test(input.person) ? input.person : "";
+      const contact = input.contact === null ? null : typeof input.contact === "string" && UUID.test(input.contact) ? input.contact : undefined;
+      if (!person || contact === undefined) return json({ error: "Which person? Nothing changed." }, 400);
+      const { data, error } = await admin.from("brand_people").update({ contact_id: contact }).eq("id", person).eq("user_id", userId).select(COLS).maybeSingle();
+      if (error || !data) return json({ error: "That person isn't on file any more — search again." }, 404);
+      return json({ ok: true, person: data });
+    }
+
+    if (input.action === "people_unlock") {
+      const person = typeof input.person === "string" && UUID.test(input.person) ? input.person : "";
+      const { data: row } = person ? await admin.from("brand_people").select(COLS).eq("id", person).eq("user_id", userId).maybeSingle() : { data: null };
+      if (!row) return json({ error: "That person isn't on file any more — search again." }, 404);
+      const r0 = row as Row;
+      if (r0.email) return json({ ok: true, person: r0, already: true });
+      const { data: b } = await admin.from("brands").select("id, name, domain").eq("id", r0.brand_id).eq("user_id", userId).maybeSingle();
+      const domain = normalizeDomain(String(b?.domain || ""));
+      if (!b || !domain) return json({ error: "Add the brand's website first — emails are only looked up at their own domain." }, 400);
+      const memo = new Map<string, KeyChoice>();
+      const [ak, hk] = await Promise.all([keyFor(admin, userId, "apollo", memo), keyFor(admin, userId, "hunter", memo)]);
+      if (!ak && !hk) return json({ error: "Connect Apollo (or Hunter) in Settings → Your API keys to get emails.", setup: true }, 400);
+      const [a, h] = await Promise.all([apolloState(admin, ak), hunterState(admin, hk)]);
+      const next: Partial<Row> = {};
+      const notes: string[] = [];
+      let via = "";
+      if (ak && a.left > 0) {
+        const r = await apolloUnlock({ id: r0.source === "apollo" ? r0.ext_id : undefined, linkedin_url: r0.linkedin_url, first_name: r0.first_name, last_name: r0.last_name, domain, company: String(b.name || "") }, { key: ak.key });
+        if (r.ok) {
+          await spend(admin, ak, 1);
+          const v = r.value;
+          Object.assign(next, { first_name: v.first_name || r0.first_name, last_name: v.last_name || r0.last_name, last_hint: "", linkedin_url: v.linkedin_url || r0.linkedin_url, email: v.email, email_status: v.email_status, ...(v.title ? { title: v.title, seniority: v.seniority } : {}) });
+          if (v.email) via = "apollo";
+        } else if (r.why !== "none") { if (r.why !== "plan" && r.why !== "no_key") await keyStop(admin, ak, "apollo", r.why); notes.push(`Apollo: ${said(r.why)}`); }
+        else notes.push("Apollo: no match");
+      }
+      const last = next.last_name || r0.last_name;
+      if (!next.email && hk && h.left > 0 && last) {
+        const r = await hunterEmail(domain, next.first_name || r0.first_name, last, undefined, hk.key);
+        if (r.ok) { await hunterUse(admin, hk); Object.assign(next, { email: r.value.email, email_status: r.value.status, ...(r.value.linkedin && !(next.linkedin_url || r0.linkedin_url) ? { linkedin_url: r.value.linkedin } : {}) }); via = "hunter"; }
+        else if (r.why !== "none") { await keyStop(admin, hk, "hunter", r.why); notes.push(`Hunter: ${said(r.why)}`); }
+        else notes.push("Hunter: no email found");
+      }
+      if (!Object.keys(next).length) return json({ error: notes.length ? `Nothing unlocked — ${notes.join("; ")}.` : "Nothing unlocked — no lookups left right now.", notes }, 502);
+      const { data: saved, error } = await admin.from("brand_people").update({ ...next, unlocked_at: new Date().toISOString(), unlock_via: via || (next.linkedin_url || next.last_name ? "apollo" : "search") }).eq("id", r0.id).eq("user_id", userId).select(COLS).maybeSingle();
+      if (error || !saved) return json({ error: "Found it, but couldn't save it — try again." }, 500);
+      return json({ ok: true, person: saved, notes, apollo: ak ? { used: a.used + (via === "apollo" || next.last_name ? 1 : 0) } : undefined });
+    }
+
+    const id = typeof input.id === "string" && UUID.test(input.id) ? input.id : "";
+    const { data: b } = id ? await admin.from("brands").select("id, user_id, name, domain, archived_at").eq("id", id).eq("user_id", userId).maybeSingle() : { data: null };
+    if (!b) return json({ error: "That brand isn't in your CRM (or hasn't saved yet) — try again in a moment." }, 404);
+    const domain = normalizeDomain((b as BrandRow).domain || "");
+
+    if (input.action === "people_list") {
+      let rows = await listOf(id).catch(() => null);
+      if (!rows) return json({ error: "Couldn't load the people — try again." }, 500);
+      // People an older search kept on the brand's research (Hunter / Clay) move into the list once.
+      if (!rows.length) {
+        const { data: ir } = await admin.from("brand_intel").select("intel").eq("brand_id", id).eq("user_id", userId).maybeSingle();
+        const old = ((ir?.intel as Intel | null)?.people?.list || []) as Person[];
+        if (old.length) {
+          const add = old.map((p) => ({ user_id: userId, brand_id: id, source: p.via === "clay" ? "clay" : "hunter", ext_id: (p.email || p.linkedin || `${p.first} ${p.last}`).toLowerCase().slice(0, 200), first_name: p.first.slice(0, 80), last_name: p.last.slice(0, 80), title: p.title.slice(0, 160), seniority: seniorityOf(p.title), has_email: !!p.email, email: p.email, email_status: p.email ? (p.confidence >= 90 ? "verified" : "likely") : "", linkedin_url: p.linkedin, unlocked_at: p.email ? new Date().toISOString() : null, unlock_via: p.email ? "hunter" : "" })).filter((p) => p.ext_id.trim());
+          await admin.from("brand_people").upsert(add, { onConflict: "user_id,brand_id,source,ext_id", ignoreDuplicates: true });
+          rows = await listOf(id).catch(() => rows);
+        }
+      }
+      return json({ ok: true, people: rows });
+    }
+
+    // people_search
+    if (!domain) return json({ error: "Add their website first — people are found by the company's website, never by name." }, 400);
+    const tries = `finder@${userId}`;
+    const { data: t } = await admin.from("ai_budget").select("calls").eq("route", tries).eq("day", utcToday()).maybeSingle();
+    if ((Number(t?.calls) || 0) >= 120) return json({ error: "That's 120 searches today — try again tomorrow." }, 429);
+    await admin.rpc("ai_budget_use", { p_route: tries, p_units: 0 });
+    const { data: me } = await admin.from("profiles").select("preferences").eq("id", userId).maybeSingle();
+    const saved = readFinder((me?.preferences as { people_finder?: unknown } | null)?.people_finder);
+    const asked = input.titles !== undefined || input.seniority !== undefined ? readFinder({ titles: input.titles ?? saved.titles, seniority: input.seniority ?? saved.seniority }) : saved;
+    const memo = new Map<string, KeyChoice>();
+    const [ak, hk, ck] = await Promise.all([keyFor(admin, userId, "apollo", memo), keyFor(admin, userId, "hunter", memo), keyFor(admin, userId, "clay", memo)]);
+    if (!ak && !hk && !ck) return json({ error: "Connect Apollo in Settings → Your API keys — searching is free with it.", setup: true }, 400);
+    const notes: string[] = [];
+    let found: (FoundPerson & { source: "apollo" | "hunter" | "clay" })[] = [];
+    let total = 0;
+    let source: "apollo" | "hunter+clay" | "" = "";
+    let apolloOk = false;
+    if (ak) {
+      const st = await apolloState(admin, ak);
+      if (st.paused > Date.now()) notes.push("Apollo: paused after an error — it tries again soon");
+      else {
+        const r = await apolloPeople(domain, asked.titles, asked.seniority, { key: ak.key, pages: 3 });
+        await spend(admin, ak, 0);
+        if (r.ok) { apolloOk = true; source = "apollo"; total = r.value.total; found = r.value.list.map((p) => ({ ...p, source: "apollo" as const })); }
+        else { if (r.why !== "none" && r.why !== "plan" && r.why !== "no_key") await keyStop(admin, ak, "apollo", r.why); if (r.why === "none") apolloOk = true; else notes.push(`Apollo: ${said(r.why)}`); if (r.why === "none") source = "apollo"; }
+      }
+    }
+    // No Apollo (or it can't search): Hunter's people with emails (1 credit) + Clay's with LinkedIn (≤ 5 results).
+    if (!apolloOk) {
+      const [h, c] = await Promise.all([hunterState(admin, hk), clayState(admin, ck)]);
+      const people: Person[][] = [[], []];
+      if (hk && h.left > 0) {
+        const r = await hunterPeople(domain, undefined, hk.key);
+        if (r.ok) { await hunterUse(admin, hk); people[0] = r.value.list; total = Math.max(total, r.value.total); }
+        else if (r.why !== "none") { await keyStop(admin, hk, "hunter", r.why); if (r.why === "error") await hunterUse(admin, hk); notes.push(`Hunter: ${said(r.why)}`); }
+        else await hunterUse(admin, hk);
+      }
+      if (ck && c.left > 0) {
+        const r = await clayPeople(domain, Math.min(5, c.left), undefined, ck.key);
+        if (r.results) await clayUse(admin, ck, r.results);
+        if (r.ok) people[1] = r.value;
+        else if (r.why !== "none") { await keyStop(admin, ck, "clay", r.why); notes.push(`Clay: ${said(r.why)}`); }
+      }
+      if (hk || ck) source = "hunter+clay";
+      found = mergePeople(people[0], people[1]).map((p) => ({
+        source: p.via === "clay" ? "clay" as const : "hunter" as const, ext_id: (p.email || p.linkedin || `${p.first} ${p.last}`).toLowerCase().slice(0, 200),
+        first_name: p.first.slice(0, 80), last_name: p.last.slice(0, 80), last_hint: "", title: p.title.slice(0, 160), seniority: seniorityOf(p.title),
+        has_email: !!p.email, email: p.email, email_status: p.email ? (p.confidence >= 90 ? "verified" : "likely") : "", linkedin_url: p.linkedin,
+      })).filter((p) => p.ext_id.trim());
+    }
+    if (!source) return json({ error: `No search ran — ${notes.join("; ") || "no lookups left right now"}.`, notes }, 502);
+    // Save: what a search can't know (an unlocked name / email / LinkedIn, the contact you made) is never overwritten.
+    const before = await listOf(id).catch(() => [] as Row[]);
+    const key = (r: { source: string; ext_id: string }) => `${r.source}|${r.ext_id}`;
+    const had = new Map(before.map((r) => [key(r), r]));
+    const now = new Date().toISOString();
+    const rows = found.map((p) => {
+      const old = had.get(key(p));
+      const kept = old?.unlocked_at ? { first_name: old.first_name, last_name: old.last_name, last_hint: old.last_hint, email: old.email, email_status: old.email_status, linkedin_url: old.linkedin_url, unlocked_at: old.unlocked_at, unlock_via: old.unlock_via } : {};
+      return { user_id: userId, brand_id: id, ...p, ...kept, found_at: now, ...(p.email && !old?.unlocked_at ? { unlocked_at: now, unlock_via: p.source } : {}) };
+    });
+    for (let i = 0; i < rows.length; i += 200) {
+      const { error } = await admin.from("brand_people").upsert(rows.slice(i, i + 200), { onConflict: "user_id,brand_id,source,ext_id" });
+      if (error) return json({ error: "Found them, but couldn't save the list — try again." }, 500);
+    }
+    // People the new search no longer returns go, unless you added them or unlocked them.
+    const now_ = new Set(rows.map(key));
+    const sources = source === "apollo" ? ["apollo"] : ["hunter", "clay"];
+    const stale = before.filter((r) => sources.includes(r.source) && !now_.has(key(r)) && !r.contact_id && !r.unlocked_at).map((r) => r.id);
+    for (let i = 0; i < stale.length; i += 200) await admin.from("brand_people").delete().eq("user_id", userId).in("id", stale.slice(i, i + 200));
+    const list = await listOf(id).catch(() => null);
+    return json({ ok: true, people: list || [], total: Math.max(total, found.length), source, titles: asked.titles, seniority: asked.seniority, notes });
   }
 
   return json({ error: "Unknown action" }, 400);

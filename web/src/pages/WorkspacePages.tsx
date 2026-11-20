@@ -14,11 +14,12 @@ import type { EmailTemplate, ThemeName, WorkspaceData } from "../types";
 import { columnKeys } from "../lib/exportFormats";
 import { CoachSettings, FollowupRulesSettings, GmailSettings, WeekendSettings } from "../components/SettingsGmail";
 import { ApiKeysSettings } from "../components/ApiKeys";
+import { PeopleFinderSettings } from "../components/PeopleFinder";
 import { useExcelCrm } from "../components/ExcelCrm";
 import { TeamSettings } from "../components/Team";
 import { WeeklyReportSettings } from "../components/WeeklyReport";
 import { AvatarButton } from "../components/AvatarEditor";
-import { CalendarDays, CornerUpLeft, KeyRound, Layers, Mail, Sheet, Target, Youtube } from "lucide-react";
+import { CalendarDays, CornerUpLeft, KeyRound, Layers, Mail, Sheet, Target, UsersRound, Youtube } from "lucide-react";
 import { FollowupTemplates } from "../components/FollowupTemplates";
 import { useAutopilot } from "../contexts/AutopilotContext";
 import { ReplyTemplateSettings } from "../components/ReplyTemplateSettings";
@@ -81,6 +82,7 @@ const SECTIONS = [
   { id: "follow-templates", label: "Follow-up templates", icon: Layers },
   { id: "youtube", label: "YouTube stats", icon: Youtube },
   { id: "keys", label: "Your API keys", icon: KeyRound },
+  { id: "people", label: "Finding people", icon: UsersRound },
   { id: "followups", label: "Follow-up rules", icon: CalendarDays },
   { id: "weekend", label: "Weekends", icon: CalendarDays },
   { id: "coach", label: "Daily goal & coach", icon: Target },
@@ -369,6 +371,7 @@ export function SettingsPage() {
       <FollowupTemplatesSection />
       <YouTubeSettings />
       <ApiKeysSettings />
+      <PeopleFinderSettings />
       <FollowupRulesSettings />
       <WeekendSettings />
       <CoachSettings />

@@ -19,7 +19,7 @@ import { useToast } from "./ToastContext";
 // A creator you add with a YouTube channel is read right away (not at the
 // next 3-minute cron), and a toast says what was found.
 
-export type MatchStatus = { stamp?: string; creators: number; read: number; failed?: number; backfilling?: number; videos?: number; paidVideos?: number; transcripts?: number; noCaptions?: number; transcriptWaiting?: number; listened?: number; listenQueue?: number; noYoutube?: number; lastRead?: string | null; everyMin?: number; perRun?: number; rescanDays?: number; brandDays?: number; brands: number; researched: number; youtube: boolean; clef: { configured: boolean; left: number; cap: number; pausedUntil: string | null }; listen: { configured: boolean; secondsLeft: number }; tx?: { services: string[]; left: number }; hunter?: { configured: boolean; own?: boolean; left: number }; clay?: { configured: boolean; own?: boolean; left: number } };
+export type MatchStatus = { stamp?: string; creators: number; read: number; failed?: number; backfilling?: number; videos?: number; paidVideos?: number; transcripts?: number; noCaptions?: number; transcriptWaiting?: number; listened?: number; listenQueue?: number; noYoutube?: number; lastRead?: string | null; everyMin?: number; perRun?: number; rescanDays?: number; brandDays?: number; brands: number; researched: number; youtube: boolean; clef: { configured: boolean; left: number; cap: number; pausedUntil: string | null }; listen: { configured: boolean; secondsLeft: number }; tx?: { services: string[]; left: number }; hunter?: { configured: boolean; own?: boolean; left: number }; clay?: { configured: boolean; own?: boolean; left: number }; apollo?: { configured: boolean; own?: boolean; used: number; paused: boolean } };
 type Result = { ok: boolean; message: string };
 type Value = {
   ready: boolean;
@@ -207,7 +207,7 @@ export function MatchProvider({ children }: { children: ReactNode }) {
     const tag = `${what}:${brandId}`;
     setLooking((s) => new Set(s).add(tag));
     try {
-      const r = await matchCall<{ ok: boolean; company?: CompanyFacts; people?: BrandIntel["people"]; found?: boolean; hunter?: { configured: boolean; left: number }; clay?: { configured: boolean; left: number } }>({ action: what === "company" ? "company_lookup" : "people_find", id: brandId });
+      const r = await matchCall<{ ok: boolean; company?: CompanyFacts; people?: BrandIntel["people"]; found?: boolean; hunter?: { configured: boolean; left: number }; clay?: { configured: boolean; left: number }; apollo?: { configured: boolean; used: number; paused: boolean } }>({ action: what === "company" ? "company_lookup" : "people_find", id: brandId });
       if (r.error || !r.data) { toast(r.error || "The lookup didn't answer — try again in a minute.", "error"); return { ok: false, message: r.error || "" }; }
       const d = r.data;
       setIntel((map) => {
@@ -217,7 +217,7 @@ export function MatchProvider({ children }: { children: ReactNode }) {
         next.set(brandId, { ...row, intel: { ...row.intel, ...(d.company ? { company: d.company } : {}), ...(d.people ? { people: d.people } : {}) } });
         return next;
       });
-      if (d.hunter || d.clay) setStatus((st) => (st ? { ...st, ...(d.hunter ? { hunter: d.hunter } : {}), ...(d.clay ? { clay: d.clay } : {}) } : st));
+      if (d.hunter || d.clay || d.apollo) setStatus((st) => (st ? { ...st, ...(d.hunter ? { hunter: d.hunter } : {}), ...(d.clay ? { clay: d.clay } : {}), ...(d.apollo ? { apollo: d.apollo } : {}) } : st));
       if (what === "company") toast(d.found === false ? "No company record for this website yet." : d.company?.linkedin ? "Company facts added." : "Company facts added — no LinkedIn page on record.", d.found === false ? "info" : "success");
       else toast(d.people?.list.length ? `${d.people.list.length} ${d.people.list.length === 1 ? "person" : "people"} found.` : "No one found at this website yet.", d.people?.list.length ? "success" : "info");
       return { ok: true, message: "" };

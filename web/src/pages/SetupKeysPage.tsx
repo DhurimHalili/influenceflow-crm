@@ -1,4 +1,4 @@
-import { ArrowRight, BatteryCharging, Check, ChevronDown, CircleCheckBig, Clock, Crosshair, ExternalLink, Gift, Layers, Pause, ShieldCheck, Sparkles, Youtube } from "lucide-react";
+import { ArrowRight, BatteryCharging, Check, ChevronDown, CircleCheckBig, Clock, Crosshair, ExternalLink, Gift, Pause, Rocket, ShieldCheck, Sparkles, Youtube } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { ServiceCard } from "../components/ApiKeys";
@@ -6,12 +6,12 @@ import { useData } from "../contexts/DataContext";
 import { AI_SERVICES, readiness, usable, useKeyStatus, type Service, type ServiceRow } from "../lib/apiKeys";
 import { hasSupabase } from "../lib/supabase";
 
-// Getting started: plug in your own keys. Four stations (YouTube, an AI, Clay, Hunter), each with what it
+// Getting started: plug in your own keys. Four stations (YouTube, an AI, Apollo, Hunter), each with what it
 // unlocks, the exact clicks to get the key, the real save card (checked with the service, sealed, never
 // shown again) — and, below, an honest list of what already works and can be trusted without any keys.
 
 type Step = { text: ReactNode; href?: string; link?: string };
-type Station = { id: "youtube" | "ai" | "clay" | "hunter"; name: string; icon: typeof Youtube; minutes: number; unlocks: string[]; steps: Step[]; rule?: string; services: Service[] };
+type Station = { id: "youtube" | "ai" | "people" | "hunter"; name: string; icon: typeof Youtube; minutes: number; unlocks: string[]; steps: Step[]; rule?: string; services: Service[] };
 
 const STATIONS: Station[] = [
   {
@@ -36,17 +36,18 @@ const STATIONS: Station[] = [
     ],
   },
   {
-    id: "clay", name: "Clay", icon: Layers, minutes: 3, services: ["clay"],
-    unlocks: ["A brand's LinkedIn page, size and revenue", "The people at a brand by job title"],
+    id: "people", name: "Apollo", icon: Rocket, minutes: 3, services: ["apollo", "clay"],
+    unlocks: ["Everyone at a brand by the job titles you rank — searching is free", "Their LinkedIn and work email in one click", "A brand's LinkedIn page, size and revenue"],
     steps: [
-      { text: <>Make a free Clay account.</>, href: "https://www.clay.com", link: "clay.com" },
-      { text: <>API and CLI → API keys → <b>Add API key</b> (scope: Public API).</>, href: "https://app.clay.com/workspaces/~/api-and-cli?tab=api-keys", link: "API keys" },
-      { text: <>Copy it right away — Clay shows it once — and paste it below.</> },
+      { text: <>Make a free Apollo account <b>with your work email</b> — Apollo only gives free accounts API access that way.</>, href: "https://app.apollo.io/#/signup", link: "Sign up" },
+      { text: <>Settings → Integrations → <b>API</b> → <b>Create new key</b>.</>, href: "https://app.apollo.io/#/settings/integrations/api_keys", link: "API keys" },
+      { text: <>Turn on <b>Set as master key</b> — people search needs it — then copy it.</> },
+      { text: <>Paste it below. Clay works too, if you already use it.</> },
     ],
   },
   {
     id: "hunter", name: "Hunter", icon: Crosshair, minutes: 2, services: ["hunter"],
-    unlocks: ["Work emails of the people who decide", "Company facts when Clay has none"],
+    unlocks: ["Work emails when Apollo has none", "Company facts when Apollo has none"],
     steps: [
       { text: <>Make a free Hunter account.</>, href: "https://hunter.io/users/sign_up", link: "Sign up" },
       { text: <>Open <b>API</b> and copy your key.</>, href: "https://hunter.io/api-keys", link: "API keys" },
@@ -69,7 +70,7 @@ const WAITS: { title: string; text: string; key: string }[] = [
   { title: "YouTube stats and Quick fill", text: "Views, engagement, subscribers, niche from a channel link.", key: "YouTube" },
   { title: "Match video reading", text: "What creators post and which brands sponsor them.", key: "YouTube" },
   { title: "Media kits and tricky emails", text: "Rate cards, PDFs, unusual price wording, unclear replies.", key: "An AI" },
-  { title: "People at a brand", text: "LinkedIn people, work emails, company size and revenue.", key: "Clay / Hunter" },
+  { title: "People at a brand", text: "Everyone by job title, LinkedIn, work emails, company size and revenue.", key: "Apollo / Hunter" },
 ];
 
 export default function SetupKeysPage() {
@@ -129,7 +130,8 @@ export default function SetupKeysPage() {
                   <div className="setup-cards">
                     {!status ? <div className="lk-card lk-skeleton"><i /><i /><i /></div>
                       : st.id === "ai" ? <AiCards rows={AI_SERVICES.map((s) => row(s)!).filter(Boolean)} owner={status.owner} onChanged={reload} />
-                        : <ServiceCard row={row(st.services[0])!} owner={status.owner} onChanged={reload} />}
+                        : st.id === "people" ? <><ServiceCard row={row("apollo")!} owner={status.owner} onChanged={reload} />{row("clay") && (row("clay")!.keys.length > 0 || row("clay")!.workspace) && <ServiceCard row={row("clay")!} owner={status.owner} onChanged={reload} backup />}</>
+                          : <ServiceCard row={row(st.services[0])!} owner={status.owner} onChanged={reload} />}
                   </div>
                 </div>
                 {i < STATIONS.length - 1 && done && <button type="button" className="setup-next" onClick={() => setOpen(STATIONS[i + 1].id)}>Next: {STATIONS[i + 1].name} <ArrowRight size={14} aria-hidden="true" /></button>}

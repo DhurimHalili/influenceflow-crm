@@ -1,5 +1,5 @@
 // A member's own API keys: YouTube (up to 3 slots), AI (Gemini, Groq, Cloudflare Workers AI, OpenRouter) and
-// the lookup services (Clay, Hunter). See keyring.ts for how work picks the keys it runs on.
+// the lookup services (Apollo, Clay, Hunter). See keyring.ts for how work picks the keys it runs on.
 //
 // Stored only sealed (AES-256-GCM) in public.member_keys, with a Vault key used for nothing else
 // (member_key_secret(), service role only). The member id + service are bound in as associated data,
@@ -8,13 +8,15 @@
 // last 4 characters), and never put in a URL (headers only).
 //
 // Whose key a lookup uses: the member's own key always; else, for the owner only, the workspace key set
-// as a Supabase secret (HUNTER_API_KEY / CLAY_API_KEY). Members never spend the owner's credits.
+// as a Supabase secret (APOLLO_API_KEY / HUNTER_API_KEY / CLAY_API_KEY). Members never spend the owner's credits.
 
-export type Service = "youtube" | "gemini" | "groq" | "cloudflare" | "openrouter" | "hunter" | "clay";
-export const SERVICES: Service[] = ["youtube", "gemini", "groq", "cloudflare", "openrouter", "hunter", "clay"];
+export type Service = "youtube" | "gemini" | "groq" | "cloudflare" | "openrouter" | "apollo" | "hunter" | "clay";
+export const SERVICES: Service[] = ["youtube", "gemini", "groq", "cloudflare", "openrouter", "apollo", "hunter", "clay"];
+/** The services that find people / company facts (a key per member, budgets per key). */
+export type Lookup = "apollo" | "hunter" | "clay";
 /** How many keys a member may keep per service. Only YouTube allows more than one (each from a project with its own approved quota). */
-export const SLOTS: Record<Service, number> = { youtube: 3, gemini: 1, groq: 1, cloudflare: 1, openrouter: 1, hunter: 1, clay: 1 };
-export const SERVICE_NAME: Record<Service, string> = { youtube: "YouTube", gemini: "Gemini", groq: "Groq", cloudflare: "Cloudflare", openrouter: "OpenRouter", hunter: "Hunter", clay: "Clay" };
+export const SLOTS: Record<Service, number> = { youtube: 3, gemini: 1, groq: 1, cloudflare: 1, openrouter: 1, apollo: 1, hunter: 1, clay: 1 };
+export const SERVICE_NAME: Record<Service, string> = { youtube: "YouTube", gemini: "Gemini", groq: "Groq", cloudflare: "Cloudflare", openrouter: "OpenRouter", apollo: "Apollo", hunter: "Hunter", clay: "Clay" };
 
 // deno-lint-ignore no-explicit-any
 type Admin = { rpc: (fn: string, args?: Record<string, unknown>) => PromiseLike<{ data: any; error: any }>; from: (t: string) => any };
@@ -68,6 +70,7 @@ export function cleanKey(service: Service, raw: unknown): string {
   if (s.length < 16 || s.length > 256 || !/^[\x21-\x7e]+$/.test(s)) return "";
   if (service === "hunter" && !/^[A-Za-z0-9_-]+$/.test(s)) return "";
   if (service === "clay" && !/^[A-Za-z0-9_.-]+$/.test(s)) return "";
+  if (service === "apollo" && !/^[A-Za-z0-9_-]+$/.test(s)) return "";
   // Google keys (YouTube, Gemini): "AIza…" (39) or the newer "AQ.…" form.
   if ((service === "youtube" || service === "gemini") && !/^(?:AIza[\w-]{30,40}|AQ\.[\w.-]{20,300})$/.test(s)) return "";
   if ((service === "groq" || service === "openrouter") && !/^[\w-]{20,200}$/.test(s)) return "";
@@ -92,7 +95,8 @@ const text = (b: unknown) => { try { return JSON.stringify(b ?? "").slice(0, 200
 
 /**
  * Asks the service whether the key works — free or 1-unit calls: YouTube i18nRegions (1 unit), Gemini models
- * list, Groq models list, OpenRouter /key, Cloudflare Workers AI model search, Hunter /v2/account, Clay /me.
+ * list, Groq models list, OpenRouter /key, Cloudflare Workers AI model search, Apollo /auth/health, Hunter
+ * /v2/account, Clay /me.
  * Cloudflare's "key" is JSON {account, token}. Keys go in headers, never URLs.
  */
 export async function checkKey(service: Service, key: string, get: Fetcher = defaultFetch): Promise<KeyCheck> {
@@ -138,6 +142,15 @@ export async function checkKey(service: Service, key: string, get: Fetcher = def
     if (r.status === 200 && (r.body as { success?: boolean } | null)?.success !== false) return { ok: true, label: "Workers AI", left: null, total: 10000, resets: null };
     return { ok: false, why: "refused" };
   }
+  if (service === "apollo") {
+    // Apollo's own key test: both booleans true = the key works (free, no credits).
+    const r = await get("https://api.apollo.io/api/v1/auth/health", { "x-api-key": key, "Cache-Control": "no-cache" });
+    if (!r || r.status >= 500) return { ok: false, why: "unreachable" };
+    if (r.status === 429) return { ok: false, why: "quota" };
+    const b = (r.body || {}) as { healthy?: unknown; is_logged_in?: unknown };
+    if (r.status !== 200 || b.is_logged_in !== true) return { ok: false, why: "refused" };
+    return { ok: true, label: "Apollo workspace", left: null, total: null, resets: null };
+  }
   if (service === "hunter") {
     const r = await get("https://api.hunter.io/v2/account", { "X-API-KEY": key });
     if (!r || r.status >= 500) return { ok: false, why: "unreachable" };
@@ -163,13 +176,14 @@ export async function checkKey(service: Service, key: string, get: Fetcher = def
 }
 
 export type KeyChoice = { key: string; scope: string; own: boolean } | null;
-const envKey = (service: "hunter" | "clay") => (typeof Deno !== "undefined" ? Deno.env.get(service === "hunter" ? "HUNTER_API_KEY" : "CLAY_API_KEY") || "" : "");
+const ENV_KEY: Record<Lookup, string> = { apollo: "APOLLO_API_KEY", hunter: "HUNTER_API_KEY", clay: "CLAY_API_KEY" };
+const envKey = (service: Lookup) => (typeof Deno !== "undefined" ? Deno.env.get(ENV_KEY[service]) || "" : "");
 
 /**
  * The key a member's lookups use, and the budget scope it counts against: their own key ("<service>@<id>"),
  * else the workspace key for the owner only ("<service>"). null = no lookups for them.
  */
-export async function keyFor(admin: Admin, userId: string, service: "hunter" | "clay", memo = new Map<string, KeyChoice>()): Promise<KeyChoice> {
+export async function keyFor(admin: Admin, userId: string, service: Lookup, memo = new Map<string, KeyChoice>()): Promise<KeyChoice> {
   const id = `${userId}:${service}`;
   if (memo.has(id)) return memo.get(id)!;
   let choice: KeyChoice = null;

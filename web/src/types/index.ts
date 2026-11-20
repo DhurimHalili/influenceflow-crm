@@ -64,6 +64,8 @@ export interface WorkspacePreferences {
   mailbox_ramp?: Record<string, string>;
   /** Mailbox guard (lib/mailboxGuard): keep every mailbox at its daily limit; `gmail` = may also cancel emails you scheduled in Gmail. */
   mailbox_guard?: { on: boolean; gmail: boolean };
+  /** People finder: the job titles to look for at brands, in YOUR order (#1 first), and how senior. */
+  people_finder?: { titles: string[]; seniority: "all" | "manager" | "director" | "head" };
   /** "Keep my goal" for this week's ramp number (asked again next week or when the number changes). */
   goal_skip?: { week: string; total: number };
   /** Daily browser summary of due actions. */
