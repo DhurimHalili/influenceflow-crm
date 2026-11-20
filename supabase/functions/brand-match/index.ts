@@ -550,6 +550,8 @@ async function applyTranscripts(admin: SupabaseClient, userId: string, items: Tx
   const byCreator = new Map(((people || []) as CreatorRow[]).map((c) => [c.id, c]));
   const now = new Date().toISOString();
   const changed: VideoRow[] = [];
+  /** Creators whose deals can change: a transcript that adds nothing leaves the links as they are. */
+  const relinkFor = new Set<string>();
   let found = 0;
   for (const it of items) for (const r of rowsById.get(it.id) || []) {
     if (it.status === "error") { const tries = (r.transcript_tries || 0) + 1; changed.push({ ...r, transcript_tries: tries, transcript_status: tries >= 3 ? "error" : "", transcript_at: now }); continue; }
@@ -570,13 +572,14 @@ async function applyTranscripts(admin: SupabaseClient, userId: string, items: Tx
     if (heard.notSponsored) for (const m of merged) if (m.kind === "sponsored" && !/sponsor/i.test(m.quote)) m.confidence = Math.min(m.confidence, 0.35);
     const deal = heard.mentions.some((m) => m.kind !== "affiliate" && m.confidence >= 0.8);
     found += heard.mentions.filter((m) => m.kind !== "affiliate").length;
+    if (JSON.stringify(merged) !== JSON.stringify(r.mentions)) relinkFor.add(r.creator_id);
     changed.push({ ...r, mentions: merged, listen: deal ? null : r.listen, transcript_status: "ok", transcript_lang: it.lang, transcript_kind: it.kind, transcript_at: now, transcript_hits: heard.hits, judged_at: null });
   }
   if (changed.length) {
     await saveVideos(admin, changed, now);
   }
   // Who works with whom, again for the creators whose videos changed.
-  for (const cid of Array.from(new Set(changed.filter((r) => r.transcript_status === "ok").map((r) => r.creator_id)))) {
+  for (const cid of relinkFor) {
     const c = byCreator.get(cid);
     if (!c) continue;
     await rebuildLinks(admin, c, await linkRows(admin, userId, cid)).catch(() => 0);
@@ -1009,8 +1012,20 @@ async function autoAdd(admin: SupabaseClient, s: SeenRow, checked: { domain: str
 
 /** Link found brands to CRM brands you added since (same domain or name). */
 async function relink(admin: SupabaseClient, userId: string) {
+  // Only when something it depends on changed: a brand added / edited, or a new unlinked deal. Before, every
+  // 3-minute run read ~1,700 open links + every brand + every found brand to change nothing (~300 MB a day).
+  const [nb, nl] = await Promise.all([
+    admin.from("brands").select("updated_at").eq("user_id", userId).order("updated_at", { ascending: false }).limit(1),
+    admin.from("creator_brands").select("updated_at").eq("user_id", userId).is("brand_id", null).order("updated_at", { ascending: false }).limit(1),
+  ]);
+  if (nb.error || nl.error) return;
+  const stamp = `${nb.data?.[0]?.updated_at || ""}|${nl.data?.[0]?.updated_at || ""}`;
+  const route = `relink@${userId}`;
+  const { data: last } = await admin.from("ai_budget").select("note").eq("route", route).eq("day", "2000-01-01").maybeSingle();
+  if (last?.note === stamp) return;
   const { data: open } = await admin.from("creator_brands").select("id, domain, brand_name").eq("user_id", userId).is("brand_id", null).limit(2000);
-  if (!open?.length) return;
+  const done = () => Promise.resolve(admin.from("ai_budget").upsert({ route, day: "2000-01-01", note: stamp })).catch(() => null);
+  if (!open?.length) { await done(); return; }
   const { brands } = await knownFor(admin, userId);
   const byDomain = new Map<string, string>(), byName = new Map<string, string>();
   for (const b of brands) { if (b.archived_at) continue; const d = normalizeDomain(b.domain || ""); if (d) byDomain.set(d, b.id); const n = b.name.toLowerCase().replace(/[^a-z0-9]+/g, ""); if (n.length >= 3) byName.set(n, b.id); }
@@ -1018,6 +1033,7 @@ async function relink(admin: SupabaseClient, userId: string) {
     const id = (l.domain && byDomain.get(l.domain)) || byName.get(l.brand_name.toLowerCase().replace(/[^a-z0-9]+/g, ""));
     if (id) await admin.from("creator_brands").update({ brand_id: id }).eq("id", l.id).eq("user_id", userId);
   }
+  await done();
 }
 
 // ---- the server ------------------------------------------------------------------------------
@@ -1061,8 +1077,12 @@ async function cron(admin: SupabaseClient) {
   if (ytUsers.length) {
     const { data: done } = await admin.from("creator_content").select("creator_id").in("user_id", ids).limit(20000);
     const seen = new Set((done || []).map((d: { creator_id: string }) => d.creator_id));
-    const { data: list } = await admin.from("creators").select("id, user_id, name, socials, youtube, created_at, archived_at").in("user_id", ytUsers).is("archived_at", null).order("created_at", { ascending: false }).limit(3000);
-    const todo = ((list || []) as CreatorRow[]).filter((c) => !seen.has(c.id) && youtubeOf(c.socials));
+    // Ids first (a few KB), the full rows only for the ones never read — every creator's YouTube data on every
+    // 3-minute run was ~700 MB of egress a day (Nov 2026).
+    const { data: ids0 } = await admin.from("creators").select("id, created_at").in("user_id", ytUsers).is("archived_at", null).order("created_at", { ascending: false }).limit(3000);
+    const unseen = ((ids0 || []) as { id: string }[]).map((c) => c.id).filter((id) => !seen.has(id)).slice(0, 40);
+    const { data: list } = unseen.length ? await admin.from("creators").select("id, user_id, name, socials, youtube, created_at, archived_at").in("id", unseen).order("created_at", { ascending: false }) : { data: [] };
+    const todo = ((list || []) as CreatorRow[]).filter((c) => youtubeOf(c.socials));
     // A few per run: a first read is the heaviest work (up to 150 videos); the rest wait 3 minutes.
     let n = 0;
     for (const c of todo) {
@@ -1084,8 +1104,9 @@ async function cron(admin: SupabaseClient) {
   }
   // 2b. Brands read before Gemini could help whose site blocked us or said nothing: once, a few a run.
   if (Date.now() < deadline - 60_000) {
-    const { data: rows } = await admin.from("brand_intel").select("brand_id, status, intel").in("user_id", ids).in("status", ["blocked", "unreachable", "ok"]).limit(5000);
-    const todo = ((rows || []) as { brand_id: string; status: string; intel: Intel | null }[]).filter((r) => (r.intel?.v || 0) < INTEL_V && (r.status !== "ok" || !(r.intel?.sells || []).length)).map((r) => r.brand_id).slice(0, 3);
+    // Only the rows that need it, only their id (it read every brand's whole research each run: ~300 MB a day).
+    const { data: rows } = await admin.from("brand_intel").select("brand_id, status, v:intel->v, sells:intel->sells").in("user_id", ids).in("status", ["blocked", "unreachable", "ok"]).or(`intel->>v.is.null,intel->>v.neq.${INTEL_V}`).limit(500);
+    const todo = ((rows || []) as { brand_id: string; status: string; v: number | null; sells: unknown[] | null }[]).filter((r) => (Number(r.v) || 0) < INTEL_V && (r.status !== "ok" || !(r.sells || []).length)).map((r) => r.brand_id).slice(0, 3);
     const { data: list } = todo.length ? await admin.from("brands").select("id, user_id, name, domain, archived_at").in("id", todo).is("archived_at", null) : { data: [] };
     for (const b of (list || []) as BrandRow[]) { if (Date.now() > deadline - 45_000) break; await as(b.user_id, () => researchBrand(admin, b)).catch(() => null); log.brands = Number(log.brands) + 1; }
   }
@@ -1153,7 +1174,7 @@ async function cron(admin: SupabaseClient) {
   }
   // 4c. LinkedIn pages for brands read before they were looked for: their site's link (already read), else Wikidata.
   if (Date.now() < deadline - 45_000) {
-    const { data: rows } = await admin.from("brand_intel").select("brand_id, user_id, intel").in("user_id", ids).not("intel", "is", null).is("intel->company", null).limit(40);
+    const { data: rows } = await admin.from("brand_intel").select("brand_id, user_id, intel").in("user_id", ids).not("intel", "is", null).is("intel->company", null).neq("intel->>domain", "").limit(40);
     for (const r of (rows || []) as { brand_id: string; user_id: string; intel: Intel | null }[]) {
       if (Date.now() > deadline - 35_000 || !r.intel?.domain) continue;
       const { data: b } = await admin.from("brands").select("name").eq("id", r.brand_id).maybeSingle();

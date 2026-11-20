@@ -1,0 +1,13 @@
+// TEMPORARY one-time edge function, deployed on the OLD project only for the move, deleted right after.
+// Hands the old project's function secrets straight to the migration script — never printed, never committed.
+// Locked by a random nonce (replace __NONCE__ with `python3 -c "import secrets;print(secrets.token_hex(24))"`,
+// kept in a chmod-600 file) AND the service-role key. List the names from `api.sh GET /v1/projects/OLD/secrets`.
+const NONCE = "__NONCE__";
+const NAMES: string[] = [/* "GEMINI_API_KEYS", "SMTP_PASSWORD", … every secret name except SUPABASE_* */];
+Deno.serve((req) => {
+  const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+  if (!key || req.method !== "POST" || req.headers.get("authorization") !== `Bearer ${key}` || req.headers.get("x-nonce") !== NONCE) return new Response("no", { status: 401 });
+  const out: { name: string; value: string }[] = [];
+  for (const name of NAMES) { const value = Deno.env.get(name); if (value) out.push({ name, value }); }
+  return Response.json(out, { headers: { "cache-control": "no-store" } });
+});
