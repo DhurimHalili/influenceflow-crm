@@ -146,6 +146,9 @@ export type PayoutModel = "fixed" | "percent";
  * email, gaps[1] after your 1st follow-up, … then `then` for every later one.
  * A gap of 1 means: email Monday, wait Tuesday, follow up Wednesday.
  */
+/** business = only your business days count (holidays skipped); calendar = every day counts, the reminder lands on the next business day. */
+export type DayUnit = "business" | "calendar";
+
 export interface FollowupRules {
   gaps: number[];
   then: number;
@@ -155,12 +158,20 @@ export interface FollowupRules {
   workdays: number[];
   /** Days off (YYYY-MM-DD) that don't count as business days. */
   holidays: string[];
-  /** Days after a Denied before the "reach back" reminder (0 = never). */
+  /** How the follow-up waits count: business days (default) or every day. */
+  gap_unit?: DayUnit;
+  /** Days after a no (Denied) before "start a new thread" with them (0 = never). */
   reach_back_days?: number;
+  /** How the wait after a no counts (default: every day — "1 month" is 30 days). */
+  reach_back_unit?: DayUnit;
   /** Follow-ups in one email thread before a new thread is due (0 = no cap). */
   thread_cap?: number;
-  /** Business days to wait after the last allowed follow-up before "start a new thread". */
+  /** Wait after the last allowed follow-up before "start a new thread" (start of the window). */
   new_thread_gap?: number;
+  /** The new thread is late after this many days (end of the window, ≥ new_thread_gap). */
+  new_thread_late?: number;
+  /** How the new-thread wait counts (default: every day — "2 to 3 weeks"). */
+  new_thread_unit?: DayUnit;
   /** When they reply before a scheduled follow-up goes out, cancel it in Gmail (default on). */
   auto_cancel_crossed?: boolean;
 }

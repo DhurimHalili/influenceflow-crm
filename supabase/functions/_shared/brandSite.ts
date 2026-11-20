@@ -6,11 +6,12 @@
 // Pure — tested in brandSite.test.ts.
 
 export type Product = { title: string; type?: string; tags?: string[]; price?: number; currency?: string };
+import { siteOrg, type SiteOrg } from "../../../web/src/lib/companyFacts.ts";
 export type Program = { kind: "affiliate" | "creator" | "ambassador" | "partner"; url: string; text: string; commission?: string; network?: string };
 export type SiteFacts = {
   title: string; siteName: string; description: string; lang: string; orgName: string; logo: string;
   platform: string; currency: string; socials: { platform: string; url: string }[]; programs: Program[];
-  nav: string[]; products: Product[]; collections: string[]; locales: string[]; sameAs: string[];
+  nav: string[]; products: Product[]; collections: string[]; locales: string[]; sameAs: string[]; org?: SiteOrg;
   /** A bot wall / captcha page instead of the site. */
   blocked: boolean;
 };
@@ -57,6 +58,7 @@ export function parseHtml(html: string, pageUrl: string): SiteFacts {
 
   // JSON-LD: the organisation and any products / offers.
   let orgName = "", logo = "";
+  let org: SiteOrg | undefined;
   const sameAs: string[] = [];
   const products: Product[] = [];
   const walk = (node: unknown, depth = 0) => {
@@ -69,6 +71,8 @@ export function parseHtml(html: string, pageUrl: string): SiteFacts {
       if (!orgName && typeof o.name === "string") orgName = clip(decode(o.name), 80);
       if (!logo) logo = typeof o.logo === "string" ? o.logo : typeof (o.logo as Record<string, unknown>)?.url === "string" ? String((o.logo as Record<string, unknown>).url) : "";
       if (Array.isArray(o.sameAs)) for (const s of o.sameAs.slice(0, 20)) if (typeof s === "string") sameAs.push(s);
+      // What the company says about itself (founding date, employees, country) — only from its own block.
+      if (!org && /^(Organization|Corporation|OnlineStore)$/i.test(type)) { const got = siteOrg(o); if (Object.keys(got).length) org = got; }
     }
     if (/^Product$/i.test(type) && typeof o.name === "string" && products.length < 120) {
       const offers = (Array.isArray(o.offers) ? o.offers[0] : o.offers) as Record<string, unknown> | undefined;
@@ -111,7 +115,7 @@ export function parseHtml(html: string, pageUrl: string): SiteFacts {
   const locales = Array.from(new Set(Array.from(h.matchAll(/<link[^>]*hreflang=["']([\w-]+)["'][^>]*>/gi), (m) => m[1].toLowerCase()).filter((x) => x !== "x-default"))).slice(0, 40);
   return {
     title, siteName: meta("og:site_name"), description: meta("description") || meta("og:description") || meta("twitter:description"), lang, orgName, logo: clip(logo, 300),
-    platform, currency, socials, programs, nav, products, collections: [], locales, sameAs: sameAs.slice(0, 12), blocked,
+    platform, currency, socials, programs, nav, products, collections: [], locales, sameAs: sameAs.slice(0, 12), org, blocked,
   };
   void host;
 }

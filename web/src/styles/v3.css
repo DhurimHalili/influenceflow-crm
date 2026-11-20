@@ -472,6 +472,49 @@ svg.logo-mark { --logo-glow: #ff7ad9; display: block; flex: none; width: auto; h
 .rules-preview small { color: var(--muted); font-size: 12px; }
 .rules-preview p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
 .rules-actions { margin-top: 14px; }
+
+/* Follow-up rules: one card per wait, each with its own day type */
+.rule-card { --rc: var(--accent); display: grid; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface-solid); }
+.rule-card.is-thread { --rc: #e07a12; border-color: color-mix(in srgb, var(--rc) 32%, var(--line)); background: linear-gradient(170deg, color-mix(in srgb, var(--rc) 7%, var(--surface-solid)), var(--surface-solid) 70%); }
+.rule-card.is-no { --rc: #3fa046; border-color: color-mix(in srgb, var(--rc) 30%, var(--line)); background: linear-gradient(170deg, color-mix(in srgb, var(--rc) 7%, var(--surface-solid)), var(--surface-solid) 70%); }
+.rule-card > header { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.rule-card > header > div { flex: 1; min-width: 160px; display: grid; gap: 1px; }
+.rule-card > header b { font: 750 14px "Manrope", sans-serif; color: var(--text); }
+.rule-card > header small { color: var(--muted); font-size: 12px; line-height: 1.4; }
+.rule-ico { flex: none; width: 30px; height: 30px; display: grid; place-items: center; border-radius: 9px; background: color-mix(in srgb, var(--rc) 15%, var(--surface-solid)); color: var(--rc); }
+.rule-card .rule-step { background: var(--surface-alt); }
+.unit-switch { display: inline-flex; padding: 3px; gap: 2px; border-radius: 10px; background: var(--surface-alt); box-shadow: inset 0 0 0 1px var(--line); }
+.unit-switch button { min-height: 30px; padding: 0 11px; border: 0; border-radius: 8px; background: transparent; color: var(--text-soft); font: 650 12px "Manrope", sans-serif; cursor: pointer; transition: background .15s ease-out, color .15s ease-out; }
+.unit-switch button:hover { color: var(--text); }
+.unit-switch button.on { background: var(--surface-solid); color: var(--rc, var(--accent)); box-shadow: 0 1px 3px rgba(0,0,0,.12), inset 0 0 0 1px color-mix(in srgb, var(--rc, var(--accent)) 35%, transparent); }
+.unit-switch button:focus-visible, .day-stepper button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.day-stepper button:disabled { opacity: .35; cursor: default; }
+.rule-presets { display: flex; flex-wrap: wrap; gap: 6px; }
+.rule-card .rule-presets .pick-chip.on { background: var(--rc); border-color: var(--rc); color: #fff; }
+.thread-window { display: grid; gap: 12px; padding: 10px 12px 12px; border-radius: 11px; background: var(--surface-alt); }
+.tw-track { position: relative; height: 34px; margin: 18px 6px 16px; border-radius: 8px; background: repeating-linear-gradient(90deg, color-mix(in srgb, var(--text) 6%, transparent) 0 6px, transparent 6px 12px); box-shadow: inset 0 0 0 1px var(--line); }
+.tw-wait { position: absolute; inset: 0 auto 0 0; border-radius: 8px 0 0 8px; background: color-mix(in srgb, var(--text) 7%, transparent); }
+.tw-win { position: absolute; top: -3px; bottom: -3px; min-width: 6px; border-radius: 9px; background: linear-gradient(90deg, color-mix(in srgb, var(--rc) 55%, transparent), var(--rc)); box-shadow: 0 4px 12px color-mix(in srgb, var(--rc) 35%, transparent); transition: left .15s ease-out, width .15s ease-out; }
+.tw-win em, .tw-late em { position: absolute; top: -19px; left: 0; white-space: nowrap; font: 700 10.5px "Manrope", sans-serif; font-style: normal; letter-spacing: .02em; text-transform: uppercase; color: color-mix(in srgb, var(--rc) 75%, var(--text)); }
+.tw-late { position: absolute; top: -6px; bottom: -6px; width: 2px; background: var(--danger); transition: left .15s ease-out; }
+.tw-late em { left: 6px; color: var(--danger); }
+.tw-track i { position: absolute; bottom: -4px; width: 1px; height: 6px; background: var(--line-strong); }
+.tw-track i small { position: absolute; top: 8px; left: 50%; transform: translateX(-50%); white-space: nowrap; color: var(--muted); font-size: 10.5px; }
+.tw-track i:first-of-type small { left: 0; transform: none; }
+.tw-steps { display: flex; flex-wrap: wrap; gap: 8px 18px; }
+.tw-steps label { display: flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 650; color: var(--text); }
+.tw-steps label span { min-width: 64px; }
+.tw-steps small { color: var(--muted); font-weight: 500; font-size: 11.5px; }
+.rules-preview li.is-thread i { background: #e07a12; }
+.rules-preview li.is-thread strong { color: color-mix(in srgb, #e07a12 70%, var(--text)); }
+.rules-preview .rp-note { display: flex; gap: 7px; align-items: flex-start; margin: 0 0 8px; padding: 8px 10px; border-radius: 10px; color: var(--text-soft); background: color-mix(in srgb, #e07a12 9%, var(--surface-solid)); }
+.rules-preview .rp-note svg { flex: none; margin-top: 2px; color: #e07a12; }
+.rules-preview .rp-note.is-no { background: color-mix(in srgb, #3fa046 9%, var(--surface-solid)); }
+.rules-preview .rp-note.is-no svg { color: #3fa046; }
+[data-theme="dark"] .rule-card.is-thread, [data-theme="dark"] .rules-preview li.is-thread strong { --rc: #ff9f45; }
+[data-theme="dark"] .rule-card.is-no { --rc: #6ccf6f; }
+@media (prefers-reduced-motion: reduce) { .tw-win, .tw-late, .unit-switch button { transition: none; } }
+@media (max-width: 520px) { .rule-card > header .unit-switch { width: 100%; } .unit-switch button { flex: 1; } .tw-steps label { width: 100%; } }
 @media (max-width: 860px) { .rules-grid { grid-template-columns: 1fr; } }
 
 /* ---------- Reports ---------- */

@@ -1,12 +1,13 @@
-import { BadgeCheck, Banknote, Building2, CalendarDays, ExternalLink, Linkedin, MapPin, Pencil, Search, UsersRound } from "lucide-react";
+import { BadgeCheck, Building2, ExternalLink, Linkedin, Pencil, Search } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import { useData } from "../contexts/DataContext";
 import { useMatch } from "../contexts/MatchContext";
 import { useToast } from "../contexts/ToastContext";
-import { brandDomain, countryName } from "../lib/match";
-import { dateLabel } from "../lib/utils";
+import { brandDomain } from "../lib/match";
 import type { Brand, BrandContact, SocialLink } from "../types";
 import { PeopleFinder } from "./PeopleFinder";
+import { CompanyCard } from "./CompanyLens";
+import { companyView } from "../lib/companyFacts";
 import { Button } from "./ui";
 
 // Who to reach at a brand: its LinkedIn page (only from a source tied to its own website — their site,
@@ -63,7 +64,7 @@ export function BrandReach({ brand, contacts }: { brand: Brand; contacts: BrandC
   const [typed, setTyped] = useState("");
   const typedPage = companyPage(typed);
   const looked = !!co?.wd_at || !!co?.hunter_at || !!co?.clay_at || !!co?.apollo_at || via === "site";
-  const facts = co && [co.size || (co.employees ? `${co.employees.toLocaleString("en-US")}` : ""), co.revenue, co.industry, co.founded, co.country].some(Boolean);
+  const view = companyView(co ? intel : null);
   const busyCompany = m.looking.has(`company:${brand.id}`);
 
   const savePage = (e: FormEvent) => {
@@ -100,18 +101,11 @@ export function BrandReach({ brand, contacts }: { brand: Brand; contacts: BrandC
       </div>
       <div className="reach-li-actions">
         {page && !editing && <button type="button" className="mx-icon-btn" onClick={() => { setTyped(minePage || page); setEditing(true); }} aria-label="Change LinkedIn page" title="Change"><Pencil size={13} /></button>}
-        {canFacts && <Button size="sm" variant="secondary" loading={busyCompany} onClick={() => void m.lookup(brand.id, "company")} title={`${services.join(", then ")} record for their website: LinkedIn, size, revenue, industry${apollo?.configured ? " · 1 Apollo credit" : ""}`}><Building2 size={13} /> Company facts</Button>}
+        {canFacts && <Button size="sm" variant="secondary" loading={busyCompany} onClick={() => void m.lookup(brand.id, "company")} title={`${services.join(", then ")} record for their website: LinkedIn, size, revenue, industry — an estimate, shown apart from the verified facts${apollo?.configured ? " · 1 Apollo credit" : ""}`}><Building2 size={13} /> Estimate facts</Button>}
       </div>
     </div>
 
-    {facts && co ? <ul className="reach-facts" aria-label="Company facts">
-      {(co.size || co.employees) && <li><UsersRound size={13} aria-hidden="true" /><b>{co.size || co.employees?.toLocaleString("en-US")}</b> people</li>}
-      {co.revenue && <li><Banknote size={13} aria-hidden="true" /><b>{co.revenue.replace(/^(\d)/, "$$$1").replace(/\s*-\s*/, "–")}</b> a year</li>}
-      {co.industry && <li><Building2 size={13} aria-hidden="true" />{co.industry}</li>}
-      {co.founded && <li><CalendarDays size={13} aria-hidden="true" />Since {co.founded}</li>}
-      {co.country && <li><MapPin size={13} aria-hidden="true" />{countryName(co.country)}</li>}
-      <li className="reach-src">{co.facts_via === "apollo" ? "Apollo" : co.facts_via === "clay" ? "Clay" : "Hunter"} · {dateLabel((co.facts_via === "apollo" ? co.apollo_at : co.facts_via === "clay" ? co.clay_at : co.hunter_at) || co.at)}</li>
-    </ul> : null}
+    <CompanyCard view={view} checked={!!co?.wdf_at || !domain} paidNote={canFacts ? `“Company facts” asks ${services.join(", then ")} for an estimate${apollo?.configured ? " (1 Apollo credit)" : ""}.` : undefined} />
 
     <PeopleFinder brand={brand} contacts={contacts} />
 

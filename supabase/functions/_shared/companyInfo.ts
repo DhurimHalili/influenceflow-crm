@@ -9,6 +9,7 @@
 
 import { normalizeDomain } from "./sponsors.ts";
 import { cred } from "./keyring.ts";
+import { buildFacts, qidsToName, rawFacts, type QidInfo, type VerifiedFacts, type WikiEntity } from "../../../web/src/lib/companyFacts.ts";
 
 export type CompanyFacts = {
   /** The domain these facts were looked up for — a new website looks again. */
@@ -27,6 +28,10 @@ export type CompanyFacts = {
   /** Which service the size / revenue / industry came from. */
   facts_via?: "hunter" | "clay" | "apollo";
   size?: string; employees?: number; revenue?: string; industry?: string; country?: string; founded?: number; name?: string;
+  /** Free facts from Wikidata (the item whose website IS theirs) + their own site — dated, cited, never estimated. */
+  verified?: VerifiedFacts | null;
+  /** Wikidata was asked for the facts (once per domain). */
+  wdf_at?: string;
 };
 
 export type Person = { first: string; last: string; title: string; email: string; linkedin: string; confidence: number; department: string; seniority: string; via?: "hunter" | "clay" };
@@ -70,6 +75,47 @@ export async function wikidataLinkedin(name: string, domain: string, get: Fetche
   const rows = ((r?.body as { results?: { bindings?: { site?: { value?: string }; li?: { value?: string } }[] } } | null)?.results?.bindings || []);
   const ids = new Set(rows.filter((b) => normalizeDomain(String(b.site?.value || "")) === d).map((b) => String(b.li?.value || "")).filter((x) => /^[\w%.-]{2,100}$/.test(x)));
   return ids.size === 1 ? linkedinCompany(`https://www.linkedin.com/company/${[...ids][0]}`) : "";
+}
+
+const sparql = (q: string) => `https://query.wikidata.org/sparql?format=json&query=${encodeURIComponent(q)}`;
+type Bindings = { results?: { bindings?: Record<string, { value?: string }>[] } } | null;
+
+/**
+ * Wikidata's facts for exactly this company (free, no key): the ONE item whose English name is the brand's
+ * (or the domain's) and whose official website is this domain. Employees, revenue (own currency, dated),
+ * founded, home country + head office, industry, stock listing, parent group, legal name, LinkedIn id.
+ * Three small requests; null when no single item is theirs.
+ */
+export async function wikidataFacts(name: string, domain: string, get: Fetcher = defaultFetch, now = new Date().toISOString()): Promise<{ facts: VerifiedFacts; linkedin: string } | null> {
+  const d = normalizeDomain(domain);
+  const label = d.split(".")[0];
+  const clean = String(name || "").replace(/["\\\n]/g, "").trim().slice(0, 60);
+  if (!label || clean.length < 2) return null;
+  const names = Array.from(new Set([clean, label.charAt(0).toUpperCase() + label.slice(1), label.toUpperCase(), label]));
+  const found = await get(sparql(`SELECT ?i ?site WHERE { VALUES ?n { ${names.map((n) => `"${n}"@en`).join(" ")} } ?i rdfs:label ?n ; wdt:P856 ?site } LIMIT 40`));
+  // Wikidata busy / down: throw, so the caller asks again later instead of noting "nothing there".
+  if (!found || found.status >= 400) throw new Error(`wikidata ${found?.status ?? "offline"}`);
+  const ids = new Set(((found?.body as Bindings)?.results?.bindings || [])
+    .filter((b) => normalizeDomain(String(b.site?.value || "")) === d)
+    .map((b) => String(b.i?.value || "").split("/").pop() || "").filter((q) => /^Q\d{1,12}$/.test(q)));
+  if (ids.size !== 1) return null;
+  const qid = [...ids][0];
+  const ent = await get(`https://www.wikidata.org/wiki/Special:EntityData/${qid}.json`);
+  if (!ent || ent.status >= 400) throw new Error(`wikidata ${ent?.status ?? "offline"}`);
+  const entity = ((ent?.body as { entities?: Record<string, WikiEntity> } | null)?.entities || {})[qid];
+  if (!entity) return null;
+  const raw = rawFacts({ ...entity, id: qid });
+  const need = qidsToName(raw);
+  const info = new Map<string, QidInfo>();
+  if (need.length) {
+    const r = await get(sparql(`SELECT ?q ?l ?iso ?cur WHERE { VALUES ?q { ${need.map((q) => `wd:${q}`).join(" ")} } OPTIONAL { ?q rdfs:label ?l FILTER(lang(?l) = "en") } OPTIONAL { ?q wdt:P297 ?iso } OPTIONAL { ?q wdt:P498 ?cur } }`));
+    for (const b of (r?.body as Bindings)?.results?.bindings || []) {
+      const q = String(b.q?.value || "").split("/").pop() || "";
+      const was = info.get(q) || {};
+      info.set(q, { label: was.label || clip(b.l?.value, 80) || undefined, iso2: was.iso2 || (b.iso?.value && /^[A-Z]{2}$/.test(b.iso.value) ? b.iso.value : undefined), currency: was.currency || (b.cur?.value && /^[A-Z]{3}$/.test(b.cur.value) ? b.cur.value : undefined) });
+    }
+  }
+  return { facts: buildFacts(raw, info, now), linkedin: raw.linkedin ? linkedinCompany(`https://www.linkedin.com/company/${raw.linkedin}`) : "" };
 }
 
 export type HunterAnswer<T> = { ok: true; value: T } | { ok: false; why: "no_key" | "quota" | "bad_key" | "busy" | "none" | "error" };

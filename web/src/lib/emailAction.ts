@@ -103,6 +103,10 @@ export function emailPlan(o: { events: EmailEvent[]; state?: FollowupState; mail
   }
 
   const mailbox = threadBox || usual;
+  // A no a month ago is a new conversation: a fresh email with a new subject, never a reply in the old thread.
+  if (s?.kind === "reach-back") {
+    return { mode: "fresh", mailbox, thread, upcoming, status: { tone: "fresh", text: `Said no ${ago(s.since, now)} — time for a new thread` } };
+  }
   if (s?.kind === "due" && s.next === "new-thread") {
     return { mode: "fresh", mailbox, thread, upcoming, status: { tone: "fresh", text: `${thread.mine} emails in this thread — time for a new one` } };
   }
@@ -116,7 +120,6 @@ export function emailPlan(o: { events: EmailEvent[]; state?: FollowupState; mail
         : { tone: "wait", text: `You wrote ${ago(s.last.at, now)} · ${s.next === "new-thread" ? "new thread" : "follow-up"} ${dayOf(s.due, now)}` };
       case "exhausted": return { tone: "calm", text: `Every follow-up sent · last ${ago(s.last.at, now)}` };
       case "managed": return { tone: "calm", text: "Their team declined by email — try a DM" };
-      case "reach-back": return { tone: "due", text: `Said no ${ago(s.since, now)} — time to try again` };
       default: return { tone: "calm", text: `Last email ${ago(thread.lastAt, now)}` };
     }
   })();

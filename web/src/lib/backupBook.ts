@@ -35,7 +35,7 @@ export type BackupInput = {
   activities: Activity[];
   autopilot: QueuedSend[];
   goal: number;
-  rules: Pick<FollowupRules, "gaps" | "then" | "thread_cap" | "new_thread_gap">;
+  rules: Pick<FollowupRules, "gaps" | "then" | "thread_cap" | "new_thread_gap" | "gap_unit" | "new_thread_unit">;
   mailboxes: string[];
   weights?: RatingWeights | null;
   timeZone: string;
