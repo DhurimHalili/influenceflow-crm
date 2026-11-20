@@ -602,6 +602,8 @@ export async function cancelOnReply(admin: Admin, userId: string): Promise<numbe
   if (!waiting.length) return 0;
   const ids = Array.from(new Set(waiting.map((w) => w.creator_id)));
   const answered = new Set<string>(), manual = new Map<string, string>();
+  type Out = { entity_id: string; gmail_id: string; scheduled: boolean; at: string; created_at: string };
+  const sentSince = new Map<string, Out[]>();
   for (const part of chunk(ids, 150)) {
     const { data: ins } = await admin.from("email_events").select("entity_id, reply_kind").eq("user_id", userId).eq("direction", "in").in("entity_id", part).limit(2000);
     for (const e of (ins || []) as { entity_id: string; reply_kind: string | null }[]) if ((e.reply_kind || "") !== "auto") answered.add(e.entity_id);
@@ -609,6 +611,10 @@ export async function cancelOnReply(admin: Admin, userId: string): Promise<numbe
     for (const f of (fu || []) as { creator_id: string; kind: string; at: string }[]) if (f.kind === "reply") answered.add(f.creator_id); else manual.set(f.creator_id, f.at > (manual.get(f.creator_id) || "") ? f.at : manual.get(f.creator_id) || "");
     const { data: cs } = await admin.from("creators").select("id, pipeline_status, archived_at").eq("user_id", userId).in("id", part);
     for (const c of (cs || []) as { id: string; pipeline_status: string; archived_at: string | null }[]) if (c.archived_at || !["contacted", "no_reply"].includes(c.pipeline_status)) answered.add(c.id);
+    // Your own emails to them since the oldest waiting row was queued: ONE query per batch (it was one per row, every sync).
+    const since = waiting.filter((w) => part.includes(w.creator_id)).map((w) => w.created_at).sort()[0];
+    const { data: outs } = await admin.from("email_events").select("entity_id, gmail_id, scheduled, at, created_at").eq("user_id", userId).eq("direction", "out").in("entity_id", part).or(`at.gt."${since}",created_at.gt."${since}"`).limit(2000);
+    for (const e of (outs || []) as Out[]) sentSince.set(e.entity_id, [...(sentSince.get(e.entity_id) || []), e]);
   }
   let n = 0;
   for (const q of waiting) {
@@ -616,10 +622,11 @@ export async function cancelOnReply(admin: Admin, userId: string): Promise<numbe
     if (!reason && (manual.get(q.creator_id) || "") > q.created_at) reason = "you_followed_up";
     if (!reason) {
       // An email you wrote them yourself — sent, or waiting in Gmail's Scheduled folder — since this was queued.
-      const { data: mineNow } = await admin.from("email_events").select("gmail_id, scheduled").eq("user_id", userId).eq("entity_id", q.creator_id).eq("direction", "out").or(`at.gt."${q.created_at}",created_at.gt."${q.created_at}"`).limit(5);
-      if ((mineNow || []).length) {
+      const after = (t: string) => new Date(t).getTime() > new Date(q.created_at).getTime();
+      const mineNow = (sentSince.get(q.creator_id) || []).filter((e) => after(e.at) || after(e.created_at));
+      if (mineNow.length) {
         const ours = await ourSends(admin, userId, q.creator_id);
-        const yours = ((mineNow || []) as { gmail_id: string; scheduled: boolean }[]).filter((e) => !ours.has(e.gmail_id));
+        const yours = mineNow.filter((e) => !ours.has(e.gmail_id));
         if (yours.some((e) => !e.scheduled)) reason = "you_followed_up";
         else if (yours.length) reason = "scheduled_in_gmail";
       }
