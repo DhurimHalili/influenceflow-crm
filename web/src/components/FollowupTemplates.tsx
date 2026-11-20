@@ -164,7 +164,8 @@ export function FollowupTemplates({ readyByRound }: { readyByRound?: Record<numb
           <p>Autopilot skips anyone whose {ordinal(round)} follow-up is due until there's one here.</p>
           <Button size="sm" onClick={() => add(ideas[0]?.text || TIPS[round].example)}><Plus size={14} /> Start from an example</Button>
         </div>}
-        {list.length > 0 && list.length < TEMPLATES_PER_ROUND && <button type="button" className="ft-add" onClick={() => add()}><Plus size={15} /> Add another way to say it</button>}
+        {list.length > 0 && list.length < TEMPLATES_PER_ROUND && <button type="button" className="ft-add" onClick={() => add()}><Plus size={15} /> Add another way to say it<small>{list.length} of {TEMPLATES_PER_ROUND}</small></button>}
+        {list.length >= TEMPLATES_PER_ROUND && <p className="ft-full" role="status">{TEMPLATES_PER_ROUND} templates is the most for one follow-up. Remove or reword one to add a new one.</p>}
       </div>
       {list.length < TEMPLATES_PER_ROUND && (showIdeas ? <div className="ft-ideas">
         <div className="ft-ideas-head">

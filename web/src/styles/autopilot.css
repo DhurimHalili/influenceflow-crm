@@ -493,3 +493,5 @@
 .fs-noanswer { display: flex; gap: 8px; align-items: flex-start; margin: 0; padding: 11px 13px; border-radius: 12px; font-size: 13px; line-height: 1.5; color: var(--text); background: color-mix(in srgb, var(--danger, #d64545) 10%, var(--surface-solid)); border: 1.5px solid color-mix(in srgb, var(--danger, #d64545) 50%, var(--line)); }
 .fs-noanswer > svg { color: var(--danger, #d64545); flex: none; margin-top: 2px; }
 .fs-noanswer a { color: var(--accent); font-weight: 700; }
+.ft-add small { font-weight: 600; font-size: 11.5px; color: var(--muted); margin-left: 4px; }
+.ft-full { margin: 0; padding: 10px 12px; border-radius: 12px; border: 1px dashed var(--line-strong); font-size: 12.5px; color: var(--text-soft); text-align: center; }
