@@ -30,7 +30,8 @@ import { answerKind, clashWhy, lastQuestion, pairFit, questionKind, type Questio
 export const ROUNDS = [1, 2, 3, 4] as const;
 export type Round = (typeof ROUNDS)[number];
 export const TEMPLATE_MAX = 2000;
-export const TEMPLATES_PER_ROUND = 12;
+/** More ways to say one follow-up = the same words go to fewer people (what spam filters notice). */
+export const TEMPLATES_PER_ROUND = 30;
 export const NAME_MAX = 40;
 export type FollowupTemplate = { id: string; name: string; text: string };
 export type TemplateBook = Record<Round, FollowupTemplate[]>;
