@@ -64,7 +64,7 @@ export function BrandReach({ brand, contacts }: { brand: Brand; contacts: BrandC
   const [typed, setTyped] = useState("");
   const typedPage = companyPage(typed);
   const looked = !!co?.wd_at || !!co?.hunter_at || !!co?.clay_at || !!co?.apollo_at || via === "site";
-  const view = companyView(co ? intel : null);
+  const view = companyView(co ? intel : null, brand.company_check);
   const busyCompany = m.looking.has(`company:${brand.id}`);
 
   const savePage = (e: FormEvent) => {
@@ -105,7 +105,7 @@ export function BrandReach({ brand, contacts }: { brand: Brand; contacts: BrandC
       </div>
     </div>
 
-    <CompanyCard view={view} checked={!!co?.wdf_at || !domain} paidNote={canFacts ? `“Company facts” asks ${services.join(", then ")} for an estimate${apollo?.configured ? " (1 Apollo credit)" : ""}.` : undefined} />
+    <CompanyCard view={view} brand={brand} linkedin={page} checked={!!co?.wdf_at || !domain} paidNote={canFacts ? `“Company facts” asks ${services.join(", then ")} for an estimate${apollo?.configured ? " (1 Apollo credit)" : ""}.` : undefined} />
 
     <PeopleFinder brand={brand} contacts={contacts} />
 

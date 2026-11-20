@@ -74,11 +74,11 @@ eq("merge: one row per person, Hunter's email + Clay's LinkedIn", merged.map((p)
 {
   const wd = (items: string[], status = 200) => async (url: string) => {
     if (url.includes("rdfs%3Alabel%20%3Fn")) return { status, body: { results: { bindings: items.map((i) => ({ i: { value: `http://www.wikidata.org/entity/${i}` }, site: { value: "https://www.acme.com/" } })) } } };
-    if (url.includes("EntityData")) return { status: 200, body: { entities: { Q7: { claims: { P1128: [{ rank: "normal", mainsnak: { snaktype: "value", datavalue: { value: { amount: "+120" } } } }], P17: [{ rank: "normal", mainsnak: { snaktype: "value", datavalue: { value: { id: "Q30" } } } }] } } } } };
+    if (url.includes("EntityData")) return { status: 200, body: { entities: { Q7: { claims: { P1128: [{ rank: "normal", mainsnak: { snaktype: "value", datavalue: { value: { amount: "+120" } } }, references: [{ snaks: { P854: [{ snaktype: "value", datavalue: { value: "https://www.acme.com/about" } }] } }] }], P17: [{ rank: "normal", mainsnak: { snaktype: "value", datavalue: { value: { id: "Q30" } } } }] } } } } };
     return { status: 200, body: { results: { bindings: [{ q: { value: "http://www.wikidata.org/entity/Q30" }, l: { value: "United States" }, iso: { value: "US" } }] } } };
   };
   const one = await wikidataFacts("Acme", "acme.com", wd(["Q7"]), "2026-11-20T00:00:00Z");
-  eq("wikidata facts: the one item", one && [one.facts.qid, one.facts.employees?.v, one.facts.country?.v], ["Q7", 120, "US"]);
+  eq("wikidata facts: the one item — a value citing their own site is kept, an uncited one is not", one && [one.facts.qid, one.facts.employees?.v, one.facts.country?.v], ["Q7", 120, undefined]);
   eq("wikidata facts: two items for the site → nothing", await wikidataFacts("Acme", "acme.com", wd(["Q7", "Q8"])), null);
   eq("wikidata facts: busy → throws", await wikidataFacts("Acme", "acme.com", wd(["Q7"], 429)).then(() => "no throw", () => "throws"), "throws");
 }

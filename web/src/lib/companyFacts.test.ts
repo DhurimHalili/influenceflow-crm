@@ -1,5 +1,5 @@
 // Run (from web/): node --experimental-strip-types --import ./scripts/ts-hooks.mjs src/lib/companyFacts.test.ts
-import { ageBand, buildFacts, companyView, estimateUsd, moneyShort, qidsToName, rawFacts, revenueBand, siteOrg, sizeBand, sizeFromText, withSite, type WikiEntity } from "./companyFacts";
+import { agreesWithLinkedin, officialSource, ageBand, buildFacts, companyView, estimateUsd, moneyShort, qidsToName, rawFacts, revenueBand, siteOrg, sizeBand, sizeFromText, withSite, type WikiEntity } from "./companyFacts";
 
 let fail = 0;
 const check = (name: string, got: unknown, want: unknown) => {
@@ -57,7 +57,18 @@ check("paid estimates parsed", [estimateUsd("$10M-$50M"), estimateUsd("$1.2B"), 
 
 // The view: verified beats estimates; estimates are labelled; nothing = none.
 const v1 = companyView({ company: { employees: 300, facts_via: "apollo", verified: f }, products: 12, price: { median: 80, currency: "USD" }, programs: [{}], geo: { shop: "US" } } as never);
-check("verified wins over Apollo's estimate", [v1.employees?.v, v1.employees?.verified, v1.quality, v1.size, v1.rev, v1.age, v1.program, v1.shop], [7300, true, "verified", "s5", "r5", "a3", true, "US"]);
+check("official (SEC-cited) count wins over Apollo's; uncited Wikidata values are dropped", [v1.employees?.v, v1.employees?.verified, v1.quality, v1.size, v1.rev, v1.age, v1.program, v1.shop, v1.estimate?.via], [7300, true, "verified", "s5", undefined, undefined, true, "US", "apollo"]);
+
+// Which sources count (owner's rule: no crowd edits without an official source).
+check("official sources", [officialSource("https://www.sec.gov/x.htm", "logitech.com"), officialSource("https://ir.logitech.com/annual", "logitech.com"), officialSource("https://find-and-update.company-information.service.gov.uk/company/1", "x.com"), officialSource("https://money.cnn.com/quote", "logitech.com"), officialSource("https://en.wikipedia.org/wiki/Logitech", "logitech.com"), officialSource(undefined, "x.com")], [true, true, true, false, false, false]);
+check("buildFacts with the domain keeps only cited-official values", Object.keys(buildFacts(raw, info, "x", "logitech.com")).sort(), ["at", "employees", "qid"]);
+// Your LinkedIn check is the final say on size; a service's number is only "what Apollo says" next to it.
+const v3 = companyView({ company: { domain: "acme.com", size: "51-200", facts_via: "apollo" } } as never, { linkedin_size: "51-200", at: "2026-11-21T10:00:00Z" });
+check("LinkedIn check verifies the size, Apollo agrees", [v3.employees?.label, v3.employees?.via, v3.employees?.verified, v3.size, v3.estimate?.agrees, v3.quality], ["51–200", "linkedin", true, "s3", true, "verified"]);
+const v4 = companyView({ company: { domain: "acme.com", employees: 640, facts_via: "apollo" } } as never, { linkedin_size: "11-50" });
+check("LinkedIn wins when Apollo disagrees", [v4.employees?.label, v4.size, v4.estimate?.v, v4.estimate?.agrees], ["11–50", "s2", 640, false]);
+check("no check, only Apollo → not verified", [companyView({ company: { domain: "acme.com", employees: 640, facts_via: "apollo" } } as never).employees?.verified, companyView({ company: { domain: "acme.com", employees: 640, facts_via: "apollo" } } as never).quality], [false, "estimate"]);
+check("agrees", [agreesWithLinkedin(120, "51-200"), agreesWithLinkedin(201, "51-200"), agreesWithLinkedin(20000, "10001+")], [true, false, true]);
 const v2 = companyView({ company: { size: "51-200", revenue: "$10M-$50M", facts_via: "hunter" } } as never);
 check("estimate only", [v2.employees?.verified, v2.employees?.label, v2.revenue?.label, v2.quality], [false, "51–200", "$10M–$50M", "estimate"]);
 check("nothing known", companyView(null).quality, "none");

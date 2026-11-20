@@ -115,7 +115,7 @@ export async function wikidataFacts(name: string, domain: string, get: Fetcher =
       info.set(q, { label: was.label || clip(b.l?.value, 80) || undefined, iso2: was.iso2 || (b.iso?.value && /^[A-Z]{2}$/.test(b.iso.value) ? b.iso.value : undefined), currency: was.currency || (b.cur?.value && /^[A-Z]{3}$/.test(b.cur.value) ? b.cur.value : undefined) });
     }
   }
-  return { facts: buildFacts(raw, info, now), linkedin: raw.linkedin ? linkedinCompany(`https://www.linkedin.com/company/${raw.linkedin}`) : "" };
+  return { facts: buildFacts(raw, info, now, d), linkedin: raw.linkedin ? linkedinCompany(`https://www.linkedin.com/company/${raw.linkedin}`) : "" };
 }
 
 export type HunterAnswer<T> = { ok: true; value: T } | { ok: false; why: "no_key" | "quota" | "bad_key" | "busy" | "none" | "error" };
