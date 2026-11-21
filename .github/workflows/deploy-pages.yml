@@ -15,10 +15,10 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+  # Build and deploy are two jobs (GitHub's own Pages setup): the artifact is finalized when the build job
+  # ends, so the deploy job always finds it. In one job, deploy-pages twice looked it up a moment too early
+  # ("Found 0 artifact(s)") right after a successful upload, Nov 2026.
+  build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -54,6 +54,7 @@ jobs:
             --exclude '.git' --exclude '.github' --exclude '_site' \
             --exclude 'web' --exclude 'supabase' --exclude 'scripts' --exclude 'security' \
             --exclude 'node_modules' --exclude '*.env' --exclude '.env*' \
+            --exclude '.claude' --exclude 'CLAUDE.md' \
             ./ _site/
           du -sh _site && find _site -type f | wc -l
       - name: Setup Pages
@@ -62,6 +63,14 @@ jobs:
         uses: actions/upload-pages-artifact@v3
         with:
           path: _site
+
+  deploy:
+    needs: build
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
       - name: Deploy
         id: deployment
         uses: actions/deploy-pages@v4
