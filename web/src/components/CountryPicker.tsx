@@ -5,7 +5,7 @@ import { findCountry, searchCountries } from "../lib/countries";
 // Type-ahead country field: typing filters the list, the closest match is
 // always highlighted, and Enter or Tab picks it ("kos" + Enter = Kosovo).
 // Arrow keys or a click pick any other row; unlisted text is kept as typed.
-export function CountryPicker({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+export function CountryPicker({ value, onChange, label = "Country" }: { value: string; onChange: (value: string) => void; /** "" hides the label (the field sits under its own heading). */ label?: string }) {
   const listId = useId();
   const [query, setQuery] = useState(value);
   const [open, setOpen] = useState(false);
@@ -84,7 +84,7 @@ export function CountryPicker({ value, onChange }: { value: string; onChange: (v
   };
 
   return <label className="field-wrap country-picker">
-    <span className="field-label">Country</span>
+    {label ? <span className="field-label">{label}</span> : null}
     <div className={`country-box${open ? " open" : ""}`}>
       {selected && !filtering && <span className="country-code" aria-hidden>{selected.code}</span>}
       <input
@@ -99,6 +99,7 @@ export function CountryPicker({ value, onChange }: { value: string; onChange: (v
         onKeyDown={onKeyDown}
         placeholder="Start typing, e.g. Kosovo"
         role="combobox"
+        aria-label={label ? undefined : "Country"}
         aria-expanded={open}
         aria-controls={listId}
         aria-autocomplete="list"

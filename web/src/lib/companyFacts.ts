@@ -60,7 +60,90 @@ export const LINKEDIN_SIZES = [
   { key: "201-500", label: "201–500", n: 350 }, { key: "501-1000", label: "501–1,000", n: 750 }, { key: "1001-5000", label: "1,001–5,000", n: 3000 },
   { key: "5001-10000", label: "5,001–10,000", n: 7500 }, { key: "10001+", label: "10,001+", n: 15000 },
 ] as const;
-export type CompanyCheck = { linkedin_size?: string; at?: string };
+/** The facts a brand profile can carry from you (Brands → profile → Company → Edit facts). Yours win over every
+ *  source; `hide` drops a found value you know is wrong (it stays hidden even when a re-read finds it again). */
+export const FACT_KEYS = ["employees", "revenue", "founded", "country", "hq", "industry", "parent", "listed", "legal"] as const;
+export type FactKey = typeof FACT_KEYS[number];
+export type MyFacts = {
+  employees?: number;
+  revenue?: { amount: number; currency: string; year?: number };
+  founded?: number;
+  /** ISO 3166 alpha-2. */
+  country?: string;
+  hq?: string;
+  industry?: string[];
+  parent?: string;
+  listed?: { exchange: string; ticker: string };
+  legal?: string;
+  /** Where you read it (their about page, an annual report…). */
+  source?: string;
+};
+export type CompanyCheck = { linkedin_size?: string; at?: string; mine?: MyFacts | null; hide?: string[]; mine_at?: string };
+
+/** The currencies a revenue can be typed in (the ones we can place in a USD band). */
+export const CURRENCIES = ["USD", "EUR", "GBP", "CHF", "CAD", "AUD", "NZD", "JPY", "CNY", "HKD", "TWD", "KRW", "SGD", "INR", "SEK", "NOK", "DKK", "PLN", "CZK", "HUF", "BRL", "MXN", "ZAR", "TRY", "ILS", "AED", "SAR"] as const;
+
+/** "4.6B", "$12.5M", "1,2 Mio", "250 000", "3bn", "750k" → the number; undefined when it isn't one. */
+export function parseAmount(text: string | undefined): number | undefined {
+  const t = String(text ?? "").trim().toLowerCase().replace(/^[^\d-]*?(?=[\d-])/, "").replace(/\s+(?=\d{3}\b)/g, "");
+  const m = /^(\d{1,3}(?:[,.\u2019']\d{3})+|\d+)(?:[.,](\d+))?\s*(k|thousand|m|mn|mio|million|b|bn|billion|t|tn|trillion)?\.?$/.exec(t);
+  if (!m) return undefined;
+  const whole = Number(m[1].replace(/[,.\u2019']/g, ""));
+  const n = m[2] ? Number(`${whole}.${m[2]}`) : whole;
+  const u = (m[3] || "")[0];
+  const mult = u === "k" ? 1e3 : u === "m" ? 1e6 : u === "b" ? 1e9 : u === "t" ? 1e12 : 1;
+  const out = Math.round(n * mult);
+  return out > 0 && out < 1e14 ? out : undefined;
+}
+
+const text = (v: unknown, max = 120) => (typeof v === "string" ? Array.from(v).filter((ch) => ch.charCodeAt(0) >= 32).join("").replace(/[<>]/g, " ").replace(/\s+/g, " ").trim().slice(0, max) : "");
+/** Anything typed (or read back from the database) → only well-formed facts. Shared by the editor and the view. */
+export function cleanMine(v: unknown, year = new Date().getFullYear()): MyFacts {
+  const o = (v && typeof v === "object" ? v : {}) as Record<string, unknown>;
+  const out: MyFacts = {};
+  const emp = Math.round(Number(o.employees));
+  if (Number.isFinite(emp) && emp >= 1 && emp <= 5_000_000) out.employees = emp;
+  const r = (o.revenue && typeof o.revenue === "object" ? o.revenue : null) as { amount?: unknown; currency?: unknown; year?: unknown } | null;
+  const amt = Number(r?.amount);
+  const cur = String(r?.currency || "").toUpperCase();
+  if (r && Number.isFinite(amt) && amt > 0 && amt < 1e14 && (CURRENCIES as readonly string[]).includes(cur)) {
+    const y = Math.round(Number(r.year));
+    out.revenue = { amount: Math.round(amt), currency: cur, ...(y >= 1900 && y <= year ? { year: y } : {}) };
+  }
+  const f = Math.round(Number(o.founded));
+  if (f >= 1500 && f <= year) out.founded = f;
+  const c = String(o.country || "").toUpperCase();
+  if (/^[A-Z]{2}$/.test(c)) out.country = c;
+  const hq = text(o.hq, 80); if (hq) out.hq = hq;
+  const ind = (Array.isArray(o.industry) ? o.industry : []).map((x) => text(x, 40)).filter(Boolean);
+  if (ind.length) out.industry = Array.from(new Set(ind)).slice(0, 5);
+  const parent = text(o.parent); if (parent) out.parent = parent;
+  const l = (o.listed && typeof o.listed === "object" ? o.listed : null) as { exchange?: unknown; ticker?: unknown } | null;
+  const ex = text(l?.exchange, 60);
+  const tk = String(l?.ticker || "").toUpperCase().replace(/[^A-Z0-9.:-]/g, "").slice(0, 12);
+  if (ex || tk) out.listed = { exchange: ex, ticker: tk };
+  const legal = text(o.legal); if (legal) out.legal = legal;
+  const src = String(o.source || "").trim().slice(0, 300);
+  if (/^https?:\/\/[^\s<>"]+\.[^\s<>"]+$/i.test(src)) out.source = src;
+  return out;
+}
+const cleanHide = (v: unknown): FactKey[] => (Array.isArray(v) ? v.filter((k): k is FactKey => (FACT_KEYS as readonly string[]).includes(k as string)) : []);
+/** A stored company_check (database / saved copy) → a clean one, or null when it holds nothing. */
+export function normalizeCheck(v: unknown): CompanyCheck | null {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+  const o = v as Record<string, unknown>;
+  const out: CompanyCheck = {};
+  const li = String(o.linkedin_size || "");
+  if (LINKEDIN_SIZES.some((x) => x.key === li)) { out.linkedin_size = li; if (typeof o.at === "string") out.at = o.at.slice(0, 40); }
+  const mine = cleanMine(o.mine);
+  if (mineKeys(mine).length || mine.source) { out.mine = mine; if (typeof o.mine_at === "string") out.mine_at = o.mine_at.slice(0, 40); }
+  const hide = cleanHide(o.hide);
+  if (hide.length) out.hide = hide;
+  return Object.keys(out).length ? out : null;
+}
+/** The facts you set, by name, in the order the card shows them. */
+export const mineKeys = (m: MyFacts) => FACT_KEYS.filter((k) => m[k] !== undefined);
+export const FACT_LABEL: Record<FactKey, string> = { employees: "People", revenue: "Revenue", founded: "Founded", country: "Country", hq: "City", industry: "Industry", parent: "Part of", listed: "Stock listing", legal: "Registered name" };
 const sizeRange = (key: string) => { const m = /^(\d+)(?:-(\d+))?(\+)?$/.exec(key); if (!m) return null; const lo = Number(m[1]); return { lo, hi: m[3] ? Infinity : Number(m[2] || m[1]) }; };
 /** Does a service's number fall inside the band LinkedIn shows? */
 export const agreesWithLinkedin = (n: number | undefined, key: string | undefined) => { const r = key ? sizeRange(key) : null; return !!r && !!n && n >= r.lo && n <= r.hi; };
@@ -260,6 +343,10 @@ export type CompanyView = {
   estimate?: Shown<number>;
   /** Your LinkedIn check, when there is one. */
   linkedin?: { key: string; label: string; at?: string };
+  /** Which facts are yours (Edit facts), and where you read them. */
+  mine: FactKey[]; mineSource?: string; mineAt?: string;
+  /** Found values you hid as wrong. */
+  hidden: FactKey[];
   size?: string; rev?: string; age?: string;
   shop?: string; products: number; price?: { median: number; currency: string }; program: boolean;
   /** "verified" = at least one fact from the company's own words, an official record or your LinkedIn check;
@@ -267,7 +354,7 @@ export type CompanyView = {
   quality: "verified" | "estimate" | "none";
 };
 
-const VIA_NAME: Record<string, string> = { wikidata: "Official record", site: "Their website", store: "Their store", linkedin: "LinkedIn, checked by you", apollo: "Apollo", clay: "Clay", hunter: "Hunter" };
+const VIA_NAME: Record<string, string> = { you: "Set by you", wikidata: "Official record", site: "Their website", store: "Their store", linkedin: "LinkedIn, checked by you", apollo: "Apollo", clay: "Clay", hunter: "Hunter" };
 export const viaName = (via: string) => VIA_NAME[via] || via;
 
 export function companyView(intel: ({ company?: (Estimates & { verified?: VerifiedFacts | null }) | null } & StoreBits) | null | undefined, check?: CompanyCheck | null): CompanyView {
@@ -278,7 +365,10 @@ export function companyView(intel: ({ company?: (Estimates & { verified?: Verifi
   const ok = <K extends keyof VerifiedFacts>(k: K) => { const f = raw?.[k] as (Fact<unknown> & { via: string; ref?: string }) | undefined; return f && trusted(f, domain) ? raw![k] : undefined; };
   const est = co || {};
   const paid = est.facts_via || "";
-  const out: CompanyView = { products: Math.max(0, Number(intel?.products) || 0), program: !!intel?.programs?.length, quality: "none" };
+  const mine = cleanMine(check?.mine);
+  const hidden = cleanHide(check?.hide).filter((k) => mine[k] === undefined);
+  const gone = (k: FactKey) => hidden.includes(k);
+  const out: CompanyView = { products: Math.max(0, Number(intel?.products) || 0), program: !!intel?.programs?.length, quality: "none", mine: mineKeys(mine), mineSource: mine.source, mineAt: check?.mine_at, hidden };
   const fact = <T,>(f: Fact<T> | undefined, label: (x: T) => string): Shown<T> | undefined => (f ? { v: f.v, label: label(f.v), verified: true, via: f.via, as_of: f.as_of, ref: f.ref } : undefined);
   // People: your LinkedIn check decides; then an official record / their own site; a paid service's number is only "what Apollo says".
   const li = check?.linkedin_size ? LINKEDIN_SIZES.find((x) => x.key === check.linkedin_size) : undefined;
@@ -301,6 +391,31 @@ export function companyView(intel: ({ company?: (Estimates & { verified?: Verifi
   out.listed = (ok("listed") as Fact<{ exchange: string; ticker: string }> | undefined)?.v;
   out.parent = (ok("parent") as Fact<string> | undefined)?.v;
   out.legal = (ok("legal") as Fact<string> | undefined)?.v;
+  // Found values you marked wrong are gone; what you set wins over every source.
+  if (gone("employees")) { if (out.employees?.via !== "linkedin") out.employees = undefined; out.estimate = undefined; }
+  if (gone("revenue")) out.revenue = undefined;
+  if (gone("founded")) out.founded = undefined;
+  if (gone("country")) out.country = undefined;
+  if (gone("hq")) out.hq = undefined;
+  if (gone("industry")) out.industry = undefined;
+  if (gone("parent")) out.parent = undefined;
+  if (gone("listed")) out.listed = undefined;
+  if (gone("legal")) out.legal = undefined;
+  const you = { verified: true, via: "you", as_of: check?.mine_at?.slice(0, 10), ref: mine.source };
+  if (mine.employees) {
+    const was = out.employees;
+    out.employees = { v: mine.employees, label: mine.employees.toLocaleString("en-US"), ...you };
+    // A paid number next to yours: does it agree with what you know?
+    if (was && !was.verified) out.estimate = { ...was, agrees: Math.abs(was.v - mine.employees) <= Math.max(5, mine.employees * 0.3) };
+  }
+  if (mine.revenue) out.revenue = { v: toUsd(mine.revenue.amount, mine.revenue.currency), label: moneyShort(mine.revenue.amount, mine.revenue.currency), ...you, as_of: mine.revenue.year ? String(mine.revenue.year) : you.as_of };
+  if (mine.founded) out.founded = { v: mine.founded, label: String(mine.founded), ...you };
+  if (mine.country) out.country = { v: mine.country, label: mine.country, ...you };
+  if (mine.hq) out.hq = mine.hq;
+  if (mine.industry) out.industry = mine.industry;
+  if (mine.parent) out.parent = mine.parent;
+  if (mine.listed) out.listed = mine.listed;
+  if (mine.legal) out.legal = mine.legal;
   out.size = sizeBand(out.employees?.v); out.rev = revenueBand(out.revenue?.v); out.age = ageBand(out.founded?.v);
   out.shop = intel?.geo?.shop || undefined;
   if (intel?.price && intel.price.median > 0) out.price = { median: intel.price.median, currency: intel.price.currency };

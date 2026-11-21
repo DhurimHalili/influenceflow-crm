@@ -301,7 +301,12 @@
 .ccard-badge { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border-radius: 999px; background: var(--surface-alt); color: var(--text-soft); font-size: 11.5px; font-weight: 700; }
 .ccard-badge.ok { background: color-mix(in srgb, var(--success) 14%, var(--surface-solid)); color: color-mix(in srgb, var(--success) 75%, var(--text)); }
 .ccard-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
-.ccard-tile { display: grid; gap: 2px; padding: 9px 10px; border-radius: 11px; background: var(--surface-alt); min-width: 0; }
+.ccard-tile { display: grid; gap: 2px; padding: 9px 10px; border-radius: 11px; background: var(--surface-alt); min-width: 0; border: 1px solid transparent; text-align: left; font: inherit; color: inherit; cursor: pointer; transition: border-color .15s ease-out, background .15s ease-out; }
+.ccard-tile:hover { border-color: color-mix(in srgb, var(--accent) 35%, var(--line)); }
+.ccard-tile:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.ccard-pen { margin-left: auto; color: var(--muted); opacity: .7; }
+.ccard-tile.mine { background: color-mix(in srgb, var(--accent) 8%, var(--surface-solid)); border-color: color-mix(in srgb, var(--accent) 28%, var(--line)); }
+.ccard-tile.mine em { color: color-mix(in srgb, var(--accent) 70%, var(--text)); font-weight: 650; }
 .ccard-tile small { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); font-size: 11px; font-weight: 650; }
 .ccard-tile small span { display: inline-grid; color: var(--accent); }
 .ccard-tile strong { font: 780 17px "Manrope", sans-serif; color: var(--text); overflow-wrap: anywhere; }
@@ -317,7 +322,55 @@
 
 /* LinkedIn size check (brand profile): the final say on company size */
 .ccard.is-bare { gap: 8px; }
-.ccard-none { margin: 0; color: var(--muted); font-size: 12.5px; line-height: 1.5; }
+.ccard-none { display: grid; gap: 6px; justify-items: start; margin: 0; color: var(--muted); font-size: 12.5px; line-height: 1.5; }
+.ccard-none p { margin: 0; }
+.ccard-head-r { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ccard-edit { gap: 5px; }
+.ccard-ind small { align-self: center; color: var(--accent); font-size: 11px; font-weight: 650; }
+.ccard-hidden { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 0; color: var(--muted); font-size: 12px; }
+.ccard.is-editing { padding: 0; overflow: hidden; border-color: color-mix(in srgb, var(--accent) 35%, var(--line)); }
+/* Edit company facts: what the CRM found on the left, what you type on the right. */
+.cedit { display: grid; gap: 0; }
+.cedit-head { display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; background: linear-gradient(165deg, color-mix(in srgb, var(--accent) 9%, var(--surface-solid)), var(--surface-solid) 70%); border-bottom: 1px solid var(--line); }
+.cedit-head div { display: grid; gap: 2px; }
+.cedit-head b { font: 750 14px "Manrope", sans-serif; color: var(--text); }
+.cedit-head small { color: var(--muted); font-size: 12px; line-height: 1.45; }
+.cedit-rows { display: grid; }
+.cedit-row { display: grid; grid-template-columns: minmax(150px, .85fr) minmax(0, 1.5fr) minmax(112px, auto); gap: 6px 12px; align-items: center; padding: 9px 14px; border-bottom: 1px solid var(--line); transition: background .15s ease-out; }
+.cedit-row.is-mine { background: color-mix(in srgb, var(--accent) 5%, var(--surface-solid)); box-shadow: inset 3px 0 0 var(--accent); }
+.cedit-row.is-hidden .cedit-label small { color: var(--danger, #c0392b); }
+.cedit-label { display: grid; gap: 2px; min-width: 0; }
+.cedit-label b { display: inline-flex; align-items: center; gap: 6px; font: 700 12.5px "Manrope", sans-serif; color: var(--text); }
+.cedit-label b span { display: inline-grid; color: var(--accent); }
+.cedit-label small { color: var(--muted); font-size: 11.5px; line-height: 1.4; overflow-wrap: anywhere; }
+.cedit-input { display: grid; gap: 4px; min-width: 0; }
+.cedit-input .field { min-height: 36px; width: 100%; min-width: 0; }
+.cedit-money { display: grid; grid-template-columns: minmax(0, 1fr) 88px 72px; gap: 6px; }
+.cedit-pair { display: grid; grid-template-columns: minmax(0, 1fr) 96px; gap: 6px; }
+.cedit-acts { display: flex; gap: 5px; flex-wrap: wrap; justify-content: flex-end; }
+.cedit-chip { display: inline-flex; align-items: center; gap: 4px; min-height: 28px; padding: 0 9px; border: 1px solid var(--line-strong); border-radius: 999px; background: var(--surface-solid); color: var(--text-soft); font: 650 11.5px "Manrope", sans-serif; cursor: pointer; white-space: nowrap; transition: border-color .15s ease-out, background .15s ease-out; }
+.cedit-chip:hover { border-color: var(--accent); color: var(--text); }
+.cedit-chip.on { background: var(--surface-alt); border-style: dashed; }
+.cedit-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.cedit-source { display: grid; gap: 5px; padding: 11px 14px; border-bottom: 1px solid var(--line); }
+.cedit-source > span { display: inline-flex; align-items: center; gap: 6px; font: 700 12.5px "Manrope", sans-serif; color: var(--text); }
+.cedit-source > span small { color: var(--muted); font: 500 11.5px "Manrope", sans-serif; }
+.cedit-foot { position: sticky; bottom: 0; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 10px 14px; background: var(--surface-solid); }
+.cedit-gap { flex: 1; }
+.cedit-reset { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; }
+@media (max-width: 700px) {
+  .cedit-row { grid-template-columns: minmax(0, 1fr) auto; padding: 10px 12px; }
+  .cedit-input { grid-column: 1 / -1; grid-row: 2; }
+  .cedit-head, .cedit-source, .cedit-foot { padding-left: 12px; padding-right: 12px; }
+}
+@media (max-width: 420px) {
+  .cedit-money { grid-template-columns: minmax(0, 1fr) 84px; }
+  .cedit-money .cedit-year { grid-column: 1 / -1; }
+  .cedit-foot .btn { flex: 1; }
+  .cedit-reset { flex-basis: 100%; }
+  .cedit-gap { display: none; }
+}
+@media (prefers-reduced-motion: reduce) { .ccard-tile, .cedit-row, .cedit-chip { transition: none; } }
 .licheck { --li: #0a66c2; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: start; padding: 10px 12px; border: 1px dashed color-mix(in srgb, var(--li) 45%, var(--line)); border-radius: 12px; background: color-mix(in srgb, var(--li) 6%, var(--surface-solid)); }
 .licheck.done { border-style: solid; }
 .licheck-mark { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 8px; background: var(--li); color: #fff; }
