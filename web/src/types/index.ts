@@ -1,6 +1,7 @@
 import type { RateEvent, RateMetaMap } from "../lib/negotiation";
 import type { BrandTerms } from "../lib/dealTerms";
 import type { Contract } from "../lib/money";
+import type { CompanyCheck } from "../lib/companyFacts";
 export type EntityStatus =
   | "new"
   /** They reached out to you first (website form, DM, inbound email). */
@@ -416,7 +417,8 @@ export interface Brand {
   /** Set when the brand came from a creator's video (Match → found in videos). */
   discovered?: { creator_id: string; creator: string; kind: string; at: string; auto?: boolean; cleanup?: boolean; why?: string } | null;
   /** What YOU confirmed on the company's LinkedIn page (company size band + when) — the final say on size. */
-  company_check?: { linkedin_size?: string; at?: string } | null;
+  /** What you confirmed on LinkedIn and the company facts you set yourself (lib/companyFacts.ts). */
+  company_check?: CompanyCheck | null;
   pipeline_status: EntityStatus;
   date_contacted: string | null;
   status_updated_at: string;

@@ -10,6 +10,7 @@ import { changedRows, removedIds, sameRecord, type Deleted } from "../lib/sync";
 import { withDealMath } from "../lib/deal";
 import { normalizeRateHistory, normalizeRateMeta } from "../lib/negotiation";
 import { normalizeTerms } from "../lib/dealTerms";
+import { normalizeCheck } from "../lib/companyFacts";
 
 type JoinRow = { campaign_id: string; creator_id: string };
 
@@ -206,7 +207,7 @@ const normalizeBrand = (row: Record<string, unknown>, userId: string): Brand => 
   socials: normalizeSocials(row.socials),
   match_topics: Array.isArray(row.match_topics) ? row.match_topics.filter((x): x is string => typeof x === "string" && /^[a-z_]{2,30}$/.test(x)).slice(0, 8) : [],
   discovered: row.discovered && typeof row.discovered === "object" && !Array.isArray(row.discovered) ? (row.discovered as Brand["discovered"]) : null,
-  company_check: row.company_check && typeof row.company_check === "object" && !Array.isArray(row.company_check) && /^[\d+-]{1,12}$/.test(String((row.company_check as { linkedin_size?: unknown }).linkedin_size || "")) ? { linkedin_size: String((row.company_check as { linkedin_size: string }).linkedin_size), at: typeof (row.company_check as { at?: unknown }).at === "string" ? String((row.company_check as { at: string }).at) : undefined } : null,
+  company_check: normalizeCheck(row.company_check),
   pipeline_status: (mapStatus(row.pipeline_status) as Brand["pipeline_status"]) || "new",
   date_contacted: dateOrNull(row.date_contacted),
   status_updated_at:

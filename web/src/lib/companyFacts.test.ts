@@ -1,5 +1,5 @@
 // Run (from web/): node --experimental-strip-types --import ./scripts/ts-hooks.mjs src/lib/companyFacts.test.ts
-import { agreesWithLinkedin, officialSource, ageBand, buildFacts, companyView, estimateUsd, moneyShort, qidsToName, rawFacts, revenueBand, siteOrg, sizeBand, sizeFromText, withSite, type WikiEntity } from "./companyFacts";
+import { agreesWithLinkedin, cleanMine, normalizeCheck, parseAmount, officialSource, ageBand, buildFacts, companyView, estimateUsd, moneyShort, qidsToName, rawFacts, revenueBand, siteOrg, sizeBand, sizeFromText, withSite, type WikiEntity } from "./companyFacts";
 
 let fail = 0;
 const check = (name: string, got: unknown, want: unknown) => {
@@ -72,6 +72,18 @@ check("agrees", [agreesWithLinkedin(120, "51-200"), agreesWithLinkedin(201, "51-
 const v2 = companyView({ company: { size: "51-200", revenue: "$10M-$50M", facts_via: "hunter" } } as never);
 check("estimate only", [v2.employees?.verified, v2.employees?.label, v2.revenue?.label, v2.quality], [false, "51–200", "$10M–$50M", "estimate"]);
 check("nothing known", companyView(null).quality, "none");
+
+// Facts you set yourself (Edit facts): typed amounts read, junk dropped, yours win, wrong found values hidden.
+check("amounts as people type them", [parseAmount("4.6B"), parseAmount("$12.5M"), parseAmount("250,000"), parseAmount("250 000"), parseAmount("1,2 Mio"), parseAmount("3bn"), parseAmount("750k"), parseAmount("12"), parseAmount("lots"), parseAmount(""), parseAmount("-5"), parseAmount("€ 1.5 billion")], [4.6e9, 12.5e6, 250000, 250000, 1.2e6, 3e9, 750000, 12, undefined, undefined, undefined, 1.5e9]);
+check("cleanMine keeps only well-formed facts", cleanMine({ employees: "120", revenue: { amount: 4.6e9, currency: "usd", year: 2024 }, founded: 3000, country: "de", hq: "  Berlin <b>", industry: ["PC hardware", "PC hardware", ""], listed: { exchange: "NASDAQ", ticker: "logi!" }, legal: "", source: "javascript:alert(1)", extra: 1 }, 2026), { employees: 120, revenue: { amount: 4.6e9, currency: "USD", year: 2024 }, country: "DE", hq: "Berlin b", industry: ["PC hardware"], listed: { exchange: "NASDAQ", ticker: "LOGI" } });
+check("cleanMine refuses odd currencies and zero people", cleanMine({ employees: 0, revenue: { amount: 5, currency: "XYZ" } }), {});
+const v5 = companyView({ company: { domain: "acme.com", employees: 640, revenue: "$10M-$50M", facts_via: "apollo" } } as never, { linkedin_size: "51-200", mine: { employees: 130, revenue: { amount: 25e6, currency: "EUR", year: 2025 }, founded: 2012, source: "https://acme.com/about" }, mine_at: "2026-11-21T10:00:00Z" });
+check("yours win: people, revenue, founded — set by you, with your source", [v5.employees?.v, v5.employees?.via, v5.employees?.ref, v5.revenue?.label, v5.revenue?.as_of, v5.founded?.via, v5.size, v5.rev, v5.mine, v5.quality, v5.estimate?.v, v5.estimate?.agrees], [130, "you", "https://acme.com/about", "€25M", "2025", "you", "s3", "r3", ["employees", "revenue", "founded"], "verified", 640, false]);
+const v6 = companyView({ company: { domain: "acme.com", employees: 640, revenue: "$10M-$50M", facts_via: "apollo" } } as never, { hide: ["employees", "revenue", "bogus" as never] });
+check("a found value you hid stays hidden", [v6.employees, v6.revenue, v6.quality, v6.hidden], [undefined, undefined, "none", ["employees", "revenue"]]);
+const v7 = companyView(null, { mine: { country: "SE", hq: "Stockholm", parent: "Acme Group", listed: { exchange: "Nasdaq Stockholm", ticker: "ACME" } } });
+check("no research at all: your facts still make a company", [v7.country?.v, v7.hq, v7.parent, v7.listed?.ticker, v7.quality], ["SE", "Stockholm", "Acme Group", "ACME", "verified"]);
+check("stored check normalised", [normalizeCheck({ linkedin_size: "51-200", at: "t", mine: { founded: 2012, junk: 1 }, mine_at: "m", hide: ["revenue", "x"] }), normalizeCheck({ linkedin_size: "lots" }), normalizeCheck("x"), normalizeCheck({ mine: {} })], [{ linkedin_size: "51-200", at: "t", mine: { founded: 2012 }, mine_at: "m", hide: ["revenue"] }, null, null, null]);
 
 if (fail) throw new Error(`${fail} failed`);
 console.log("\nall company facts tests passed");
