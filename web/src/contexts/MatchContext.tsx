@@ -2,6 +2,8 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { hasSupabase, supabase } from "../lib/supabase";
 import { byCreator, trustedLinks, type BrandIntel, type BrandLink, type CompanyFacts, type ContentRow, type IntelRow, type MatchWorld, type Pitch, type SeenBrand } from "../lib/match";
 import { normalizeCriteria } from "../lib/criteria";
+import { applyChanges, fresh, sinceOf, type Changes, type MatchRows } from "../lib/matchSync";
+import { readCopy, saveCopy } from "../lib/matchCache";
 import type { DealKind } from "../lib/sponsors";
 import { useData } from "./DataContext";
 import { useToast } from "./ToastContext";
@@ -13,9 +15,12 @@ import { useToast } from "./ToastContext";
 //   creator_brands   who works with whom (with the evidence)
 //   seen_brands      brands found in videos that aren't in the CRM
 //   brand_pitches    who you already pitched to which brand
-// Loaded the first time a screen asks (useMatch), refreshed every minute while
-// something is still being read, and after every action. Your verdicts and
-// pitches update on screen at once and roll back visibly if saving fails.
+// Loaded the first time a screen asks (useMatch): from this device's copy at once
+// (lib/matchCache.ts), then only what changed since (`match_changes`, lib/matchSync.ts)
+// — every minute while something is still being read, every 5 minutes otherwise, when
+// the tab comes back, and after every action. Everything is downloaded again only for
+// a new device or a copy older than 12 days. Your verdicts and pitches update on screen
+// at once and roll back visibly if saving fails.
 // A creator you add with a YouTube channel is read right away (not at the
 // next 3-minute cron), and a toast says what was found.
 
@@ -82,6 +87,8 @@ const pageAll = async <T,>(table: string, columns: string, userId: string): Prom
   return got.flatMap((g) => (g.data || []) as T[]);
 };
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const EMPTY_ROWS: MatchRows = { links: [], intel: [], content: [], seen: [], pitches: [] };
+const ALL_TABLES = ["links", "intel", "content", "seen", "pitches"] as const;
 
 export function MatchProvider({ children }: { children: ReactNode }) {
   const data = useData();
@@ -100,8 +107,12 @@ export function MatchProvider({ children }: { children: ReactNode }) {
   const [scanning, setScanning] = useState<Set<string>>(new Set());
   const [researching, setResearching] = useState<Set<string>>(new Set());
   const busy = useRef(false);
-  // What the server last said changed (newest deal / read / site check); a poll reloads only when it moves.
-  const stamp = useRef("");
+  // What this device holds (the same rows the screens show) and the database's clock of the last answer.
+  const rowsRef = useRef<MatchRows | null>(null);
+  const cursor = useRef("");
+  const statusAt = useRef(0);
+  const lastSync = useRef(0);
+  const saveTimer = useRef(0);
   // Only a real account id — the placeholder profile before sign-in finishes ("guest") must never be queried.
   const cloud = hasSupabase && UUID_RE.test(userId || "") && !data.demoSeeded;
   // A refresh asked for while one runs is not dropped: it runs right after (the account may have just loaded).
@@ -110,6 +121,36 @@ export function MatchProvider({ children }: { children: ReactNode }) {
   current.current = userId;
   const retryTimer = useRef(0);
 
+  // Rows → screens: only the tables that changed get a new value, so nothing else re-scores.
+  const publish = useCallback((rows: MatchRows, tables: readonly (keyof MatchRows)[]) => {
+    rowsRef.current = rows;
+    if (tables.includes("links")) setLinks(rows.links);
+    if (tables.includes("intel")) setIntel(new Map(rows.intel.map((x) => [x.brand_id, x])));
+    if (tables.includes("content")) setContent(new Map(rows.content.map((x) => [x.creator_id, x])));
+    if (tables.includes("seen")) setSeen(new Map(rows.seen.map((x) => [x.brand_key, x])));
+    if (tables.includes("pitches")) setPitches(rows.pitches);
+  }, []);
+  // The device copy is written a moment after the last change (one write for a burst of changes).
+  const keep = useCallback((forUser: string) => {
+    window.clearTimeout(saveTimer.current);
+    saveTimer.current = window.setTimeout(() => {
+      if (current.current === forUser && rowsRef.current && cursor.current) void saveCopy(forUser, cursor.current, rowsRef.current);
+    }, 1500);
+  }, []);
+  // A change made here (your verdict, a pitch): on screen at once, and in the copy.
+  const patch = useCallback(<K extends keyof MatchRows>(name: K, fn: (rows: MatchRows[K]) => MatchRows[K]) => {
+    const base = rowsRef.current || EMPTY_ROWS;
+    publish({ ...base, [name]: fn(base[name]) }, [name]);
+    if (current.current) keep(current.current);
+  }, [publish, keep]);
+  // Another account on this device: nothing of the last one stays on screen.
+  useEffect(() => {
+    publish(EMPTY_ROWS, ALL_TABLES);
+    // Nothing loaded yet (not "an empty list"): the next refresh starts from this device's copy.
+    rowsRef.current = null; cursor.current = ""; statusAt.current = 0;
+    setStatus(null); setReady(false);
+  }, [userId, publish]);
+
   const refresh = useCallback(async () => {
     if (!cloud) return;
     if (busy.current) { again.current = true; return; }
@@ -117,23 +158,55 @@ export function MatchProvider({ children }: { children: ReactNode }) {
     setLoading(true);
     const forUser = userId;
     try {
-      const [l, i, c, s, p] = await Promise.all([
-        pageAll<BrandLink>("creator_brands", "id, creator_id, brand_key, brand_name, domain, brand_id, kind, confidence, store, videos, first_at, last_at, evidence, by_ai, manual, verdict, verdict_kind, verdict_at, updated_at, video_ids", userId),
-        pageAll<IntelRow>("brand_intel", "brand_id, intel, status, researched_at", userId),
-        pageAll<ContentRow>("creator_content", "creator_id, content, status, note, scanned_at", userId),
-        pageAll<SeenBrand>("seen_brands", "brand_key, name, domain, domain_check, site, checked_at, hidden, added_brand_id", userId),
-        pageAll<Pitch>("brand_pitches", "id, brand_id, creator_id, at, source", userId),
-      ]);
-      if (current.current !== forUser) return;
-      setLinks(l);
-      setIntel(new Map(i.map((x) => [x.brand_id, x])));
-      setContent(new Map(c.map((x) => [x.creator_id, x])));
-      setSeen(new Map(s.map((x) => [x.brand_key, x])));
-      setPitches(p);
+      let changed = 0;
+      // First time in this tab: this device's copy, at once.
+      if (!rowsRef.current) {
+        const copy = await readCopy(forUser);
+        if (current.current !== forUser) return;
+        if (copy && fresh(copy.at)) { cursor.current = copy.at; publish(copy.rows, ALL_TABLES); setReady(true); }
+      }
+      let full = !rowsRef.current || !cursor.current;
+      if (!full) {
+        // Only what changed since the last answer (a little overlap so a write still saving isn't missed).
+        const { data: ch, error: e } = await supabase.rpc("match_changes", { p_since: sinceOf(cursor.current) });
+        if (current.current !== forUser) return;
+        if (e) throw e;
+        const c = ch as Changes | null;
+        if (!c?.at || c.full) full = true;
+        else {
+          const r = applyChanges(rowsRef.current!, c);
+          if (r.changed) publish(r.state, r.tables);
+          changed = r.changed;
+          cursor.current = c.at;
+        }
+      }
+      if (full) {
+        // The database's clock BEFORE the download: anything saved while the pages come in is in the next answer.
+        const { data: t0 } = await supabase.rpc("match_changes", { p_since: "9999-01-01T00:00:00Z" });
+        const at = (t0 as Changes | null)?.at || new Date(Date.now() - 10 * 60_000).toISOString();
+        const [l, i, c, s, p] = await Promise.all([
+          pageAll<BrandLink>("creator_brands", "id, creator_id, brand_key, brand_name, domain, brand_id, kind, confidence, store, videos, first_at, last_at, evidence, by_ai, manual, verdict, verdict_kind, verdict_at, updated_at, video_ids", forUser),
+          pageAll<IntelRow>("brand_intel", "brand_id, intel, status, researched_at, updated_at", forUser),
+          pageAll<ContentRow>("creator_content", "creator_id, content, status, note, scanned_at, updated_at", forUser),
+          pageAll<SeenBrand>("seen_brands", "brand_key, name, domain, domain_check, site, checked_at, hidden, added_brand_id, updated_at", forUser),
+          pageAll<Pitch>("brand_pitches", "id, brand_id, creator_id, at, source, updated_at", forUser),
+        ]);
+        if (current.current !== forUser) return;
+        publish({ links: l, intel: i, content: c, seen: s, pitches: p }, ALL_TABLES);
+        cursor.current = at;
+        changed = 1;
+      }
+      lastSync.current = Date.now();
       setReady(true);
       setError("");
-      const st = await matchCall<MatchStatus & { ok: boolean }>({ action: "status" });
-      if (st.data) { setStatus(st.data); stamp.current = st.data.stamp || ""; }
+      if (changed) keep(forUser);
+      // The counts (coverage strip, read state): after a change (at most every 2 minutes), else every 5.
+      const since = Date.now() - statusAt.current;
+      if (!statusAt.current || since > 5 * 60_000 || (changed && since > 2 * 60_000)) {
+        statusAt.current = Date.now();
+        const st = await matchCall<MatchStatus & { ok: boolean }>({ action: "status" });
+        if (st.data && current.current === forUser) setStatus(st.data);
+      }
     } catch (e) {
       if (current.current !== forUser) return;
       // Before the migration runs the tables don't exist: say so plainly, keep the app working.
@@ -147,28 +220,24 @@ export function MatchProvider({ children }: { children: ReactNode }) {
       setLoading(false);
       if (again.current) { again.current = false; void refreshRef.current(); }
     }
-  }, [cloud, userId]);
+  }, [cloud, userId, publish, keep]);
   const refreshRef = useRef(refresh);
   refreshRef.current = refresh;
-  useEffect(() => () => window.clearTimeout(retryTimer.current), []);
+  useEffect(() => () => { window.clearTimeout(retryTimer.current); window.clearTimeout(saveTimer.current); }, []);
 
   const load = useCallback(() => setWanted(true), []);
   useEffect(() => { if (wanted) void refresh(); }, [wanted, refresh]);
-  // While creators or brands are still being read, ask the server every minute
-  // whether anything changed — and only then load it again (a reload re-scores everything).
+  // Asking "what changed?" costs one small call that usually answers "nothing": every minute while creators or
+  // brands are still being read, every 5 minutes otherwise, and when you come back to the tab.
   const pending = !!status && (status.read < status.creators || status.researched < status.brands);
   useEffect(() => {
-    if (!wanted || !pending) return;
-    const t = window.setInterval(async () => {
-      if (document.visibilityState !== "visible" || busy.current) return;
-      const st = await matchCall<MatchStatus & { ok: boolean }>({ action: "status" });
-      if (!st.data) return;
-      if (st.data.stamp && st.data.stamp === stamp.current) { setStatus(st.data); return; }
-      stamp.current = st.data.stamp || "";
-      void refresh();
-    }, 60_000);
-    return () => window.clearInterval(t);
-  }, [wanted, pending, refresh]);
+    if (!wanted || !cloud) return;
+    const tick = () => { if (document.visibilityState === "visible" && !busy.current) void refreshRef.current(); };
+    const t = window.setInterval(tick, pending ? 60_000 : 5 * 60_000);
+    const back = () => { if (document.visibilityState === "visible" && Date.now() - lastSync.current > 60_000) tick(); };
+    document.addEventListener("visibilitychange", back);
+    return () => { window.clearInterval(t); document.removeEventListener("visibilitychange", back); };
+  }, [wanted, cloud, pending]);
 
   const scan = useCallback(async (creatorId: string, opts: { quiet?: boolean } = {}): Promise<Result> => {
     setScanning((s) => new Set(s).add(creatorId));
@@ -201,7 +270,7 @@ export function MatchProvider({ children }: { children: ReactNode }) {
   const [looking, setLooking] = useState<Set<string>>(new Set());
   const refreshStatus = useCallback(async () => {
     const st = await matchCall<MatchStatus & { ok: boolean }>({ action: "status" });
-    if (st.data) setStatus(st.data);
+    if (st.data) { setStatus(st.data); statusAt.current = Date.now(); }
   }, []);
   const lookup = useCallback(async (brandId: string, what: "company" | "people"): Promise<Result> => {
     const tag = `${what}:${brandId}`;
@@ -210,13 +279,7 @@ export function MatchProvider({ children }: { children: ReactNode }) {
       const r = await matchCall<{ ok: boolean; company?: CompanyFacts; people?: BrandIntel["people"]; found?: boolean; hunter?: { configured: boolean; left: number }; clay?: { configured: boolean; left: number }; apollo?: { configured: boolean; used: number; paused: boolean } }>({ action: what === "company" ? "company_lookup" : "people_find", id: brandId });
       if (r.error || !r.data) { toast(r.error || "The lookup didn't answer — try again in a minute.", "error"); return { ok: false, message: r.error || "" }; }
       const d = r.data;
-      setIntel((map) => {
-        const row = map.get(brandId);
-        if (!row?.intel) return map;
-        const next = new Map(map);
-        next.set(brandId, { ...row, intel: { ...row.intel, ...(d.company ? { company: d.company } : {}), ...(d.people ? { people: d.people } : {}) } });
-        return next;
-      });
+      patch("intel", (rows) => rows.map((row) => (row.brand_id === brandId && row.intel ? { ...row, intel: { ...row.intel, ...(d.company ? { company: d.company } : {}), ...(d.people ? { people: d.people } : {}) } } : row)));
       if (d.hunter || d.clay || d.apollo) setStatus((st) => (st ? { ...st, ...(d.hunter ? { hunter: d.hunter } : {}), ...(d.clay ? { clay: d.clay } : {}), ...(d.apollo ? { apollo: d.apollo } : {}) } : st));
       if (what === "company") toast(d.found === false ? "No company record for this website yet." : d.company?.linkedin ? "Company facts added." : "Company facts added — no LinkedIn page on record.", d.found === false ? "info" : "success");
       else toast(d.people?.list.length ? `${d.people.list.length} ${d.people.list.length === 1 ? "person" : "people"} found.` : "No one found at this website yet.", d.people?.list.length ? "success" : "info");
@@ -224,16 +287,16 @@ export function MatchProvider({ children }: { children: ReactNode }) {
     } finally {
       setLooking((s) => { const n = new Set(s); n.delete(tag); return n; });
     }
-  }, [toast]);
+  }, [toast, patch]);
 
   const verdict = useCallback(async (linkId: string, v: "" | "yes" | "no", kind: DealKind | null = null) => {
-    const before = links;
-    setLinks((ls) => ls.map((l) => (l.id === linkId ? { ...l, verdict: v, verdict_kind: kind, verdict_at: v ? new Date().toISOString() : null } : l)));
+    const undo = (rowsRef.current?.links || []).find((l) => l.id === linkId);
+    const put = (row: BrandLink) => patch("links", (ls) => ls.map((l) => (l.id === linkId ? row : l)));
+    if (undo) put({ ...undo, verdict: v, verdict_kind: kind, verdict_at: v ? new Date().toISOString() : null });
     const { error: e } = await supabase.rpc("set_brand_link", { p_id: linkId, p_verdict: v, p_kind: kind });
-    if (e) { setLinks(before); toast("Couldn't save that — try again.", "error"); return; }
-    const undo = before.find((l) => l.id === linkId);
-    if (v && undo) toast(v === "yes" ? "Marked as confirmed." : "Marked as wrong — it won't count anywhere.", "success", { label: "Undo", run: () => void supabase.rpc("set_brand_link", { p_id: linkId, p_verdict: undo.verdict, p_kind: undo.verdict_kind }).then(() => setLinks((ls) => ls.map((l) => (l.id === linkId ? undo : l)))) });
-  }, [links, toast]);
+    if (e) { if (undo) put(undo); toast("Couldn't save that — try again.", "error"); return; }
+    if (v && undo) toast(v === "yes" ? "Marked as confirmed." : "Marked as wrong — it won't count anywhere.", "success", { label: "Undo", run: () => void supabase.rpc("set_brand_link", { p_id: linkId, p_verdict: undo.verdict, p_kind: undo.verdict_kind }).then(({ error: u }) => { if (u) toast("Couldn't undo that — try again.", "error"); else put(undo); }) });
+  }, [patch, toast]);
 
   const addLink = useCallback(async (creatorId: string, brandId: string, kind: DealKind, opts?: { retries?: number }) => {
     let { error: e } = await supabase.rpc("add_brand_link", { p_creator: creatorId, p_brand: brandId, p_kind: kind });
@@ -249,29 +312,31 @@ export function MatchProvider({ children }: { children: ReactNode }) {
   }, [refresh, toast]);
 
   const hide = useCallback(async (key: string, hidden: boolean) => {
-    const before = seen.get(key);
-    setSeen((m) => { const n = new Map(m); const s = n.get(key); if (s) n.set(key, { ...s, hidden }); return n; });
+    const before = (rowsRef.current?.seen || []).find((x) => x.brand_key === key);
+    const put = (h: boolean) => patch("seen", (rows) => rows.map((x) => (x.brand_key === key ? { ...x, hidden: h } : x)));
+    put(hidden);
     const { error: e } = await supabase.rpc("hide_seen_brand", { p_key: key, p_hidden: hidden });
-    if (e) { setSeen((m) => { const n = new Map(m); if (before) n.set(key, before); return n; }); toast("Couldn't save that — try again.", "error"); return; }
-    if (hidden) toast(`${before?.name || "Brand"} hidden.`, "success", { label: "Undo", run: () => void supabase.rpc("hide_seen_brand", { p_key: key, p_hidden: false }).then(() => setSeen((m) => { const n = new Map(m); const s = n.get(key); if (s) n.set(key, { ...s, hidden: false }); return n; })) });
-  }, [seen, toast]);
+    if (e) { put(before?.hidden ?? !hidden); toast("Couldn't save that — try again.", "error"); return; }
+    if (hidden) toast(`${before?.name || "Brand"} hidden.`, "success", { label: "Undo", run: () => void supabase.rpc("hide_seen_brand", { p_key: key, p_hidden: false }).then(({ error: u }) => { if (u) toast("Couldn't undo that — try again.", "error"); else put(false); }) });
+  }, [patch, toast]);
 
   const pitch = useCallback(async (brandId: string, creatorIds: string[], source: "manual" | "pitch" = "manual") => {
     const fresh = creatorIds.filter((id) => !pitches.some((p) => p.brand_id === brandId && p.creator_id === id));
     if (!fresh.length) return;
     const temp = fresh.map((id): Pitch => ({ id: `tmp-${id}`, brand_id: brandId, creator_id: id, at: new Date().toISOString(), source }));
-    setPitches((ps) => [...ps, ...temp]);
-    const { data: rows, error: e } = await supabase.from("brand_pitches").upsert(fresh.map((id) => ({ user_id: userId, brand_id: brandId, creator_id: id, source })), { onConflict: "user_id,brand_id,creator_id", ignoreDuplicates: true }).select("id, brand_id, creator_id, at, source");
-    if (e) { setPitches((ps) => ps.filter((p) => !temp.includes(p))); toast("Couldn't mark them as pitched — check your connection.", "error"); return; }
-    setPitches((ps) => [...ps.filter((p) => !temp.includes(p)), ...((rows || []) as Pitch[])]);
-  }, [pitches, toast, userId]);
+    patch("pitches", (ps) => [...ps, ...temp]);
+    const { data: rows, error: e } = await supabase.from("brand_pitches").upsert(fresh.map((id) => ({ user_id: userId, brand_id: brandId, creator_id: id, source })), { onConflict: "user_id,brand_id,creator_id", ignoreDuplicates: true }).select("id, brand_id, creator_id, at, source, updated_at");
+    if (e) { patch("pitches", (ps) => ps.filter((p) => !temp.includes(p))); toast("Couldn't mark them as pitched — check your connection.", "error"); return; }
+    const saved = (rows || []) as Pitch[];
+    patch("pitches", (ps) => [...ps.filter((p) => !temp.includes(p) && !saved.some((r) => r.id === p.id)), ...saved]);
+  }, [pitches, patch, toast, userId]);
 
   const unpitch = useCallback(async (brandId: string, creatorId: string) => {
-    const before = pitches;
-    setPitches((ps) => ps.filter((p) => !(p.brand_id === brandId && p.creator_id === creatorId)));
+    const gone = pitches.filter((p) => p.brand_id === brandId && p.creator_id === creatorId);
+    patch("pitches", (ps) => ps.filter((p) => !gone.includes(p)));
     const { error: e } = await supabase.from("brand_pitches").delete().eq("user_id", userId).eq("brand_id", brandId).eq("creator_id", creatorId);
-    if (e) { setPitches(before); toast("Couldn't undo the pitch — try again.", "error"); }
-  }, [pitches, toast, userId]);
+    if (e) { patch("pitches", (ps) => [...ps, ...gone]); toast("Couldn't undo the pitch — try again.", "error"); }
+  }, [pitches, patch, toast, userId]);
 
   // A creator added now with a YouTube channel: read their videos as soon as the record has saved.
   const seenIds = useRef<Set<string> | null>(null);

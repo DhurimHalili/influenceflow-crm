@@ -45,8 +45,8 @@ export type CompanyFacts = {
   verified?: VerifiedFacts | null; wdf_at?: string;
 };
 export type HunterPerson = { first: string; last: string; title: string; email: string; linkedin: string; confidence: number; department: string; seniority: string; via?: "hunter" | "clay" };
-export type IntelRow = { brand_id: string; intel: BrandIntel | null; status: string; researched_at: string | null };
-export type ContentRow = { creator_id: string; content: ContentProfile | null; status: string; note?: string; scanned_at: string | null };
+export type IntelRow = { brand_id: string; intel: BrandIntel | null; status: string; researched_at: string | null; updated_at?: string };
+export type ContentRow = { creator_id: string; content: ContentProfile | null; status: string; note?: string; scanned_at: string | null; updated_at?: string };
 
 /** Why a creator has no content mix to rank brands by — a short rail label and a sentence for the pane. */
 export function unreadWhy(row: ContentRow | undefined, scanning: boolean): { short: string; long: string } {
@@ -70,9 +70,9 @@ export type BrandLink = {
 export type SeenBrand = {
   brand_key: string; name: string; domain: string; domain_check: "" | "site" | "link" | "mismatch" | "guess" | "none" | "blocked";
   site: { title?: string; description?: string; topics?: { key: string; weight: number }[]; logo?: string } | null;
-  checked_at: string | null; hidden: boolean; added_brand_id: string | null;
+  checked_at: string | null; hidden: boolean; added_brand_id: string | null; updated_at?: string;
 };
-export type Pitch = { id: string; brand_id: string; creator_id: string; at: string; source: string };
+export type Pitch = { id: string; brand_id: string; creator_id: string; at: string; source: string; updated_at?: string };
 
 // ---- small helpers ------------------------------------------------------------------------
 

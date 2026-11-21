@@ -207,21 +207,34 @@ async function sponsorBlock(id: string): Promise<Segment[] | undefined> {
 
 // ---- known brands ---------------------------------------------------------------------
 
-// Brands + found brands of a member, kept 5 minutes: a cron run used to load all of them (≈100 KB) once per
-// creator / brand it handled — several times a run, every 3 minutes.
-const knownCache = new Map<string, { at: number; value: Promise<{ known: Known[]; brands: BrandRow[] }> }>();
-function knownFor(admin: SupabaseClient, userId: string): Promise<{ known: Known[]; brands: BrandRow[] }> {
+// Brands + found brands of a member (≈90 KB). A cron run used to load them once per creator / brand it handled,
+// and every helper transcript save loaded them again (78 loads an hour at peak, Nov 2026). Now one copy per
+// worker, re-used while neither list changed: two index lookups (a few hundred bytes) say whether it still holds.
+const knownCache = new Map<string, { at: number; stamp: string; value: Promise<{ known: Known[]; brands: BrandRow[] }> }>();
+async function knownStamp(admin: SupabaseClient, userId: string): Promise<string> {
+  const [b, s] = await Promise.all([
+    admin.from("brands").select("updated_at").eq("user_id", userId).order("updated_at", { ascending: false, nullsFirst: false }).limit(1),
+    admin.from("seen_brands").select("updated_at").eq("user_id", userId).order("updated_at", { ascending: false, nullsFirst: false }).limit(1),
+  ]);
+  if (b.error || s.error) return "";
+  return `${(b.data?.[0] as { updated_at?: string } | undefined)?.updated_at || ""}|${(s.data?.[0] as { updated_at?: string } | undefined)?.updated_at || ""}`;
+}
+async function knownFor(admin: SupabaseClient, userId: string): Promise<{ known: Known[]; brands: BrandRow[] }> {
   const hit = knownCache.get(userId);
-  if (hit && Date.now() - hit.at < 5 * 60_000) return hit.value;
+  // Inside one run (a minute): no check at all.
+  if (hit && Date.now() - hit.at < 60_000) return hit.value;
+  const stamp = await knownStamp(admin, userId);
+  if (hit && stamp && hit.stamp === stamp) { hit.at = Date.now(); return hit.value; }
   const value = loadKnown(admin, userId);
-  knownCache.set(userId, { at: Date.now(), value });
+  knownCache.set(userId, { at: Date.now(), stamp, value });
   value.catch(() => knownCache.delete(userId));
   return value;
 }
 async function loadKnown(admin: SupabaseClient, userId: string): Promise<{ known: Known[]; brands: BrandRow[] }> {
   const [{ data: brands }, { data: seen }] = await Promise.all([
     admin.from("brands").select("id, user_id, name, domain, archived_at").eq("user_id", userId).limit(3000),
-    admin.from("seen_brands").select("brand_key, name, domain, domain_check").eq("user_id", userId).neq("domain", "").limit(5000),
+    // Only found brands whose website was checked count as known (the loop below): the rest never leave the database.
+    admin.from("seen_brands").select("brand_key, name, domain, domain_check").eq("user_id", userId).neq("domain", "").in("domain_check", ["site", "guess", "link"]).limit(5000),
   ]);
   const known: Known[] = [];
   for (const b of (brands || []) as BrandRow[]) {
@@ -1459,12 +1472,11 @@ Deno.serve(async (req) => {
     const backfilling = withYoutube.filter((id) => rowsOf.get(id) && rowsOf.get(id)!.backfill?.done !== true && ["ok", "empty"].includes(rowsOf.get(id)!.status)).length;
     const lastRead = [...readAt.values()].sort().pop() || null;
     const year = new Date(Date.now() - 365 * DAY).toISOString();
-    const vc = (f: (q: ReturnType<typeof videoCount>) => ReturnType<typeof videoCount>) => f(videoCount()).then((r) => r.count || 0);
-    const videoCount = () => admin.from("creator_videos").select("video_id", { count: "exact", head: true }).eq("user_id", userId).gte("published_at", year);
-    const [videos, paidVideos, transcripts, noCaptions, waiting, listened, listenQueue] = await Promise.all([
-      vc((q) => q), vc((q) => q.eq("paid", true)), vc((q) => q.eq("transcript_status", "ok")), vc((q) => q.eq("transcript_status", "none")),
-      vc((q) => q.eq("transcript_status", "").gt("secs", 60)), vc((q) => q.not("listened_at", "is", null)), vc((q) => q.not("listen", "is", null).is("listened_at", null).neq("transcript_status", "ok")),
-    ]);
+    // All seven coverage counts in ONE pass over the member's videos of the last year (match_video_counts,
+    // migration 20261206000100) — seven separate counts timed out on the free plan's disk.
+    const { data: vcRow } = await admin.rpc("match_video_counts", { p_user: userId, p_since: year });
+    const vcs = (vcRow || {}) as Record<string, number>;
+    const [videos, paidVideos, transcripts, noCaptions, waiting, listened, listenQueue] = ["videos", "paid", "transcripts", "none", "waiting", "listened", "queue"].map((k) => Number(vcs[k]) || 0);
     return json({ ok: true, stamp, creators, read, failed, backfilling, videos, paidVideos, transcripts, noCaptions, transcriptWaiting: waiting, listened, listenQueue, noYoutube: (people || []).length - creators, lastRead, everyMin: 3, perRun: 4, rescanDays: RESCAN_DAYS, brandDays: BRAND_DAYS, brands: brands || 0, researched: researched || 0, youtube: youtubeConfigured(), clef, listen: { configured: listenConfigured(), secondsLeft: await listenLeft() }, tx: { services: txProviders().map((p) => p.name), left: await txLeft(admin).catch(() => 0) }, ...(await lookupStatus(admin, userId)) });
   }
 

@@ -138,3 +138,12 @@ NOT moved) and every public table, then verifies row count + checksum per table.
   transcript changed something). Lesson: before a move, rank edge_logs GET requests by count ×
   (row size × rows) — `request.search` per path — and kill whole-table reads on timers.
 - 2026-11-21 · Supabase warned "depleting Disk IO budget" (free compute). Causes were WRITES: every deal-link rebuild rewrote every link (~117k row updates), unchanged videos re-saved whole, pg_cron run log never pruned. Fixed (link fingerprints, stamp-only updates, nightly log prune, timers 5/10 min). Lesson: check `pg_stat_all_tables` n_tup_upd/ins per table, not only reads, after a move.
+- 2026-11-21 · Index names are global per schema: `create index if not exists X` silently SKIPS when another
+  table already has an index called X (two FK indexes never got made). Name indexes `<table>_<cols>_<purpose>`
+  and re-run the advisors after every migration. Also: the app now keeps Match data in IndexedDB and pulls only
+  changes (`match_changes(since)`). Devices keep their copy across a move ONLY because the copy carries every
+  row's `updated_at` and `match_gone` notes: copydata.py must copy both unchanged (it does: it runs with
+  `session_replication_role = replica`, so the `match_touch` trigger doesn't re-stamp rows). Never skip
+  match_gone, or deletes made just before cutover linger on devices until their copy is 12 days old. New
+  triggers/functions in this round (`match_touch`, `match_gone_log`, `match_changes`, `match_video_counts`,
+  cron `influenceflow-match-gone-prune`) are in migrations and covered by the fingerprint diff.
