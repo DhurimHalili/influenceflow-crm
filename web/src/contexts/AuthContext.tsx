@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState, type R
 import type { Session, User } from "@supabase/supabase-js";
 import { authRedirectUrl, hasSupabase, pendingAuthRedirect, supabase } from "../lib/supabase";
 import { clearSessionState } from "../hooks/useSessionState";
+import { dropCopy } from "../lib/matchCache";
 
 export type AuthResult = { error: string | null; code?: "invalid_credentials" | "locked" | "network" | "not_confirmed" | "exists" | "rate_limited" | "invalid_email" | "pending" | "revoked" | "other"; attemptsLeft?: number };
 
@@ -252,6 +253,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } catch {
         // storage unavailable
       }
+      // This device's copy of the Match data goes too.
+      if (userId) await dropCopy(userId);
     }
     setRecovery(false);
     setSession(null);
