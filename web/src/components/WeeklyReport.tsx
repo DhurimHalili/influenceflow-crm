@@ -51,7 +51,7 @@ export function WeeklyReportDialog({ open, onClose }: { open: boolean; onClose: 
   }, [open, prefs.weekly_backup, workbookInput]);
   const mail = useMemo(() => {
     if (!open) return null;
-    const report = weeklyReport({ creators: data.creators.filter((c) => !c.archived_at), brands: data.brands.filter((b) => !b.archived_at), contacts: data.contacts, followups: data.followups, events: data.emailEvents || [], activities: data.activities, campaigns: data.campaigns, goal: prefs.daily_email_goal || 50, rules: prefs.followup_rules || DEFAULT_FOLLOWUP_RULES, name: data.profile.display_name, timeZone: prefs.timezone || browserZone(), which, appUrl: `${window.location.origin}${window.location.pathname}` });
+    const report = weeklyReport({ creators: data.creators, brands: data.brands, contacts: data.contacts, followups: data.followups, events: data.emailEvents || [], activities: data.activities, campaigns: data.campaigns, goal: prefs.daily_email_goal || 50, rules: prefs.followup_rules || DEFAULT_FOLLOWUP_RULES, name: data.profile.display_name, timeZone: prefs.timezone || browserZone(), which, appUrl: `${window.location.origin}${window.location.pathname}` });
     return renderWeeklyEmail(report, { backup });
   }, [backup, open, which, data.creators, data.brands, data.contacts, data.followups, data.emailEvents, data.activities, data.campaigns, prefs, data.profile.display_name]);
 

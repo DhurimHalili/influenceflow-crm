@@ -74,8 +74,10 @@ async function reportFor(admin: SupabaseClient, userId: string, which: "last" | 
   const ruleSet = rulesFrom(prefs.followup_rules);
 
   const report = weeklyReport({
-    creators: creators.filter((c) => !c.archived_at).map(record) as never[],
-    brands: brands.filter((b) => !b.archived_at).map(record) as never[],
+    // Every record, archived too — the same as the dashboard: an email that went out counts even if you
+    // archived that person later (archived records are never chased; the engine skips them by itself).
+    creators: creators.map(record) as never[],
+    brands: brands.map(record) as never[],
     contacts: contacts.map(record) as never[],
     campaigns: campaigns as never[],
     activities: activityRows as never[],
